@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.env
+.env.local
+*.log
+.DS_Store
+.codexstation/
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+data/
+uploads/
+nul
