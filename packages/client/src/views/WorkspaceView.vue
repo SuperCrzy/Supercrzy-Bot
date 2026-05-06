@@ -45,18 +45,24 @@
       <!-- Resizable divider -->
       <div class="resizer horizontal" @mousedown="startResize('terminal', $event)"></div>
 
-      <!-- Code Preview (placeholder for now) -->
+      <!-- Code Editor (Monaco) -->
       <div class="editor-panel">
         <div class="panel-header">
-          <span>{{ editingFile ? editingFile.split('/').pop() : 'Code Preview' }}</span>
-          <span class="panel-status" v-if="editingFile">{{ editingFile }}</span>
+          <span>{{ editingFile ? editingFile.split('/').pop() : 'Code Editor' }}</span>
+          <div class="panel-actions">
+            <span class="panel-status" v-if="editingFile">{{ editingFile }}</span>
+            <span class="save-indicator" v-if="isDirty" :class="{ saved: isSaved }">
+              {{ isSaved ? 'Saved' : 'Modified' }}
+            </span>
+            <n-button v-if="editingFile && isDirty" size="tiny" type="primary" @click="saveFile">
+              Save
+            </n-button>
+          </div>
         </div>
-        <div class="editor-area" v-if="editingFile && fileContent !== null">
-          <pre class="code-view"><code>{{ fileContent }}</code></pre>
-        </div>
+        <div class="editor-area" ref="editorRef" v-if="editingFile && fileContent !== null"></div>
         <div class="editor-empty" v-else>
-          <p>Select a file to preview</p>
-          <p class="hint">Click a file in the browser or use the terminal to navigate</p>
+          <p>Select a file to edit</p>
+          <p class="hint">Click a file in the browser to open it in the editor</p>
         </div>
       </div>
     </div>
@@ -64,11 +70,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
+import * as monaco from 'monaco-editor'
 
 interface FileEntry {
   name: string
@@ -79,6 +86,7 @@ interface FileEntry {
 }
 
 const terminalRef = ref<HTMLElement>()
+const editorRef = ref<HTMLElement>()
 const files = ref<FileEntry[]>([])
 const currentDir = ref('/')
 const workspaceRoot = ref('/')
@@ -86,10 +94,13 @@ const editingFile = ref('')
 const fileContent = ref<string | null>(null)
 const filePanelWidth = ref(240)
 const terminalHeight = ref(280)
+const isDirty = ref(false)
+const isSaved = ref(false)
 
 let ws: WebSocket | null = null
 let term: Terminal | null = null
 let fitAddon: FitAddon | null = null
+let editor: monaco.editor.IStandaloneCodeEditor | null = null
 
 const WS_URL = `ws://localhost:${location.port}/ws/terminal`
 
@@ -125,9 +136,14 @@ function connectWS() {
       case 'file_content':
         editingFile.value = msg.path
         fileContent.value = msg.content
+        isDirty.value = false
+        isSaved.value = false
+        nextTick(() => initEditor())
         break
       case 'file_saved':
-        term?.write(`\r\n[Saved: ${msg.path}]\r\n`)
+        isSaved.value = true
+        isDirty.value = false
+        setTimeout(() => { isSaved.value = false }, 2000)
         break
       case 'cwd':
         currentDir.value = msg.cwd
@@ -193,6 +209,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  editor?.dispose()
   ws?.close()
   term?.dispose()
 })
@@ -222,6 +239,69 @@ function navigateTo(path: string) {
 function openFile(path: string) {
   if (ws?.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ type: 'read_file', path }))
+  }
+}
+
+function getLanguage(filePath: string): string {
+  const ext = filePath.split('.').pop()?.toLowerCase() || ''
+  const map: Record<string, string> = {
+    ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
+    vue: 'html', py: 'python', rs: 'rust', go: 'go', java: 'java',
+    json: 'json', yaml: 'yaml', yml: 'yaml', toml: 'ini',
+    md: 'markdown', html: 'html', css: 'css', scss: 'scss', less: 'less',
+    xml: 'xml', svg: 'xml', sh: 'shell', bash: 'shell',
+    sql: 'sql', graphql: 'graphql', dockerfile: 'dockerfile',
+    c: 'c', cpp: 'cpp', h: 'c', hpp: 'cpp', rb: 'ruby', php: 'php',
+    swift: 'swift', kt: 'kotlin', dart: 'dart',
+  }
+  return map[ext] || 'plaintext'
+}
+
+function initEditor() {
+  if (!editorRef.value || fileContent.value === null) return
+
+  if (editor) {
+    editor.dispose()
+  }
+
+  const lang = getLanguage(editingFile.value)
+
+  editor = monaco.editor.create(editorRef.value, {
+    value: fileContent.value,
+    language: lang,
+    theme: document.documentElement.classList.contains('dark') ? 'vs-dark' : 'vs',
+    fontSize: 13,
+    fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+    minimap: { enabled: true, maxColumn: 80 },
+    lineNumbers: 'on',
+    scrollBeyondLastLine: false,
+    wordWrap: 'on',
+    automaticLayout: true,
+    tabSize: 2,
+    renderWhitespace: 'selection',
+    bracketPairColorization: { enabled: true },
+    suggestOnTriggerCharacters: true,
+    quickSuggestions: true,
+    padding: { top: 8 },
+  })
+
+  editor.onDidChangeModelContent(() => {
+    isDirty.value = true
+    isSaved.value = false
+  })
+
+  // Ctrl+S / Cmd+S save
+  editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+    saveFile()
+  })
+}
+
+function saveFile() {
+  if (!editor || !editingFile.value) return
+  const content = editor.getValue()
+  fileContent.value = content
+  if (ws?.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'write_file', path: editingFile.value, content }))
   }
 }
 
@@ -320,8 +400,9 @@ function startResize(panel: string, e: MouseEvent) {
 
 /* Editor */
 .editor-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-.editor-area { flex: 1; overflow: auto; padding: 16px; background: var(--bg-secondary); }
-.code-view { margin: 0; font-family: Menlo, Monaco, monospace; font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
+.editor-area { flex: 1; overflow: hidden; }
+.save-indicator { font-size: 11px; padding: 2px 8px; border-radius: 4px; color: var(--text-muted); }
+.save-indicator.saved { color: #50fa7b; }
 .editor-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-muted); gap: 8px; }
 .editor-empty p { margin: 0; font-size: 13px; }
 .editor-empty .hint { font-size: 12px; }

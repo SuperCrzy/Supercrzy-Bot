@@ -64,7 +64,32 @@ function buildSystemPrompt(basePrompt: string, userMessage: string): string {
 
   const toolsSection = `\n\n## 可用工具\n你可以使用以下工具来完成任务。当需要时自动调用它们，不要询问用户是否可以使用。\n- memory_store: 存储重要的用户信息到长期记忆\n- memory_recall: 搜索已存储的记忆\n- memory_list: 列出所有记忆\n- web_search: 搜索互联网获取最新信息\n- web_fetch: 获取网页内容\n- file_read/file_write/file_exists: 读写本地文件\n- shell_exec: 执行Shell命令`
 
-  return `${basePrompt}\n\n## 你的能力\n你是一个智能 AI 代理，可以：\n1. 通过 memory_store 工具学习和记住用户信息\n2. 通过 web_search 搜索互联网获取实时信息\n3. 通过 web_fetch 读取网页内容\n4. 通过文件工具读写本地文件\n5. 通过 shell_exec 执行命令\n\n重要规则：\n- 主动使用工具完成任务，不要等待用户指令\n- 每次对话结束后，主动存储重要信息到记忆\n- 在回答前先搜索相关记忆和网络信息\n${memorySection}${relatedSection}${toolsSection}`
+  // 匹配激活的技能
+  let skillSection = ''
+  try {
+    const matchedSkills = db.prepare(
+      `SELECT name, description, prompt_template, tools FROM skills WHERE enabled = 1`
+    ).all() as any[]
+
+    const relevantSkills = matchedSkills.filter((s: any) => {
+      if (!s.trigger_keywords) return false
+      const keywords = s.trigger_keywords.split(',').map((k: string) => k.trim().toLowerCase())
+      const q = userMessage.toLowerCase()
+      return keywords.some((kw: string) => q.includes(kw) || kw.includes(q))
+    })
+
+    if (relevantSkills.length > 0) {
+      skillSection = '\n\n## 激活的技能\n' +
+        relevantSkills.map((s: any) =>
+          `- [${s.name}] ${s.description}\n  ${s.prompt_template ? 'Prompt: ' + s.prompt_template : ''}`
+        ).join('\n') +
+        '\n\n请结合以上技能的专业知识和 prompt 模板来优化你的回复。'
+    }
+  } catch {
+    // skills table might not exist yet
+  }
+
+  return `${basePrompt}\n\n## 你的能力\n你是一个智能 AI 代理，可以：\n1. 通过 memory_store 工具学习和记住用户信息\n2. 通过 web_search 搜索互联网获取实时信息\n3. 通过 web_fetch 读取网页内容\n4. 通过文件工具读写本地文件\n5. 通过 shell_exec 执行命令\n\n重要规则：\n- 主动使用工具完成任务，不要等待用户指令\n- 每次对话结束后，主动存储重要信息到记忆\n- 在回答前先搜索相关记忆和网络信息\n${memorySection}${relatedSection}${toolsSection}${skillSection}`
 }
 
 /**

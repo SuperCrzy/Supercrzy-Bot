@@ -13,10 +13,12 @@ import { statsRouter } from './routes/stats'
 import { memoryRouter } from './routes/memory'
 import { uploadRouter } from './routes/upload'
 import { gatewayRouter, initChannelsTable } from './routes/gateway'
+import skillsRouter, { seedBuiltinSkills } from './routes/skills'
 
 async function bootstrap() {
   initDatabase()
   initChannelsTable()
+  seedBuiltinSkills()
 
   const app = new Koa()
   const PORT = config.port
@@ -25,7 +27,7 @@ async function bootstrap() {
   app.use(bodyParser())
 
   // API Routes
-  const routers = [uploadRouter, chatRouter, settingsRouter, sessionRouter, historyRouter, statsRouter, memoryRouter, gatewayRouter]
+  const routers = [uploadRouter, chatRouter, settingsRouter, sessionRouter, historyRouter, statsRouter, memoryRouter, gatewayRouter, skillsRouter]
   for (const r of routers) {
     app.use(r.routes())
     app.use(r.allowedMethods())
