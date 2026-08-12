@@ -285,4 +285,25 @@ gatewayRouter.get('/wechat/debug-poll', async (ctx: Context) => {
   }
 })
 
+// ============================
+// 通用二维码生成（DetailPanel 手机扫码预览等场景）
+// ============================
+
+gatewayRouter.get('/qrcode', async (ctx: Context) => {
+  const text = (ctx.query.text as string) || ''
+  if (!text) {
+    ctx.status = 400
+    ctx.body = { error: 'text query param is required' }
+    return
+  }
+  try {
+    const QRCode = (await import('qrcode')).default
+    const qrDataUrl = await QRCode.toDataURL(text, { width: 200, margin: 1 })
+    ctx.body = { qrDataUrl }
+  } catch (err: any) {
+    ctx.status = 500
+    ctx.body = { error: err.message }
+  }
+})
+
 export default gatewayRouter

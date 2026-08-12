@@ -165,7 +165,7 @@ export const useChatStore = defineStore('chat', () => {
     if (message.role === 'user') {
       const userMsgs = list.filter((m) => m.role === 'user')
       if (userMsgs.length === 1) {
-        const firstBlock = message.content?.[0]
+        const firstBlock = Array.isArray(message.content) ? message.content[0] : undefined
         const text = firstBlock && firstBlock.type === 'text' ? firstBlock.text : ''
         const title = text.slice(0, 40) || '新对话'
         const session = sessions.value.find((s) => s.id === sessionId)
@@ -208,7 +208,7 @@ export const useChatStore = defineStore('chat', () => {
     const list = messages.value.get(sessionId)
     if (list && list.length > 0) {
       const last = list[list.length - 1]
-      last.content = content
+      last.content = normalizeContent(content)
     }
   }
 

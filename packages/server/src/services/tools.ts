@@ -18,13 +18,13 @@ export interface ToolDefinition {
   name: string
   description: string
   parameters: Record<string, any>
-  category?: 'memory' | 'file' | 'network' | 'system'
+  category?: 'memory' | 'file' | 'network' | 'system' | 'interaction'
   dangerous?: boolean
 }
 
 export interface ToolMeta {
   name: string
-  category: 'memory' | 'file' | 'network' | 'system'
+  category: 'memory' | 'file' | 'network' | 'system' | 'interaction'
   dangerous: boolean
   duration?: number
 }

@@ -469,7 +469,7 @@ export async function runAgentLoop(
                   if (!toolCallBuffer.has(ix)) {
                     toolCallBuffer.set(ix, { id: tc.id || "", name: "", args: "" })
                   }
-                  const en = toolCallBuffer.get(ix);
+                  const en = toolCallBuffer.get(ix)!
                   if (tc.id) en.id = tc.id
                   if (tc.function?.name) en.name += tc.function.name
                   if (tc.function?.arguments) en.args += tc.function.arguments

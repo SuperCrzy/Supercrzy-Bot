@@ -90,6 +90,9 @@ const emit = defineEmits<{
 const expanded = ref(props.status === 'running' || props.status === 'pending')
 const resultExpanded = ref(false)
 
+// 是否有可展示的结果
+const resultDisplay = computed(() => !!(props.result || '').trim())
+
 // 状态过渡动画 + 自动展开/折叠
 const justCompleted = ref(false)
 const justErrored = ref(false)

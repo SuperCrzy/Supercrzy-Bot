@@ -46,7 +46,7 @@
       <!-- 文件 Tab — 工作区文件树 -->
       <div v-if="activeTab === 'files'" class="tab-content">
         <div class="tab-hint">当前目录: {{ currentDir || '/' }}</div>
-        <button class="refresh-btn" @click="loadFiles" :disabled="loadingFiles">刷新</button>
+        <button class="refresh-btn" @click="() => loadFiles()" :disabled="loadingFiles">刷新</button>
         <div v-if="loadingFiles" class="loading-hint">加载中...</div>
         <div v-else-if="fileTree.length === 0" class="tab-empty">
           <n-empty description="暂无文件" />
@@ -150,7 +150,7 @@ const artifactFiles = computed<FileBlock[]>(() => {
   const files: FileBlock[] = []
   for (const m of msgs) {
     if (m.role === 'assistant') {
-      for (const b of m.content) {
+      for (const b of Array.isArray(m.content) ? m.content : []) {
         if (b.type === 'file') files.push(b as FileBlock)
       }
     }
@@ -194,6 +194,18 @@ const previewContent = ref('')
 const previewUrl = ref('')
 const previewHtml = ref('')
 const previewFileName = ref('')
+
+// 手机扫码预览：本地模式用当前 origin 生成预览链接，二维码由 server /api/qrcode 生成
+const mobilePreviewURL = computed(() =>
+  previewFileName.value
+    ? `${window.location.origin}/api/preview/${encodeURIComponent(previewFileName.value)}`
+    : ''
+)
+const qrCodeURL = computed(() =>
+  mobilePreviewURL.value
+    ? `/api/qrcode?text=${encodeURIComponent(mobilePreviewURL.value)}`
+    : ''
+)
 const diffFiles = ref<Array<{ name: string; path: string; oldContent?: string; newContent?: string }>>([])
 const selectedDiff = ref(0)
 const showDiffEditor = ref(false)
@@ -204,7 +216,7 @@ let diffEditor: monaco.editor.IStandaloneDiffEditor | null = null
 watch([() => chatStore.currentMessages, () => props.visible], () => {
   const files: typeof diffFiles.value = []
   for (const m of chatStore.currentMessages) {
-    for (const b of m.content) {
+    for (const b of Array.isArray(m.content) ? m.content : []) {
       if (b.type === 'tool-call' && b.name === 'file_write') {
         try {
           const args = JSON.parse(b.args || '{}')

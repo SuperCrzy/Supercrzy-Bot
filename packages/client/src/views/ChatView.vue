@@ -108,7 +108,7 @@
             <ThinkingBlock
               v-for="(think, idx) in (msg.thinking || [])"
               :key="'think-' + idx"
-              :message="think"
+              :message="think.text || think.message || ''"
             />
             <!-- 工具调用 -->
             <ToolCallBlock
@@ -120,7 +120,7 @@
               :status="tc.status"
             />
             <!-- 文本内容 -->
-            <div v-if="msg.content" class="message-content" v-html="renderMarkdown(msg.content)"></div>
+            <div v-if="msg.content" class="message-content" v-html="renderMarkdown(textOf(msg.content))"></div>
 
             <!-- Token usage -->
             <div v-if="msg.role === 'assistant' && msg.tokenCount" class="message-tokens">
@@ -210,6 +210,7 @@ import { useChatStore } from '@/stores/chat'
 import { useAppStore } from '@/stores/app'
 import { getModelShortName } from '@/data/models'
 import type { ChatMessage, Attachment } from '@/types'
+import { extractText } from '@/types'
 import ThinkingBlock from '@/components/chat/ThinkingBlock.vue'
 import ToolCallBlock from '@/components/chat/ToolCallBlock.vue'
 import MarkdownIt from 'markdown-it'
@@ -232,11 +233,11 @@ const uploading = ref(false)
 
 const acceptTypes = '.jpg,.jpeg,.png,.gif,.webp,.svg,.bmp,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.html,.css,.js,.json,.md,.xml,.yaml,.yml,.zip,.tar.gz,.gz'
 
-const md = new MarkdownIt({
+const md: MarkdownIt = new MarkdownIt({
   html: false,
   linkify: true,
   typographer: true,
-  highlight(str: string, lang: string) {
+  highlight(str: string, lang: string): string {
     if (lang && hljs.getLanguage(lang)) {
       try {
         return `<pre class="hljs"><code>${hljs.highlight(str, { language: lang, ignoreIllegals: true }).value}</code></pre>`
@@ -316,6 +317,12 @@ function renderMarkdown(content: string) {
   return md.render(content)
 }
 
+/** 统一 content 取值：兼容 string（流式）与 ContentBlock[]（历史消息） */
+function textOf(content: ChatMessage['content']): string {
+  if (typeof content === 'string') return content
+  return extractText(content)
+}
+
 function formatTime(dateStr: string) {
   const d = new Date(dateStr)
   return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
@@ -353,10 +360,10 @@ function buildAPIMessage(m: ChatMessage) {
   const docs = (m.attachments || []).filter(a => !a.type.startsWith('image/'))
 
   if (images.length === 0 && docs.length === 0) {
-    return { role: m.role, content: m.content }
+    return { role: m.role, content: textOf(m.content) }
   }
 
-  let content = m.content || ''
+  let content = textOf(m.content)
   if (images.length > 0) {
     const imgNames = images.map(i => i.name).join(', ')
     content += `\n\n[用户上传了 ${images.length} 张图片: ${imgNames}]`

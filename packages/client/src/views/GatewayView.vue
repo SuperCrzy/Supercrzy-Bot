@@ -19,7 +19,7 @@
               <div class="channel-name">{{ ch.name }}</div>
               <div class="channel-meta">{{ ch.platform }} · {{ ch.status }}</div>
             </div>
-            <n-switch :value="ch.enabled" @update:value="v => toggleChannel(ch, v)" size="small" />
+            <n-switch :value="ch.enabled" @update:value="(v: boolean) => toggleChannel(ch, v)" size="small" />
             <n-button size="tiny" quaternary @click="editChannel(ch)">Edit</n-button>
             <n-button size="tiny" quaternary type="error" @click="deleteChannel(ch)">Delete</n-button>
           </div>

@@ -207,13 +207,13 @@
           :value="appStore.currentModel"
           @change="appStore.setModel(($event.target as HTMLSelectElement).value)"
         >
-          <template v-for="opt in appStore.modelSelectOptions" :key="opt.key || opt.value">
-            <optgroup v-if="opt.type === 'group'" :label="opt.label">
-              <option v-for="child in opt.children" :key="child.value" :value="child.value">
+          <template v-for="opt in appStore.modelSelectOptions" :key="optKey(opt)">
+            <optgroup v-if="isGroup(opt)" :label="opt.label">
+              <option v-for="child in optChildren(opt)" :key="child.value" :value="child.value">
                 {{ child.label }}
               </option>
             </optgroup>
-            <option v-else :value="opt.value">{{ opt.label }}</option>
+            <option v-else :value="optValue(opt)">{{ opt.label }}</option>
           </template>
         </select>
         <router-link to="/models" class="model-add-link">+ 添加或配置模型</router-link>
@@ -270,6 +270,16 @@ const sidebarCollapsed = ref(false)
 const mobileMenuOpen = ref(false)
 const isMobile = ref(false)
 const advancedOpen = ref(false)
+
+// ---- 模型选择器选项（联合类型：普通项 / 分组项）----
+type ModelSelectOption =
+  | { label: string; value: string }
+  | { type: 'group'; label: string; key: string; children: Array<{ label: string; value: string }> }
+
+const isGroup = (opt: ModelSelectOption): opt is Extract<ModelSelectOption, { type: 'group' }> => 'type' in opt
+const optKey = (opt: ModelSelectOption) => (isGroup(opt) ? opt.key : opt.value)
+const optValue = (opt: ModelSelectOption) => (isGroup(opt) ? '' : opt.value)
+const optChildren = (opt: ModelSelectOption) => (isGroup(opt) ? opt.children : [])
 
 function checkMobile() { isMobile.value = window.innerWidth <= 768 }
 onMounted(() => { checkMobile(); window.addEventListener('resize', checkMobile) })

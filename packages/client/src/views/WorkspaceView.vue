@@ -216,7 +216,7 @@ onUnmounted(() => {
 
 function spawnShell() {
   if (ws?.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type: 'spawn', command: process.platform === 'win32' ? 'cmd.exe' : '/bin/zsh' }))
+    ws.send(JSON.stringify({ type: 'spawn', command: /win/i.test(navigator.platform + ' ' + navigator.userAgent) ? 'cmd.exe' : '/bin/zsh' }))
   }
 }
 

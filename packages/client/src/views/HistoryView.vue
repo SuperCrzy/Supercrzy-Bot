@@ -34,7 +34,7 @@
               <div class="history-item-meta">
                 <span>{{ s.model }}</span>
                 <span>·</span>
-                <span>{{ formatDate(s.updatedAt || s.updated_at) }}</span>
+                <span>{{ formatDate(s.updatedAt || s.updated_at || '') }}</span>
                 <span v-if="s.message_count">· {{ s.message_count }} 条消息</span>
               </div>
             </div>

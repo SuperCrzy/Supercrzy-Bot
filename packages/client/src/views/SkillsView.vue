@@ -52,7 +52,7 @@
         <template #action>
           <div class="skill-actions">
             <n-button size="tiny" quaternary @click="editSkill(s)">Edit</n-button>
-            <n-switch :value="!!s.enabled" @update:value="v=>toggleSkill(s.id,v)" size="small" />
+            <n-switch :value="!!s.enabled" @update:value="(v: boolean) => toggleSkill(s.id, v)" size="small" />
             <n-button v-if="!s.is_builtin" size="tiny" quaternary type="error" @click="deleteSkill(s.id)">Del</n-button>
           </div>
         </template>

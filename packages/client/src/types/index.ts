@@ -165,7 +165,8 @@ export type MessageStatus = 'pending' | 'streaming' | 'complete' | 'error'
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant' | 'system'
-  content: ContentBlock[]
+  /** 兼容两种形态：流式过程中的字符串，历史消息的 ContentBlock[] */
+  content: ContentBlock[] | string
   createdAt: string
   /** 消息状态 */
   status?: MessageStatus
@@ -180,6 +181,10 @@ export interface ChatMessage {
   tokenCount?: number
   cost?: number
   attachments?: Attachment[]
+  /** 流式过程中的思考步骤（agent 模式） */
+  thinking?: Array<{ text?: string; message?: string; turn?: number }>
+  /** 流式过程中的工具调用（agent 模式） */
+  toolCalls?: ToolCallEvent[]
 }
 
 // ===== SSE 事件协议 =====

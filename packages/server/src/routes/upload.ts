@@ -28,7 +28,7 @@ const storage = multer.diskStorage({
 })
 
 // File filter: allow images, PDF, Word, Excel, plain text, code files
-function fileFilter(_req: any, file: Express.Multer.File, cb: multer.FileFilterCallback) {
+function fileFilter(_req: any, file: Express.Multer.File, cb: (error: Error | null, acceptFile: boolean) => void) {
   const allowedTypes = [
     // Images
     'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml', 'image/bmp',
@@ -49,7 +49,7 @@ function fileFilter(_req: any, file: Express.Multer.File, cb: multer.FileFilterC
   if (allowedTypes.includes(file.mimetype)) {
     cb(null, true)
   } else {
-    cb(new Error(`不支持的文件类型: ${file.mimetype}`))
+    cb(new Error(`不支持的文件类型: ${file.mimetype}`), false)
   }
 }
 
@@ -73,7 +73,7 @@ uploadRouter.post('/', upload.array('files', 5), async (ctx: Context) => {
   }
 
   const db = getDB()
-  const sessionId = ctx.request.body?.session_id || null
+  const sessionId = (ctx.request.body as any)?.session_id || null
 
   const results = files.map((file) => {
     const fileId = uuidv4()
