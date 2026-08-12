@@ -99,7 +99,7 @@
             </div>
 
             <!-- 思考状态 -->
-            <div v-if="msg.role === 'assistant' && chatStore.isLoading && !msg.content && (!msg.toolCalls || msg.toolCalls.length === 0) && (!msg.thinking || msg.thinking.length === 0)" class="typing-indicator">
+            <div v-if="msg.role === 'assistant' && chatStore.isLoading && !msg.content && (!msg.flow || msg.flow.length === 0)" class="typing-indicator">
               <span class="dot"></span>
               <span class="dot"></span>
               <span class="dot"></span>
@@ -113,31 +113,33 @@
               <div class="planner-title">📋 执行计划</div>
               <div v-for="(step, i) in msg.planner.steps" :key="i" class="planner-step">{{ step }}</div>
             </div>
-            <!-- 思考步骤 -->
-            <ThinkingBlock
-              v-for="(think, idx) in (msg.thinking || [])"
-              :key="'think-' + idx"
-              :message="think.message || ''"
-              :turn="think.turn"
-              :completed="think.completed"
-              :reasoning="think.reasoning"
-            />
-            <!-- 工具调用 -->
-            <ToolCallBlock
-              v-for="tc in (msg.toolCalls || [])"
-              :key="tc.id"
-              :tool-name="tc.name"
-              :args="tc.arguments"
-              :result="tc.result"
-              :status="tc.status"
-              :duration="tc.duration"
-              @allow="onToolAllow(tc)"
-              @deny="onToolDeny(tc)"
-            />
+            <!-- 时序流：思考/工具/正文按真实顺序交错 -->
+            <template v-if="msg.flow && msg.flow.length">
+              <template v-for="(node, ni) in msg.flow" :key="'flow-' + ni">
+                <ThinkingBlock
+                  v-if="node.kind === 'thinking'"
+                  :message="node.message || ''"
+                  :turn="node.turn"
+                  :completed="node.completed"
+                  :reasoning="node.reasoning"
+                />
+                <ToolCallBlock
+                  v-else-if="node.kind === 'tool'"
+                  :tool-name="node.tool.name"
+                  :args="node.tool.arguments"
+                  :result="node.tool.result"
+                  :status="node.tool.status"
+                  :duration="node.tool.duration"
+                  @allow="onToolAllow(node.tool)"
+                  @deny="onToolDeny(node.tool)"
+                />
+                <div v-else-if="node.kind === 'text' && node.text" class="message-content" v-html="renderMarkdown(node.text)"></div>
+              </template>
+            </template>
+            <!-- 无时序流时（历史消息 / 简单模式）：直接渲染 content -->
+            <div v-else-if="msg.content" class="message-content" v-html="renderMarkdown(textOf(msg.content))"></div>
             <!-- 重试提示 -->
             <div v-if="msg.retrying" class="retry-hint">🔄 {{ msg.retrying }}</div>
-            <!-- 文本内容 -->
-            <div v-if="msg.content" class="message-content" v-html="renderMarkdown(textOf(msg.content))"></div>
             <!-- 交付摘要 -->
             <div v-if="msg.deliverySummary && msg.deliverySummary.artifacts.length" class="delivery-summary">
               <div class="ds-title">📦 交付产物 ({{ msg.deliverySummary.artifactCount }})</div>
@@ -235,7 +237,7 @@ import { useI18n } from 'vue-i18n'
 import { useChatStore } from '@/stores/chat'
 import { useAppStore } from '@/stores/app'
 import { getModelShortName } from '@/data/models'
-import type { ChatMessage, Attachment, ToolCallEvent } from '@/types'
+import type { ChatMessage, Attachment, ToolCallEvent, ChatFlowNode } from '@/types'
 import { extractText } from '@/types'
 import ThinkingBlock from '@/components/chat/ThinkingBlock.vue'
 import ToolCallBlock from '@/components/chat/ToolCallBlock.vue'
@@ -514,49 +516,69 @@ async function sendAgentMessage(assistantMsg: ChatMessage, apiMessages: Array<{ 
 }
 
 function handleAgentEvent(event: string, data: any, msg: ChatMessage) {
+  // 时序流：每个事件按到达顺序追加节点（思考/工具/文本交错）
+  if (!msg.flow) msg.flow = []
+
+  const lastThinking = (): Extract<ChatFlowNode, { kind: 'thinking' }> | undefined => {
+    for (let i = msg.flow!.length - 1; i >= 0; i--) {
+      if (msg.flow![i].kind === 'thinking') return msg.flow![i] as Extract<ChatFlowNode, { kind: 'thinking' }>
+    }
+    return undefined
+  }
+  const lastText = (): Extract<ChatFlowNode, { kind: 'text' }> | undefined => {
+    for (let i = msg.flow!.length - 1; i >= 0; i--) {
+      if (msg.flow![i].kind === 'text') return msg.flow![i] as Extract<ChatFlowNode, { kind: 'text' }>
+    }
+    return undefined
+  }
+
   switch (event) {
     case 'thinking': {
-      if (!msg.thinking) msg.thinking = []
-      msg.thinking.push({ turn: data.turn, message: data.message, completed: false, reasoning: '' })
+      msg.flow.push({ kind: 'thinking', turn: data.turn, message: data.message, reasoning: '', completed: false })
       break
     }
     case 'thinking_chunk': {
-      // 真实推理内容 → 累积到当前 thinking 块
-      if (!msg.thinking) msg.thinking = []
-      if (msg.thinking.length === 0) {
-        msg.thinking.push({ turn: data.turn || 1, message: '思考中...', completed: false, reasoning: '' })
+      // 真实推理 → 累积到最近一个 thinking 节点
+      let node = lastThinking()
+      if (!node) {
+        node = { kind: 'thinking', turn: data.turn || 1, message: '思考中...', reasoning: '', completed: false }
+        msg.flow.push(node)
       }
-      const last = msg.thinking[msg.thinking.length - 1]
-      last.reasoning = (last.reasoning || '') + (data.text || '')
+      node.reasoning += data.text || ''
       break
     }
     case 'tool_call': {
-      if (!msg.toolCalls) msg.toolCalls = []
-      msg.toolCalls.push({
-        id: data.id,
-        name: data.name,
-        arguments: data.arguments,
-        status: data.status === 'pending' ? 'pending' : 'running',
-        startedAt: Date.now(),
+      msg.flow.push({
+        kind: 'tool',
+        tool: {
+          id: data.id,
+          name: data.name,
+          arguments: data.arguments,
+          status: data.status === 'pending' ? 'pending' : 'running',
+          startedAt: Date.now(),
+        },
       })
       break
     }
     case 'tool_result': {
-      if (msg.toolCalls) {
-        const target = [...msg.toolCalls].reverse().find(
-          (tc) => tc.name === data.name && tc.status !== 'done' && tc.status !== 'error'
-        )
-        if (target) {
-          target.result = data.content
-          target.status = 'done'
+      // 更新最近一个未完成且同名的 tool 节点
+      for (let i = msg.flow.length - 1; i >= 0; i--) {
+        const n = msg.flow[i]
+        if (n.kind === 'tool' && n.tool.name === data.name && n.tool.status !== 'done' && n.tool.status !== 'error') {
+          n.tool.result = data.content
+          n.tool.status = 'done'
+          break
         }
       }
       break
     }
     case 'tool_duration': {
-      if (msg.toolCalls) {
-        const target = [...msg.toolCalls].reverse().find((tc) => tc.name === data.name && !tc.duration)
-        if (target) target.duration = Math.round((data.duration || 0) * 10) / 10
+      for (let i = msg.flow.length - 1; i >= 0; i--) {
+        const n = msg.flow[i]
+        if (n.kind === 'tool' && n.tool.name === data.name && !n.tool.duration) {
+          n.tool.duration = Math.round((data.duration || 0) * 10) / 10
+          break
+        }
       }
       break
     }
@@ -570,17 +592,18 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage) {
       break
     }
     case 'content_chunk': {
-      // 打字机：逐字累积
+      // 打字机：累积到最近一个 text 节点
       const text = data.text || ''
-      if (typeof msg.content === 'string') {
-        msg.content += text
-      } else if (Array.isArray(msg.content)) {
-        const last = msg.content[msg.content.length - 1]
-        if (last && last.type === 'text') last.text += text
-        else msg.content.push({ type: 'text', text })
-      } else {
-        msg.content = text
+      if (!text) break
+      let node = lastText()
+      if (!node) {
+        node = { kind: 'text', text: '' }
+        msg.flow.push(node)
       }
+      node.text += text
+      // 同步 msg.content（供 token 估算/持久化/历史兼容）
+      if (typeof msg.content === 'string') msg.content += text
+      else msg.content = text
       break
     }
     case 'content': {
@@ -613,11 +636,16 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage) {
   }
 }
 
-/** 将最后一个 thinking 块标记为完成（内容产出或结束时） */
+/** 将最后一个 thinking 节点标记为完成（内容产出或结束时） */
 function markThinkingDone(msg: ChatMessage) {
-  if (msg.thinking && msg.thinking.length > 0) {
-    const last = msg.thinking[msg.thinking.length - 1]
-    last.completed = true
+  if (msg.flow) {
+    for (let i = msg.flow.length - 1; i >= 0; i--) {
+      const n = msg.flow[i]
+      if (n.kind === 'thinking') {
+        n.completed = true
+        break
+      }
+    }
   }
 }
 

@@ -185,6 +185,8 @@ export interface ChatMessage {
   thinking?: Array<{ turn?: number; message?: string; reasoning?: string; completed?: boolean }>
   /** 流式过程中的工具调用（agent 模式） */
   toolCalls?: ToolCallEvent[]
+  /** 统一时序流：按事件到达顺序交错渲染（思考 → 工具 → 正文 → 下一轮） */
+  flow?: ChatFlowNode[]
   /** 匹配到的技能 */
   skills?: Array<{ name: string }>
   /** Planner 执行计划 */
@@ -199,6 +201,12 @@ export interface ChatMessage {
     turns: number
   }
 }
+
+/** 聊天时序流节点（agent 模式实时渲染用） */
+export type ChatFlowNode =
+  | { kind: 'thinking'; turn?: number; message: string; reasoning: string; completed: boolean }
+  | { kind: 'tool'; tool: ToolCallEvent }
+  | { kind: 'text'; text: string }
 
 // ===== SSE 事件协议 =====
 export interface SSEEvent {
