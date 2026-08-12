@@ -99,16 +99,28 @@
             </div>
 
             <!-- 思考状态 -->
-            <div v-if="msg.role === 'assistant' && chatStore.isLoading && !msg.content && (!msg.toolCalls || msg.toolCalls.length === 0)" class="typing-indicator">
+            <div v-if="msg.role === 'assistant' && chatStore.isLoading && !msg.content && (!msg.toolCalls || msg.toolCalls.length === 0) && (!msg.thinking || msg.thinking.length === 0)" class="typing-indicator">
               <span class="dot"></span>
               <span class="dot"></span>
               <span class="dot"></span>
+            </div>
+            <!-- 技能匹配 -->
+            <div v-if="msg.skills && msg.skills.length" class="skill-match-row">
+              <span v-for="s in msg.skills" :key="s.name" class="skill-tag">⚡ {{ s.name }}</span>
+            </div>
+            <!-- Planner 执行计划 -->
+            <div v-if="msg.planner && msg.planner.steps && msg.planner.steps.length" class="planner-card">
+              <div class="planner-title">📋 执行计划</div>
+              <div v-for="(step, i) in msg.planner.steps" :key="i" class="planner-step">{{ step }}</div>
             </div>
             <!-- 思考步骤 -->
             <ThinkingBlock
               v-for="(think, idx) in (msg.thinking || [])"
               :key="'think-' + idx"
-              :message="think.text || think.message || ''"
+              :message="think.message || ''"
+              :turn="think.turn"
+              :completed="think.completed"
+              :reasoning="think.reasoning"
             />
             <!-- 工具调用 -->
             <ToolCallBlock
@@ -118,9 +130,23 @@
               :args="tc.arguments"
               :result="tc.result"
               :status="tc.status"
+              :duration="tc.duration"
+              @allow="onToolAllow(tc)"
+              @deny="onToolDeny(tc)"
             />
+            <!-- 重试提示 -->
+            <div v-if="msg.retrying" class="retry-hint">🔄 {{ msg.retrying }}</div>
             <!-- 文本内容 -->
             <div v-if="msg.content" class="message-content" v-html="renderMarkdown(textOf(msg.content))"></div>
+            <!-- 交付摘要 -->
+            <div v-if="msg.deliverySummary && msg.deliverySummary.artifacts.length" class="delivery-summary">
+              <div class="ds-title">📦 交付产物 ({{ msg.deliverySummary.artifactCount }})</div>
+              <div v-for="(a, i) in msg.deliverySummary.artifacts" :key="i" class="ds-item">
+                <span class="ds-icon">📄</span>
+                <span class="ds-name">{{ a.name }}</span>
+                <span class="ds-path">{{ a.path }}</span>
+              </div>
+            </div>
 
             <!-- Token usage -->
             <div v-if="msg.role === 'assistant' && msg.tokenCount" class="message-tokens">
@@ -209,7 +235,7 @@ import { useI18n } from 'vue-i18n'
 import { useChatStore } from '@/stores/chat'
 import { useAppStore } from '@/stores/app'
 import { getModelShortName } from '@/data/models'
-import type { ChatMessage, Attachment } from '@/types'
+import type { ChatMessage, Attachment, ToolCallEvent } from '@/types'
 import { extractText } from '@/types'
 import ThinkingBlock from '@/components/chat/ThinkingBlock.vue'
 import ToolCallBlock from '@/components/chat/ToolCallBlock.vue'
@@ -491,7 +517,17 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage) {
   switch (event) {
     case 'thinking': {
       if (!msg.thinking) msg.thinking = []
-      msg.thinking.push(data.message)
+      msg.thinking.push({ turn: data.turn, message: data.message, completed: false, reasoning: '' })
+      break
+    }
+    case 'thinking_chunk': {
+      // 真实推理内容 → 累积到当前 thinking 块
+      if (!msg.thinking) msg.thinking = []
+      if (msg.thinking.length === 0) {
+        msg.thinking.push({ turn: data.turn || 1, message: '思考中...', completed: false, reasoning: '' })
+      }
+      const last = msg.thinking[msg.thinking.length - 1]
+      last.reasoning = (last.reasoning || '') + (data.text || '')
       break
     }
     case 'tool_call': {
@@ -500,34 +536,98 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage) {
         id: data.id,
         name: data.name,
         arguments: data.arguments,
-        status: 'running',
+        status: data.status === 'pending' ? 'pending' : 'running',
+        startedAt: Date.now(),
       })
       break
     }
     case 'tool_result': {
       if (msg.toolCalls) {
-        const lastRunning = [...msg.toolCalls].reverse().find(
-          (tc) => tc.name === data.name && tc.status === 'running'
+        const target = [...msg.toolCalls].reverse().find(
+          (tc) => tc.name === data.name && tc.status !== 'done' && tc.status !== 'error'
         )
-        if (lastRunning) {
-          lastRunning.result = data.content
-          lastRunning.status = 'done'
+        if (target) {
+          target.result = data.content
+          target.status = 'done'
         }
+      }
+      break
+    }
+    case 'tool_duration': {
+      if (msg.toolCalls) {
+        const target = [...msg.toolCalls].reverse().find((tc) => tc.name === data.name && !tc.duration)
+        if (target) target.duration = Math.round((data.duration || 0) * 10) / 10
+      }
+      break
+    }
+    case 'skill_matched': {
+      if (!msg.skills) msg.skills = []
+      if (!msg.skills.some((s) => s.name === data.name)) msg.skills.push({ name: data.name })
+      break
+    }
+    case 'planner_plan': {
+      msg.planner = { steps: data.steps || [], raw: data.raw || '' }
+      break
+    }
+    case 'content_chunk': {
+      // 打字机：逐字累积
+      const text = data.text || ''
+      if (typeof msg.content === 'string') {
+        msg.content += text
+      } else if (Array.isArray(msg.content)) {
+        const last = msg.content[msg.content.length - 1]
+        if (last && last.type === 'text') last.text += text
+        else msg.content.push({ type: 'text', text })
+      } else {
+        msg.content = text
       }
       break
     }
     case 'content': {
       msg.content = data.content
+      markThinkingDone(msg)
+      break
+    }
+    case 'delivery_summary': {
+      msg.deliverySummary = {
+        artifactCount: data.artifactCount || 0,
+        artifacts: data.artifacts || [],
+        toolCallCount: data.toolCallCount || 0,
+        turns: data.turns || 0,
+      }
       break
     }
     case 'done': {
+      markThinkingDone(msg)
       break
     }
     case 'error': {
-      msg.content = `❌ Agent 错误：${data.message}`
+      if (data.retrying) {
+        msg.retrying = data.message || '正在重试...'
+      } else {
+        msg.content = `❌ ${data.message}`
+        markThinkingDone(msg)
+      }
       break
     }
   }
+}
+
+/** 将最后一个 thinking 块标记为完成（内容产出或结束时） */
+function markThinkingDone(msg: ChatMessage) {
+  if (msg.thinking && msg.thinking.length > 0) {
+    const last = msg.thinking[msg.thinking.length - 1]
+    last.completed = true
+  }
+}
+
+/** 工具确认：当前版本后端对敏感工具发 pending 后仍会执行，确认仅更新前端展示状态（后端真拦截在安全批次做） */
+function onToolAllow(tc: ToolCallEvent) {
+  tc.status = 'running'
+}
+function onToolDeny(tc: ToolCallEvent) {
+  tc.status = 'error'
+  tc.result = '用户拒绝执行此操作'
 }
 
 /**
@@ -582,6 +682,87 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+/* ---- Agent 过程展示（技能/Planner/重试/交付摘要） ---- */
+.skill-match-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 0;
+}
+
+.skill-tag {
+  font-size: 11px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--accent-muted, rgba(129, 140, 248, 0.12));
+  color: var(--accent);
+  border: 1px solid var(--border-color);
+}
+
+.planner-card {
+  margin: 8px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-tertiary);
+}
+
+.planner-title {
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: var(--text-secondary);
+}
+
+.planner-step {
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text-secondary);
+  padding-left: 4px;
+}
+
+.retry-hint {
+  font-size: 12px;
+  color: var(--warning, #eab308);
+  padding: 4px 0;
+}
+
+.delivery-summary {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-tertiary);
+}
+
+.ds-title {
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.ds-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  padding: 3px 0;
+}
+
+.ds-name {
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.ds-path {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .chat-container {
   display: flex;
   flex-direction: column;

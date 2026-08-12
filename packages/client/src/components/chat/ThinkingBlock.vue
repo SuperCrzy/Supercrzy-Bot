@@ -7,23 +7,31 @@
       <div class="thinking-header">
         <span class="thinking-turn">Turn {{ turn }}</span>
         <span class="thinking-message">{{ message }}</span>
+        <button v-if="reasoning" class="thinking-toggle" @click="reasoningOpen = !reasoningOpen">
+          {{ reasoningOpen ? '收起思考' : '展开思考' }}
+        </button>
       </div>
+      <div v-if="reasoning && reasoningOpen" class="thinking-reasoning">{{ reasoning }}</div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 
 const props = withDefaults(defineProps<{
   message: string
   turn?: number
   completed?: boolean
+  /** 真实推理内容（thinking_chunk 累积） */
+  reasoning?: string
 }>(), {
   turn: 1,
   completed: false,
+  reasoning: '',
 })
 
+const reasoningOpen = ref(false)
 const isCompleted = computed(() => props.completed)
 </script>
 
@@ -125,5 +133,36 @@ const isCompleted = computed(() => props.completed)
 .thinking-message {
   font-size: var(--text-sm);
   color: var(--text-secondary);
+}
+
+.thinking-toggle {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 1px 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.thinking-toggle:hover {
+  background: var(--bg-tertiary);
+}
+
+.thinking-reasoning {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--accent-muted);
+  background: var(--bg-tertiary);
+  border-radius: 0 6px 6px 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow-y: auto;
 }
 </style>

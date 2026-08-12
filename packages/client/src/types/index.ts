@@ -182,9 +182,22 @@ export interface ChatMessage {
   cost?: number
   attachments?: Attachment[]
   /** 流式过程中的思考步骤（agent 模式） */
-  thinking?: Array<{ text?: string; message?: string; turn?: number }>
+  thinking?: Array<{ turn?: number; message?: string; reasoning?: string; completed?: boolean }>
   /** 流式过程中的工具调用（agent 模式） */
   toolCalls?: ToolCallEvent[]
+  /** 匹配到的技能 */
+  skills?: Array<{ name: string }>
+  /** Planner 执行计划 */
+  planner?: { steps: string[]; raw?: string }
+  /** 重试提示（error 事件 retrying 时） */
+  retrying?: string
+  /** 交付摘要 */
+  deliverySummary?: {
+    artifactCount: number
+    artifacts: Array<{ name: string; path: string; mime: string }>
+    toolCallCount: number
+    turns: number
+  }
 }
 
 // ===== SSE 事件协议 =====
@@ -269,7 +282,11 @@ export interface ToolCallEvent {
   name: string
   arguments: string
   result?: string
-  status: 'running' | 'done' | 'error'
+  status: 'running' | 'done' | 'error' | 'pending'
+  /** 执行耗时（秒） */
+  duration?: number
+  /** 开始时间（实时计时用） */
+  startedAt?: number
 }
 
 export interface ApiRequest {
