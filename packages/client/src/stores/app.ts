@@ -9,7 +9,7 @@ export const useAppStore = defineStore('app', () => {
   const currentAgent = ref('default')
   const isConnected = ref(false)
   const detailPanelVisible = ref(false)
-  const detailPanelTab = ref<'artifacts' | 'files' | 'changes' | 'preview' | 'timeline'>('artifacts')
+  const detailPanelTab = ref<'artifacts' | 'files' | 'changes' | 'preview' | 'timeline' | 'ghost'>('artifacts')
 
   // Custom models from API
   const customModels = shallowRef<CustomModel[]>([])
@@ -177,7 +177,7 @@ export const useAppStore = defineStore('app', () => {
     detailPanelVisible.value = !detailPanelVisible.value
   }
 
-  function setDetailPanelTab(tab: 'artifacts' | 'files' | 'changes' | 'preview' | 'timeline') {
+  function setDetailPanelTab(tab: 'artifacts' | 'files' | 'changes' | 'preview' | 'timeline' | 'ghost') {
     detailPanelTab.value = tab
   }
 

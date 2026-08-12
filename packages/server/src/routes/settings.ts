@@ -98,10 +98,11 @@ settingsRouter.post('/', (ctx: Context) => {
     }
 
     for (const key of allowedKeys) {
-      if (body[key] !== undefined) {
-        const value = typeof body[key] === 'boolean' ? String(body[key]) : typeof body[key] === 'number' ? String(body[key]) : String(body[key])
-        stmt.run(key, value)
-      }
+      if (body[key] === undefined) continue
+      // 保护：apiKey 空串不覆盖已有 key（脱敏后前端 form 回显为空，整体保存会误清空）
+      if (key === 'apiKey' && String(body[key]).trim() === '') continue
+      const value = typeof body[key] === 'boolean' ? String(body[key]) : typeof body[key] === 'number' ? String(body[key]) : String(body[key])
+      stmt.run(key, value)
     }
 
     ctx.body = { success: true }

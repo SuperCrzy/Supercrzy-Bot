@@ -36,6 +36,8 @@ import { modelsRouter } from './routes/models'
 import { workspaceRouter } from './routes/workspace'
 import checkpointsRouter from './routes/checkpoints'
 import { playbookRouter } from './routes/playbook'
+import { ghostRouter } from './routes/ghost'
+import { startGhostWatcher } from './services/ghost-watch'
 import { startScheduler } from './services/scheduler'
 import { loadCredentials, sendMessage } from './services/wechat-ilink'
 import { startBot, setMessageHandlerFull } from './services/wechat-bot-runner'
@@ -70,6 +72,7 @@ async function bootstrap() {
   initSkillsDirectory(process.cwd())
   syncFileSkills(process.cwd())
   startScheduler()
+  startGhostWatcher()
 
   const app = new Koa()
   const PORT = config.port
@@ -361,7 +364,7 @@ async function bootstrap() {
   }
 
   // API Routes
-  const routers = [uploadRouter, chatRouter, settingsRouter, sessionRouter, historyRouter, statsRouter, memoryRouter, gatewayRouter, skillsRouter, tasksRouter, automationsRouter, modelsRouter, workspaceRouter, checkpointsRouter, playbookRouter]
+  const routers = [uploadRouter, chatRouter, settingsRouter, sessionRouter, historyRouter, statsRouter, memoryRouter, gatewayRouter, skillsRouter, tasksRouter, automationsRouter, modelsRouter, workspaceRouter, checkpointsRouter, playbookRouter, ghostRouter]
   for (const r of routers) {
     app.use(r.routes())
     app.use(r.allowedMethods())

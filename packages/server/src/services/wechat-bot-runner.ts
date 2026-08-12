@@ -74,7 +74,7 @@ async function tryTranscribeAudio(
     }
     
     // 4. 调用 ASR API（支持 OpenAI Whisper / 阿里云 / 腾讯云）
-    const deepseekApiKey = process.env.DEEPSEEK_API_KEY || ''
+    const deepseekApiKey = process.env.OPENAI_KEY || ''
     const whisperEndpoint = process.env.WHISPER_ENDPOINT || 'https://api.deepseek.com/v1/audio/transcriptions'
     
     // 检查配置

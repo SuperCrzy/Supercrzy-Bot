@@ -116,6 +116,11 @@
       <div v-if="activeTab === 'timeline'" class="tab-content">
         <TimelinePanel :flow="lastAssistantFlow" />
       </div>
+
+      <!-- 幽灵 Tab -->
+      <div v-if="activeTab === 'ghost'" class="tab-content">
+        <GhostPanel />
+      </div>
     </div>
   </aside>
 </template>
@@ -128,6 +133,7 @@ import { useChatStore } from '@/stores/chat'
 import { extractFiles } from '@/types'
 import type { ChatFlowNode } from '@/types'
 import TimelinePanel from '@/components/chat/TimelinePanel.vue'
+import GhostPanel from '@/components/chat/GhostPanel.vue'
 import type { FileBlock } from '@/types'
 import * as monaco from 'monaco-editor'
 
@@ -140,12 +146,12 @@ interface FileEntry {
 
 const props = defineProps<{
   visible: boolean
-  activeTab: 'artifacts' | 'files' | 'changes' | 'preview' | 'timeline'
+  activeTab: 'artifacts' | 'files' | 'changes' | 'preview' | 'timeline' | 'ghost'
 }>()
 
 const emit = defineEmits<{
   (e: 'toggle'): void
-  (e: 'update:tab', tab: 'artifacts' | 'files' | 'changes' | 'preview' | 'timeline'): void
+  (e: 'update:tab', tab: 'artifacts' | 'files' | 'changes' | 'preview' | 'timeline' | 'ghost'): void
 }>()
 
 const appStore = useAppStore()
@@ -303,7 +309,7 @@ watch(() => appStore.previewFilePath, (path) => {
   }
 })
 
-function switchTab(tab: 'artifacts' | 'files' | 'changes' | 'preview' | 'timeline') {
+function switchTab(tab: 'artifacts' | 'files' | 'changes' | 'preview' | 'timeline' | 'ghost') {
   emit('update:tab', tab)
   if (tab === 'files' && fileTree.value.length === 0) {
     loadFiles()
@@ -322,6 +328,7 @@ const tabs = [
   { key: 'changes' as const, label: '变更', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>' },
   { key: 'preview' as const, label: '预览', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>' },
   { key: 'timeline' as const, label: '时间线', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17h18M3 12h18M3 7h18"/><circle cx="12" cy="17" r="1.5" fill="currentColor"/><circle cx="7" cy="12" r="1.5" fill="currentColor"/><circle cx="16" cy="7" r="1.5" fill="currentColor"/></svg>' },
+  { key: 'ghost' as const, label: '幽灵', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a7 7 0 0 0-7 7v7h14v-7a7 7 0 0 0-7-7z"/><path d="M8 14h.01M16 14h.01M8 18v3M16 18v3"/></svg>' },
 ]
 </script>
 

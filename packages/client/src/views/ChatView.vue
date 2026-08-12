@@ -400,6 +400,57 @@ watch(() => chatStore.pendingResume, (ckptId) => {
   chatStore.pendingResume = null
   resumeFromCheckpoint(ckptId)
 })
+// 幽灵建议信号（来自 GhostPanel）→ 作为用户消息自动发送
+watch(() => chatStore.pendingMessage, (msg) => {
+  if (!msg) return
+  chatStore.pendingMessage = null
+  sendGhostMessage(msg)
+})
+
+/** 幽灵建议自动发送：建议作为用户消息发起 Agent 执行 */
+async function sendGhostMessage(suggestion: string) {
+  if (chatStore.isLoading) {
+    chatStore.pendingMessage = suggestion
+    return
+  }
+  let session = chatStore.currentSession
+  if (!session) {
+    session = await chatStore.createSession(suggestion.slice(0, 40))
+  }
+  const userMsg: ChatMessage = {
+    id: crypto.randomUUID(),
+    role: 'user',
+    content: suggestion,
+    createdAt: new Date().toISOString(),
+  }
+  await chatStore.addMessage(session.id, userMsg)
+
+  const assistantMsg: ChatMessage = {
+    id: crypto.randomUUID(),
+    role: 'assistant',
+    content: '',
+    createdAt: new Date().toISOString(),
+    flow: [],
+  }
+  chatStore.addMessage(session.id, assistantMsg)
+  chatStore.setLoading(true)
+  abortController.value = new AbortController()
+  try {
+    await sendAgentMessage(assistantMsg, [{ role: 'user', content: suggestion }])
+  } catch (err: any) {
+    if (err.name !== 'AbortError') {
+      const cur = messages.value.find((m) => m.id === assistantMsg.id)
+      if (cur) cur.content = `❌ 执行失败：${err.message || '未知错误'}`
+    }
+  } finally {
+    chatStore.setLoading(false)
+    abortController.value = null
+    if (session) {
+      assistantMsg.tokenCount = Math.ceil(textOf(assistantMsg.content).length * 0.6)
+      chatStore.persistLastMessage(session.id)
+    }
+  }
+}
 
 /** 从指定 checkpoint 继续 Agent 执行（分支续跑） */
 async function resumeFromCheckpoint(ckptId: string) {

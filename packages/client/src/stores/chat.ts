@@ -50,6 +50,8 @@ export const useChatStore = defineStore('chat', () => {
   const loaded = ref(false)
   /** 分支续跑信号：TimelinePanel 设置后，ChatView 监听并发起续跑 */
   const pendingResume = ref<string | null>(null)
+  /** 幽灵建议信号：GhostPanel 设置后，ChatView 作为用户消息自动发送 */
+  const pendingMessage = ref<string | null>(null)
 
   const currentSession = computed(() =>
     sessions.value.find((s) => s.id === currentSessionId.value)
@@ -249,6 +251,7 @@ export const useChatStore = defineStore('chat', () => {
     isLoading,
     loaded,
     pendingResume,
+    pendingMessage,
     currentSession,
     currentMessages,
     loadSessions,
