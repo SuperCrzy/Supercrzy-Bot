@@ -30,7 +30,7 @@
     </header>
 
     <!-- Messages -->
-    <div class="messages-area" ref="messagesRef">
+    <div class="messages-area" ref="messagesRef" @scroll="onScroll">
       <!-- Welcome -->
       <div v-if="messages.length === 0" class="welcome-area">
         <div class="welcome-logo">DA</div>
@@ -356,16 +356,38 @@ function formatTime(dateStr: string) {
   return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
 }
 
-function scrollToBottom() {
+/** 是否吸附底部（用户手动上滚时暂停自动滚动，回到底部恢复） */
+const stickToBottom = ref(true)
+
+function onScroll() {
+  const el = messagesRef.value
+  if (!el) return
+  stickToBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < 60
+}
+
+function scrollToBottom(force = false) {
   nextTick(() => {
-    if (messagesRef.value) {
-      messagesRef.value.scrollTop = messagesRef.value.scrollHeight
-    }
+    const el = messagesRef.value
+    if (!el) return
+    if (!force && !stickToBottom.value) return
+    el.scrollTop = el.scrollHeight
   })
 }
 
-watch(() => messages.value.length, scrollToBottom)
-watch(() => messages.value[messages.value.length - 1]?.content, scrollToBottom)
+// 消息数量变化（新消息 / 切换会话）→ 强制滚到底部
+watch(() => messages.value.length, () => {
+  stickToBottom.value = true
+  scrollToBottom(true)
+})
+// 正文流式 → 跟随滚动
+watch(() => messages.value[messages.value.length - 1]?.content, () => scrollToBottom())
+// 时序流变化（思考推理/工具状态/文本逐字）→ 跟随滚动
+watch(() => messages.value[messages.value.length - 1]?.flow, () => scrollToBottom(), { deep: true })
+// 切换会话 → 强制滚到底部
+watch(() => chatStore.currentSessionId, () => {
+  stickToBottom.value = true
+  scrollToBottom(true)
+})
 
 function sendQuick(text: string) {
   inputText.value = text
