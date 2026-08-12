@@ -2,9 +2,11 @@ node_modules/
 dist/
 .env
 .env.local
+.env.production
 *.log
 .DS_Store
 .codexstation/
+.workbuddy/
 *.db
 *.db-journal
 *.db-shm
@@ -12,3 +14,17 @@ dist/
 data/
 uploads/
 nul
+
+# ── 敏感文件：含服务器凭据，禁止入库 ──
+SUPERCRZY_AGENT_参考手册.md
+
+# ── 编译产物与备份残留 ──
+*.tsbuildinfo
+*.bak
+*.bak2
+*.js.map
+packages/client/src/i18n/index.js
+packages/client/src/router/index.js
+packages/client/src/types/index.js
+packages/client/src/composables/useChatSearch.js
+

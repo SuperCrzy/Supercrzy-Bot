@@ -10,6 +10,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'history', name: 'History', component: () => import('@/views/HistoryView.vue'), meta: { title: '历史' } },
       { path: 'search', name: 'Search', component: () => import('@/views/SearchView.vue'), meta: { title: '搜索' } },
       { path: 'tasks', name: 'Tasks', component: () => import('@/views/TasksView.vue'), meta: { title: '任务' } },
+      { path: 'automations', name: 'Automations', component: () => import('@/views/AutomationsView.vue'), meta: { title: '自动化' } },
       { path: 'channel', name: 'Channel', component: () => import('@/views/ChannelView.vue'), meta: { title: '频道' } },
       { path: 'workspace', name: 'Workspace', component: () => import('@/views/WorkspaceView.vue'), meta: { title: '工作台' } },
       { path: 'skills', name: 'Skills', component: () => import('@/views/SkillsView.vue'), meta: { title: '技能' } },
@@ -31,7 +32,7 @@ const router = createRouter({
 
 router.beforeEach((to) => {
   const title = to.meta.title as string
-  if (title) document.title = `${title} - DeepSeek Agent`
+  if (title) document.title = `${title} - SuperCrzy`
 })
 
 export { routes }

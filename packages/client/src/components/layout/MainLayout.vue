@@ -1,16 +1,38 @@
 <template>
   <div class="app-layout" :class="{ dark: appStore.darkMode }">
+    <!-- ========== MOBILE TOP BAR ========== -->
+    <div class="mobile-topbar">
+      <button class="hamburger-btn" @click="mobileMenuOpen = !mobileMenuOpen">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="3" y1="6" x2="21" y2="6" v-if="!mobileMenuOpen"/>
+          <line x1="3" y1="12" x2="21" y2="12" v-if="!mobileMenuOpen"/>
+          <line x1="3" y1="18" x2="21" y2="18" v-if="!mobileMenuOpen"/>
+          <line x1="18" y1="6" x2="6" y2="18" v-if="mobileMenuOpen"/>
+          <line x1="6" y1="6" x2="18" y2="18" v-if="mobileMenuOpen"/>
+        </svg>
+      </button>
+      <div class="mobile-logo">SC</div>
+      <span class="mobile-title">{{ currentPageTitle }}</span>
+      <button class="mobile-new-chat" @click="handleNewChat">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      </button>
+    </div>
+
+    <!-- Mobile overlay backdrop -->
+    <div class="mobile-overlay" v-if="mobileMenuOpen" @click="mobileMenuOpen = false"></div>
+
     <!-- ========== LEFT SIDEBAR ========== -->
-    <aside class="sidebar" :class="{ collapsed: sidebarCollapsed }">
+    <aside class="sidebar" :class="{ collapsed: sidebarCollapsed, 'mobile-open': mobileMenuOpen }">
+      <!-- Logo -->
       <div class="sidebar-header" @click="navigate('Chat')">
-        <div class="logo-icon">DA</div>
-        <span class="logo-text" v-show="!sidebarCollapsed">DeepSeek Agent</span>
+        <div class="logo-icon">SC</div>
+        <span class="logo-text" v-show="!sidebarCollapsed">SUPERCRZY</span>
       </div>
 
       <button class="collapse-btn" @click="toggleSidebar">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path v-if="!sidebarCollapsed" d="M11 19l-7-7 7-7m8 14l-7-7 7-7"/>
-          <path v-else d="M13 5l7 7-7 7M6 5l7 7-7 7"/>
+          <path v-if="!sidebarCollapsed" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+          <path v-else d="M13 5l7 7-7 7M6 5l7 7-7 7" />
         </svg>
       </button>
 
@@ -24,15 +46,15 @@
           </div>
           <div class="nav-items" v-show="groups.chat">
             <router-link to="/" class="nav-item" :class="{ active: route.name === 'Chat' }">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+              <SvgIcon name="message" :size="16" />
               <span>{{ $t('nav.chat') }}</span>
             </router-link>
             <router-link to="/history" class="nav-item" :class="{ active: route.name === 'History' }">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              <SvgIcon name="history" :size="16" />
               <span>{{ $t('nav.history') }}</span>
             </router-link>
-            <router-link to="/search" class="nav-item" :class="{ active: route.name === 'Search' }">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <router-link v-if="!isMobile" to="/search" class="nav-item" :class="{ active: route.name === 'Search' }">
+              <SvgIcon name="search" :size="16" />
               <span>{{ $t('nav.search') }}</span>
             </router-link>
           </div>
@@ -45,46 +67,50 @@
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :class="{ rotated: groups.agent }"><path d="M6 9l6 6 6-6"/></svg>
           </div>
           <div class="nav-items" v-show="groups.agent">
-            <router-link to="/tasks" class="nav-item" :class="{ active: route.name === 'Tasks' }">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/></svg>
+            <router-link v-if="!isMobile" to="/tasks" class="nav-item" :class="{ active: route.name === 'Tasks' }">
+              <SvgIcon name="layers" :size="16" />
               <span>{{ $t('nav.tasks') }}</span>
             </router-link>
-            <router-link to="/channel" class="nav-item" :class="{ active: route.name === 'Channel' }">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+            <router-link v-if="!isMobile" to="/automations" class="nav-item" :class="{ active: route.name === 'Automations' }">
+              <SvgIcon name="clock" :size="16" />
+              <span>Automations</span>
+            </router-link>
+            <router-link v-if="!isMobile" to="/channel" class="nav-item" :class="{ active: route.name === 'Channel' }">
+              <SvgIcon name="plug" :size="16" />
               <span>{{ $t('nav.channel') }}</span>
             </router-link>
-            <router-link to="/workspace" class="nav-item" :class="{ active: route.name === 'Workspace' }">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+            <router-link v-if="!isMobile" to="/workspace" class="nav-item" :class="{ active: route.name === 'Workspace' }">
+              <SvgIcon name="terminal" :size="16" />
               <span>工作台</span>
             </router-link>
             <router-link to="/skills" class="nav-item" :class="{ active: route.name === 'Skills' }">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+              <SvgIcon name="star" :size="16" />
               <span>{{ $t('nav.skills') }}</span>
             </router-link>
             <router-link to="/memory" class="nav-item" :class="{ active: route.name === 'Memory' }">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+              <SvgIcon name="brain" :size="16" />
               <span>{{ $t('nav.memory') }}</span>
             </router-link>
-            <router-link to="/models" class="nav-item" :class="{ active: route.name === 'Models' }">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+            <router-link v-if="!isMobile" to="/models" class="nav-item" :class="{ active: route.name === 'Models' }">
+              <SvgIcon name="monitor" :size="16" />
               <span>{{ $t('nav.models') }}</span>
             </router-link>
           </div>
         </div>
 
         <!-- Monitor Group -->
-        <div class="nav-group">
+        <div class="nav-group" v-if="!isMobile">
           <div class="nav-group-title" @click="toggleGroup('monitor')">
             <span>{{ $t('nav.monitorGroup') }}</span>
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :class="{ rotated: groups.monitor }"><path d="M6 9l6 6 6-6"/></svg>
           </div>
           <div class="nav-items" v-show="groups.monitor">
             <router-link to="/logs" class="nav-item" :class="{ active: route.name === 'Logs' }">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              <SvgIcon name="file-text" :size="16" />
               <span>{{ $t('nav.logs') }}</span>
             </router-link>
             <router-link to="/usage" class="nav-item" :class="{ active: route.name === 'Usage' }">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+              <SvgIcon name="activity" :size="16" />
               <span>{{ $t('nav.usage') }}</span>
             </router-link>
           </div>
@@ -97,72 +123,143 @@
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :class="{ rotated: groups.system }"><path d="M6 9l6 6 6-6"/></svg>
           </div>
           <div class="nav-items" v-show="groups.system">
-            <router-link to="/gateway" class="nav-item" :class="{ active: route.name === 'Gateway' }">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+            <router-link v-if="!isMobile" to="/gateway" class="nav-item" :class="{ active: route.name === 'Gateway' }">
+              <SvgIcon name="globe" :size="16" />
               <span>{{ $t('nav.gateway') }}</span>
             </router-link>
-            <router-link to="/users" class="nav-item" :class="{ active: route.name === 'Users' }">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            <router-link v-if="!isMobile" to="/users" class="nav-item" :class="{ active: route.name === 'Users' }">
+              <SvgIcon name="user" :size="16" />
               <span>{{ $t('nav.users') }}</span>
             </router-link>
             <router-link to="/settings" class="nav-item" :class="{ active: route.name === 'Settings' }">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+              <SvgIcon name="settings" :size="16" />
               <span>{{ $t('nav.settings') }}</span>
+            </router-link>
+          </div>
+        </div>
+
+        <!-- Advanced Group — mobile only, collapsed by default -->
+        <div class="nav-group" v-if="isMobile">
+          <div class="nav-group-title" @click="advancedOpen = !advancedOpen">
+            <span>高级</span>
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :class="{ rotated: advancedOpen }"><path d="M6 9l6 6 6-6"/></svg>
+          </div>
+          <div class="nav-items" v-show="advancedOpen">
+            <router-link to="/tasks" class="nav-item" :class="{ active: route.name === 'Tasks' }">
+              <SvgIcon name="layers" :size="14" /><span>Tasks</span>
+            </router-link>
+            <router-link to="/workspace" class="nav-item" :class="{ active: route.name === 'Workspace' }">
+              <SvgIcon name="terminal" :size="14" /><span>Workspace</span>
+            </router-link>
+            <router-link to="/automations" class="nav-item" :class="{ active: route.name === 'Automations' }">
+              <SvgIcon name="clock" :size="14" /><span>Automations</span>
+            </router-link>
+            <router-link to="/models" class="nav-item" :class="{ active: route.name === 'Models' }">
+              <SvgIcon name="monitor" :size="14" /><span>Models</span>
+            </router-link>
+            <router-link to="/logs" class="nav-item" :class="{ active: route.name === 'Logs' }">
+              <SvgIcon name="file-text" :size="14" /><span>Logs</span>
+            </router-link>
+            <router-link to="/usage" class="nav-item" :class="{ active: route.name === 'Usage' }">
+              <SvgIcon name="activity" :size="14" /><span>Usage</span>
+            </router-link>
+            <router-link to="/gateway" class="nav-item" :class="{ active: route.name === 'Gateway' }">
+              <SvgIcon name="globe" :size="14" /><span>Gateway</span>
             </router-link>
           </div>
         </div>
       </nav>
 
+      <!-- ===== Session List (integrated in sidebar) ===== -->
+      <div class="sidebar-chats" v-show="!sidebarCollapsed">
+        <div class="chats-header">
+          <span class="chats-title">对话</span>
+          <n-button size="tiny" quaternary @click="handleNewChat">
+            <template #icon><SvgIcon name="plus" :size="16" /></template>
+          </n-button>
+        </div>
+        <div class="chats-list">
+          <div
+            v-for="s in chatStore.sessions"
+            :key="s.id"
+            class="chat-item"
+            :class="{ active: s.id === chatStore.currentSessionId }"
+            @click="selectSession(s.id)"
+          >
+            <SvgIcon name="message" :size="13" class="chat-item-icon" />
+            <div class="chat-item-info">
+              <div class="chat-item-title">{{ s.title }}</div>
+              <div class="chat-item-meta">{{ getModelShortName(s.model) }} · {{ formatRelativeTime(s.updatedAt) }}</div>
+            </div>
+            <button class="chat-item-del" @click.stop="delSession(s.id)" title="删除">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+          <div v-if="chatStore.sessions.length === 0" class="chats-empty">暂无对话</div>
+        </div>
+      </div>
+
+      <!-- ===== Model Selector in Sidebar ===== -->
+      <div class="sidebar-model" v-show="!sidebarCollapsed">
+        <label class="model-label">当前模型</label>
+        <select
+          class="sidebar-model-select"
+          :value="appStore.currentModel"
+          @change="appStore.setModel(($event.target as HTMLSelectElement).value)"
+        >
+          <template v-for="opt in appStore.modelSelectOptions" :key="opt.key || opt.value">
+            <optgroup v-if="opt.type === 'group'" :label="opt.label">
+              <option v-for="child in opt.children" :key="child.value" :value="child.value">
+                {{ child.label }}
+              </option>
+            </optgroup>
+            <option v-else :value="opt.value">{{ opt.label }}</option>
+          </template>
+        </select>
+        <router-link to="/models" class="model-add-link">+ 添加或配置模型</router-link>
+      </div>
+
       <!-- Footer -->
       <div class="sidebar-footer" v-show="!sidebarCollapsed">
-        <div class="footer-row"><span class="footer-label">{{ $t('nav.user') }}</span><span class="footer-value">{{ appStore.currentAgent }}</span></div>
-        <div class="footer-row" style="flex-direction: column; align-items: flex-start; gap: 4px;"><span class="footer-label">{{ $t('nav.model') }}</span>
-          <n-select size="tiny" :value="appStore.currentModel" :options="modelOpts" @update:value="appStore.setModel" class="model-mini" filterable :consistent-menu-width="false" />
+        <div class="footer-row">
+          <span class="footer-label">{{ $t('nav.user') }}</span>
+          <span class="footer-value">{{ appStore.currentAgent }}</span>
         </div>
         <div class="footer-bottom">
           <span class="connection-status"><span class="conn-dot"></span>{{ $t('nav.connected') }}</span>
-          <n-switch size="small" :value="appStore.darkMode" @update:value="appStore.toggleDarkMode()">
-            <template #checked>🌙</template><template #unchecked>☀️</template>
-          </n-switch>
+          <button class="theme-toggle" @click="appStore.toggleDarkMode()">
+            <SvgIcon :name="appStore.darkMode ? 'sun' : 'moon'" :size="14" />
+          </button>
         </div>
         <div class="version-info">
-          <a href="#" class="version-link">DeepSeek Agent v0.1.0</a>
+          <a href="#" class="version-link">SuperCrzy v1.0.0</a>
         </div>
       </div>
     </aside>
-
-    <!-- ========== SESSION LIST (Chat Only) ========== -->
-    <div class="session-panel" v-if="showSessionPanel">
-      <div class="session-header">
-        <span class="session-header-title">{{ $t('nav.sessionTitle') }}</span>
-        <n-button size="tiny" quaternary @click="handleNewChat" :title="$t('chat.newChat')">
-          <template #icon><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></template>
-        </n-button>
-      </div>
-      <div class="session-hint">{{ $t('nav.sessionHint') }}</div>
-      <div class="session-list">
-        <div v-for="s in chatStore.sessions" :key="s.id" class="session-item" :class="{ active: s.id === chatStore.currentSessionId }" @click="selectSession(s.id)">
-          <div class="session-icon">💬</div>
-          <div class="session-info"><div class="session-title">{{ s.title }}</div><div class="session-meta">{{ s.model }} · {{ fmtDate(s.updatedAt) }}</div></div>
-          <n-button class="session-del" quaternary circle size="tiny" @click.stop="delSession(s.id)"><template #icon>×</template></n-button>
-        </div>
-        <n-empty v-if="chatStore.sessions.length === 0" :description="$t('nav.noSessions')" class="empty-hint" />
-      </div>
-    </div>
 
     <!-- ========== MAIN CONTENT ========== -->
     <main class="main-content">
       <router-view />
     </main>
+
+    <!-- ========== RIGHT DETAIL PANEL ========== -->
+    <DetailPanel
+      :visible="appStore.detailPanelVisible"
+      :active-tab="appStore.detailPanelTab"
+      @toggle="appStore.toggleDetailPanel"
+      @update:tab="appStore.setDetailPanelTab"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, computed } from 'vue'
+import { reactive, ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'
-import { useChatStore } from '@/stores/chat'
-import { getModelSelectOptions } from '@/data/models'
+import { useChatStore, formatRelativeTime } from '@/stores/chat'
+import { getModelShortName } from '@/data/models'
+import SvgIcon from '@/components/ui/SvgIcon.vue'
+import DetailPanel from '@/components/layout/DetailPanel.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -170,13 +267,16 @@ const appStore = useAppStore()
 const chatStore = useChatStore()
 
 const sidebarCollapsed = ref(false)
+const mobileMenuOpen = ref(false)
+const isMobile = ref(false)
+const advancedOpen = ref(false)
+
+function checkMobile() { isMobile.value = window.innerWidth <= 768 }
+onMounted(() => { checkMobile(); window.addEventListener('resize', checkMobile) })
+
+const currentPageTitle = computed(() => (route.meta.title as string) || 'SUPERCRZY')
 
 const groups = reactive({ chat: true, agent: true, monitor: true, system: true })
-
-const modelOpts = getModelSelectOptions()
-
-// Show session panel only on Chat route
-const showSessionPanel = computed(() => route.name === 'Chat')
 
 function toggleGroup(g: keyof typeof groups) { groups[g] = !groups[g] }
 function toggleSidebar() { sidebarCollapsed.value = !sidebarCollapsed.value }
@@ -184,66 +284,505 @@ function navigate(name: string) { router.push({ name }) }
 function handleNewChat() { chatStore.createSession() }
 function selectSession(id: string) { chatStore.selectSession(id) }
 function delSession(id: string) { chatStore.deleteSession(id) }
-function fmtDate(d: string) {
-  const diff = Date.now() - new Date(d).getTime()
-  if (diff < 60000) return '刚刚'; if (diff < 3600000) return `${Math.floor(diff / 60000)}m 前`; if (diff < 86400000) return `${Math.floor(diff / 3600000)}h 前`
-  return new Date(d).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
-}
+
+onMounted(() => {
+  appStore.loadSettings()
+  chatStore.loadSessions()
+})
 </script>
 
 <style scoped>
-.app-layout { display: flex; height: 100vh; background: var(--bg-primary); color: var(--text-primary); --bg-primary: #fff; --bg-secondary: #f5f5f5; --bg-sidebar: #fafafa; --text-primary: #1a1a1a; --text-secondary: #666; --text-muted: #999; --border-color: #e5e5e5; --accent: #4F46E5; --accent-light: #EEF2FF; }
-.app-layout.dark { --bg-primary: #1a1a2e; --bg-secondary: #16213e; --bg-sidebar: #0f0f23; --text-primary: #e5e5e5; --text-secondary: #a0a0a0; --text-muted: #666; --border-color: #2a2a4a; --accent: #6366F1; --accent-light: #1e1b4b; }
+.app-layout {
+  display: flex;
+  height: 100vh;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
 
-/* Sidebar */
-.sidebar { width: 200px; min-width: 200px; background: var(--bg-sidebar); border-right: 1px solid var(--border-color); display: flex; flex-direction: column; transition: width .2s,min-width .2s; position: relative; }
-.sidebar.collapsed { width: 52px; min-width: 52px; }
-.sidebar-header { display: flex; align-items: center; gap: 10px; padding: 14px 14px; cursor: pointer; border-bottom: 1px solid var(--border-color); }
-.logo-icon { width: 28px; height: 28px; border-radius: 7px; background: linear-gradient(135deg, #4F46E5, #06B6D4); color: #fff; font-weight: 700; font-size: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-.logo-text { font-size: 14px; font-weight: 600; white-space: nowrap; }
-.collapse-btn { position: absolute; top: 14px; right: -14px; width: 28px; height: 28px; border-radius: 50%; background: var(--bg-primary); border: 1px solid var(--border-color); cursor: pointer; display: flex; align-items: center; justify-content: center; color: var(--text-secondary); z-index: 10; padding: 0; }
-.collapse-btn:hover { background: var(--bg-secondary); }
-.nav-groups { flex: 1; overflow-y: auto; padding: 6px 0; }
+/* ===== Sidebar ===== */
+.sidebar {
+  width: 220px;
+  min-width: 220px;
+  background: var(--bg-sidebar);
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  transition: width var(--duration-normal) var(--ease-out),
+              min-width var(--duration-normal) var(--ease-out);
+  position: relative;
+}
+
+.sidebar.collapsed {
+  width: 52px;
+  min-width: 52px;
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.logo-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, #4F46E5, #06B6D4);
+  color: #fff;
+  font-weight: 700;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-family: 'Saira Stencil One', sans-serif;
+}
+
+.logo-text {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  font-family: 'Saira Stencil One', sans-serif;
+  letter-spacing: 1px;
+}
+
+.collapse-btn {
+  position: absolute;
+  top: 14px;
+  right: -14px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  z-index: 10;
+  padding: 0;
+}
+
+.collapse-btn:hover {
+  background: var(--bg-secondary);
+}
+
+.nav-groups {
+  flex: 0 1 auto;
+  overflow-y: auto;
+  padding: 6px 0;
+  max-height: 40vh;
+}
+
 .nav-group { margin-bottom: 2px; }
-.nav-group-title { display: flex; align-items: center; justify-content: space-between; padding: 8px 14px; font-size: 11px; font-weight: 600; color: var(--text-muted); cursor: pointer; text-transform: uppercase; letter-spacing: .5px; }
+
+.nav-group-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
 .nav-group-title:hover { color: var(--text-secondary); }
-.nav-group-title svg { transition: transform .2s; }
+
+.nav-group-title svg {
+  transition: transform var(--duration-normal) var(--ease-out);
+}
+
 .nav-group-title svg.rotated { transform: rotate(180deg); }
-.nav-items { display: flex; flex-direction: column; gap: 1px; padding: 0 6px; }
-.nav-item { display: flex; align-items: center; gap: 9px; padding: 7px 10px; border-radius: 6px; font-size: 13px; color: var(--text-secondary); text-decoration: none; cursor: pointer; transition: background .12s,color .12s; }
-.nav-item:hover { background: var(--bg-secondary); color: var(--text-primary); }
-.nav-item.active { background: var(--accent-light); color: var(--accent); font-weight: 500; }
-.nav-item.router-link-active { background: var(--accent-light); color: var(--accent); font-weight: 500; }
 
-/* Footer */
-.sidebar-footer { padding: 10px 12px; border-top: 1px solid var(--border-color); font-size: 12px; }
-.footer-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
-.footer-label { color: var(--text-muted); }
-.footer-value { color: var(--text-primary); font-weight: 500; }
+.nav-items {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 0 6px;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out),
+              color var(--duration-fast) var(--ease-out);
+}
+
+.nav-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.nav-item.active,
+.nav-item.router-link-exact-active {
+  background: var(--bg-active);
+  color: var(--accent);
+  font-weight: 500;
+}
+
+/* ===== Sidebar Chats (integrated session list) ===== */
+.sidebar-chats {
+  flex: 1 1 120px;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border-color);
+  min-height: 120px;
+  overflow: hidden;
+}
+
+.chats-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px 6px;
+  flex-shrink: 0;
+}
+
+.chats-title {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.chats-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 6px;
+}
+
+.chat-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out);
+  position: relative;
+}
+
+.chat-item:hover { background: var(--bg-hover); }
+.chat-item.active { background: var(--bg-active); }
+
+.chat-item-icon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.chat-item-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-item-title {
+  font-size: 12px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.3;
+}
+
+.chat-item-meta {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 1px;
+  line-height: 1.3;
+}
+
+.chat-item-del {
+  opacity: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 0;
+  flex-shrink: 0;
+  transition: opacity var(--duration-fast);
+}
+
+.chat-item:hover .chat-item-del { opacity: 0.4; }
+.chat-item-del:hover { opacity: 1 !important; color: var(--error); background: var(--error-muted); }
+
+.chats-empty {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 16px 8px;
+}
+
+/* ===== Sidebar Model Selector ===== */
+.sidebar-model {
+  padding: 10px 12px;
+  border-top: 1px solid var(--border-color);
+}
+.model-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 4px;
+  display: block;
+}
+.sidebar-model-select {
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+  outline: none;
+  appearance: auto;
+}
+.sidebar-model-select:focus {
+  border-color: var(--accent, #4F46E5);
+}
+.sidebar-model-select option {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+.model-add-link {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-decoration: none;
+  padding: 4px 0 0;
+  transition: color 0.15s;
+}
+.model-add-link:hover { color: var(--accent); }
+
+/* ===== Sidebar Footer (always at bottom) ===== */
+.sidebar-footer {
+  padding: 8px 12px;
+  border-top: 1px solid var(--border-color);
+  font-size: var(--text-sm);
+  flex-shrink: 0;
+}
+
+.footer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.footer-label { color: var(--text-muted); font-size: 11px; }
+.footer-value { color: var(--text-primary); font-weight: 500; font-size: 11px; }
 .model-mini { width: 100%; }
-.footer-bottom { display: flex; align-items: center; justify-content: space-between; margin: 8px 0; }
-.connection-status { display: flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 11px; }
-.conn-dot { width: 7px; height: 7px; border-radius: 50%; background: #22c55e; }
-.version-info { font-size: 11px; color: var(--text-muted); text-align: center; margin-top: 4px; }
-.version-link { color: var(--text-muted); text-decoration: none; }
 
-/* Session Panel */
-.session-panel { width: 260px; min-width: 260px; border-right: 1px solid var(--border-color); display: flex; flex-direction: column; background: var(--bg-secondary); }
-.session-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--border-color); }
-.session-header-title { font-size: 13px; font-weight: 600; }
-.session-hint { font-size: 11px; color: var(--text-muted); padding: 8px 14px; border-bottom: 1px solid var(--border-color); line-height: 1.5; }
-.session-list { flex: 1; overflow-y: auto; padding: 6px 8px; }
-.session-item { display: flex; align-items: center; gap: 8px; padding: 10px; border-radius: 8px; cursor: pointer; transition: background .12s; position: relative; }
-.session-item:hover { background: var(--bg-primary); }
-.session-item.active { background: var(--accent-light); }
-.session-icon { font-size: 15px; flex-shrink: 0; }
-.session-info { flex: 1; min-width: 0; }
-.session-title { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.session-meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
-.session-del { opacity: 0; transition: opacity .12s; }
-.session-item:hover .session-del { opacity: .5; }
-.session-del:hover { opacity: 1 !important; }
-.empty-hint { margin-top: 40px; }
+.footer-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 6px 0;
+}
 
-.main-content { flex: 1; min-width: 0; overflow: hidden; }
+.connection-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.conn-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--success);
+}
+
+.theme-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background: transparent;
+  cursor: pointer;
+  color: var(--text-secondary);
+  padding: 0;
+}
+
+.theme-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.version-info {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  text-align: center;
+  margin-top: 2px;
+}
+
+.version-link {
+  color: var(--text-muted);
+  text-decoration: none;
+}
+
+/* ===== Main Content ===== */
+.main-content {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* =================================================================
+   MOBILE ( ≤ 768px )
+   ================================================================= */
+@media (max-width: 768px) {
+  /* app-layout needs top padding to account for fixed topbar */
+  .app-layout { flex-direction: column; padding-top: 48px; }
+
+  /* Top bar — fixed so it stays visible when scrolling */
+  .mobile-topbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 48px;
+    padding: 0 12px;
+    background: var(--bg-sidebar);
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 100;
+  }
+
+  .hamburger-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px; height: 32px;
+    border: none; background: none;
+    color: var(--text-primary);
+    cursor: pointer; padding: 0;
+    flex-shrink: 0;
+  }
+
+  .mobile-logo {
+    width: 24px; height: 24px;
+    border-radius: 6px;
+    background: linear-gradient(135deg, #4F46E5, #06B6D4);
+    color: #fff; font-weight: 700; font-size: 9px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .mobile-title {
+    flex: 1;
+    font-size: 14px; font-weight: 600;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+
+  .mobile-new-chat {
+    display: flex; align-items: center; justify-content: center;
+    width: 32px; height: 32px;
+    border: none; background: none;
+    color: var(--text-secondary);
+    cursor: pointer; padding: 0;
+  }
+
+  /* Overlay */
+  .mobile-overlay {
+    position: fixed;
+    inset: 48px 0 0 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 98;
+  }
+
+  /* Sidebar slides in */
+  .sidebar {
+    position: fixed;
+    top: 48px; left: 0; bottom: 0;
+    width: 260px;
+    z-index: 99;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    box-shadow: 4px 0 20px rgba(0,0,0,0.3);
+  }
+
+  .sidebar.mobile-open {
+    transform: translateX(0);
+  }
+
+  .sidebar.collapsed { transform: translateX(-100%); }
+
+  /* Hide desktop elements */
+  .collapse-btn { display: none; }
+  .sidebar-header { padding: 12px 14px; }
+
+  /* Keep nav groups expanded for quick access on mobile */
+  .nav-groups { flex: 1; max-height: none; }
+
+  .nav-item { min-height: 48px; font-size: 14px; }
+
+  /* Hide chat history in sidebar — use History page instead */
+  .sidebar-chats { display: none !important; }
+
+  /* Main content fills rest */
+  .main-content {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Detail panel on mobile: bottom sheet */
+  :deep(.detail-panel) {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    height: 50vh;
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -4px 20px rgba(0,0,0,0.2);
+  }
+
+  :deep(.detail-panel-slide-enter-active),
+  :deep(.detail-panel-slide-leave-active) {
+    transition: transform 0.3s ease;
+  }
+  :deep(.detail-panel-slide-enter-from),
+  :deep(.detail-panel-slide-leave-to) {
+    transform: translateY(100%);
+  }
+}
+
+/* ===== Hide mobile topbar on desktop ===== */
+.mobile-topbar { display: none; }
+.mobile-overlay { display: none; }
+
+@media (max-width: 768px) {
+  .mobile-topbar { display: flex; }
+  .mobile-overlay { display: block; }
+}
 </style>

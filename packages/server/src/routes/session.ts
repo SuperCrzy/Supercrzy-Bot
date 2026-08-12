@@ -56,6 +56,21 @@ sessionRouter.post('/', (ctx: Context) => {
   ctx.status = 201
 })
 
+// Update session
+sessionRouter.patch('/:id', (ctx: Context) => {
+  const db = getDB()
+  const body = ctx.request.body as { title?: string; model?: string }
+  if (body.title) {
+    db.prepare("UPDATE sessions SET title = ?, updated_at = datetime('now') WHERE id = ?")
+      .run(body.title, ctx.params.id)
+  }
+  if (body.model) {
+    db.prepare("UPDATE sessions SET model = ?, updated_at = datetime('now') WHERE id = ?")
+      .run(body.model, ctx.params.id)
+  }
+  ctx.body = { success: true }
+})
+
 // Delete session
 sessionRouter.delete('/:id', (ctx: Context) => {
   const db = getDB()

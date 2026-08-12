@@ -1,6 +1,46 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { ChatSession, ChatMessage } from '@/types'
+import type { ChatSession, ChatMessage, ContentBlock, TextBlock } from '@/types'
+
+/** 将旧格式字符串 content 转为 ContentBlock[] */
+function normalizeContent(content: any): ContentBlock[] {
+  if (Array.isArray(content)) return content as ContentBlock[]
+  if (typeof content === 'string') {
+    // 尝试解析 JSON 数组（Agent 存储的消息格式）
+    if (content.trim().startsWith('[')) {
+      try {
+        const parsed = JSON.parse(content)
+        if (Array.isArray(parsed)) return parsed as ContentBlock[]
+      } catch { /* fall through */ }
+    }
+    return content ? [{ type: 'text', text: content }] : []
+  }
+  return []
+}
+
+/** 人性化时间显示 — 兼容多种日期格式 */
+export function formatRelativeTime(dateStr: string): string {
+  if (!dateStr) return ''
+  // 兼容 SQLite 格式 "2026-05-07 06:44:42"
+  const normalized = dateStr.includes(' ') && !dateStr.includes('T')
+    ? dateStr.replace(' ', 'T') + 'Z'
+    : dateStr
+  const date = new Date(normalized).getTime()
+  if (isNaN(date)) return dateStr.slice(0, 10)
+  const now = Date.now()
+  const diff = now - date
+  const seconds = Math.floor(diff / 1000)
+  if (seconds < 60) return '刚刚'
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}分钟前`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}小时前`
+  const days = Math.floor(hours / 24)
+  if (days < 7) return `${days}天前`
+  if (days < 30) return `${Math.floor(days / 7)}周前`
+  if (days < 365) return `${Math.floor(days / 30)}个月前`
+  return `${Math.floor(days / 365)}年前`
+}
 
 export const useChatStore = defineStore('chat', () => {
   const sessions = ref<ChatSession[]>([])
@@ -23,8 +63,15 @@ export const useChatStore = defineStore('chat', () => {
     try {
       const res = await fetch('/api/sessions')
       if (res.ok) {
-        const data: ChatSession[] = await res.json()
-        sessions.value = data
+        const data: any[] = await res.json()
+        // 规范化字段名：后端返回 created_at → 前端用 createdAt
+        sessions.value = data.map((s: any) => ({
+          id: s.id,
+          title: s.title || '新对话',
+          createdAt: s.created_at || s.createdAt,
+          updatedAt: s.updated_at || s.updatedAt,
+          model: s.model || 'deepseek-v4-pro',
+        }))
         // 如果没有当前会话，选第一个
         if (!currentSessionId.value && data.length > 0) {
           currentSessionId.value = data[0].id
@@ -43,7 +90,12 @@ export const useChatStore = defineStore('chat', () => {
       if (res.ok) {
         const data = await res.json()
         if (data.messages) {
-          messages.value.set(sessionId, data.messages)
+          // 兼容旧数据：将字符串 content 转为 ContentBlock[]
+          const normalized = data.messages.map((m: any) => ({
+            ...m,
+            content: normalizeContent(m.content),
+          }))
+          messages.value.set(sessionId, normalized)
         }
       }
     } catch (err) {
@@ -109,15 +161,38 @@ export const useChatStore = defineStore('chat', () => {
     list.push(message)
     messages.value.set(sessionId, list)
 
+    // 首次用户消息 → 自动命名会话
+    if (message.role === 'user') {
+      const userMsgs = list.filter((m) => m.role === 'user')
+      if (userMsgs.length === 1) {
+        const firstBlock = message.content?.[0]
+        const text = firstBlock && firstBlock.type === 'text' ? firstBlock.text : ''
+        const title = text.slice(0, 40) || '新对话'
+        const session = sessions.value.find((s) => s.id === sessionId)
+        if (session && session.title === '新对话') {
+          session.title = title
+          // 持久化标题
+          try {
+            await fetch(`/api/sessions/${sessionId}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ title }),
+            })
+          } catch {}
+        }
+      }
+    }
+
     // 持久化到后端
     try {
+      const contentStr = JSON.stringify(message.content)
       await fetch(`/api/sessions/${sessionId}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           id: message.id,
           role: message.role,
-          content: message.content,
+          content: contentStr,
           token_count: message.tokenCount,
           cost: message.cost,
           attachments: message.attachments || undefined,
@@ -143,13 +218,14 @@ export const useChatStore = defineStore('chat', () => {
     if (!list || list.length === 0) return
     const last = list[list.length - 1]
     try {
+      const contentStr = JSON.stringify(last.content)
       await fetch(`/api/sessions/${sessionId}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           id: last.id,
           role: last.role,
-          content: last.content,
+          content: contentStr,
           token_count: last.tokenCount,
           cost: last.cost,
           attachments: last.attachments || undefined,

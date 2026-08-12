@@ -3,39 +3,61 @@ import { getDB } from '../services/database'
 import { config } from '../config'
 import { runAgentLoop } from './agent'
 
-// Valid DeepSeek API model IDs
-const VALID_MODELS = new Set([
-  'deepseek-v4-pro',
-  'deepseek-v4-flash',
-  'deepseek-v3.2-speciale',
-  'deepseek-v3.2',
-  'deepseek-v3.2-exp',
-  'deepseek-v3.1-terminus',
-  'deepseek-chat',
-  'deepseek-chat-v3-0324',
-  'deepseek-chat-v2.5',
-  'deepseek-reasoner',
-  'deepseek-r1',
-  'deepseek-r1-0528',
-  'deepseek-r1-zero',
-  'deepseek-r1-distill-qwen-32b',
-  'deepseek-r1-distill-qwen-14b',
-  'deepseek-r1-distill-llama-70b',
-  'deepseek-prover-v2',
-])
+/** 标准化 base URL，确保不会出现双重 /v1 */
+function normalizeBaseUrl(url: string): string {
+  return url.replace(/\/v1\/?$/, '')
+}
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** 解析模型名 → 真实 model_id（用于发给 API） */
 function resolveModel(requestModel?: string): string {
   const db = getDB()
   const model = requestModel
     || (db.prepare('SELECT value FROM settings WHERE key = ?').get('model') as any)?.value
     || config.deepseek.defaultModel
 
-  // If model is not in our known list, fall back to default
-  if (!VALID_MODELS.has(model)) {
-    console.warn(`[chat] Unknown model "${model}", falling back to ${config.deepseek.defaultModel}`)
-    return config.deepseek.defaultModel
+  if (UUID_RE.test(model)) {
+    const byId = db.prepare('SELECT model_id FROM custom_models WHERE id = ? AND enabled = 1').get(model) as any
+    if (byId) return byId.model_id
   }
+
+  const customModel = db.prepare(
+    'SELECT model_id FROM custom_models WHERE model_id = ? AND enabled = 1'
+  ).get(model) as any
+  if (customModel) return model
+
+  const DEEPSEEK_MODELS = new Set([
+    'deepseek-v4-pro', 'deepseek-v4-flash',
+    'deepseek-v3.2-speciale', 'deepseek-v3.2', 'deepseek-v3.2-exp',
+    'deepseek-v3.1-terminus', 'deepseek-chat', 'deepseek-chat-v3-0324',
+    'deepseek-chat-v2.5', 'deepseek-reasoner', 'deepseek-r1',
+    'deepseek-r1-0528', 'deepseek-r1-zero',
+    'deepseek-r1-distill-qwen-32b', 'deepseek-r1-distill-qwen-14b',
+    'deepseek-r1-distill-llama-70b', 'deepseek-prover-v2',
+  ])
+  if (DEEPSEEK_MODELS.has(model)) return model
+
+  console.warn(`[chat] Unknown model "${model}", passing through to API`)
   return model
+}
+
+/** 根据原始请求（UUID 或 model_id）解析 provider 的 baseUrl + apiKey */
+function resolveProvider(requestModel: string, fallbackBaseUrl: string, fallbackApiKey: string): { baseUrl: string; apiKey: string } {
+  const db = getDB()
+  let baseUrl = fallbackBaseUrl
+  let apiKey = fallbackApiKey
+
+  const customModel = UUID_RE.test(requestModel)
+    ? db.prepare('SELECT cm.*, cp.base_url, cp.api_key FROM custom_models cm JOIN custom_providers cp ON cm.provider_id = cp.id WHERE cm.id = ? AND cm.enabled = 1').get(requestModel) as any
+    : db.prepare('SELECT cm.*, cp.base_url, cp.api_key FROM custom_models cm JOIN custom_providers cp ON cm.provider_id = cp.id WHERE cm.model_id = ? AND cm.enabled = 1').get(requestModel) as any
+
+  if (customModel) {
+    baseUrl = customModel.base_url || baseUrl
+    apiKey = customModel.api_key || apiKey
+  }
+
+  return { baseUrl, apiKey }
 }
 
 interface ChatRequestBody {
@@ -56,8 +78,8 @@ export async function handleStreamChat(ctx: Context) {
 
   // Get API key from settings table or config
   const db = getDB()
-  const apiKeyRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('apiKey') as any
-  const apiKey = apiKeyRow?.value || config.deepseek.apiKey
+  let apiKey = (db.prepare('SELECT value FROM settings WHERE key = ?').get('apiKey') as any)?.value || config.deepseek.apiKey
+  let baseUrl = config.deepseek.baseUrl
 
   if (!apiKey) {
     ctx.status = 400
@@ -67,6 +89,12 @@ export async function handleStreamChat(ctx: Context) {
 
   // Get model and other settings
   const model = resolveModel(body.model)
+
+  // 用原始请求（可能含 UUID）解析 provider
+  const provider = resolveProvider(body.model || model, baseUrl, apiKey)
+  baseUrl = provider.baseUrl
+  apiKey = provider.apiKey
+
   const temperature = body.temperature || parseFloat((db.prepare('SELECT value FROM settings WHERE key = ?').get('temperature') as any)?.value || '0.7')
   const systemPrompt = (db.prepare('SELECT value FROM settings WHERE key = ?').get('systemPrompt') as any)?.value || ''
 
@@ -76,25 +104,21 @@ export async function handleStreamChat(ctx: Context) {
     messages.unshift({ role: 'system', content: systemPrompt })
   }
 
-  const url = `${config.deepseek.baseUrl}/v1/chat/completions`
-
-  ctx.set({
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
-    Connection: 'keep-alive',
-  })
+  const url = `${normalizeBaseUrl(baseUrl)}/v1/chat/completions`
 
   const response = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
+      ...(apiKey.startsWith('tp-')
+        ? { 'api-key': apiKey }
+        : { Authorization: `Bearer ${apiKey}` }),
     },
     body: JSON.stringify({
       model,
       messages,
       temperature,
-      max_tokens: body.max_tokens || 8192,
+      max_tokens: body.max_tokens || 16384,
       stream: true,
     }),
   })
@@ -103,12 +127,22 @@ export async function handleStreamChat(ctx: Context) {
     const errorText = await response.text()
     ctx.status = response.status
     ctx.type = 'application/json'
-    ctx.body = { error: `DeepSeek API error: ${errorText}` }
+    ctx.body = { error: `API error: ${errorText}` }
     return
   }
 
   ctx.status = 200
   ctx.respond = false
+
+  const res = ctx.res
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  })
+  const sock = (res as any).socket
+  if (sock) { sock.setNoDelay(true); sock.setTimeout(0) }
 
   const reader = response.body?.getReader()
   if (!reader) {
@@ -156,8 +190,8 @@ export async function handleChat(ctx: Context) {
   }
 
   const db = getDB()
-  const apiKeyRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('apiKey') as any
-  const apiKey = apiKeyRow?.value || config.deepseek.apiKey
+  let apiKey = (db.prepare('SELECT value FROM settings WHERE key = ?').get('apiKey') as any)?.value || config.deepseek.apiKey
+  let baseUrl = config.deepseek.baseUrl
 
   if (!apiKey) {
     ctx.status = 400
@@ -166,6 +200,12 @@ export async function handleChat(ctx: Context) {
   }
 
   const model = resolveModel(body.model)
+
+  // 用原始请求（可能含 UUID）解析 provider
+  const provider2 = resolveProvider(body.model || model, baseUrl, apiKey)
+  baseUrl = provider2.baseUrl
+  apiKey = provider2.apiKey
+
   const systemPrompt = (db.prepare('SELECT value FROM settings WHERE key = ?').get('systemPrompt') as any)?.value || ''
 
   const messages = [...body.messages]
@@ -173,19 +213,21 @@ export async function handleChat(ctx: Context) {
     messages.unshift({ role: 'system', content: systemPrompt })
   }
 
-  const url = `${config.deepseek.baseUrl}/v1/chat/completions`
+  const url = `${normalizeBaseUrl(baseUrl)}/v1/chat/completions`
 
   const response = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
+      ...(apiKey.startsWith('tp-')
+        ? { 'api-key': apiKey }
+        : { Authorization: `Bearer ${apiKey}` }),
     },
     body: JSON.stringify({
       model,
       messages,
       temperature: body.temperature || 0.7,
-      max_tokens: body.max_tokens || 8192,
+      max_tokens: body.max_tokens || 16384,
     }),
   })
 
@@ -198,7 +240,9 @@ export async function handleChat(ctx: Context) {
  * 支持工具调用、记忆注入、多轮思考
  */
 export async function handleAgentChat(ctx: Context) {
-  const body = ctx.request.body as ChatRequestBody & { agent?: boolean; maxTurns?: number }
+  const { readdir } = await import('fs/promises'); const { access } = await import('fs/promises');
+  const fileExists = async (p: string) => { try { await access(p); return true; } catch { return false; } };
+  const body = ctx.request.body as ChatRequestBody & { agent?: boolean; maxTurns?: number; resumeCheckpoint?: string }
   if (!body.messages || !Array.isArray(body.messages)) {
     ctx.status = 400
     ctx.body = { error: 'messages is required and must be an array' }
@@ -207,39 +251,55 @@ export async function handleAgentChat(ctx: Context) {
 
   const db = getDB()
   const apiKeyRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('apiKey') as any
-  const apiKey = apiKeyRow?.value || config.deepseek.apiKey
-
-  if (!apiKey) {
-    ctx.status = 400
-    ctx.body = { error: 'API Key not configured. Please set it in Settings.' }
-    return
-  }
+  let apiKey = apiKeyRow?.value || config.deepseek.apiKey
+  let baseUrl = config.deepseek.baseUrl
 
   const model = resolveModel(body.model)
+
+  // 用原始请求（可能含 UUID）解析 provider
+  const provider3 = resolveProvider(body.model || model, baseUrl, apiKey)
+  baseUrl = provider3.baseUrl
+  apiKey = provider3.apiKey
+
   const temperature = body.temperature || parseFloat(
     (db.prepare('SELECT value FROM settings WHERE key = ?').get('temperature') as any)?.value || '0.7'
   )
   const systemPrompt = (db.prepare('SELECT value FROM settings WHERE key = ?').get('systemPrompt') as any)?.value || ''
-  const maxTurns = body.maxTurns || 10
+  const savedMaxTurns = (db.prepare('SELECT value FROM settings WHERE key = ?').get('maxTurns') as any)?.value
+  const maxTurns = body.maxTurns || (savedMaxTurns ? parseInt(savedMaxTurns) : 80)
 
-  // Set SSE headers
+  // 用 Koa 标准 SSE 头 + 原生 write 写数据
   ctx.set({
     'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
+    'Cache-Control': 'no-cache, no-transform',
     Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
   })
   ctx.status = 200
   ctx.respond = false
 
+  // 禁用 TCP 缓冲 — 在 write 之前设置
+  const sock = (ctx.res as any).socket
+  if (sock) { sock.setNoDelay(true); sock.setTimeout(0) }
+
+  // 发送初始注释心跳，让浏览器立即收到 headers
+  ctx.res.write(': connected\n\n')
+
   try {
-    await runAgentLoop(ctx, body.messages, {
-      model,
-      apiKey,
-      temperature,
-      maxTokens: body.max_tokens || 8192,
-      systemPrompt,
-      maxTurns,
-    })
+    await runAgentLoop(
+      ctx,
+      body.messages,
+      {
+        model,
+        apiKey,
+        baseUrl,
+        temperature,
+        maxTokens: body.max_tokens || 16384,
+        systemPrompt,
+        maxTurns,
+      },
+      body.resumeCheckpoint,
+    )
     ctx.res.end()
   } catch (err: any) {
     ctx.res.write(`event: error\ndata: ${JSON.stringify({ message: err.message })}\n\n`)

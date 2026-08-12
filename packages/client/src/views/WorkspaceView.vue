@@ -199,7 +199,7 @@ onMounted(async () => {
     }
   })
 
-  term.writeln('DeepSeek Agent Terminal')
+  term.writeln('SuperCrzy Terminal')
   term.writeln('Type commands to interact with the agent workspace.\r\n')
 
   connectWS()

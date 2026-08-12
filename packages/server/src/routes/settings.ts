@@ -65,6 +65,31 @@ settingsRouter.post('/', (ctx: Context) => {
     ]
     const stmt = db.prepare("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))")
 
+    // Validate model before accepting — reject unknown/disabled models from browser
+    if (body.model !== undefined) {
+      const model = String(body.model)
+      const validModels = new Set([
+        'deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-chat',
+        'mimo-v2.5-pro',
+        'kimi-k2.6', 'moonshot-v1-8k',
+        'gpt-4o', 'gpt-4.1',
+        'claude-sonnet-4-20250514',
+        'glm-4.7',
+      ])
+      // Check custom_models for UUID-based models
+      const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+      if (UUID_RE.test(model)) {
+        const cm = db.prepare('SELECT id FROM custom_models WHERE id = ? AND enabled = 1').get(model)
+        if (!cm) {
+          console.log(`[settings] Rejecting unknown/disabled model UUID: ${model}`)
+          delete body.model // strip invalid model, keep the rest
+        }
+      } else if (!validModels.has(model)) {
+        console.log(`[settings] Rejecting unknown model: ${model}`)
+        delete body.model
+      }
+    }
+
     for (const key of allowedKeys) {
       if (body[key] !== undefined) {
         const value = typeof body[key] === 'boolean' ? String(body[key]) : typeof body[key] === 'number' ? String(body[key]) : String(body[key])

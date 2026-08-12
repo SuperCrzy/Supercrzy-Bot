@@ -4,6 +4,7 @@ import naive from 'naive-ui'
 import App from './App.vue'
 import createRouter from './router'
 import createI18n from './i18n'
+import './styles/tokens.css'
 import './assets/styles/global.css'
 
 const app = createApp(App)

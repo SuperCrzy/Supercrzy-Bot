@@ -5,41 +5,6 @@
     </header>
 
     <div class="settings-body">
-      <!-- ======== API 连接配置（始终可见） ======== -->
-      <div class="settings-card">
-        <h3 class="section-title">{{ $t('settings.apiSection') }}</h3>
-        <div class="form-group">
-          <label>{{ $t('settings.apiKey') }}</label>
-          <div class="input-row">
-            <n-input v-model:value="form.apiKey" type="password" show-password-on="click"
-              :placeholder="$t('settings.apiKeyPlaceholder')" size="large" style="flex:1" />
-            <n-button size="large" @click="testConnection" :loading="testing">
-              {{ $t('settings.testConnection') }}
-            </n-button>
-          </div>
-          <p class="form-hint">{{ $t('settings.apiKeyHint') }}</p>
-        </div>
-        <div class="form-row-inline">
-          <div class="form-group flex-1">
-            <label>{{ $t('settings.model') }}</label>
-            <n-select v-model:value="form.model" :options="modelOptions" size="large" />
-          </div>
-          <div class="form-group flex-1">
-            <label>{{ $t('settings.temperature') }}: {{ form.temperature }}</label>
-            <n-slider v-model:value="form.temperature" :min="0" :max="2" :step="0.1" />
-          </div>
-          <div class="form-group" style="width:140px">
-            <label>{{ $t('settings.maxTokens') }}</label>
-            <n-input-number v-model:value="form.maxTokens" :min="1" :max="128000" size="large" />
-          </div>
-        </div>
-        <div class="form-group">
-          <label>{{ $t('settings.systemPrompt') }}</label>
-          <n-input v-model:value="form.systemPrompt" type="textarea" :rows="3"
-            :placeholder="$t('settings.systemPromptPlaceholder')" size="large" />
-        </div>
-      </div>
-
       <!-- ======== 设置标签页 ======== -->
       <n-card size="small" class="tabs-card" content-style="padding:0">
         <n-tabs v-model:value="activeTab" type="line" animated>
@@ -126,7 +91,7 @@
               <div class="form-group">
                 <label>{{ $t('settings.maxTurns') }}</label>
                 <p class="input-desc">{{ $t('settings.maxTurnsDesc') }}</p>
-                <n-input-number v-model:value="form.maxTurns" :min="1" :max="50" size="large" style="width:200px" />
+                <n-input-number v-model:value="form.maxTurns" :min="1" :max="200" size="large" style="width:200px" />
               </div>
               <div class="form-group">
                 <label>{{ $t('settings.gatewayTimeout') }}</label>
@@ -239,10 +204,8 @@ const { locale } = useI18n()
 
 const activeTab = ref('account')
 const saving = ref(false)
-const testing = ref(false)
-const showToken = ref(false)
 
-const modelOptions = getModelSelectOptions()
+const showToken = ref(false)
 
 const themeOptions = [
   { label: '浅色', value: 'light' },
@@ -268,7 +231,6 @@ const resetModeOptions = [
 interface SettingsForm {
   apiKey: string
   apiKeyMasked: string
-  model: string
   temperature: number
   maxTokens: number
   systemPrompt: string
@@ -305,7 +267,6 @@ interface SettingsForm {
 const form = reactive<SettingsForm>({
   apiKey: '',
   apiKeyMasked: '',
-  model: 'deepseek-v4-pro',
   temperature: 0.7,
   maxTokens: 8192,
   systemPrompt: '',
@@ -340,6 +301,7 @@ const tokenDisplay = computed(() => {
   return '••••••••'
 })
 
+
 onMounted(async () => {
   try {
     const res = await fetch('/api/settings')
@@ -351,6 +313,10 @@ onMounted(async () => {
     }
     if (data.theme) {
       appStore.darkMode = data.theme === 'dark'
+    }
+    // 同步 completionSound 到 localStorage
+    if (data.completionSound !== undefined) {
+      localStorage.setItem('supercrzy:completionSound', String(data.completionSound))
     }
   } catch (err) {
     console.error('[SettingsView] Failed to load settings:', err)
@@ -368,9 +334,11 @@ async function saveSettings() {
     if (!res.ok) throw new Error('Save failed')
     // 实时切换 i18n 语言
     locale.value = form.language
-    localStorage.setItem('deepseek-agent-lang', form.language)
+    localStorage.setItem('supercrzy-lang', form.language)
     // 实时切换主题
     appStore.darkMode = form.theme === 'dark'
+    // 同步 completionSound 到 localStorage
+    localStorage.setItem('supercrzy:completionSound', String(form.completionSound))
     nMessage.success('设置已保存')
   } catch (err: any) {
     console.error('[SettingsView] Save error:', err)
@@ -380,32 +348,7 @@ async function saveSettings() {
   }
 }
 
-async function testConnection() {
-  testing.value = true
-  try {
-    const res = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: form.model,
-        messages: [{ role: 'user', content: 'ping' }],
-        max_tokens: 10,
-        temperature: 0,
-        stream: false,
-      }),
-    })
-    if (res.ok) {
-      nMessage.success('连接成功')
-    } else {
-      const err = await res.json()
-      nMessage.error('连接失败: ' + (err.error || res.statusText))
-    }
-  } catch (err: any) {
-    nMessage.error('连接失败: ' + err.message)
-  } finally {
-    testing.value = false
-  }
-}
+// testConnection moved to ModelsView
 </script>
 
 <style scoped>
@@ -443,4 +386,6 @@ async function testConnection() {
 /* Actions */
 .settings-actions { padding: 0 0 40px; }
 .settings-actions .n-button { min-width: 120px; }
+
+
 </style>

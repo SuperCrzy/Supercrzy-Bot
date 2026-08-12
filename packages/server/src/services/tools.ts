@@ -7,6 +7,8 @@ import { randomUUID } from 'crypto'
 import { readFile, writeFile, access } from 'fs/promises'
 import { exec } from 'child_process'
 import { constants } from 'fs'
+import { installSkillFromGitHub, initSkillsDirectory } from './skill-loader'
+import { join } from 'path'
 
 // ============================
 // 类型定义
@@ -16,6 +18,15 @@ export interface ToolDefinition {
   name: string
   description: string
   parameters: Record<string, any>
+  category?: 'memory' | 'file' | 'network' | 'system'
+  dangerous?: boolean
+}
+
+export interface ToolMeta {
+  name: string
+  category: 'memory' | 'file' | 'network' | 'system'
+  dangerous: boolean
+  duration?: number
 }
 
 export interface ToolCall {
@@ -66,8 +77,58 @@ const toolExecutors: Record<string, ToolExecutor> = {
     const rows = db.prepare(
       'SELECT key, content, category, importance FROM agent_memory ORDER BY importance DESC LIMIT 20'
     ).all() as any[]
-    if (rows.length === 0) return '目前没有任何记忆。'
-    return rows.map((r: any) => `[${r.key}] (${r.category}, 重要性:${r.importance}) ${r.content}`).join('\n')
+    if (rows.length === 0) return 'No memories stored.'
+    return rows.map((r: any) => `[${r.key}] (${r.category}, importance:${r.importance}) ${r.content}`).join('\n')
+  },
+
+  // ---- 任务工具 ----
+  async task_create(args) {
+    const db = getDB()
+    const id = randomUUID()
+    db.prepare(
+      'INSERT INTO tasks (id, session_id, subject, description, status) VALUES (?, ?, ?, ?, ?)'
+    ).run(id, args.session_id || null, args.subject, args.description || '', 'pending')
+
+    // Auto-create sub-tasks if provided
+    if (Array.isArray(args.subtasks)) {
+      for (let i = 0; i < args.subtasks.length; i++) {
+        const sub = args.subtasks[i]
+        db.prepare(
+          'INSERT INTO tasks (id, session_id, parent_id, subject, description, status, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)'
+        ).run(randomUUID(), args.session_id || null, id, sub.subject || sub, sub.description || '', 'pending', i)
+      }
+    }
+
+    return `Task created: [${id}] "${args.subject}" ${args.subtasks ? `with ${args.subtasks.length} sub-tasks` : ''}`
+  },
+
+  async task_update(args) {
+    const db = getDB()
+    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(args.id) as any
+    if (!task) return `Task not found: ${args.id}`
+
+    const updates: string[] = []
+    if (args.status) { db.prepare('UPDATE tasks SET status = ?, updated_at = datetime(\'now\') WHERE id = ?').run(args.status, args.id); updates.push(`status → ${args.status}`) }
+    if (args.progress !== undefined) { db.prepare('UPDATE tasks SET progress = ?, updated_at = datetime(\'now\') WHERE id = ?').run(args.progress, args.id); updates.push(`progress → ${args.progress}%`) }
+    if (args.subject) { db.prepare('UPDATE tasks SET subject = ?, updated_at = datetime(\'now\') WHERE id = ?').run(args.subject, args.id); updates.push(`subject updated`) }
+
+    return updates.length > 0 ? `Task updated: ${updates.join(', ')}` : 'No changes made. Use status/pending, status/in_progress, status/completed, progress/0-100.'
+  },
+
+  async task_list(args) {
+    const db = getDB()
+    let query = 'SELECT * FROM tasks WHERE 1=1'
+    const params: any[] = []
+    if (args.session_id) { query += ' AND session_id = ?'; params.push(args.session_id) }
+    if (args.status) { query += ' AND status = ?'; params.push(args.status) }
+    query += ' ORDER BY sort_order ASC LIMIT 20'
+
+    const tasks = db.prepare(query).all(...params) as any[]
+    if (tasks.length === 0) return args.status ? `No ${args.status} tasks` : 'No tasks found.'
+
+    return tasks.map((t: any) =>
+      `${t.status === 'in_progress' ? '▶' : t.status === 'completed' ? '✓' : '○'} [${t.status}] ${t.subject}${t.progress ? ` (${t.progress}%)` : ''}`
+    ).join('\n')
   },
 
   // ---- 文件工具 ----
@@ -123,7 +184,7 @@ const toolExecutors: Record<string, ToolExecutor> = {
     try {
       const response = await fetch(args.url, {
         headers: {
-          'User-Agent': 'DeepSeek-Agent/0.1',
+          'User-Agent': 'SuperCrzy/1.0',
         },
       })
       const contentType = response.headers.get('content-type') || ''
@@ -160,7 +221,7 @@ const toolExecutors: Record<string, ToolExecutor> = {
 
       const response = await fetch(url, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (compatible; DeepSeek-Agent/0.1)',
+          'User-Agent': 'Mozilla/5.0 (compatible; SuperCrzy/1.0)',
           'Accept': 'application/rss+xml, application/xml, text/xml',
         },
       })
@@ -198,17 +259,123 @@ const toolExecutors: Record<string, ToolExecutor> = {
       }
 
       if (results.length === 0) {
-        return `未找到关于 "${args.query}" 的搜索结果。`
+        return JSON.stringify({ results: [], query: args.query, message: `未找到关于 "${args.query}" 的搜索结果。` })
       }
 
-      return results
-        .map((r, i) =>
-          `${i + 1}. **${r.title}**\n   ${r.url}${r.date ? `\n   📅 ${r.date}` : ''}${r.desc ? `\n   ${r.desc}` : ''}`
-        )
-        .join('\n\n')
+      return JSON.stringify({
+        results: results.map(r => ({ title: r.title, url: r.url, description: r.desc, date: r.date })),
+        query: args.query,
+      })
     } catch (err: any) {
       return `❌ 搜索失败：${err.message}`
     }
+  },
+
+  // ---- 技能管理工具 ----
+  async skill_list(_args) {
+    const db = getDB()
+    const rows = db.prepare(
+      'SELECT name, description, category, enabled, is_builtin, trigger_keywords FROM skills ORDER BY sort_order ASC, created_at DESC'
+    ).all() as any[]
+    if (rows.length === 0) return 'No skills installed.'
+    return rows.map((r: any) => {
+      const status = r.enabled ? 'ON' : 'OFF'
+      const source = r.is_builtin ? 'builtin' : 'installed'
+      return `[${status}] ${r.name} (${r.category}, ${source}) - ${r.description}`
+    }).join('\n')
+  },
+
+  async skill_search(args) {
+    const query = args.query || args.q || ''
+    if (!query.trim()) return 'Usage: skill_search(query="docker deploy")'
+
+    const searchQuery = `${query} SKILL.md agent skill github`
+    try {
+      const encoded = encodeURIComponent(searchQuery)
+      const url = `https://www.bing.com/search?format=rss&q=${encoded}&count=8`
+      const response = await fetch(url, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; SuperCrzy/1.0)', 'Accept': 'application/rss+xml' },
+      })
+      if (!response.ok) return `Search failed: HTTP ${response.status}`
+
+      const xml = await response.text()
+      const itemRegex = /<item>([\s\S]*?)<\/item>/g
+      const titleRegex = /<title><!\[CDATA\[(.*?)\]\]><\/title>|<title>(.*?)<\/title>/
+      const linkRegex = /<link>(.*?)<\/link>/
+
+      const results: string[] = []
+      let match
+      while ((match = itemRegex.exec(xml)) !== null && results.length < 8) {
+        const item = match[1]
+        const titleM = item.match(titleRegex)
+        const linkM = item.match(linkRegex)
+        const title = titleM ? (titleM[1] || titleM[2] || '').trim() : ''
+        const repoUrl = linkM ? linkM[1].trim() : ''
+        if (title && repoUrl) {
+          results.push(`- ${title}\n  ${repoUrl}`)
+        }
+      }
+
+      if (results.length === 0) return `No skills found for "${query}". Try broader keywords.`
+      return `Found ${results.length} results for "${query}":\n\n${results.join('\n\n')}\n\nUse skill_install(url="...") to install any of these.`
+    } catch (err: any) {
+      return `Skill search failed: ${err.message}`
+    }
+  },
+
+  async skill_view(args) {
+    const db = getDB()
+    const name = args.name || args.id || ''
+    if (!name) return 'Usage: skill_view(name="skill-name") or skill_view(id="uuid")'
+
+    const skill = name.length > 20
+      ? db.prepare('SELECT * FROM skills WHERE id = ?').get(name) as any
+      : db.prepare('SELECT * FROM skills WHERE name LIKE ?').get(`%${name}%`) as any
+
+    if (!skill) return `Skill not found: ${name}. Use skill_list() to see available skills.`
+
+    let tools = ''
+    try { tools = JSON.parse(skill.tools || '[]').join(', ') || 'none' } catch { tools = skill.tools || 'none' }
+
+    return [
+      `=== ${skill.name} ===`,
+      `Description: ${skill.description}`,
+      `Category: ${skill.category}`,
+      `Status: ${skill.enabled ? 'Active' : 'Disabled'}`,
+      `Source: ${skill.is_builtin ? 'builtin' : 'installed'}`,
+      `Keywords: ${skill.trigger_keywords || 'none'}`,
+      `Tools: ${tools}`,
+      skill.source_file ? `File: ${skill.source_file}` : '',
+      skill.prompt_template ? `\n--- Prompt Template ---\n${skill.prompt_template}` : '',
+    ].filter(Boolean).join('\n')
+  },
+
+  async skill_install(args) {
+    const url = args.url || args.github || ''
+    if (!url.trim()) return 'Usage: skill_install(url="https://github.com/user/skill-repo")'
+
+    try {
+      initSkillsDirectory(process.cwd())
+      const result = await installSkillFromGitHub(url.trim(), process.cwd())
+      if (result.success) {
+        return `Installed skill: ${result.name}\nSkill is now active. Use skill_view(name="${result.name}") to see details.`
+      } else {
+        return `Install failed: ${result.error}`
+      }
+    } catch (err: any) {
+      return `Skill install error: ${err.message}`
+    }
+  },
+
+  // ---- 交互工具 ----
+  async ask_user(args) {
+    // 返回标记供 agent loop 拦截，不立即执行
+    return `__ASK_USER__${JSON.stringify({
+      question: args.question,
+      header: args.header || '确认',
+      options: args.options,
+      multiSelect: args.multiSelect || false,
+    })}`
   },
 }
 
@@ -220,6 +387,7 @@ export const toolDefinitions: ToolDefinition[] = [
   {
     name: 'memory_store',
     description: '存储一条长期记忆。当你学到关于用户的重要信息时使用。',
+    category: 'memory',
     parameters: {
       type: 'object',
       properties: {
@@ -238,6 +406,7 @@ export const toolDefinitions: ToolDefinition[] = [
   {
     name: 'memory_recall',
     description: '搜索已存储的记忆。在需要回忆用户信息时使用。',
+    category: 'memory',
     parameters: {
       type: 'object',
       properties: {
@@ -250,6 +419,7 @@ export const toolDefinitions: ToolDefinition[] = [
   {
     name: 'memory_list',
     description: '列出所有已存储的记忆。',
+    category: 'memory',
     parameters: {
       type: 'object',
       properties: {},
@@ -258,6 +428,7 @@ export const toolDefinitions: ToolDefinition[] = [
   {
     name: 'file_read',
     description: '读取本地文件内容。支持文本文件。',
+    category: 'file',
     parameters: {
       type: 'object',
       properties: {
@@ -270,6 +441,8 @@ export const toolDefinitions: ToolDefinition[] = [
   {
     name: 'file_write',
     description: '写入内容到本地文件。',
+    category: 'file',
+    dangerous: true,
     parameters: {
       type: 'object',
       properties: {
@@ -282,6 +455,7 @@ export const toolDefinitions: ToolDefinition[] = [
   {
     name: 'file_exists',
     description: '检查文件是否存在。',
+    category: 'file',
     parameters: {
       type: 'object',
       properties: {
@@ -293,6 +467,8 @@ export const toolDefinitions: ToolDefinition[] = [
   {
     name: 'shell_exec',
     description: '执行Shell命令并获取输出。仅支持只读/非破坏性命令。输出限制8000字符。',
+    category: 'system',
+    dangerous: true,
     parameters: {
       type: 'object',
       properties: {
@@ -305,6 +481,7 @@ export const toolDefinitions: ToolDefinition[] = [
   {
     name: 'web_fetch',
     description: '获取网页内容。返回网页的文本内容。',
+    category: 'network',
     parameters: {
       type: 'object',
       properties: {
@@ -315,27 +492,148 @@ export const toolDefinitions: ToolDefinition[] = [
     },
   },
   {
-    name: 'web_search',
-    description: '搜索互联网获取最新信息。使用Bing搜索引擎。',
+    name: 'task_create',
+    description: 'Create a new task with optional sub-tasks. Use for planning and tracking work.',
+    category: 'system',
     parameters: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: '搜索关键词' },
-        count: { type: 'number', description: '返回结果数量，默认10' },
+        subject: { type: 'string', description: 'Task title' },
+        description: { type: 'string', description: 'Task description' },
+        session_id: { type: 'string', description: 'Associated session ID' },
+        subtasks: { type: 'array', items: { type: 'object', properties: { subject: { type: 'string' }, description: { type: 'string' } } }, description: 'Sub-tasks' },
+      },
+      required: ['subject'],
+    },
+  },
+  {
+    name: 'task_update',
+    description: 'Update task status, progress, or subject. Status: pending/in_progress/completed.',
+    category: 'system',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Task ID' },
+        status: { type: 'string', enum: ['pending', 'in_progress', 'completed'], description: 'New status' },
+        progress: { type: 'number', description: 'Progress 0-100' },
+        subject: { type: 'string', description: 'New subject' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'task_list',
+    description: 'List tasks, optionally filtered by session or status.',
+    category: 'system',
+    parameters: {
+      type: 'object',
+      properties: {
+        session_id: { type: 'string', description: 'Filter by session' },
+        status: { type: 'string', enum: ['pending', 'in_progress', 'completed'], description: 'Filter by status' },
+      },
+    },
+  },
+  {
+    name: 'skill_list',
+    description: '列出所有已安装的技能模块。查看 agent 当前具备哪些能力。',
+    category: 'system',
+    parameters: { type: 'object', properties: {} },
+  },
+  {
+    name: 'skill_search',
+    description: '搜索互联网上的开源技能。当你需要的能力没有内置技能支持时使用，如 docker、deploy、lint 等。',
+    category: 'system',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: '搜索关键词，如 "docker deploy"、"python lint"、"react testing"' },
       },
       required: ['query'],
+    },
+  },
+  {
+    name: 'skill_view',
+    description: '查看指定技能的完整详情，包括 prompt template 和可用工具。',
+    category: 'system',
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: '技能名称（模糊匹配）' },
+        id: { type: 'string', description: '技能 UUID' },
+      },
+    },
+  },
+  {
+    name: 'skill_install',
+    description: '从 GitHub 安装第三方技能。传入包含 SKILL.md 的 GitHub 仓库 URL。',
+    category: 'system',
+    dangerous: true,
+    parameters: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: 'GitHub 仓库 URL，如 https://github.com/user/skill-repo' },
+      },
+      required: ['url'],
+    },
+  },
+  {
+    name: 'ask_user',
+    description: '当你遇到歧义或需要用户决策时使用。提出问题并列出选项，等待用户选择后继续执行。仅在确实需要用户输入时才调用。',
+    category: 'interaction',
+    parameters: {
+      type: 'object',
+      properties: {
+        question: { type: 'string', description: '向用户提出的问题' },
+        header: { type: 'string', description: '问题简短标题（最多12字）' },
+        options: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              label: { type: 'string', description: '选项显示文字' },
+              description: { type: 'string', description: '选项说明' },
+            },
+            required: ['label', 'description'],
+          },
+          description: '选项列表（2-4个）',
+        },
+        multiSelect: { type: 'boolean', description: '是否允许多选', default: false },
+      },
+      required: ['question', 'options'],
     },
   },
 ]
 
 // ============================
+// 工具元数据查询
+// ============================
+
+export function getToolMeta(name: string): ToolMeta | undefined {
+  const def = toolDefinitions.find(t => t.name === name)
+  if (!def) return undefined
+  return {
+    name: def.name,
+    category: def.category || 'system',
+    dangerous: def.dangerous || false,
+  }
+}
+
+export function getToolsByCategory(category: string): ToolDefinition[] {
+  return toolDefinitions.filter(t => t.category === category)
+}
+
+// ============================
 // 工具执行入口
 // ============================
 
+export interface ToolResultWithMeta extends ToolResult {
+  duration?: number
+}
+
 export async function executeToolCalls(
   toolCalls: ToolCall[]
-): Promise<ToolResult[]> {
-  const results: ToolResult[] = []
+): Promise<ToolResultWithMeta[]> {
+  const results: ToolResultWithMeta[] = []
 
   for (const tc of toolCalls) {
     const executor = toolExecutors[tc.function.name]
@@ -343,7 +641,7 @@ export async function executeToolCalls(
       results.push({
         tool_call_id: tc.id,
         role: 'tool',
-        content: `❌ 未知工具：${tc.function.name}`,
+        content: `Unknown tool: ${tc.function.name}`,
       })
       continue
     }
@@ -355,23 +653,26 @@ export async function executeToolCalls(
       results.push({
         tool_call_id: tc.id,
         role: 'tool',
-        content: `❌ 无法解析工具参数：${tc.function.arguments}`,
+        content: `Failed to parse tool arguments: ${tc.function.arguments}`,
       })
       continue
     }
 
     try {
+      const startTime = Date.now()
       const result = await executor(args)
+      const duration = (Date.now() - startTime) / 1000
       results.push({
         tool_call_id: tc.id,
         role: 'tool',
-        content: result.slice(0, 16000), // 限制结果长度
+        content: result.slice(0, 16000),
+        duration,
       })
     } catch (err: any) {
       results.push({
         tool_call_id: tc.id,
         role: 'tool',
-        content: `❌ 工具执行异常：${err.message}`,
+        content: `Tool execution error: ${err.message}`,
       })
     }
   }

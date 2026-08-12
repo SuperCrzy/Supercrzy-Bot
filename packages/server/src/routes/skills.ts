@@ -1,10 +1,11 @@
 /**
  * Skills API 路由
- * 技能系统 CRUD — 完整的技能管理后端
+ * 技能系统 CRUD + 文件化安装
  */
 import Router from 'koa-router'
 import { randomUUID } from 'crypto'
 import { getDB } from '../services/database.js'
+import { syncFileSkills, installSkillFromGitHub } from '../services/skill-loader.js'
 
 const router = new Router({ prefix: '/api/skills' })
 
@@ -47,7 +48,7 @@ router.post('/', (ctx) => {
     id,
     name: body.name || 'Untitled Skill',
     description: body.description || '',
-    icon: body.icon || '',
+    icon: body.icon || 'star',
     category: body.category || 'general',
     enabled: body.enabled !== undefined ? (body.enabled ? 1 : 0) : 1,
     trigger_keywords: body.trigger_keywords || '',
@@ -139,17 +140,57 @@ router.post('/match', (ctx) => {
     return
   }
 
-  // 从启用的技能中查找 trigger_keywords 包含 query 中关键词的技能
   const allSkills = db.prepare("SELECT * FROM skills WHERE enabled = 1").all() as any[]
 
-  const matched = allSkills.filter((skill) => {
+  const matched = allSkills.filter((skill: any) => {
     if (!skill.trigger_keywords) return false
-    const keywords = skill.trigger_keywords.split(',').map(k => k.trim().toLowerCase())
+    const keywords = skill.trigger_keywords.split(',').map((k: string) => k.trim().toLowerCase())
     const queryLower = query.toLowerCase()
-    return keywords.some(kw => queryLower.includes(kw) || kw.includes(queryLower))
+    return keywords.some((kw: string) => queryLower.includes(kw) || kw.includes(queryLower))
   })
 
   ctx.body = matched
+})
+
+// Install skill from GitHub URL
+router.post('/install', async (ctx) => {
+  const { url, workspaceDir } = ctx.request.body as { url: string; workspaceDir?: string }
+  if (!url) {
+    ctx.status = 400
+    ctx.body = { success: false, error: 'GitHub URL is required' }
+    return
+  }
+
+  try {
+    const result = await installSkillFromGitHub(url, workspaceDir || process.cwd())
+    if (result.success) {
+      ctx.body = { success: true, name: result.name }
+    } else {
+      ctx.status = 400
+      ctx.body = { success: false, error: result.error }
+    }
+  } catch (err: any) {
+    ctx.status = 500
+    ctx.body = { success: false, error: err.message }
+  }
+})
+
+// Sync file-based skills
+router.post('/sync', (ctx) => {
+  try {
+    const workspaceDir = (ctx.request.body as any).workspaceDir || process.cwd()
+    // Auto-seed builtin skills if DB is empty
+    const db = getDB()
+    const count = (db.prepare('SELECT COUNT(*) as c FROM skills').get() as any).c
+    if (count === 0) {
+      seedBuiltinSkills()
+    }
+    const result = syncFileSkills(workspaceDir)
+    ctx.body = { success: true, ...result }
+  } catch (err: any) {
+    ctx.status = 500
+    ctx.body = { success: false, error: err.message }
+  }
 })
 
 // 初始化内置技能
@@ -157,12 +198,12 @@ export function seedBuiltinSkills() {
   const db = getDB()
 
   const count = (db.prepare('SELECT COUNT(*) as c FROM skills').get() as any).c
-  if (count > 0) return // 已有数据不覆盖
+  if (count > 0) return
 
   const builtinSkills = [
     {
       name: '代码生成',
-      icon: '💻',
+      icon: 'code',
       description: '根据自然语言描述生成代码，支持多种编程语言',
       category: 'coding',
       enabled: true,
@@ -174,7 +215,7 @@ export function seedBuiltinSkills() {
     },
     {
       name: '文件操作',
-      icon: '📂',
+      icon: 'folder',
       description: '读写本地文件系统，管理项目文件结构',
       category: 'coding',
       enabled: true,
@@ -186,7 +227,7 @@ export function seedBuiltinSkills() {
     },
     {
       name: '网络搜索',
-      icon: '🌐',
+      icon: 'globe',
       description: '搜索互联网获取最新信息和资料',
       category: 'research',
       enabled: true,
@@ -198,7 +239,7 @@ export function seedBuiltinSkills() {
     },
     {
       name: 'Shell 执行',
-      icon: '⚡',
+      icon: 'zap',
       description: '执行 Shell 命令完成系统操作任务',
       category: 'system',
       enabled: false,
@@ -210,7 +251,7 @@ export function seedBuiltinSkills() {
     },
     {
       name: '浏览器自动化',
-      icon: '🖥️',
+      icon: 'monitor',
       description: '控制浏览器进行网页交互和数据采集',
       category: 'automation',
       enabled: false,
@@ -222,7 +263,7 @@ export function seedBuiltinSkills() {
     },
     {
       name: '数据可视化',
-      icon: '📊',
+      icon: 'activity',
       description: '将数据转换为图表和可视化报告',
       category: 'analysis',
       enabled: true,
@@ -234,7 +275,7 @@ export function seedBuiltinSkills() {
     },
     {
       name: '文档写作',
-      icon: '📝',
+      icon: 'pen',
       description: '撰写技术文档、README、API 文档等',
       category: 'writing',
       enabled: true,
@@ -246,7 +287,7 @@ export function seedBuiltinSkills() {
     },
     {
       name: '记忆管理',
-      icon: '🧠',
+      icon: 'brain',
       description: '管理和查询 Agent 的长期记忆',
       category: 'system',
       enabled: true,

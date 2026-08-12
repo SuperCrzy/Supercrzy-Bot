@@ -380,6 +380,20 @@ export function getModelById(id: string): ModelInfo | undefined {
  * 获取模型显示名称（简短版）
  */
 export function getModelShortName(id: string): string {
+  // UUID 格式 → 自定义模型，尝试从已知映射获取名称
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+  if (UUID_RE.test(id)) {
+    // 从 localStorage 缓存的 customModels 中查找
+    try {
+      const cached = localStorage.getItem('supercrzy:customModels')
+      if (cached) {
+        const models = JSON.parse(cached)
+        const cm = models.find((m: any) => m.id === id)
+        if (cm) return cm.displayName || cm.modelId || id.slice(0, 8)
+      }
+    } catch { /* ignore */ }
+    return id.slice(0, 8) + '…'
+  }
   const model = getModelById(id)
   if (!model) return id
   // 提取简短名称，如 "V4 Pro", "V4 Flash", "R1" 等
@@ -413,13 +427,18 @@ export function getModelSelectOptions(): Array<{
   key: string
   children: Array<{ label: string; value: string }>
 }> {
-  return modelSeries.map((series) => ({
-    type: 'group' as const,
-    label: `${series.emoji} ${series.name}`,
-    key: series.id,
-    children: series.models.map((m) => ({
-      label: `${m.name}${m.recommended ? ' ⭐' : ''}${!m.available ? ' 🔒' : ''}`,
-      value: m.id,
-    })),
-  }))
+  // Show all available models grouped by series
+  return modelSeries
+    .filter(s => s.models.some(m => m.available))
+    .map(s => ({
+      type: 'group' as const,
+      label: `${s.emoji} ${s.name}`,
+      key: s.id,
+      children: s.models
+        .filter(m => m.available)
+        .map(m => ({
+          label: `${m.name}${m.recommended ? ' ⭐' : ''}`,
+          value: m.id,
+        })),
+    }))
 }

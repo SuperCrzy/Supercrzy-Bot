@@ -1,5 +1,5 @@
 <template>
-  <div class="page-container"><header class="page-header"><h2>用户管理</h2><p class="page-desc">管理 DeepSeek Agent 用户和访问权限</p></header>
+  <div class="page-container"><header class="page-header"><h2>用户管理</h2><p class="page-desc">管理 SuperCrzy 用户和访问权限</p></header>
     <div class="users-list">
       <div class="user-card" v-for="u in users" :key="u.id">
         <div class="user-avatar">{{ u.name[0] }}</div>
@@ -11,7 +11,7 @@
 </template>
 <script setup lang="ts">
 import { ref } from 'vue'
-const users = ref([{ id: '1', name: 'Admin', email: 'admin@deepseek-agent.local', role: 'admin', active: true, lastActive: '刚刚' }, { id: '2', name: 'API User', email: 'api@deepseek-agent.local', role: 'user', active: true, lastActive: '2 小时前' }])
+const users = ref([{ id: '1', name: 'Admin', email: 'admin@supercrzy.local', role: 'admin', active: true, lastActive: '刚刚' }, { id: '2', name: 'API User', email: 'api@supercrzy.local', role: 'user', active: true, lastActive: '2 小时前' }])
 </script>
 <style scoped>
 .page-container { height: 100vh; display: flex; flex-direction: column; }

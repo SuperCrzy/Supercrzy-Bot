@@ -1,20 +1,20 @@
 {
-  "name": "deepseek-agent",
+  "name": "supercrzy",
   "version": "0.1.0",
-  "description": "DeepSeek Agent - AI Agent Platform with Web UI",
+  "description": "SuperCrzy - AI Agent Platform",
   "author": "SuperCrzy",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/SuperCrzy/deepseek-agent"
+    "url": "https://github.com/SuperCrzy/supercrzy-agent"
   },
-  "homepage": "https://github.com/SuperCrzy/deepseek-agent#readme",
+  "homepage": "https://github.com/SuperCrzy/supercrzy-agent#readme",
   "scripts": {
-    "dev": "concurrently \"pnpm --filter @deepseek-agent/server dev\" \"pnpm --filter @deepseek-agent/client dev\"",
-    "dev:server": "pnpm --filter @deepseek-agent/server dev",
-    "dev:client": "pnpm --filter @deepseek-agent/client dev",
-    "build": "pnpm --filter @deepseek-agent/client build && pnpm --filter @deepseek-agent/server build",
-    "cli": "pnpm --filter @deepseek-agent/server cli",
+    "dev": "concurrently \"pnpm --filter @supercrzy/server dev\" \"pnpm --filter @supercrzy/client dev\"",
+    "dev:server": "pnpm --filter @supercrzy/server dev",
+    "dev:client": "pnpm --filter @supercrzy/client dev",
+    "build": "pnpm --filter @supercrzy/client build && pnpm --filter @supercrzy/server build",
+    "cli": "pnpm --filter @supercrzy/server cli",
     "lint": "pnpm -r lint",
     "clean": "pnpm -r clean"
   },
@@ -23,6 +23,10 @@
     "typescript": "^5.7.0"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["better-sqlite3", "esbuild", "vue-demi"]
+    "onlyBuiltDependencies": ["better-sqlite3", "esbuild", "vue-demi"],
+    "overrides": {
+      "http-errors": "^2.0.1",
+      "entities": "^4.5.0"
+    }
   }
 }

@@ -1,29 +1,172 @@
 <template>
-  <div class="page-container"><header class="page-header"><h2>用量统计</h2><p class="page-desc">查看 API 调用量和费用统计</p></header>
-    <div class="stats-cards">
-      <div class="stat-card"><div class="stat-value">{{ stats.today.messages }}</div><div class="stat-label">今日消息</div></div>
-      <div class="stat-card"><div class="stat-value">{{ formatNumber(stats.today.tokens) }}</div><div class="stat-label">今日 Token</div></div>
-      <div class="stat-card"><div class="stat-value">¥{{ stats.today.cost?.toFixed(2) || '0.00' }}</div><div class="stat-label">今日费用</div></div>
-      <div class="stat-card"><div class="stat-value">{{ stats.total.sessions }}</div><div class="stat-label">总会话</div></div>
-      <div class="stat-card"><div class="stat-value">{{ stats.total.messages }}</div><div class="stat-label">总消息</div></div>
-      <div class="stat-card"><div class="stat-value">{{ formatNumber(stats.total.tokens) }}</div><div class="stat-label">总 Token</div></div>
+  <div class="page-container">
+    <header class="page-header">
+      <h2>用量统计</h2>
+      <p class="page-desc">查看 API 调用量、Token 消耗和费用统计</p>
+    </header>
+
+    <!-- 概览卡片 -->
+    <div class="stats-overview">
+      <div class="overview-card primary">
+        <div class="overview-value">{{ formatNumber(stats.total.messages) }}</div>
+        <div class="overview-label">总消息数</div>
+        <div class="overview-sub">共 {{ stats.total.sessions }} 个会话</div>
+      </div>
+      <div class="overview-card accent">
+        <div class="overview-value">{{ formatNumber(stats.total.tokens) }}</div>
+        <div class="overview-label">总 Token 消耗</div>
+        <div class="overview-sub">约 ¥{{ stats.total.cost?.toFixed(4) || '0' }}</div>
+      </div>
+      <div class="overview-card success">
+        <div class="overview-value">{{ stats.today.messages }}</div>
+        <div class="overview-label">今日消息</div>
+        <div class="overview-sub">{{ formatNumber(stats.today.tokens) }} tokens</div>
+      </div>
+      <div class="overview-card warning">
+        <div class="overview-value">¥{{ stats.today.cost?.toFixed(6) || '0' }}</div>
+        <div class="overview-label">今日费用</div>
+        <div class="overview-sub">{{ stats.today.messages }} 条消息</div>
+      </div>
     </div>
-    <div class="chart-area"><n-card size="small" title="近 7 日用量趋势"><div style="height:200px;display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:13px">图表区域 — 将在 Phase 2 实现实时图表</div></n-card></div>
+
+    <!-- 7日趋势 -->
+    <div class="section">
+      <h3 class="section-title">近 7 日用量趋势</h3>
+      <div class="trend-chart">
+        <VChart v-if="stats.weekly.length > 0" :option="chartOption" style="height:180px" autoresize />
+        <div v-else class="chart-empty">暂无数据</div>
+      </div>
+    </div>
+
+    <!-- 模型用量详情 -->
+    <div class="section">
+      <h3 class="section-title">模型调用详情</h3>
+      <n-table :single-line="false" size="small" class="model-table">
+        <thead>
+          <tr>
+            <th>模型</th>
+            <th>消息数</th>
+            <th>Token 消耗</th>
+            <th>预估费用</th>
+            <th>最后调用</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="m in modelStats" :key="m.model">
+            <td><code class="model-name">{{ m.model }}</code></td>
+            <td>{{ m.count }}</td>
+            <td>{{ formatNumber(m.tokens) }}</td>
+            <td>¥{{ m.cost?.toFixed(6) || '0' }}</td>
+            <td>{{ m.lastUsed || '-' }}</td>
+          </tr>
+        </tbody>
+      </n-table>
+      <n-empty v-if="modelStats.length === 0" description="暂无模型调用数据" class="empty-mini" />
+    </div>
   </div>
 </template>
+
 <script setup lang="ts">
-import { reactive, onMounted } from 'vue'
-const stats = reactive({ today: { messages: 0, tokens: 0, cost: 0 }, total: { sessions: 0, messages: 0, tokens: 0, cost: 0 }, weekly: [] as any[] })
-function formatNumber(n: number) { if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M'; if (n >= 1000) return (n / 1000).toFixed(1) + 'K'; return String(n) }
-onMounted(async () => { try { const res = await fetch('/api/stats/usage'); if (res.ok) Object.assign(stats, await res.json()) } catch {} })
+import { reactive, computed, onMounted } from 'vue'
+import { NTable } from 'naive-ui'
+import VChart from 'vue-echarts'
+import { use } from 'echarts/core'
+import { LineChart } from 'echarts/charts'
+import { GridComponent, TooltipComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+
+use([LineChart, GridComponent, TooltipComponent, CanvasRenderer])
+
+const chartOption = computed(() => ({
+  grid: { top: 10, right: 20, bottom: 20, left: 40 },
+  tooltip: { trigger: 'axis' },
+  xAxis: { type: 'category', data: stats.weekly.map(d => d.date.slice(5)), axisLabel: { fontSize: 10 } },
+  yAxis: { type: 'value', axisLabel: { fontSize: 10 } },
+  series: [{
+    type: 'line', data: stats.weekly.map(d => d.messages),
+    smooth: true, lineStyle: { color: '#4F46E5' },
+    itemStyle: { color: '#4F46E5' }, areaStyle: { color: 'rgba(79,70,229,0.08)' },
+    symbolSize: 4,
+  }],
+}))
+
+interface WeeklyPoint { date: string; messages: number; tokens: number }
+interface ModelStat { model: string; count: number; tokens: number; cost: number; lastUsed: string }
+
+const stats = reactive({
+  today: { messages: 0, tokens: 0, cost: 0 },
+  total: { sessions: 0, messages: 0, tokens: 0, cost: 0 },
+  weekly: [] as WeeklyPoint[],
+})
+
+const modelStats = computed<ModelStat[]>(() => {
+  // 简化：按模型分组统计（需要后端支持，这里先用通用统计）
+  return [
+    { model: 'deepseek-v4-pro', count: stats.total.messages, tokens: stats.total.tokens, cost: stats.total.cost, lastUsed: '刚刚' },
+  ]
+})
+
+const maxMsgs = computed(() => Math.max(...stats.weekly.map(d => d.messages), 1))
+
+function barHeight(count: number) {
+  return Math.max((count / maxMsgs.value) * 100, 3)
+}
+
+function formatNumber(n: number) {
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M'
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'K'
+  return String(Math.floor(n))
+}
+
+function formatShortDate(d: string) {
+  return d.slice(5) // MM-DD
+}
+
+onMounted(async () => {
+  try {
+    const res = await fetch('/api/stats/usage')
+    if (res.ok) {
+      const data = await res.json()
+      Object.assign(stats, data)
+    }
+  } catch {}
+})
 </script>
+
 <style scoped>
-.page-container { height: 100vh; display: flex; flex-direction: column; }
-.page-header { padding: 16px 24px; border-bottom: 1px solid var(--border-color); }
-.page-header h2 { font-size: 16px; font-weight: 600; margin: 0; } .page-desc { font-size: 12px; color: var(--text-muted); margin: 4px 0 0; }
-.stats-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 24px; }
-.stat-card { padding: 20px; border-radius: 10px; border: 1px solid var(--border-color); background: var(--bg-secondary); text-align: center; }
-.stat-value { font-size: 24px; font-weight: 700; color: var(--accent); }
-.stat-label { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
-.chart-area { padding: 0 24px 24px; }
+.page-container { height: 100vh; display: flex; flex-direction: column; overflow-y: auto; }
+.page-header { padding: 16px 24px; border-bottom: 1px solid var(--border-color); flex-shrink: 0; }
+.page-header h2 { font-size: 16px; font-weight: 600; margin: 0; }
+.page-desc { font-size: 12px; color: var(--text-muted); margin: 4px 0 0; }
+
+/* Overview Cards */
+.stats-overview { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; padding: 20px 24px; }
+.overview-card { padding: 18px 16px; border-radius: 12px; border: 1px solid var(--border-color); }
+.overview-card.primary { background: linear-gradient(135deg, rgba(79,70,229,.06), rgba(79,70,229,.02)); }
+.overview-card.accent { background: linear-gradient(135deg, rgba(6,182,212,.06), rgba(6,182,212,.02)); }
+.overview-card.success { background: linear-gradient(135deg, rgba(34,197,94,.06), rgba(34,197,94,.02)); }
+.overview-card.warning { background: linear-gradient(135deg, rgba(245,158,11,.06), rgba(245,158,11,.02)); }
+
+.overview-value { font-size: 26px; font-weight: 700; color: var(--text-primary); }
+.overview-label { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+.overview-sub { font-size: 11px; color: var(--text-secondary); margin-top: 2px; }
+
+/* Section */
+.section { padding: 0 24px 20px; }
+.section-title { font-size: 14px; font-weight: 600; margin: 0 0 12px; }
+
+/* Bar Chart */
+.trend-chart { background: var(--bg-secondary); border-radius: 10px; border: 1px solid var(--border-color); padding: 20px; }
+.chart-empty { text-align: center; color: var(--text-muted); font-size: 13px; padding: 40px 0; }
+
+.bar-chart { display: flex; align-items: flex-end; gap: 12px; height: 140px; padding-top: 20px; }
+.bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; height: 100%; justify-content: flex-end; }
+.bar-value { font-size: 10px; color: var(--text-secondary); font-weight: 600; }
+.bar-fill { width: 100%; max-width: 40px; background: var(--accent); border-radius: 4px 4px 0 0; min-height: 3px; transition: height var(--duration-normal); }
+.bar-label { font-size: 10px; color: var(--text-muted); margin-top: 4px; }
+
+/* Model Table */
+.model-table { width: 100%; margin-top: 8px; }
+.model-name { font-family: var(--font-mono); font-size: 11px; }
+.empty-mini { margin: 20px 0; }
 </style>

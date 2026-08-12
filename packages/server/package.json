@@ -1,12 +1,12 @@
 {
-  "name": "@deepseek-agent/server",
+  "name": "@supercrzy/server",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/app.ts",
     "build": "tsc",
-    "start": "node dist/app.js",
+    "start": "tsx src/app.ts",
     "cli": "tsx src/cli.ts",
     "lint": "tsc --noEmit",
     "clean": "rm -rf dist node_modules"
@@ -14,14 +14,24 @@
   "dependencies": {
     "@koa/cors": "^5.0.0",
     "@koa/multer": "^4.0.0",
+    "@tencent-weixin/openclaw-weixin": "^2.4.1",
+    "@types/koa-static": "^4.0.4",
     "better-sqlite3": "^11.7.0",
     "dotenv": "^16.4.0",
     "koa": "^3.2.0",
     "koa-bodyparser": "^4.4.0",
     "koa-router": "^12.0.0",
+    "koa-static": "^5.0.0",
+    "localtunnel": "^2.0.2",
+    "mammoth": "^1.12.0",
     "multer": "^2.1.1",
+    "pdf-parse": "^2.4.5",
+    "qrcode": "^1.5.4",
+    "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.3",
     "uuid": "^11.0.0",
-    "ws": "^8.20.0"
+    "ws": "^8.20.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.0",
@@ -33,6 +43,7 @@
     "@types/node": "^22.0.0",
     "@types/uuid": "^10.0.0",
     "@types/ws": "^8.18.1",
+    "esbuild": "^0.28.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0"
   }

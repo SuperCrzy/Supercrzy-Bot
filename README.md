@@ -1,4 +1,4 @@
-# DeepSeek Agent
+# SuperCrzy
 
 AI Agent Platform with Web UI, natively integrated with DeepSeek V4.
 
@@ -50,7 +50,7 @@ pnpm cli
 ## Project Structure
 
 ```
-deepseek-agent/
+supercrzy-agent/
 ├── packages/
 │   ├── client/          # Vue3 frontend + Monaco Editor
 │   │   └── src/views/   # 14 pages (chat, workspace, skills, etc.)

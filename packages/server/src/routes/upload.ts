@@ -1,7 +1,7 @@
 import Router from 'koa-router'
 import type { Context } from 'koa'
 import { v4 as uuidv4 } from 'uuid'
-import { existsSync, mkdirSync, unlinkSync, createReadStream } from 'fs'
+import { existsSync, mkdirSync, unlinkSync, createReadStream, readFileSync } from 'fs'
 import { join, extname, basename } from 'path'
 import { getDB } from '../services/database'
 import multer from '@koa/multer'
@@ -134,6 +134,59 @@ uploadRouter.get('/files/:filename', (ctx: Context) => {
   // Allow inline preview for images and PDFs
   ctx.set('Content-Disposition', 'inline')
   ctx.body = createReadStream(filePath)
+})
+
+// Read text content of uploaded file (for Agent to process)
+uploadRouter.get('/read/:id', (ctx: Context) => {
+  const db = getDB()
+  const upload = db.prepare('SELECT * FROM uploads WHERE id = ?').get(ctx.params.id) as any
+
+  if (!upload) {
+    ctx.status = 404
+    ctx.body = { error: 'File not found' }
+    return
+  }
+
+  const filePath = join(UPLOAD_DIR, upload.stored_name)
+  if (!existsSync(filePath)) {
+    ctx.status = 404
+    ctx.body = { error: 'File not on disk' }
+    return
+  }
+
+  const mime = upload.mime_type || ''
+  const isText = mime.startsWith('text/') ||
+    mime === 'application/json' ||
+    mime === 'application/xml' ||
+    mime === 'application/yaml' ||
+    mime === 'application/javascript'
+
+  if (!isText) {
+    ctx.body = {
+      readable: false,
+      type: mime,
+      name: upload.original_name,
+      message: `Cannot extract text from ${mime} files. The agent can reference this file at: ${upload.url}`,
+    }
+    return
+  }
+
+  try {
+    const content = readFileSync(filePath, 'utf-8')
+    ctx.body = {
+      readable: true,
+      type: mime,
+      name: upload.original_name,
+      content: content.slice(0, 50000),
+    }
+  } catch {
+    ctx.body = {
+      readable: false,
+      type: mime,
+      name: upload.original_name,
+      message: 'Failed to read file content.',
+    }
+  }
 })
 
 // Delete uploaded file

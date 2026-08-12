@@ -3,7 +3,7 @@
     <header class="page-header">
       <div>
         <h2>历史记录</h2>
-        <p class="page-desc">这里按来源只读查看 DeepSeek Agent 历史会话。</p>
+        <p class="page-desc">这里按来源只读查看 SuperCrzy 历史会话。</p>
       </div>
       <n-input v-model:value="searchText" placeholder="搜索会话..." clearable class="search-input">
         <template #prefix><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></template>
@@ -14,7 +14,9 @@
       <div v-for="(group, source) in groupedSessions" :key="source" class="source-group">
         <div class="source-header" @click="toggleGroup(source as string)">
           <div class="source-info">
-            <span class="source-icon">{{ sourceIcons[source as string] || '💬' }}</span>
+            <span class="source-icon">
+              <SvgIcon :name="getSourceIcon(source as string)" :size="16" />
+            </span>
             <span class="source-name">{{ source }}</span>
             <n-tag size="tiny" :bordered="false" type="info">{{ group.length }}</n-tag>
           </div>
@@ -23,9 +25,11 @@
           </svg>
         </div>
         <div v-show="expandedGroups[source as string]" class="source-sessions">
-          <div v-for="s in group" :key="s.id" class="history-item" @click="viewSession(s)">
-            <div class="history-item-icon">💬</div>
-            <div class="history-item-content">
+          <div v-for="s in group" :key="s.id" class="history-item">
+            <div class="history-item-icon" @click="viewSession(s)">
+              <SvgIcon name="messages" :size="16" />
+            </div>
+            <div class="history-item-content" @click="viewSession(s)">
               <div class="history-item-title">{{ s.first_msg || s.title || '新对话' }}</div>
               <div class="history-item-meta">
                 <span>{{ s.model }}</span>
@@ -34,6 +38,7 @@
                 <span v-if="s.message_count">· {{ s.message_count }} 条消息</span>
               </div>
             </div>
+            <n-button size="tiny" quaternary type="primary" @click="continueChat(s)">Continue</n-button>
           </div>
         </div>
       </div>
@@ -46,7 +51,7 @@
       <div class="detail-messages" v-if="detailMessages.length">
         <div v-for="msg in detailMessages" :key="msg.id" class="detail-msg" :class="msg.role">
           <div class="detail-msg-header">
-            <span class="detail-msg-role">{{ msg.role === 'user' ? '你' : 'DeepSeek' }}</span>
+            <span class="detail-msg-role">{{ msg.role === 'user' ? 'You' : 'SuperCrzy' }}</span>
             <span class="detail-msg-time">{{ formatTime(msg.created_at || msg.createdAt) }}</span>
           </div>
           <div class="detail-msg-content">{{ msg.content }}</div>
@@ -58,6 +63,17 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, reactive } from 'vue'
+import { useRouter } from 'vue-router'
+import { useChatStore } from '@/stores/chat'
+import SvgIcon from '@/components/ui/SvgIcon.vue'
+
+const router = useRouter()
+const chatStore = useChatStore()
+
+function getSourceIcon(src: string): string {
+  const map: Record<string, string> = { 'Web UI': 'monitor', 'CLI': 'terminal', 'API': 'plug', 'WeChat': 'message' }
+  return map[src] || 'folder'
+}
 
 interface HistorySession {
   id: string
@@ -76,8 +92,6 @@ const showDetail = ref(false)
 const detailMessages = ref<any[]>([])
 const expandedGroups = reactive<Record<string, boolean>>({})
 
-const sourceIcons: Record<string, string> = { 'Web UI': '🌐', 'CLI': '💻', 'API': '🔌', '默认': '💬' }
-
 const filteredSessions = computed(() => {
   if (!searchText.value) return sessions.value
   const q = searchText.value.toLowerCase()
@@ -91,7 +105,7 @@ const filteredSessions = computed(() => {
 const groupedSessions = computed(() => {
   const groups: Record<string, HistorySession[]> = {}
   for (const s of filteredSessions.value) {
-    const src = s.source || '默认'
+    const src = s.source || 'Default'
     if (!groups[src]) groups[src] = []
     groups[src].push(s)
   }
@@ -111,6 +125,12 @@ async function viewSession(s: HistorySession) {
       showDetail.value = true
     }
   } catch {}
+}
+
+async function continueChat(s: HistorySession) {
+  // Navigate to Chat with this session
+  await chatStore.selectSession(s.id)
+  router.push('/')
 }
 
 function formatDate(d: string) {
