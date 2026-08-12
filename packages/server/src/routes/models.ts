@@ -39,12 +39,17 @@ modelsRouter.put('/providers/:id', (ctx: Context) => {
     const { id } = ctx.params
     const body = ctx.request.body as Record<string, any>
 
-    const provider = db.prepare('SELECT * FROM custom_providers WHERE id = ?').get(id) as any
+    // 兼容两种 id 语义：custom_providers.id（preset-xxx）或 provider_key（deepseek）
+    let provider = db.prepare('SELECT * FROM custom_providers WHERE id = ?').get(id) as any
+    if (!provider) {
+      provider = db.prepare('SELECT * FROM custom_providers WHERE provider_key = ?').get(id) as any
+    }
     if (!provider) {
       ctx.status = 404
       ctx.body = { error: 'Provider not found' }
       return
     }
+    const realId = provider.id
 
     const updates: string[] = []
     const values: any[] = []
@@ -73,7 +78,7 @@ modelsRouter.put('/providers/:id', (ctx: Context) => {
     }
 
     updates.push("updated_at = datetime('now')")
-    values.push(id)
+    values.push(realId)
 
     db.prepare(`UPDATE custom_providers SET ${updates.join(', ')} WHERE id = ?`).run(...values)
     ctx.body = { success: true }
@@ -126,24 +131,29 @@ modelsRouter.post('/custom', (ctx: Context) => {
       return
     }
 
-    const provider = db.prepare('SELECT * FROM custom_providers WHERE id = ?').get(body.providerId) as any
+    // 兼容两种 id 语义：custom_providers.id（preset-xxx）或 provider_key（deepseek）
+    let provider = db.prepare('SELECT * FROM custom_providers WHERE id = ?').get(body.providerId) as any
+    if (!provider) {
+      provider = db.prepare('SELECT * FROM custom_providers WHERE provider_key = ?').get(body.providerId) as any
+    }
     if (!provider) {
       ctx.status = 404
       ctx.body = { error: 'Provider not found' }
       return
     }
+    const realProviderId = provider.id
 
     const id = randomUUID()
     db.prepare(`
       INSERT INTO custom_models (id, provider_id, model_id, display_name, enabled, is_default)
       VALUES (?, ?, ?, ?, 1, 0)
-    `).run(id, body.providerId, body.modelId, body.displayName || body.modelId)
+    `).run(id, realProviderId, body.modelId, body.displayName || body.modelId)
 
     ctx.body = {
       success: true,
       model: {
         id,
-        providerId: body.providerId,
+        providerId: realProviderId,
         modelId: body.modelId,
         displayName: body.displayName || body.modelId,
         providerName: provider.name,
