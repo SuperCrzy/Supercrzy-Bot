@@ -28,3 +28,6 @@ packages/client/src/router/index.js
 packages/client/src/types/index.js
 packages/client/src/composables/useChatSearch.js
 
+articles/
+.git-rewrite/
+.git-rewrite/
