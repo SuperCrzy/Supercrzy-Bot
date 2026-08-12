@@ -99,6 +99,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import { useMessage } from 'naive-ui'
+import { errMsg } from '@/utils/i18n-error'
 import SvgIcon from '@/components/ui/SvgIcon.vue'
 
 const nMessage = useMessage()
@@ -213,7 +214,7 @@ async function testChannel() {
     if (d.success) {
       nMessage.success('Connection successful')
     } else {
-      nMessage.error(d.message || 'Connection failed')
+      nMessage.error(errMsg(d.code, d.message || 'Connection failed'))
     }
     await loadChannels()
   } catch { nMessage.error('Test failed') }

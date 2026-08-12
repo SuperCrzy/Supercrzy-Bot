@@ -37,15 +37,15 @@
         <h1 class="welcome-title">{{ $t('chat.welcomeTitle') }}</h1>
         <p class="welcome-subtitle">{{ $t('chat.welcomeDesc') }}</p>
         <div class="quick-prompts">
-          <div class="quick-prompt" @click="sendQuick('帮我写一个 Python 快速排序函数，并测试它')">
+          <div class="quick-prompt" @click="sendQuick(t('chat.quickCode'))">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
             {{ locale === 'en-US' ? 'Write & test code' : '写代码并执行测试' }}
           </div>
-          <div class="quick-prompt" @click="sendQuick('用中文搜索并总结今天的 AI 领域重要新闻')">
+          <div class="quick-prompt" @click="sendQuick(t('chat.quickSearch'))">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
             {{ locale === 'en-US' ? 'Search latest AI news' : '搜索最新 AI 资讯' }}
           </div>
-          <div class="quick-prompt" @click="sendQuick('请记住：我喜欢简洁的中文回答，用表格式呈现数据')">
+          <div class="quick-prompt" @click="sendQuick(t('chat.quickPref'))">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
             {{ locale === 'en-US' ? 'Teach Agent preferences' : '让 Agent 记住偏好' }}
           </div>
@@ -245,6 +245,7 @@ import { useAppStore } from '@/stores/app'
 import { getModelShortName } from '@/data/models'
 import type { ChatMessage, Attachment, ToolCallEvent, ChatFlowNode } from '@/types'
 import { extractText } from '@/types'
+import { errMsg } from '@/utils/i18n-error'
 import ThinkingBlock from '@/components/chat/ThinkingBlock.vue'
 import ToolCallBlock from '@/components/chat/ToolCallBlock.vue'
 import MarkdownIt from 'markdown-it'
@@ -323,7 +324,7 @@ async function handleFileSelect(event: Event) {
 
     if (!res.ok) {
       const err = await res.json()
-      throw new Error(err.error || t('chat.uploadFailed'))
+      throw new Error(errMsg(err.code, err.error || t('chat.uploadFailed')))
     }
 
     const data = await res.json()
@@ -518,7 +519,7 @@ function buildAPIMessage(m: ChatMessage) {
     const imgNames = images.map(i => i.name).join(', ')
     content += `\n\n[${t('chat.imagesUploaded', { n: images.length, names: imgNames })}]`
     for (const img of images) {
-      content += `\n[图片URL: ${img.url}]`
+      content += `\n[${t('chat.imgUrl')}: ${img.url}]`
     }
   }
   if (docs.length > 0) {
@@ -656,7 +657,7 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage) {
 
   switch (event) {
     case 'thinking': {
-      msg.flow.push({ kind: 'thinking', turn: data.turn, message: data.message, reasoning: '', completed: false })
+      msg.flow.push({ kind: 'thinking', turn: data.turn, message: t('chat.thinking'), reasoning: '', completed: false })
       break
     }
     case 'thinking_chunk': {

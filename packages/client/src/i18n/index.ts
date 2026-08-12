@@ -49,6 +49,13 @@ const messages = {
       execute: '执行',
       executed: '已执行',
     },
+    errors: {
+      NO_FILE: '没有文件上传',
+      FILE_NOT_FOUND: '文件不存在',
+      NEED_CREDENTIALS: '请填写 App ID 和 App Secret',
+      CONNECT_FAILED: '连接失败，请检查凭据',
+      CONFIG_INCOMPLETE: '配置不完整',
+    },
     nav: {
       chatGroup: '对话',
       agentGroup: '代理',
@@ -123,7 +130,11 @@ const messages = {
       uploadFile: '上传文件',
       dragOrClick: '点击或拖拽文件到此处上传',
       fileTooLarge: '文件大小超过限制',
-      maxFiles: '最多上传5个文件',
+      maxFiles: '最多上传5个文件',      quickCode: '帮我写一个 Python 快速排序函数，并测试它',
+      quickSearch: '用中文搜索并总结今天的 AI 领域重要新闻',
+      quickPref: '请记住：我喜欢简洁的中文回答，用表格式呈现数据',
+      imgUrl: '图片URL',
+
       playbookUsedTitle: '应用经验',
       plannerTitle: '执行计划',
       deliveryTitle: '交付产物',
@@ -531,6 +542,13 @@ const messages = {
       execute: 'Execute',
       executed: 'Executed',
     },
+    errors: {
+      NO_FILE: 'No file uploaded',
+      FILE_NOT_FOUND: 'File not found',
+      NEED_CREDENTIALS: 'Please fill in App ID and App Secret',
+      CONNECT_FAILED: 'Connection failed, check your credentials',
+      CONFIG_INCOMPLETE: 'Incomplete configuration',
+    },
     nav: {
       chatGroup: 'Chat',
       agentGroup: 'Agent',
@@ -605,7 +623,11 @@ const messages = {
       uploadFile: 'Upload File',
       dragOrClick: 'Click or drag files to upload',
       fileTooLarge: 'File size exceeds limit',
-      maxFiles: 'Maximum 5 files',
+      maxFiles: 'Maximum 5 files',      quickCode: 'Write a Python quicksort function and test it',
+      quickSearch: "Search and summarize today's top AI news",
+      quickPref: 'Remember: I like concise Chinese answers with tabular data',
+      imgUrl: 'Image URL',
+
       playbookUsedTitle: 'Applied experience',
       plannerTitle: 'Execution plan',
       deliveryTitle: 'Deliverables',

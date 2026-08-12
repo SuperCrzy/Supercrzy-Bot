@@ -68,7 +68,7 @@ uploadRouter.post('/', upload.array('files', 5), async (ctx: Context) => {
 
   if (!files || files.length === 0) {
     ctx.status = 400
-    ctx.body = { error: '没有文件上传' }
+    ctx.body = { error: '没有文件上传', code: 'NO_FILE' }
     return
   }
 
@@ -111,7 +111,7 @@ uploadRouter.get('/files/:filename', (ctx: Context) => {
 
   if (!existsSync(filePath)) {
     ctx.status = 404
-    ctx.body = { error: '文件不存在' }
+    ctx.body = { error: '文件不存在', code: 'FILE_NOT_FOUND' }
     return
   }
 
@@ -196,7 +196,7 @@ uploadRouter.delete('/:id', (ctx: Context) => {
 
   if (!upload) {
     ctx.status = 404
-    ctx.body = { error: '文件不存在' }
+    ctx.body = { error: '文件不存在', code: 'FILE_NOT_FOUND' }
     return
   }
 

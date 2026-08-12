@@ -154,7 +154,7 @@ gatewayRouter.post('/channels/:id/test', async (ctx: Context) => {
   // QQ: 真实连接测试
   if (channel.platform === 'qq') {
     if (!config.appId || !config.appSecret) {
-      ctx.body = { success: false, status: 'error', message: '请填写 App ID 和 App Secret' }
+      ctx.body = { success: false, status: 'error', message: '请填写 App ID 和 App Secret', code: 'NEED_CREDENTIALS' }
       return
     }
     try {
@@ -163,7 +163,7 @@ gatewayRouter.post('/channels/:id/test', async (ctx: Context) => {
         db.prepare("UPDATE channels SET status='connected', enabled=1, updated_at=datetime('now') WHERE id=?").run(id)
         ctx.body = { success: true, status: 'connected' }
       } else {
-        ctx.body = { success: false, status: 'error', message: '连接失败，请检查凭据' }
+        ctx.body = { success: false, status: 'error', message: '连接失败，请检查凭据', code: 'CONNECT_FAILED' }
       }
     } catch (err: any) {
       ctx.body = { success: false, status: 'error', message: err.message }
@@ -182,7 +182,7 @@ gatewayRouter.post('/channels/:id/test', async (ctx: Context) => {
     db.prepare("UPDATE channels SET status='connected', enabled=1, updated_at=datetime('now') WHERE id=?").run(id)
     ctx.body = { success: true, status: 'connected' }
   } else {
-    ctx.body = { success: false, status: 'error', message: '配置不完整' }
+    ctx.body = { success: false, status: 'error', message: '配置不完整', code: 'CONFIG_INCOMPLETE' }
   }
 })
 

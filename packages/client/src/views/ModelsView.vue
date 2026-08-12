@@ -583,7 +583,7 @@ async function toggleCustomModel(id: string, enabled: boolean) {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ enabled }),
     })
-    if (!res.ok) { const d = await res.json().catch(() => ({})); message.error((d as any).error || '操作失败'); return }
+    if (!res.ok) { const d = await res.json().catch(() => ({})); message.error((d as any).error || t('models.opFail')); return }
     const m = customModels.value.find(mod => mod.id === id)
     if (m) m.enabled = enabled
     message.success(enabled ? t('common.enabled') : t('common.disabled'))
@@ -599,7 +599,7 @@ async function handleDelete() {
   if (!deletingModel.value) return
   try {
     const res = await fetch(`/api/models/custom/${deletingModel.value.id}`, { method: 'DELETE' })
-    if (!res.ok) { const d = await res.json().catch(() => ({})); message.error((d as any).error || '删除失败'); return }
+    if (!res.ok) { const d = await res.json().catch(() => ({})); message.error((d as any).error || t('models.deleteFail')); return }
     message.success(t('models.deleted'))
     showDeleteModal.value = false
     deletingModel.value = null
