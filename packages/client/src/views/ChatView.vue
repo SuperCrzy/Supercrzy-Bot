@@ -256,7 +256,7 @@ const chatStore = useChatStore()
 const appStore = useAppStore()
 const nMessage = useMessage()
 
-const { locale, t } = useI18n()
+const { locale, t } = useI18n({ useScope: 'global' })
 const inputText = ref('')
 const messagesRef = ref<HTMLElement>()
 const inputRef = ref()

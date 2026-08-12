@@ -184,7 +184,7 @@ import { getModelShortName } from '@/data/models'
 import type { CustomModel, AddModelForm } from '@/types'
 
 const appStore = useAppStore()
-const { t } = useI18n()
+const { t } = useI18n({ useScope: 'global' })
 const message = useMessage()
 
 // ===== Providers =====

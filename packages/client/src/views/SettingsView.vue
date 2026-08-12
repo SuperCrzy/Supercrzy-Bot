@@ -200,7 +200,7 @@ import { getModelSelectOptions } from '@/data/models'
 
 const appStore = useAppStore()
 const nMessage = useMessage()
-const { locale, t } = useI18n()
+const { locale, t } = useI18n({ useScope: 'global' })
 
 const activeTab = ref('account')
 const saving = ref(false)

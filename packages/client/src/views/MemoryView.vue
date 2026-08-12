@@ -117,7 +117,7 @@ interface Memory {
 }
 
 const nMessage = useMessage()
-const { t } = useI18n()
+const { t } = useI18n({ useScope: 'global' })
 const memories = ref<Memory[]>([])
 const loading = ref(false)
 const saving = ref(false)

@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
+import i18n from '@/i18n'
 
 const routes: RouteRecordRaw[] = [
   {
@@ -32,7 +33,7 @@ const router = createRouter({
 
 router.beforeEach((to) => {
   const title = to.meta.title as string
-  if (title) document.title = `${title} - SUPERCRZY BOT`
+  if (title) document.title = `${i18n().global.t(title)} - SUPERCRZY BOT`
 })
 
 export { routes }

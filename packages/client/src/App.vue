@@ -19,7 +19,7 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 
 const appStore = useAppStore()
-const { locale } = useI18n()
+const { locale } = useI18n({ useScope: 'global' })
 
 const naiveLocale = computed(() => locale.value === 'en-US' ? enUS : zhCN)
 

@@ -68,7 +68,7 @@ interface LogEntry {
   tokens?: number
 }
 
-const { t } = useI18n()
+const { t } = useI18n({ useScope: 'global' })
 const logs = ref<LogEntry[]>([])
 const loading = ref(false)
 const searchQuery = ref('')

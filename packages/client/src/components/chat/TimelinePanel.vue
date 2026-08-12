@@ -69,7 +69,7 @@ interface CheckpointMeta {
   firstUserMsg: string
 }
 
-const { t: i18n } = useI18n()
+const { t: i18n } = useI18n({ useScope: 'global' })
 const props = defineProps<{ flow?: ChatFlowNode[] }>()
 
 const chatStore = useChatStore()

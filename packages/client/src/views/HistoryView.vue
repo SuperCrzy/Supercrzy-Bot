@@ -69,7 +69,7 @@ import { useI18n } from 'vue-i18n'
 import SvgIcon from '@/components/ui/SvgIcon.vue'
 
 const router = useRouter()
-const { t } = useI18n()
+const { t } = useI18n({ useScope: 'global' })
 const chatStore = useChatStore()
 
 function getSourceIcon(src: string): string {

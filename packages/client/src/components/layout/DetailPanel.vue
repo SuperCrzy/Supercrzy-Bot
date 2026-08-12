@@ -156,7 +156,7 @@ const emit = defineEmits<{
 }>()
 
 const appStore = useAppStore()
-const { t } = useI18n()
+const { t } = useI18n({ useScope: 'global' })
 const chatStore = useChatStore()
 
 /** 当前会话最后一条 assistant 消息的时序流（时间线数据源） */

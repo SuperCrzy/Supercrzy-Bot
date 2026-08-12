@@ -285,7 +285,7 @@ const optChildren = (opt: ModelSelectOption) => (isGroup(opt) ? opt.children : [
 function checkMobile() { isMobile.value = window.innerWidth <= 768 }
 onMounted(() => { checkMobile(); window.addEventListener('resize', checkMobile) })
 
-const { t } = useI18n()
+const { t } = useI18n({ useScope: 'global' })
 
 const currentPageTitle = computed(() => (route.meta.title ? t(route.meta.title as string) : 'SUPERCRZY BOT'))
 
