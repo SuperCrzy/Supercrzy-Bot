@@ -17,6 +17,7 @@ import { toolDefinitions, executeToolCalls, type ToolCall, type ToolResultWithMe
 import { classifyApiError, jitteredBackoff } from './error-classifier'
 import { ToolGuardrailController } from './tool-guardrails'
 import { shouldCompress, compressContext, pruneOldToolResults } from './context-compressor'
+import { matchPlaybooks } from './playbook-match'
 
 interface AgentMessage {
   role: 'system' | 'user' | 'assistant' | 'tool'
@@ -286,23 +287,7 @@ export async function runAgentLoop(
     const playbooks = db.prepare(
       'SELECT task_type, lesson FROM playbook ORDER BY created_at DESC LIMIT 30'
     ).all() as Array<{ task_type: string; lesson: string }>
-    const q = lastUserContent.toLowerCase()
-
-    /** 任务类型拆词：分词 + 滑动 2-gram，提高匹配召回 */
-    const splitWords = (t: string): string[] => {
-      const words = t.split(/[,，、\s]+/).filter((w) => w.length >= 2)
-      for (let i = 0; i < t.length - 1; i++) words.push(t.slice(i, i + 2))
-      return words
-    }
-
-    const relevant = playbooks
-      .filter((p) => {
-        const type = (p.task_type || '').toLowerCase()
-        if (!type || !q) return false
-        const words = splitWords(type)
-        return words.some((w) => q.includes(w))
-      })
-      .slice(0, 2)
+    const relevant = matchPlaybooks(playbooks, lastUserContent)
 
     if (relevant.length > 0) {
       systemPrompt.prompt +=

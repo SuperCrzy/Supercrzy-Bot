@@ -5,10 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/app.ts",
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "start": "tsx src/app.ts",
     "cli": "tsx src/cli.ts",
     "lint": "tsc --noEmit",
+    "test": "vitest run",
     "clean": "rm -rf dist node_modules"
   },
   "dependencies": {
@@ -41,10 +42,13 @@
     "@types/koa__cors": "^5.0.0",
     "@types/multer": "^2.1.0",
     "@types/node": "^22.0.0",
+    "@types/supertest": "^7.2.1",
     "@types/uuid": "^10.0.0",
     "@types/ws": "^8.18.1",
     "esbuild": "^0.28.0",
+    "supertest": "^7.2.2",
     "tsx": "^4.19.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.10"
   }
 }

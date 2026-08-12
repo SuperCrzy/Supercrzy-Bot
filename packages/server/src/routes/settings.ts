@@ -4,6 +4,11 @@ import { getDB } from '../services/database'
 
 export const settingsRouter = new Router({ prefix: '/api/settings' })
 
+/** 密钥脱敏：前 headLen 位 + ... + 后 4 位（导出供单测） */
+export function maskSecret(value: string, headLen: number): string {
+  return value.slice(0, headLen) + '...' + value.slice(-4)
+}
+
 // Numeric keys that should be parsed as float
 const FLOAT_KEYS = ['temperature', 'maxTokens', 'maxTurns', 'gatewayTimeout', 'drainTimeout', 'memoryCharLimit', 'userProfileCharLimit', 'idleTimeout', 'scheduledResetHour']
 
@@ -26,12 +31,12 @@ settingsRouter.get('/', (ctx: Context) => {
   }
   // 脱敏：不返回明文密钥，只返回 masked + 布尔标记（ModelsView/SettingsView 已适配）
   if (settings.apiKey) {
-    settings.apiKeyMasked = settings.apiKey.slice(0, 8) + '...' + settings.apiKey.slice(-4)
+    settings.apiKeyMasked = maskSecret(settings.apiKey, 8)
     settings.hasApiKey = true
     delete settings.apiKey
   }
   if (settings.qqAppSecret) {
-    settings.qqAppSecretMasked = settings.qqAppSecret.slice(0, 4) + '...' + settings.qqAppSecret.slice(-4)
+    settings.qqAppSecretMasked = maskSecret(settings.qqAppSecret, 4)
     settings.hasQqAppSecret = true
     delete settings.qqAppSecret
   }

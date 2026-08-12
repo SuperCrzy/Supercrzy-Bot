@@ -12,8 +12,12 @@ export const checkpointsRouter = new Router({ prefix: '/api/checkpoints' })
 
 const CKPT_DIR = join(config.workspaceDir || process.cwd(), 'data', 'checkpoints')
 
-/** 只允许 UUID 格式，防止路径穿越 */
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+/** 只允许 UUID 格式，防止路径穿越（导出供单测） */
+export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+export function isValidCheckpointId(id: string): boolean {
+  return UUID_RE.test(id)
+}
 
 interface CheckpointMeta {
   id: string

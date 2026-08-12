@@ -13,8 +13,8 @@ export const workspaceRouter = new Router({ prefix: '/api/workspace' })
 
 const WORKSPACE_ROOT = resolve(config.workspaceDir || process.cwd())
 
-/** 校验并规范化路径：必须在 workspace 根内，否则返回 null */
-function safePath(input: string): string | null {
+/** 校验并规范化路径：必须在 workspace 根内，否则返回 null（导出供单测） */
+export function safePath(input: string): string | null {
   if (!input || input.includes('\0')) return null
   const abs = resolve(WORKSPACE_ROOT, input)
   if (abs !== WORKSPACE_ROOT && !abs.startsWith(WORKSPACE_ROOT + '/')) return null
