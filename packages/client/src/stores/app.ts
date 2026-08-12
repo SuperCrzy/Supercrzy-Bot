@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia'
+import i18n from '@/i18n'
 import { ref, computed, shallowRef } from 'vue'
 import { getModelSelectOptions, getModelShortName } from '@/data/models'
 import type { CustomModel } from '@/types'
@@ -112,7 +113,7 @@ export const useAppStore = defineStore('app', () => {
     if (result.length > 0 && customOpts.length > 0) {
       return [
         ...result,
-        { type: 'group' as const, label: '自定义模型', key: 'custom', children: customOpts },
+        { type: 'group' as const, label: i18n().global.t('models.customModels'), key: 'custom', children: customOpts },
       ]
     }
     return [...result, ...customOpts]

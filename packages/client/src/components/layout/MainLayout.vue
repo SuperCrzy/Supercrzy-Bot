@@ -73,7 +73,7 @@
             </router-link>
             <router-link v-if="!isMobile" to="/automations" class="nav-item" :class="{ active: route.name === 'Automations' }">
               <SvgIcon name="clock" :size="16" />
-              <span>Automations</span>
+              <span>{{ $t('nav.automations') }}</span>
             </router-link>
             <router-link v-if="!isMobile" to="/channel" class="nav-item" :class="{ active: route.name === 'Channel' }">
               <SvgIcon name="plug" :size="16" />
@@ -146,25 +146,25 @@
           </div>
           <div class="nav-items" v-show="advancedOpen">
             <router-link to="/tasks" class="nav-item" :class="{ active: route.name === 'Tasks' }">
-              <SvgIcon name="layers" :size="14" /><span>Tasks</span>
+              <SvgIcon name="layers" :size="14" /><span>{{ $t('nav.tasks') }}</span>
             </router-link>
             <router-link to="/workspace" class="nav-item" :class="{ active: route.name === 'Workspace' }">
-              <SvgIcon name="terminal" :size="14" /><span>Workspace</span>
+              <SvgIcon name="terminal" :size="14" /><span>{{ $t('nav.workspace') }}</span>
             </router-link>
             <router-link to="/automations" class="nav-item" :class="{ active: route.name === 'Automations' }">
-              <SvgIcon name="clock" :size="14" /><span>Automations</span>
+              <SvgIcon name="clock" :size="14" /><span>{{ $t('nav.automations') }}</span>
             </router-link>
             <router-link to="/models" class="nav-item" :class="{ active: route.name === 'Models' }">
-              <SvgIcon name="monitor" :size="14" /><span>Models</span>
+              <SvgIcon name="monitor" :size="14" /><span>{{ $t('nav.models') }}</span>
             </router-link>
             <router-link to="/logs" class="nav-item" :class="{ active: route.name === 'Logs' }">
-              <SvgIcon name="file-text" :size="14" /><span>Logs</span>
+              <SvgIcon name="file-text" :size="14" /><span>{{ $t('nav.logs') }}</span>
             </router-link>
             <router-link to="/usage" class="nav-item" :class="{ active: route.name === 'Usage' }">
-              <SvgIcon name="activity" :size="14" /><span>Usage</span>
+              <SvgIcon name="activity" :size="14" /><span>{{ $t('nav.usage') }}</span>
             </router-link>
             <router-link to="/gateway" class="nav-item" :class="{ active: route.name === 'Gateway' }">
-              <SvgIcon name="globe" :size="14" /><span>Gateway</span>
+              <SvgIcon name="globe" :size="14" /><span>{{ $t('nav.gateway') }}</span>
             </router-link>
           </div>
         </div>
