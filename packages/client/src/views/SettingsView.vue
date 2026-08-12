@@ -45,7 +45,7 @@
                 <div class="setting-info">
                   <span class="setting-label">{{ $t('settings.language') }}</span>
                 </div>
-                <n-select v-model:value="form.language" :options="langOptions" size="small" style="width:140px" />
+                <n-select v-model:value="form.language" :options="langOptions" size="small" style="width:140px" @update:value="onLangChange" />
               </div>
               <div class="setting-row">
                 <span class="setting-label">{{ $t('settings.streamingEnabled') }}</span>
@@ -212,10 +212,10 @@ const themeOptions = [
   { label: t('settings.themeDark'), value: 'dark' },
 ]
 
-const langOptions = [
+const langOptions = computed(() => [
   { label: t('settings.langZh'), value: 'zh-CN' },
   { label: 'English', value: 'en-US' },
-]
+])
 
 const toolStrategyOptions = [
   { label: t('settings.auto'), value: 'auto' },
@@ -310,6 +310,8 @@ onMounted(async () => {
     Object.assign(form, data)
     if (data.language) {
       locale.value = data.language
+      // 同步 localStorage，避免刷新后 i18n 初始化读到旧值
+      localStorage.setItem('supercrzy-lang', data.language)
     }
     if (data.theme) {
       appStore.darkMode = data.theme === 'dark'
@@ -322,6 +324,12 @@ onMounted(async () => {
     console.error('[SettingsView] Failed to load settings:', err)
   }
 })
+
+/** 语言下拉切换即时生效（无需点保存），同时写入 localStorage 保证刷新后一致 */
+function onLangChange(v: string) {
+  locale.value = v
+  localStorage.setItem('supercrzy-lang', v)
+}
 
 async function saveSettings() {
   saving.value = true
