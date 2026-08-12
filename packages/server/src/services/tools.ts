@@ -184,7 +184,7 @@ const toolExecutors: Record<string, ToolExecutor> = {
     try {
       const response = await fetch(args.url, {
         headers: {
-          'User-Agent': 'SuperCrzy/1.0',
+          'User-Agent': 'SUPERCRZY-BOT/1.0',
         },
       })
       const contentType = response.headers.get('content-type') || ''
@@ -221,7 +221,7 @@ const toolExecutors: Record<string, ToolExecutor> = {
 
       const response = await fetch(url, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (compatible; SuperCrzy/1.0)',
+          'User-Agent': 'Mozilla/5.0 (compatible; SUPERCRZY-BOT/1.0)',
           'Accept': 'application/rss+xml, application/xml, text/xml',
         },
       })
@@ -294,7 +294,7 @@ const toolExecutors: Record<string, ToolExecutor> = {
       const encoded = encodeURIComponent(searchQuery)
       const url = `https://www.bing.com/search?format=rss&q=${encoded}&count=8`
       const response = await fetch(url, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; SuperCrzy/1.0)', 'Accept': 'application/rss+xml' },
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; SUPERCRZY-BOT/1.0)', 'Accept': 'application/rss+xml' },
       })
       if (!response.ok) return `Search failed: HTTP ${response.status}`
 

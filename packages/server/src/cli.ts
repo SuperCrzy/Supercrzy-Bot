@@ -39,7 +39,7 @@ let cliSettings: CliSettings = {
   model: 'deepseek-v4-pro',
   temperature: 0.7,
   maxTokens: 8192,
-  systemPrompt: 'You are SuperCrzy, a helpful AI assistant. Answer in the same language the user uses. Be concise and practical.',
+  systemPrompt: 'You are SUPERCRZY BOT, a helpful AI assistant. Answer in the same language the user uses. Be concise and practical.',
 }
 
 // ─── ANSI Colors ─────────────────────────────────────────
@@ -106,7 +106,7 @@ function banner() {
 
   console.log(`
 ${C.cyan}${C.bold}╔══════════════════════════════════════════╗
-║       SuperCrzy — CLI Mode          ║
+║       SUPERCRZY BOT — CLI Mode          ║
 ╚══════════════════════════════════════════╝${C.reset}
   Model:    ${C.yellow}${modelDisplay}${C.reset}
   API Key:  ${keyStatus}
@@ -137,7 +137,7 @@ function ask(rl: readline.Interface, question: string, defaultValue?: string): P
 }
 
 async function runSetupWizard(rl: readline.Interface): Promise<boolean> {
-  console.log(`\n${C.yellow}${C.bold}⚡ Welcome to SuperCrzy!${C.reset}`)
+  console.log(`\n${C.yellow}${C.bold}⚡ Welcome to SUPERCRZY BOT!${C.reset}`)
   console.log(`${C.dim}Let's set up your configuration to get started.${C.reset}\n`)
 
   // Step 1: API Key

@@ -207,7 +207,7 @@ export async function downloadFile(
     const res = await fetch(cdnUrl, {
       headers: {
         Authorization: `Bearer ${token}`,
-        'User-Agent': 'SuperCrzyAgent/1.0',
+        'User-Agent': 'SUPERCRZY-BOT/1.0',
       },
     })
 
