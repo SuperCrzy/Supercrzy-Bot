@@ -33,8 +33,8 @@
     <div class="messages-area" ref="messagesRef" @scroll="onScroll">
       <!-- Welcome -->
       <div v-if="messages.length === 0" class="welcome-area">
-        <div class="welcome-logo">DA</div>
-        <h1 class="welcome-title">DeepSeek Agent</h1>
+        <div class="welcome-logo">SC</div>
+        <h1 class="welcome-title">{{ $t('chat.welcomeTitle') }}</h1>
         <p class="welcome-subtitle">{{ $t('chat.welcomeDesc') }}</p>
         <div class="quick-prompts">
           <div class="quick-prompt" @click="sendQuick('帮我写一个 Python 快速排序函数，并测试它')">
