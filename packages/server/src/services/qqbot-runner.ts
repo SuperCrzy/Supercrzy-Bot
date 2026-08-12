@@ -62,7 +62,7 @@ export class QQBotRunner {
     }
   }
 
-  /** 调用 SUPERCRZY Agent */
+  /** 调用 SUPERCRZY BOT */
   private async callAgent(userId: string, text: string): Promise<string> {
     // 稳定 sessionId
     const sessionId = userId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 32)

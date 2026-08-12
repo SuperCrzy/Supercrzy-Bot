@@ -81,7 +81,7 @@ async function fetchGatewayUrl(token: string): Promise<string> {
 }
 
 /**
- * 调用 SUPERCRZY Agent 获取回复
+ * 调用 SUPERCRZY BOT 获取回复
  */
 async function callAgent(userMessage: string, userName: string): Promise<string> {
   const db = getDB()

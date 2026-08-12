@@ -24,7 +24,7 @@ function buildPrompt(userMsg: string, model: string): string {
   const prompt = `${systemPrompt}${memText}
 
 ## Your Setup
-- Model: **${model || 'deepseek-v4-pro'}** | Platform: SuperCrzy Agent
+- Model: **${model || 'deepseek-v4-pro'}** | Platform: SUPERCRZY BOT
 - Workspace: ${process.env.WORKSPACE_DIR || process.cwd()}
 
 ## Core Principle

@@ -183,7 +183,7 @@ function buildSystemPrompt(basePrompt: string, userMessage: string, model?: stri
   const prompt = `${basePrompt}
 
 ## Your Setup
-- Model: **${model || 'deepseek-v4-pro'}** | Platform: SuperCrzy Agent
+- Model: **${model || 'deepseek-v4-pro'}** | Platform: SUPERCRZY BOT
 - Tools: file, shell, web search, memory, skills
 
 ## Core Principle

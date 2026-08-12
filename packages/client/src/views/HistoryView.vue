@@ -3,7 +3,7 @@
     <header class="page-header">
       <div>
         <h2>历史记录</h2>
-        <p class="page-desc">这里按来源只读查看 SuperCrzy 历史会话。</p>
+        <p class="page-desc">这里按来源只读查看 SUPERCRZY BOT 历史会话。</p>
       </div>
       <n-input v-model:value="searchText" placeholder="搜索会话..." clearable class="search-input">
         <template #prefix><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></template>
@@ -51,7 +51,7 @@
       <div class="detail-messages" v-if="detailMessages.length">
         <div v-for="msg in detailMessages" :key="msg.id" class="detail-msg" :class="msg.role">
           <div class="detail-msg-header">
-            <span class="detail-msg-role">{{ msg.role === 'user' ? 'You' : 'SuperCrzy' }}</span>
+            <span class="detail-msg-role">{{ msg.role === 'user' ? 'You' : 'SUPERCRZY BOT' }}</span>
             <span class="detail-msg-time">{{ formatTime(msg.created_at || msg.createdAt) }}</span>
           </div>
           <div class="detail-msg-content">{{ msg.content }}</div>

@@ -1,5 +1,5 @@
 <template>
-  <div class="page-container"><header class="page-header"><h2>工作区文件</h2><p class="page-desc">浏览和管理 SuperCrzy 工作区文件</p></header>
+  <div class="page-container"><header class="page-header"><h2>工作区文件</h2><p class="page-desc">浏览和管理 SUPERCRZY BOT 工作区文件</p></header>
     <div class="file-browser">
       <div class="breadcrumb"><span v-for="(p,i) in pathParts" :key="i" class="breadcrumb-item" @click="navigateTo(i)">{{ p || '根目录' }}</span></div>
       <div class="file-list">

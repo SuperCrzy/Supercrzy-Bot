@@ -420,7 +420,7 @@ async function bootstrap() {
 
   server.listen(PORT, () => {
     const localIP = getLocalIP()
-    console.log(`\n🚀 SUPERCRZY Agent running on:`)
+    console.log(`\n🚀 SUPERCRZY BOT running on:`)
     console.log(`   Local:   http://localhost:${PORT}`)
     if (localIP) console.log(`   Network: http://${localIP}:${PORT}`)
     if (getTunnelUrl()) console.log(`   Tunnel:  ${getTunnelUrl()}`)

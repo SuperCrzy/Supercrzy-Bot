@@ -26,7 +26,7 @@
       <!-- Logo -->
       <div class="sidebar-header" @click="navigate('Chat')">
         <div class="logo-icon">SC</div>
-        <span class="logo-text" v-show="!sidebarCollapsed">SUPERCRZY</span>
+        <span class="logo-text" v-show="!sidebarCollapsed">SUPERCRZY BOT</span>
       </div>
 
       <button class="collapse-btn" @click="toggleSidebar">
@@ -232,7 +232,7 @@
           </button>
         </div>
         <div class="version-info">
-          <a href="#" class="version-link">SuperCrzy v1.0.0</a>
+          <a href="#" class="version-link">SUPERCRZY BOT v1.0.0</a>
         </div>
       </div>
     </aside>
@@ -284,7 +284,7 @@ const optChildren = (opt: ModelSelectOption) => (isGroup(opt) ? opt.children : [
 function checkMobile() { isMobile.value = window.innerWidth <= 768 }
 onMounted(() => { checkMobile(); window.addEventListener('resize', checkMobile) })
 
-const currentPageTitle = computed(() => (route.meta.title as string) || 'SUPERCRZY')
+const currentPageTitle = computed(() => (route.meta.title as string) || 'SUPERCRZY BOT')
 
 const groups = reactive({ chat: true, agent: true, monitor: true, system: true })
 
