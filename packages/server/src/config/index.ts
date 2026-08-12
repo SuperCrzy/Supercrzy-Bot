@@ -34,4 +34,9 @@ export const config = {
     path: process.env.DB_PATH || './data/supercrzy.db',
   },
   workspaceDir: process.env.WORKSPACE_DIR || process.cwd(),
+  // 隧道默认关闭：纯本地运行，只有显式设置 TUNNEL_ENABLED=true 才开启公网穿透
+  tunnel: {
+    enabled: process.env.TUNNEL_ENABLED === 'true',
+    subdomain: process.env.TUNNEL_SUBDOMAIN || '',
+  },
 }

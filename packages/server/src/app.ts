@@ -404,9 +404,9 @@ async function bootstrap() {
   // Agent Socket.IO
   createAgentIOServer(server)
 
-  // Cloudflare Tunnel
-  const tunnelSubdomain = process.env.TUNNEL_SUBDOMAIN || config.tunnel?.subdomain
-  if (config.tunnel?.enabled !== false) {
+  // Cloudflare Tunnel（默认关闭，TUNNEL_ENABLED=true 才开启）
+  const tunnelSubdomain = process.env.TUNNEL_SUBDOMAIN || config.tunnel.subdomain
+  if (config.tunnel.enabled) {
     startTunnel(PORT).catch((err: any) => {
       console.warn('[Tunnel] Failed to start:', err.message)
     })
