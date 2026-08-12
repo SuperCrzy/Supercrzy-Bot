@@ -102,7 +102,7 @@ let term: Terminal | null = null
 let fitAddon: FitAddon | null = null
 let editor: monaco.editor.IStandaloneCodeEditor | null = null
 
-const WS_URL = `ws://localhost:${location.port}/ws/terminal`
+const WS_URL = `${location.protocol === 'https:' ? 'wss://' : 'ws://'}${location.host}/ws/terminal`
 
 // WebSocket connection
 function connectWS() {

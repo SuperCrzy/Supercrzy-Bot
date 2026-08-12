@@ -234,20 +234,24 @@ function removeLSConfig(id: string) {
 // providerConfigs 用 reactive 而非 ref，确保深层变更触发视图更新
 const providerConfigs = reactive<Record<string, ProviderConfig>>(loadLSConfigs())
 
+/** 全局 settings 表里是否已配置 API Key（脱敏后接口只返回 hasApiKey，不返回明文） */
+const hasGlobalKey = ref(false)
+
 /** 从 /api/settings 加载全局 DeepSeek 作为 fallback */
 async function loadGlobalSettings() {
   try {
     const res = await fetch('/api/settings')
     if (!res.ok) { console.log('[Models] settings fetch failed:', res.status); return }
     const data = await res.json()
-    console.log('[Models] settings loaded, apiKey:', !!data.apiKey, 'model:', data.model)
+    console.log('[Models] settings loaded, hasApiKey:', !!data.hasApiKey, 'model:', data.model)
+    hasGlobalKey.value = !!data.hasApiKey || !!data.apiKeyMasked
     // 仅当 DeepSeek 还没在 localStorage 配置时，用全局设置填充
     const ds = providerConfigs.deepseek
     const hasLS = !!(ds && ds.apiKey)
-    console.log('[Models] deepseek config:', { hasLS, hasApiKey: !!data.apiKey, hasMasked: !!data.apiKeyMasked })
-    if (!hasLS && (data.apiKey || data.apiKeyMasked)) {
+    console.log('[Models] deepseek config:', { hasLS, hasApiKey: hasGlobalKey.value, hasMasked: !!data.apiKeyMasked })
+    if (!hasLS && hasGlobalKey.value) {
       const cfg: ProviderConfig = {
-        apiKey: data.apiKey || '',
+        apiKey: '',
         baseUrl: data.baseUrl || PREDEFINED[0].baseUrl,
         defaultModel: data.model || PREDEFINED[0].defaultModel,
       }
@@ -310,7 +314,7 @@ const currentProvider = computed(() => {
 const presetProviders = computed(() =>
   PREDEFINED.map(p => ({
     ...p,
-    configured: !!(providerConfigs[p.id]?.apiKey),
+    configured: !!(providerConfigs[p.id]?.apiKey) || (p.id === 'deepseek' && hasGlobalKey.value),
   }))
 )
 
@@ -322,7 +326,8 @@ const allModelOptions = computed(() => {
   // 1. 已配置的 provider 默认模型（从 providerConfigs 读取）
   for (const p of PREDEFINED) {
     const cfg = providerConfigs[p.id]
-    if (cfg?.apiKey && !seen.has(cfg.defaultModel)) {
+    const isConfigured = !!cfg?.apiKey || (p.id === 'deepseek' && hasGlobalKey.value)
+    if (isConfigured && cfg?.defaultModel && !seen.has(cfg.defaultModel)) {
       seen.add(cfg.defaultModel)
       const short = getModelShortName(cfg.defaultModel)
       const label = short !== cfg.defaultModel ? `${short} (${p.label})` : `${cfg.defaultModel} (${p.label})`

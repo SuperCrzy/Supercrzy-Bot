@@ -3,12 +3,12 @@
     <header class="page-header">
       <div class="header-row">
         <div>
-          <h2>系统日志</h2>
-          <p class="page-desc">实时查看系统运行日志和消息记录</p>
+          <h2>最近消息</h2>
+          <p class="page-desc">最近 50 条消息记录 · 系统运行日志能力规划中</p>
         </div>
         <div class="header-actions">
           <n-input-group size="small" class="search-box">
-            <n-input v-model:value="searchQuery" placeholder="搜索日志..." clearable />
+            <n-input v-model:value="searchQuery" placeholder="搜索消息..." clearable />
             <n-button type="primary" ghost @click="loadLogs">刷新</n-button>
           </n-input-group>
           <n-checkbox v-model:checked="autoRefresh" size="small">自动刷新</n-checkbox>
@@ -22,7 +22,7 @@
           <n-button :type="levelFilter === 'error' ? 'error' : 'default'" @click="levelFilter = 'error'" ghost>ERROR</n-button>
           <n-button :type="levelFilter === 'debug' ? 'default' : 'default'" @click="levelFilter = 'debug'" ghost>DEBUG</n-button>
         </n-button-group>
-        <span class="log-count">{{ filteredLogs.length }} 条日志</span>
+        <span class="log-count">{{ filteredLogs.length }} 条消息</span>
       </div>
     </header>
 
@@ -39,7 +39,7 @@
           <span v-if="l.tokens" class="log-tokens">{{ l.tokens }} tokens</span>
         </span>
       </div>
-      <n-empty v-if="filteredLogs.length === 0 && !loading" description="暂无日志" class="empty-state" />
+      <n-empty v-if="filteredLogs.length === 0 && !loading" description="暂无消息" class="empty-state" />
       <n-spin v-if="loading" class="loading-spin" />
     </div>
 

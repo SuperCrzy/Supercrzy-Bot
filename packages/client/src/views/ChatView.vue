@@ -438,6 +438,8 @@ async function handleSend() {
     chatStore.setLoading(false)
     abortController.value = null
     if (session) {
+      // 估算 token 数（中英混合粗略 0.6 token/字符），供用量统计使用
+      assistantMsg.tokenCount = Math.ceil(textOf(assistantMsg.content).length * 0.6)
       chatStore.persistLastMessage(session.id)
     }
   }

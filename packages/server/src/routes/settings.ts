@@ -24,9 +24,16 @@ settingsRouter.get('/', (ctx: Context) => {
       settings[row.key] = row.value
     }
   }
-  // Mask API key
+  // 脱敏：不返回明文密钥，只返回 masked + 布尔标记（ModelsView/SettingsView 已适配）
   if (settings.apiKey) {
     settings.apiKeyMasked = settings.apiKey.slice(0, 8) + '...' + settings.apiKey.slice(-4)
+    settings.hasApiKey = true
+    delete settings.apiKey
+  }
+  if (settings.qqAppSecret) {
+    settings.qqAppSecretMasked = settings.qqAppSecret.slice(0, 4) + '...' + settings.qqAppSecret.slice(-4)
+    settings.hasQqAppSecret = true
+    delete settings.qqAppSecret
   }
   ctx.body = settings
 })

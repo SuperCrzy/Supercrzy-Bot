@@ -17,6 +17,21 @@ historyRouter.get('/', (ctx: Context) => {
   ctx.body = sessions
 })
 
+// 全文检索消息（必须先于 /:id 注册，否则 'search' 会被当成 id）
+historyRouter.get('/search', (ctx: Context) => {
+  const q = ((ctx.query.q as string) || '').trim()
+  if (!q) { ctx.body = []; return }
+  const db = getDB()
+  const like = `%${q}%`
+  const rows = db.prepare(`
+    SELECT m.id, m.session_id, m.role, m.content, m.created_at, s.title as session_title
+    FROM messages m LEFT JOIN sessions s ON m.session_id = s.id
+    WHERE m.content LIKE ?
+    ORDER BY m.created_at DESC LIMIT 50
+  `).all(like)
+  ctx.body = rows
+})
+
 // Get session detail with messages
 historyRouter.get('/:id', (ctx: Context) => {
   const db = getDB()

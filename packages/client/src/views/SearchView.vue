@@ -1,12 +1,26 @@
 <template>
   <div class="page-container"><header class="page-header"><h2>搜索</h2><p class="page-desc">搜索所有对话消息</p></header>
     <div class="search-area"><n-input v-model:value="query" placeholder="输入关键词搜索对话..." size="large" clearable @keyup.enter="doSearch"><template #prefix><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></template></n-input></div>
-    <div class="results" v-if="results.length"><div v-for="r in results" :key="r.id" class="result-item"><div class="result-header"><n-tag size="tiny" :type="r.role === 'user' ? 'info' : 'success'">{{ r.role === 'user' ? '你' : 'AI' }}</n-tag><span class="result-time">{{ formatTime(r.created_at) }}</span><span class="result-session">{{ r.session_title }}</span></div><div class="result-content">{{ r.content.slice(0, 300) }}{{ r.content.length > 300 ? '...' : '' }}</div></div></div>
+    <div class="results" v-if="results.length"><div v-for="r in results" :key="r.id" class="result-item"><div class="result-header"><n-tag size="tiny" :type="r.role === 'user' ? 'info' : 'success'">{{ r.role === 'user' ? '你' : 'AI' }}</n-tag><span class="result-time">{{ formatTime(r.created_at) }}</span><span class="result-session">{{ r.session_title }}</span></div><div class="result-content">{{ displayContent(r.content).slice(0, 300) }}{{ displayContent(r.content).length > 300 ? '...' : '' }}</div></div></div>
     <n-empty v-else-if="query && searched" description="未找到结果" /></div>
 </template>
 <script setup lang="ts">
 import { ref } from 'vue'; const query = ref(''); const results = ref<any[]>([]); const searched = ref(false)
-async function doSearch() { if (!query.value.trim()) return; try { const res = await fetch(`/api/sessions`); if (res.ok) { const sessions = await res.json(); const all: any[] = []; for (const s of sessions) { const msgs = await fetch(`/api/sessions/${s.id}`).then(r => r.json()).then(d => d.messages || []); for (const m of msgs) { if (m.content?.toLowerCase().includes(query.value.toLowerCase())) { all.push({ ...m, session_title: s.title }) } } } results.value = all } } catch {} finally { searched.value = true } }
+async function doSearch() { if (!query.value.trim()) return; try { const res = await fetch(`/api/history/search?q=${encodeURIComponent(query.value.trim())}`); if (res.ok) results.value = await res.json() } catch {} finally { searched.value = true } }
+// 兼容两种 content：纯文本 / ContentBlock[] JSON 字符串（agent 消息）
+function displayContent(content: any): string {
+  if (typeof content !== 'string') return ''
+  const trimmed = content.trim()
+  if (trimmed.startsWith('[')) {
+    try {
+      const blocks = JSON.parse(trimmed)
+      if (Array.isArray(blocks)) {
+        return blocks.filter((b: any) => b && b.type === 'text' && typeof b.text === 'string').map((b: any) => b.text).join('\n')
+      }
+    } catch {}
+  }
+  return content
+}
 function formatTime(d: string) { return new Date(d).toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) }
 </script>
 <style scoped>

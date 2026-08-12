@@ -22,9 +22,10 @@ const pathParts = computed(() => currentPath.value.split('/').filter(Boolean))
 function fileIcon(name: string) { const ext = name.split('.').pop()?.toLowerCase(); const icons: Record<string, string> = { vue: '💚', ts: '🔷', js: '🟨', json: '📋', md: '📝', css: '🎨', html: '🌐', py: '🐍', yml: '⚙️', yaml: '⚙️', sql: '🗄️', sh: '⚡' }; return icons[ext || ''] || '📄' }
 function formatSize(bytes: number) { if (!bytes) return '--'; if (bytes < 1024) return bytes + ' B'; if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB'; return (bytes / 1048576).toFixed(1) + ' MB' }
 function formatTime(d: string) { return new Date(d).toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) }
-function enterDir(name: string) { currentPath.value = currentPath.value ? `${currentPath.value}/${name}` : name }
-function navigateTo(idx: number) { currentPath.value = pathParts.value.slice(0, idx).join('/') }
-onMounted(async () => { try { const res = await fetch('/api/channel/files'); if (res.ok) files.value = await res.json() } catch { files.value = [{ name: 'src', isDir: true, size: 0, mtime: new Date().toISOString() }, { name: 'package.json', isDir: false, size: 1024, mtime: new Date().toISOString() }] } })
+function enterDir(name: string) { currentPath.value = currentPath.value ? `${currentPath.value}/${name}` : name; loadFiles() }
+function navigateTo(idx: number) { currentPath.value = pathParts.value.slice(0, idx).join('/'); loadFiles() }
+onMounted(loadFiles)
+async function loadFiles() { try { const res = await fetch(`/api/workspace/files${currentPath.value ? `?dir=${encodeURIComponent(currentPath.value)}` : ''}`); if (res.ok) { const data = await res.json(); files.value = (data.files || []).map((f: any) => ({ ...f, isDir: f.type === 'directory' })) } } catch {} }
 </script>
 <style scoped>
 .page-container { height: 100vh; display: flex; flex-direction: column; }
