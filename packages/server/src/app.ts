@@ -34,6 +34,7 @@ import tasksRouter from './routes/tasks'
 import automationsRouter from './routes/automations'
 import { modelsRouter } from './routes/models'
 import { workspaceRouter } from './routes/workspace'
+import checkpointsRouter from './routes/checkpoints'
 import { startScheduler } from './services/scheduler'
 import { loadCredentials, sendMessage } from './services/wechat-ilink'
 import { startBot, setMessageHandlerFull } from './services/wechat-bot-runner'
@@ -359,7 +360,7 @@ async function bootstrap() {
   }
 
   // API Routes
-  const routers = [uploadRouter, chatRouter, settingsRouter, sessionRouter, historyRouter, statsRouter, memoryRouter, gatewayRouter, skillsRouter, tasksRouter, automationsRouter, modelsRouter, workspaceRouter]
+  const routers = [uploadRouter, chatRouter, settingsRouter, sessionRouter, historyRouter, statsRouter, memoryRouter, gatewayRouter, skillsRouter, tasksRouter, automationsRouter, modelsRouter, workspaceRouter, checkpointsRouter]
   for (const r of routers) {
     app.use(r.routes())
     app.use(r.allowedMethods())

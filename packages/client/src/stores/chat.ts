@@ -48,6 +48,8 @@ export const useChatStore = defineStore('chat', () => {
   const messages = ref<Map<string, ChatMessage[]>>(new Map())
   const isLoading = ref(false)
   const loaded = ref(false)
+  /** 分支续跑信号：TimelinePanel 设置后，ChatView 监听并发起续跑 */
+  const pendingResume = ref<string | null>(null)
 
   const currentSession = computed(() =>
     sessions.value.find((s) => s.id === currentSessionId.value)
@@ -246,6 +248,7 @@ export const useChatStore = defineStore('chat', () => {
     messages,
     isLoading,
     loaded,
+    pendingResume,
     currentSession,
     currentMessages,
     loadSessions,

@@ -111,6 +111,11 @@
           <iframe :src="previewUrl" class="preview-iframe"></iframe>
         </div>
       </div>
+
+      <!-- 时间线 Tab -->
+      <div v-if="activeTab === 'timeline'" class="tab-content">
+        <TimelinePanel :flow="lastAssistantFlow" />
+      </div>
     </div>
   </aside>
 </template>
@@ -121,6 +126,8 @@ import { NEmpty } from 'naive-ui'
 import { useAppStore } from '@/stores/app'
 import { useChatStore } from '@/stores/chat'
 import { extractFiles } from '@/types'
+import type { ChatFlowNode } from '@/types'
+import TimelinePanel from '@/components/chat/TimelinePanel.vue'
 import type { FileBlock } from '@/types'
 import * as monaco from 'monaco-editor'
 
@@ -133,16 +140,28 @@ interface FileEntry {
 
 const props = defineProps<{
   visible: boolean
-  activeTab: 'artifacts' | 'files' | 'changes' | 'preview'
+  activeTab: 'artifacts' | 'files' | 'changes' | 'preview' | 'timeline'
 }>()
 
 const emit = defineEmits<{
   (e: 'toggle'): void
-  (e: 'update:tab', tab: 'artifacts' | 'files' | 'changes' | 'preview'): void
+  (e: 'update:tab', tab: 'artifacts' | 'files' | 'changes' | 'preview' | 'timeline'): void
 }>()
 
 const appStore = useAppStore()
 const chatStore = useChatStore()
+
+/** 当前会话最后一条 assistant 消息的时序流（时间线数据源） */
+const lastAssistantFlow = computed<ChatFlowNode[] | undefined>(() => {
+  const msgs = chatStore.currentMessages
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i]
+    if (m.role === 'assistant' && m.flow && m.flow.length) {
+      return m.flow
+    }
+  }
+  return undefined
+})
 
 // ----- Artifacts -----
 const artifactFiles = computed<FileBlock[]>(() => {
@@ -284,7 +303,7 @@ watch(() => appStore.previewFilePath, (path) => {
   }
 })
 
-function switchTab(tab: 'artifacts' | 'files' | 'changes' | 'preview') {
+function switchTab(tab: 'artifacts' | 'files' | 'changes' | 'preview' | 'timeline') {
   emit('update:tab', tab)
   if (tab === 'files' && fileTree.value.length === 0) {
     loadFiles()
@@ -302,6 +321,7 @@ const tabs = [
   { key: 'files' as const, label: '文件', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>' },
   { key: 'changes' as const, label: '变更', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>' },
   { key: 'preview' as const, label: '预览', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>' },
+  { key: 'timeline' as const, label: '时间线', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17h18M3 12h18M3 7h18"/><circle cx="12" cy="17" r="1.5" fill="currentColor"/><circle cx="7" cy="12" r="1.5" fill="currentColor"/><circle cx="16" cy="7" r="1.5" fill="currentColor"/></svg>' },
 ]
 </script>
 

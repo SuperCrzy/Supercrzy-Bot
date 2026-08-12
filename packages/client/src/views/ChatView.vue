@@ -388,6 +388,49 @@ watch(() => chatStore.currentSessionId, () => {
   stickToBottom.value = true
   scrollToBottom(true)
 })
+// 分支续跑信号（来自 TimelinePanel）→ 从 checkpoint 继续执行
+watch(() => chatStore.pendingResume, (ckptId) => {
+  if (!ckptId) return
+  chatStore.pendingResume = null
+  resumeFromCheckpoint(ckptId)
+})
+
+/** 从指定 checkpoint 继续 Agent 执行（分支续跑） */
+async function resumeFromCheckpoint(ckptId: string) {
+  if (chatStore.isLoading) {
+    chatStore.pendingResume = ckptId
+    return
+  }
+  let session = chatStore.currentSession
+  if (!session) {
+    session = await chatStore.createSession(`续跑 ${ckptId.slice(0, 8)}`)
+  }
+  const assistantMsg: ChatMessage = {
+    id: crypto.randomUUID(),
+    role: 'assistant',
+    content: '',
+    createdAt: new Date().toISOString(),
+    flow: [],
+  }
+  chatStore.addMessage(session.id, assistantMsg)
+  chatStore.setLoading(true)
+  abortController.value = new AbortController()
+  try {
+    await sendAgentMessage(assistantMsg, [], ckptId)
+  } catch (err: any) {
+    if (err.name !== 'AbortError') {
+      const cur = messages.value.find((m) => m.id === assistantMsg.id)
+      if (cur) cur.content = `❌ 续跑失败：${err.message || '未知错误'}`
+    }
+  } finally {
+    chatStore.setLoading(false)
+    abortController.value = null
+    if (session) {
+      assistantMsg.tokenCount = Math.ceil(textOf(assistantMsg.content).length * 0.6)
+      chatStore.persistLastMessage(session.id)
+    }
+  }
+}
 
 function sendQuick(text: string) {
   inputText.value = text
@@ -498,11 +541,11 @@ async function handleSend() {
 /**
  * Agent 模式 — 使用 /api/chat/agent，处理 named SSE 事件
  */
-async function sendAgentMessage(assistantMsg: ChatMessage, apiMessages: Array<{ role: string; content: string }>) {
+async function sendAgentMessage(assistantMsg: ChatMessage, apiMessages: Array<{ role: string; content: string }>, resumeCheckpoint?: string) {
   const res = await fetch('/api/chat/agent', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messages: apiMessages, model: appStore.currentModel }),
+    body: JSON.stringify({ messages: apiMessages, model: appStore.currentModel, resumeCheckpoint }),
     signal: abortController.value!.signal,
   })
 

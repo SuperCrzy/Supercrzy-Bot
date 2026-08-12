@@ -286,6 +286,13 @@ export async function handleAgentChat(ctx: Context) {
   ctx.res.write(': connected\n\n')
 
   try {
+    // 兼容两种 resumeCheckpoint 语义：checkpoint id 或完整文件路径
+    let resumePath = body.resumeCheckpoint
+    if (resumePath && !resumePath.includes('/') && !resumePath.endsWith('.json')) {
+      const { join } = await import('path')
+      resumePath = join(process.cwd(), 'data', 'checkpoints', `${resumePath}.json`)
+    }
+
     await runAgentLoop(
       ctx,
       body.messages,
@@ -298,7 +305,7 @@ export async function handleAgentChat(ctx: Context) {
         systemPrompt,
         maxTurns,
       },
-      body.resumeCheckpoint,
+      resumePath,
     )
     ctx.res.end()
   } catch (err: any) {
