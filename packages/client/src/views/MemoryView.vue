@@ -1,12 +1,12 @@
 <template>
   <div class="page-container">
     <header class="page-header">
-      <h2>记忆管理</h2>
-      <p class="page-desc">管理智能体的长期记忆。智能体会自动从对话中学习并存储重要信息。</p>
+      <h2>{{ $t('memory.title') }}</h2>
+      <p class="page-desc">{{ $t('memory.desc') }}</p>
       <div class="header-actions">
         <n-input
           v-model:value="searchQuery"
-          placeholder="搜索记忆..."
+          :placeholder="$t('memory.searchPlaceholder')"
           clearable
           size="small"
           class="search-input"
@@ -18,7 +18,7 @@
         <n-select
           v-model:value="filterCategory"
           :options="categoryOpts"
-          placeholder="全部分类"
+          :placeholder="$t('memory.allCategories')"
           size="small"
           clearable
           style="width: 130px"
@@ -27,7 +27,7 @@
           <template #icon>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           </template>
-          添加记忆
+          {{ $t('memory.addMemory') }}
         </n-button>
       </div>
     </header>
@@ -57,7 +57,7 @@
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                     </n-button>
                   </template>
-                  确定删除这条记忆？
+                  {{ $t('memory.deleteConfirm') }}
                 </n-popconfirm>
               </div>
             </div>
@@ -67,34 +67,34 @@
             </div>
           </n-card>
         </div>
-        <n-empty v-else description="暂无记忆" class="empty-hint" />
+        <n-empty v-else :description="$t('memory.noMemory')" class="empty-hint" />
       </n-spin>
     </div>
 
     <!-- Create/Edit Modal -->
-    <n-modal v-model:show="showCreateModal" preset="card" title="记忆详情" style="max-width: 500px" :mask-closable="false">
+    <n-modal v-model:show="showCreateModal" preset="card" :title="$t('memory.detailTitle')" style="max-width: 500px" :mask-closable="false">
       <div class="modal-form">
         <div class="form-group">
-          <label>标识（key）</label>
-          <n-input v-model:value="editForm.key" placeholder="例如：用户偏好、项目名称" />
+          <label>{{ $t('memory.key') }}</label>
+          <n-input v-model:value="editForm.key" :placeholder="$t('memory.keyPlaceholder')" />
         </div>
         <div class="form-group">
-          <label>内容</label>
-          <n-input v-model:value="editForm.content" type="textarea" :rows="4" placeholder="记忆的具体内容..." />
+          <label>{{ $t('memory.content') }}</label>
+          <n-input v-model:value="editForm.content" type="textarea" :rows="4" :placeholder="$t('memory.contentPlaceholder')" />
         </div>
         <div class="form-group">
-          <label>分类</label>
+          <label>{{ $t('memory.category') }}</label>
           <n-select v-model:value="editForm.category" :options="categoryOpts.filter(o => o.value !== 'all')" />
         </div>
         <div class="form-group">
-          <label>重要性</label>
+          <label>{{ $t('memory.importance') }}</label>
           <n-rate v-model:value="editForm.importance" :count="5" size="medium" />
         </div>
       </div>
       <template #footer>
-        <n-button @click="showCreateModal = false">取消</n-button>
+        <n-button @click="showCreateModal = false">{{ $t('common.cancel') }}</n-button>
         <n-button type="primary" @click="saveMemory" :loading="saving">
-          {{ editForm.id ? '更新' : '创建' }}
+          {{ editForm.id ? $t('common.update') : $t('common.create') }}
         </n-button>
       </template>
     </n-modal>
@@ -104,6 +104,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useMessage } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 
 interface Memory {
   id: string
@@ -116,6 +117,7 @@ interface Memory {
 }
 
 const nMessage = useMessage()
+const { t } = useI18n()
 const memories = ref<Memory[]>([])
 const loading = ref(false)
 const saving = ref(false)
@@ -132,11 +134,11 @@ const editForm = ref({
 })
 
 const categoryOpts = [
-  { label: '全部', value: 'all' },
-  { label: '通用', value: 'general' },
-  { label: '偏好', value: 'preference' },
-  { label: '事实', value: 'fact' },
-  { label: '规则', value: 'rule' },
+  { label: t('memory.catAll'), value: 'all' },
+  { label: t('memory.categories.general'), value: 'general' },
+  { label: t('memory.categories.preference'), value: 'preference' },
+  { label: t('memory.categories.fact'), value: 'fact' },
+  { label: t('memory.categories.rule'), value: 'rule' },
 ]
 
 const filteredMemories = computed(() => {
@@ -163,10 +165,10 @@ function categoryType(cat: string): 'default' | 'info' | 'success' | 'warning' |
 
 function categoryLabel(cat: string): string {
   const map: Record<string, string> = {
-    general: '通用',
-    preference: '偏好',
-    fact: '事实',
-    rule: '规则',
+    general: t('memory.categories.general'),
+    preference: t('memory.categories.preference'),
+    fact: t('memory.categories.fact'),
+    rule: t('memory.categories.rule'),
   }
   return map[cat] || cat
 }
@@ -176,9 +178,9 @@ function formatTime(d: string): string {
   const date = new Date(d)
   const now = new Date()
   const diff = now.getTime() - date.getTime()
-  if (diff < 60000) return '刚刚'
-  if (diff < 3600000) return `${Math.floor(diff / 60000)}m 前`
-  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h 前`
+  if (diff < 60000) return t('common.justNow')
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}${t('common.minAgo')}`
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)}${t('common.hourAgo')}`
   return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
@@ -198,7 +200,7 @@ async function fetchMemories() {
       memories.value = await res.json()
     }
   } catch (err: any) {
-    nMessage.error('加载记忆失败')
+    nMessage.error(t('memory.loadFail'))
   } finally {
     loading.value = false
   }
@@ -217,7 +219,7 @@ function editMemory(mem: Memory) {
 
 async function saveMemory() {
   if (!editForm.value.key.trim() || !editForm.value.content.trim()) {
-    nMessage.warning('请填写标识和内容')
+    nMessage.warning(t('memory.needKeyContent'))
     return
   }
   saving.value = true
@@ -236,13 +238,13 @@ async function saveMemory() {
       }),
     })
     if (res.ok) {
-      nMessage.success(isUpdate ? '记忆已更新' : '记忆已创建')
+      nMessage.success(isUpdate ? t('memory.updated') : t('memory.created'))
       showCreateModal.value = false
       editForm.value = { id: '', key: '', content: '', category: 'general', importance: 1 }
       await fetchMemories()
     }
   } catch {
-    nMessage.error('保存失败')
+    nMessage.error(t('memory.saveFail'))
   } finally {
     saving.value = false
   }
@@ -252,11 +254,11 @@ async function deleteMemory(id: string) {
   try {
     const res = await fetch(`/api/memory/${id}`, { method: 'DELETE' })
     if (res.ok) {
-      nMessage.success('已删除')
+      nMessage.success(t('memory.deleted'))
       memories.value = memories.value.filter((m) => m.id !== id)
     }
   } catch {
-    nMessage.error('删除失败')
+    nMessage.error(t('memory.deleteFail'))
   }
 }
 

@@ -6,7 +6,7 @@
         ref="inputRef"
         v-model="keyword"
         type="text"
-        placeholder="搜索消息内容..."
+        :placeholder="$t('chatui.searchPlaceholder')"
         class="search-input"
         @input="onSearch"
         @keydown.escape="close"
@@ -15,13 +15,13 @@
         @keydown.down.prevent="nextMatch"
       />
       <span v-if="keyword" class="match-count">{{ currentIdx + 1 }}/{{ totalMatches }}</span>
-      <button class="search-nav-btn" @click="prevMatch" title="上一个">
+      <button class="search-nav-btn" @click="prevMatch" :title="$t('chatui.prev')">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 15l-6-6-6 6"/></svg>
       </button>
-      <button class="search-nav-btn" @click="nextMatch" title="下一个">
+      <button class="search-nav-btn" @click="nextMatch" :title="$t('chatui.next')">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
       </button>
-      <button class="search-close-btn" @click="close" title="关闭">
+      <button class="search-close-btn" @click="close" :title="$t('common.close')">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>

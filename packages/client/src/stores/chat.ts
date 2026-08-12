@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia'
+import i18n from '@/i18n'
 import { ref, computed } from 'vue'
 import type { ChatSession, ChatMessage, ContentBlock, TextBlock } from '@/types'
 
@@ -30,16 +31,17 @@ export function formatRelativeTime(dateStr: string): string {
   const now = Date.now()
   const diff = now - date
   const seconds = Math.floor(diff / 1000)
-  if (seconds < 60) return '刚刚'
+  const tt = i18n().global.t
+  if (seconds < 60) return tt('common.justNow')
   const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}分钟前`
+  if (minutes < 60) return `${minutes}${tt('common.minAgo')}`
   const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}小时前`
+  if (hours < 24) return `${hours}${tt('common.hourAgo')}`
   const days = Math.floor(hours / 24)
-  if (days < 7) return `${days}天前`
-  if (days < 30) return `${Math.floor(days / 7)}周前`
-  if (days < 365) return `${Math.floor(days / 30)}个月前`
-  return `${Math.floor(days / 365)}年前`
+  if (days < 7) return `${days}${tt('common.dayAgo')}`
+  if (days < 30) return `${Math.floor(days / 7)}${tt('common.weekAgo')}`
+  if (days < 365) return `${Math.floor(days / 30)}${tt('common.monthAgo')}`
+  return `${Math.floor(days / 365)}${tt('common.yearAgo')}`
 }
 
 export const useChatStore = defineStore('chat', () => {

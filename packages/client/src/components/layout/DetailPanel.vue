@@ -13,7 +13,7 @@
         <span class="tab-label">{{ tab.label }}</span>
       </button>
 
-      <button class="panel-close-btn" @click="emit('toggle')" title="收起面板">
+      <button class="panel-close-btn" @click="emit('toggle')" :title="$t('detail.collapse')">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <polyline points="15 18 9 12 15 6" />
         </svg>
@@ -24,9 +24,9 @@
     <div class="panel-body">
       <!-- 产物 Tab -->
       <div v-if="activeTab === 'artifacts'" class="tab-content">
-        <div class="tab-hint">当前会话产生的交付文件</div>
+        <div class="tab-hint">{{ $t('detail.artifactsHint') }}</div>
         <div v-if="artifactFiles.length === 0" class="tab-empty">
-          <n-empty description="暂无产物" />
+          <n-empty :description="$t('detail.noArtifacts')" />
         </div>
         <div v-else class="file-list">
           <div
@@ -45,11 +45,11 @@
 
       <!-- 文件 Tab — 工作区文件树 -->
       <div v-if="activeTab === 'files'" class="tab-content">
-        <div class="tab-hint">当前目录: {{ currentDir || '/' }}</div>
-        <button class="refresh-btn" @click="() => loadFiles()" :disabled="loadingFiles">刷新</button>
-        <div v-if="loadingFiles" class="loading-hint">加载中...</div>
+        <div class="tab-hint">{{ $t('detail.currentDir') }}: {{ currentDir || '/' }}</div>
+        <button class="refresh-btn" @click="() => loadFiles()" :disabled="loadingFiles">{{ $t('common.refresh') }}</button>
+        <div v-if="loadingFiles" class="loading-hint">{{ $t('common.loading') }}</div>
         <div v-else-if="fileTree.length === 0" class="tab-empty">
-          <n-empty description="暂无文件" />
+          <n-empty :description="$t('detail.noFiles')" />
         </div>
         <div v-else class="file-list">
           <div
@@ -61,7 +61,7 @@
             <svg v-if="f.type === 'directory'" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#eab308" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
             <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
             <span class="file-name">{{ f.name }}</span>
-            <span v-if="f.type === 'directory'" class="file-type-dir">目录</span>
+            <span v-if="f.type === 'directory'" class="file-type-dir">{{ $t('detail.dir') }}</span>
             <span v-if="f.size" class="file-size">{{ formatSize(f.size) }}</span>
           </div>
         </div>
@@ -69,9 +69,9 @@
 
       <!-- 变更 Tab -->
       <div v-if="activeTab === 'changes'" class="tab-content">
-        <div class="tab-hint">文件变更记录</div>
+        <div class="tab-hint">{{ $t('detail.changesHint') }}</div>
         <div v-if="diffFiles.length === 0">
-          <n-empty description="暂无变更" />
+          <n-empty :description="$t('detail.noChanges')" />
         </div>
         <div v-else class="diff-list">
           <div v-for="(df, i) in diffFiles" :key="i" class="diff-item" @click="selectedDiff = i; showDiff()">
@@ -86,7 +86,7 @@
       <div v-if="activeTab === 'preview'" class="tab-content">
         <div v-if="previewFileName" class="mobile-tip">
           <div class="qr-section" v-if="previewUrl || previewFileName">
-            <div class="qr-label">📱 手机扫码预览</div>
+            <div class="qr-label">📱 {{ $t('detail.qrPreview') }}</div>
             <img
               :src="qrCodeURL"
               class="qr-code"
@@ -95,16 +95,16 @@
             <div class="qr-url">{{ mobilePreviewURL }}</div>
           </div>
         </div>
-        <div class="tab-hint">文件内容预览</div>
+        <div class="tab-hint">{{ $t('detail.previewHint') }}</div>
         <div v-if="!previewContent && !previewUrl" class="tab-empty">
-          <n-empty description="选中文件即可预览" />
+          <n-empty :description="$t('detail.selectToPreview')" />
         </div>
         <div v-else-if="previewContent" class="preview-content">
           <div class="preview-header">{{ previewFileName }}</div>
           <pre class="preview-code"><code>{{ previewContent }}</code></pre>
         </div>
         <div v-else-if="previewHtml" class="preview-content">
-          <div class="preview-header">HTML 预览</div>
+          <div class="preview-header">{{ $t('detail.htmlPreview') }}</div>
           <iframe :srcdoc="previewHtml" class="preview-iframe" sandbox="allow-scripts"></iframe>
         </div>
         <div v-else-if="previewUrl" class="preview-content">
@@ -130,6 +130,7 @@ import { ref, watch, computed, nextTick } from 'vue'
 import { NEmpty } from 'naive-ui'
 import { useAppStore } from '@/stores/app'
 import { useChatStore } from '@/stores/chat'
+import { useI18n } from 'vue-i18n'
 import { extractFiles } from '@/types'
 import type { ChatFlowNode } from '@/types'
 import TimelinePanel from '@/components/chat/TimelinePanel.vue'
@@ -155,6 +156,7 @@ const emit = defineEmits<{
 }>()
 
 const appStore = useAppStore()
+const { t } = useI18n()
 const chatStore = useChatStore()
 
 /** 当前会话最后一条 assistant 消息的时序流（时间线数据源） */
@@ -323,12 +325,12 @@ function formatSize(bytes: number): string {
 }
 
 const tabs = [
-  { key: 'artifacts' as const, label: '产物', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>' },
-  { key: 'files' as const, label: '文件', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>' },
-  { key: 'changes' as const, label: '变更', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>' },
-  { key: 'preview' as const, label: '预览', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>' },
-  { key: 'timeline' as const, label: '时间线', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17h18M3 12h18M3 7h18"/><circle cx="12" cy="17" r="1.5" fill="currentColor"/><circle cx="7" cy="12" r="1.5" fill="currentColor"/><circle cx="16" cy="7" r="1.5" fill="currentColor"/></svg>' },
-  { key: 'ghost' as const, label: '幽灵', icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a7 7 0 0 0-7 7v7h14v-7a7 7 0 0 0-7-7z"/><path d="M8 14h.01M16 14h.01M8 18v3M16 18v3"/></svg>' },
+  { key: 'artifacts' as const, label: t('detail.tabArtifacts'), icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>' },
+  { key: 'files' as const, label: t('detail.tabFiles'), icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>' },
+  { key: 'changes' as const, label: t('detail.tabChanges'), icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>' },
+  { key: 'preview' as const, label: t('detail.tabPreview'), icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>' },
+  { key: 'timeline' as const, label: t('detail.tabTimeline'), icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17h18M3 12h18M3 7h18"/><circle cx="12" cy="17" r="1.5" fill="currentColor"/><circle cx="7" cy="12" r="1.5" fill="currentColor"/><circle cx="16" cy="7" r="1.5" fill="currentColor"/></svg>' },
+  { key: 'ghost' as const, label: t('detail.tabGhost'), icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a7 7 0 0 0-7 7v7h14v-7a7 7 0 0 0-7-7z"/><path d="M8 14h.01M16 14h.01M8 18v3M16 18v3"/></svg>' },
 ]
 </script>
 

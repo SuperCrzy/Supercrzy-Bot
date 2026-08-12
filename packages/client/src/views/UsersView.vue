@@ -1,9 +1,9 @@
 <template>
-  <div class="page-container"><header class="page-header"><h2>用户管理</h2><p class="page-desc">管理 SUPERCRZY BOT 用户和访问权限</p></header>
+  <div class="page-container"><header class="page-header"><h2>{{ $t('users.title') }}</h2><p class="page-desc">{{ $t('users.desc') }}</p></header>
     <div class="users-list">
       <div class="user-card" v-for="u in users" :key="u.id">
         <div class="user-avatar">{{ u.name[0] }}</div>
-        <div class="user-info"><div class="user-name">{{ u.name }} <n-tag size="tiny" :bordered="false" :type="u.role === 'admin' ? 'error' : 'info'">{{ u.role }}</n-tag></div><div class="user-email">{{ u.email }}</div><div class="user-last">最后活跃: {{ u.lastActive }}</div></div>
+        <div class="user-info"><div class="user-name">{{ u.name }} <n-tag size="tiny" :bordered="false" :type="u.role === 'admin' ? 'error' : 'info'">{{ u.role }}</n-tag></div><div class="user-email">{{ u.email }}</div><div class="user-last">{{ $t('users.lastActive') }}: {{ u.lastActive }}</div></div>
         <n-switch :value="u.active" size="small" />
       </div>
     </div>

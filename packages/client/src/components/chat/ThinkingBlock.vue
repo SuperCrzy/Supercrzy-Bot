@@ -8,7 +8,7 @@
         <span class="thinking-turn">Turn {{ turn }}</span>
         <span class="thinking-message">{{ message }}</span>
         <button v-if="reasoning" class="thinking-toggle" @click="reasoningOpen = !reasoningOpen">
-          {{ reasoningOpen ? '收起思考' : '展开思考' }}
+          {{ reasoningOpen ? $t('chatui.collapseReason') : $t('chatui.expandReason') }}
         </button>
       </div>
       <div v-if="reasoning && reasoningOpen" class="thinking-reasoning">{{ reasoning }}</div>

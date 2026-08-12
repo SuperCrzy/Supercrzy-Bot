@@ -1,9 +1,9 @@
 <template>
   <div class="ghost-panel">
-    <div class="tab-hint">幽灵模式：感知工作区变化，低打扰地给出建议</div>
+    <div class="tab-hint">{{ $t('ghost.hint') }}</div>
 
     <div v-if="suggestions.length === 0" class="ghost-empty">
-      暂无建议。修改代码后，这里可能出现值得介入的提示（如硬编码密钥、重复模式、报错迹象）。
+      {{ $t('ghost.empty') }}
     </div>
 
     <div v-for="s in suggestions" :key="s.id" class="ghost-item" :class="{ executed: s.executed }">
@@ -15,9 +15,9 @@
       <div class="ghost-suggestion">{{ s.suggestion }}</div>
       <div class="ghost-foot">
         <span class="ghost-reason" :title="s.reason">{{ s.reason }}</span>
-        <span class="ghost-conf">置信 {{ Math.round(s.confidence * 100) }}%</span>
-        <button v-if="!s.executed" class="ghost-exec" @click="execute(s)">▶ 执行</button>
-        <span v-else class="ghost-done">✓ 已执行</span>
+        <span class="ghost-conf">{{ $t('ghost.confidence', { n: Math.round(s.confidence * 100) }) }}</span>
+        <button v-if="!s.executed" class="ghost-exec" @click="execute(s)">▶ {{ $t('ghost.execute') }}</button>
+        <span v-else class="ghost-done">✓ {{ $t('ghost.executed') }}</span>
       </div>
     </div>
   </div>

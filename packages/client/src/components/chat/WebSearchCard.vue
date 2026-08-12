@@ -2,12 +2,12 @@
   <div class="web-search-card" :class="{ collapsed: !expanded }">
     <div class="ws-header" @click="expanded = !expanded">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-      <span class="ws-query">{{ query || '搜索' }}</span>
-      <span v-if="resultCount > 0" class="ws-count">{{ resultCount }}条结果</span>
+      <span class="ws-query">{{ query || $t('chatui.search') }}</span>
+      <span v-if="resultCount > 0" class="ws-count">{{ $t('chatui.resultCount', { n: resultCount }) }}</span>
       <svg class="ws-chevron" :class="{ open: expanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
     </div>
     <div v-if="expanded" class="ws-body">
-      <div v-if="results.length === 0" class="ws-empty">暂无搜索结果</div>
+      <div v-if="results.length === 0" class="ws-empty">{{ $t('chatui.noResults') }}</div>
       <a
         v-for="(r, i) in results"
         :key="i"
@@ -16,7 +16,7 @@
         target="_blank"
         rel="noopener"
       >
-        <div class="ws-result-title">{{ r.title || '无标题' }}</div>
+        <div class="ws-result-title">{{ r.title || $t('chatui.noTitle') }}</div>
         <div class="ws-result-snippet">{{ r.snippet || r.description || '' }}</div>
         <div class="ws-result-url">{{ formatUrl(r.url || r.link) }}</div>
       </a>

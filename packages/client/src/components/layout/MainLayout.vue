@@ -81,7 +81,7 @@
             </router-link>
             <router-link v-if="!isMobile" to="/workspace" class="nav-item" :class="{ active: route.name === 'Workspace' }">
               <SvgIcon name="terminal" :size="16" />
-              <span>工作台</span>
+              <span>{{ $t('nav.workspace') }}</span>
             </router-link>
             <router-link to="/skills" class="nav-item" :class="{ active: route.name === 'Skills' }">
               <SvgIcon name="star" :size="16" />
@@ -141,7 +141,7 @@
         <!-- Advanced Group — mobile only, collapsed by default -->
         <div class="nav-group" v-if="isMobile">
           <div class="nav-group-title" @click="advancedOpen = !advancedOpen">
-            <span>高级</span>
+            <span>{{ $t('nav.agentGroup') }}</span>
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :class="{ rotated: advancedOpen }"><path d="M6 9l6 6 6-6"/></svg>
           </div>
           <div class="nav-items" v-show="advancedOpen">
@@ -173,7 +173,7 @@
       <!-- ===== Session List (integrated in sidebar) ===== -->
       <div class="sidebar-chats" v-show="!sidebarCollapsed">
         <div class="chats-header">
-          <span class="chats-title">对话</span>
+          <span class="chats-title">{{ $t('nav.chatGroup') }}</span>
           <n-button size="tiny" quaternary @click="handleNewChat">
             <template #icon><SvgIcon name="plus" :size="16" /></template>
           </n-button>
@@ -191,17 +191,17 @@
               <div class="chat-item-title">{{ s.title }}</div>
               <div class="chat-item-meta">{{ getModelShortName(s.model) }} · {{ formatRelativeTime(s.updatedAt) }}</div>
             </div>
-            <button class="chat-item-del" @click.stop="delSession(s.id)" title="删除">
+            <button class="chat-item-del" @click.stop="delSession(s.id)" :title="$t('common.delete')">
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
           </div>
-          <div v-if="chatStore.sessions.length === 0" class="chats-empty">暂无对话</div>
+          <div v-if="chatStore.sessions.length === 0" class="chats-empty">{{ $t('nav.noSessions') }}</div>
         </div>
       </div>
 
       <!-- ===== Model Selector in Sidebar ===== -->
       <div class="sidebar-model" v-show="!sidebarCollapsed">
-        <label class="model-label">当前模型</label>
+        <label class="model-label">{{ $t('models.currentModel') }}</label>
         <select
           class="sidebar-model-select"
           :value="appStore.currentModel"
@@ -216,7 +216,7 @@
             <option v-else :value="optValue(opt)">{{ opt.label }}</option>
           </template>
         </select>
-        <router-link to="/models" class="model-add-link">+ 添加或配置模型</router-link>
+        <router-link to="/models" class="model-add-link">+ {{ $t('models.addOrConfig') }}</router-link>
       </div>
 
       <!-- Footer -->
@@ -256,6 +256,7 @@
 import { reactive, ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'
+import { useI18n } from 'vue-i18n'
 import { useChatStore, formatRelativeTime } from '@/stores/chat'
 import { getModelShortName } from '@/data/models'
 import SvgIcon from '@/components/ui/SvgIcon.vue'
@@ -284,7 +285,9 @@ const optChildren = (opt: ModelSelectOption) => (isGroup(opt) ? opt.children : [
 function checkMobile() { isMobile.value = window.innerWidth <= 768 }
 onMounted(() => { checkMobile(); window.addEventListener('resize', checkMobile) })
 
-const currentPageTitle = computed(() => (route.meta.title as string) || 'SUPERCRZY BOT')
+const { t } = useI18n()
+
+const currentPageTitle = computed(() => (route.meta.title ? t(route.meta.title as string) : 'SUPERCRZY BOT'))
 
 const groups = reactive({ chat: true, agent: true, monitor: true, system: true })
 

@@ -28,7 +28,7 @@
     </div>
     <div class="question-actions">
       <button class="question-submit" :disabled="selectedIdx < 0" @click="submit">
-        提交选择
+        {{ $t('chatui.submitChoice') }}
       </button>
     </div>
   </div>

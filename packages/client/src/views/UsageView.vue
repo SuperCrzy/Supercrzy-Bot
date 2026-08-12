@@ -1,54 +1,54 @@
 <template>
   <div class="page-container">
     <header class="page-header">
-      <h2>用量统计</h2>
-      <p class="page-desc">查看 API 调用量、Token 消耗和费用统计</p>
+      <h2>{{ $t('usage.title') }}</h2>
+      <p class="page-desc">{{ $t('usage.desc') }}</p>
     </header>
 
     <!-- 概览卡片 -->
     <div class="stats-overview">
       <div class="overview-card primary">
         <div class="overview-value">{{ formatNumber(stats.total.messages) }}</div>
-        <div class="overview-label">总消息数</div>
-        <div class="overview-sub">共 {{ stats.total.sessions }} 个会话</div>
+        <div class="overview-label">{{ $t('usage.totalMessages') }}</div>
+        <div class="overview-sub">{{ $t('usage.sessionCount', { n: stats.total.sessions }) }}</div>
       </div>
       <div class="overview-card accent">
         <div class="overview-value">{{ formatNumber(stats.total.tokens) }}</div>
-        <div class="overview-label">总 Token 消耗</div>
-        <div class="overview-sub">约 ¥{{ stats.total.cost?.toFixed(4) || '0' }}</div>
+        <div class="overview-label">{{ $t('usage.totalTokenCost') }}</div>
+        <div class="overview-sub">{{ $t('usage.about') }} ¥{{ stats.total.cost?.toFixed(4) || '0' }}</div>
       </div>
       <div class="overview-card success">
         <div class="overview-value">{{ stats.today.messages }}</div>
-        <div class="overview-label">今日消息</div>
+        <div class="overview-label">{{ $t('usage.todayMessages') }}</div>
         <div class="overview-sub">{{ formatNumber(stats.today.tokens) }} tokens</div>
       </div>
       <div class="overview-card warning">
         <div class="overview-value">¥{{ stats.today.cost?.toFixed(6) || '0' }}</div>
-        <div class="overview-label">今日费用</div>
-        <div class="overview-sub">{{ stats.today.messages }} 条消息</div>
+        <div class="overview-label">{{ $t('usage.todayCost') }}</div>
+        <div class="overview-sub">{{ $t('usage.messageCount', { n: stats.today.messages }) }}</div>
       </div>
     </div>
 
     <!-- 7日趋势 -->
     <div class="section">
-      <h3 class="section-title">近 7 日用量趋势</h3>
+      <h3 class="section-title">{{ $t('usage.trendTitle') }}</h3>
       <div class="trend-chart">
         <VChart v-if="stats.weekly.length > 0" :option="chartOption" style="height:180px" autoresize />
-        <div v-else class="chart-empty">暂无数据</div>
+        <div v-else class="chart-empty">{{ $t('usage.noData') }}</div>
       </div>
     </div>
 
     <!-- 模型用量详情 -->
     <div class="section">
-      <h3 class="section-title">模型调用详情</h3>
+      <h3 class="section-title">{{ $t('usage.modelDetail') }}</h3>
       <n-table :single-line="false" size="small" class="model-table">
         <thead>
           <tr>
-            <th>模型</th>
-            <th>消息数</th>
-            <th>Token 消耗</th>
-            <th>预估费用</th>
-            <th>最后调用</th>
+            <th>{{ $t('usage.modelCol') }}</th>
+            <th>{{ $t('usage.messagesCol') }}</th>
+            <th>{{ $t('usage.tokensCol') }}</th>
+            <th>{{ $t('usage.costCol') }}</th>
+            <th>{{ $t('usage.lastCallCol') }}</th>
           </tr>
         </thead>
         <tbody>
@@ -61,7 +61,7 @@
           </tr>
         </tbody>
       </n-table>
-      <n-empty v-if="modelStats.length === 0" description="暂无模型调用数据" class="empty-mini" />
+      <n-empty v-if="modelStats.length === 0" :description="$t('usage.noModelData')" class="empty-mini" />
     </div>
   </div>
 </template>

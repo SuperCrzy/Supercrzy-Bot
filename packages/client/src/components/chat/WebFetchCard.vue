@@ -9,7 +9,7 @@
     </div>
     <div v-if="expanded" class="wf-body">
       <div v-if="content" class="wf-content">{{ content.slice(0, 2000) }}</div>
-      <div v-else class="wf-empty">内容为空</div>
+      <div v-else class="wf-empty">{{ $t('chatui.emptyContent') }}</div>
     </div>
   </div>
 </template>

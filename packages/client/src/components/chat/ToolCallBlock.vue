@@ -5,7 +5,7 @@
       <div class="confirm-header">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--warning)" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
         <div>
-          <div class="confirm-title">确认执行操作</div>
+          <div class="confirm-title">{{ $t('chatui.confirmTitle') }}</div>
           <div class="confirm-desc">{{ sensitiveDesc }}</div>
         </div>
       </div>
@@ -13,8 +13,8 @@
         <code v-for="(a,i) in formattedArgs.slice(0,3)" :key="i">{{ a.key }}: {{ a.value }}</code>
       </div>
       <div class="confirm-actions">
-        <button class="confirm-deny" @click.stop="$emit('deny')">拒绝</button>
-        <button class="confirm-allow" @click.stop="$emit('allow')">允许执行</button>
+        <button class="confirm-deny" @click.stop="$emit('deny')">{{ $t('chatui.deny') }}</button>
+        <button class="confirm-allow" @click.stop="$emit('allow')">{{ $t('chatui.allow') }}</button>
       </div>
     </div>
 
@@ -69,7 +69,9 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 
+const { t } = useI18n()
 const props = withDefaults(defineProps<{
   toolName: string
   args?: string
@@ -118,11 +120,11 @@ const SENSITIVE_TOOLS = new Set(['shell_exec', 'file_write', 'file_delete'])
 const isSensitive = computed(() => SENSITIVE_TOOLS.has(props.toolName))
 const sensitiveDesc = computed(() => {
   const map: Record<string, string> = {
-    shell_exec: 'Agent 想要执行系统命令',
-    file_write: 'Agent 想要写入文件',
-    file_delete: 'Agent 想要删除文件',
+    shell_exec: t('chatui.toolDescShell'),
+    file_write: t('chatui.toolDescFileWrite'),
+    file_delete: t('chatui.toolDescFileDelete'),
   }
-  return map[props.toolName] || 'Agent 想要执行敏感操作'
+  return map[props.toolName] || t('chatui.toolDescSensitive')
 })
 
 // Tool category mapping

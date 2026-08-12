@@ -61,7 +61,7 @@
 
     <n-empty v-if="filteredSkills.length===0&&!loading" description="No skills found" style="margin-top:60px">
       <template #extra>
-        <n-button size="small" type="primary" :loading="syncing" @click="doSync">初始化内置技能</n-button>
+        <n-button size="small" type="primary" :loading="syncing" @click="doSync">{{ $t('skills.initBuiltin') }}</n-button>
       </template>
     </n-empty>
 

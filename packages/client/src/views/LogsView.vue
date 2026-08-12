@@ -3,26 +3,26 @@
     <header class="page-header">
       <div class="header-row">
         <div>
-          <h2>最近消息</h2>
-          <p class="page-desc">最近 50 条消息记录 · 系统运行日志能力规划中</p>
+          <h2>{{ $t('logs.title') }}</h2>
+          <p class="page-desc">{{ $t('logs.desc') }}</p>
         </div>
         <div class="header-actions">
           <n-input-group size="small" class="search-box">
-            <n-input v-model:value="searchQuery" placeholder="搜索消息..." clearable />
-            <n-button type="primary" ghost @click="loadLogs">刷新</n-button>
+            <n-input v-model:value="searchQuery" :placeholder="$t('logs.searchPlaceholder')" clearable />
+            <n-button type="primary" ghost @click="loadLogs">{{ $t('common.refresh') }}</n-button>
           </n-input-group>
-          <n-checkbox v-model:checked="autoRefresh" size="small">自动刷新</n-checkbox>
+          <n-checkbox v-model:checked="autoRefresh" size="small">{{ $t('logs.autoRefresh') }}</n-checkbox>
         </div>
       </div>
       <div class="filter-bar">
         <n-button-group size="tiny">
-          <n-button :type="levelFilter === 'all' ? 'primary' : 'default'" @click="levelFilter = 'all'" ghost>全部</n-button>
+          <n-button :type="levelFilter === 'all' ? 'primary' : 'default'" @click="levelFilter = 'all'" ghost>{{ $t('logs.levelAll') }}</n-button>
           <n-button :type="levelFilter === 'info' ? 'info' : 'default'" @click="levelFilter = 'info'" ghost>INFO</n-button>
           <n-button :type="levelFilter === 'warn' ? 'warning' : 'default'" @click="levelFilter = 'warn'" ghost>WARN</n-button>
           <n-button :type="levelFilter === 'error' ? 'error' : 'default'" @click="levelFilter = 'error'" ghost>ERROR</n-button>
           <n-button :type="levelFilter === 'debug' ? 'default' : 'default'" @click="levelFilter = 'debug'" ghost>DEBUG</n-button>
         </n-button-group>
-        <span class="log-count">{{ filteredLogs.length }} 条消息</span>
+        <span class="log-count">{{ $t('logs.count', { n: filteredLogs.length }) }}</span>
       </div>
     </header>
 
@@ -39,7 +39,7 @@
           <span v-if="l.tokens" class="log-tokens">{{ l.tokens }} tokens</span>
         </span>
       </div>
-      <n-empty v-if="filteredLogs.length === 0 && !loading" description="暂无消息" class="empty-state" />
+      <n-empty v-if="filteredLogs.length === 0 && !loading" :description="$t('logs.empty')" class="empty-state" />
       <n-spin v-if="loading" class="loading-spin" />
     </div>
 
@@ -57,6 +57,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 interface LogEntry {
   time: string
@@ -67,6 +68,7 @@ interface LogEntry {
   tokens?: number
 }
 
+const { t } = useI18n()
 const logs = ref<LogEntry[]>([])
 const loading = ref(false)
 const searchQuery = ref('')
@@ -103,7 +105,7 @@ async function loadLogs() {
       logs.value = data.map((m: any) => ({
         time: m.created_at || new Date().toISOString(),
         level: 'info',
-        type: m.role === 'user' ? '用户消息' : m.role === 'assistant' ? 'AI回复' : m.role || '系统',
+        type: m.role === 'user' ? t('logs.userMsg') : m.role === 'assistant' ? t('logs.aiReply') : m.role || t('logs.system'),
         message: (m.content || '').slice(0, 100),
         sessionTitle: m.session_title || undefined,
       }))

@@ -2,8 +2,8 @@
   <div class="list-file-card">
     <div class="lf-header" @click="expanded = !expanded">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#eab308" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-      <span class="lf-title">{{ dirPath || '文件列表' }}</span>
-      <span class="lf-count">{{ entries.length }} 项</span>
+      <span class="lf-title">{{ dirPath || $t('chatui.fileList') }}</span>
+      <span class="lf-count">{{ $t('chatui.items', { n: entries.length }) }}</span>
       <span class="lf-toggle"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :class="{ rotated: expanded }"><path d="M6 9l6 6 6-6"/></svg></span>
     </div>
     <div v-if="expanded" class="lf-body">
@@ -12,7 +12,7 @@
         <svg v-else width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
         <span class="lf-name">{{ e.name }}</span>
         <span class="lf-size" v-if="e.size">{{ formatSize(e.size) }}</span>
-        <span class="lf-type" v-else>目录</span>
+        <span class="lf-type" v-else>{{ $t('chatui.dir') }}</span>
       </div>
     </div>
   </div>

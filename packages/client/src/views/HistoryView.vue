@@ -2,10 +2,10 @@
   <div class="page-container">
     <header class="page-header">
       <div>
-        <h2>历史记录</h2>
-        <p class="page-desc">这里按来源只读查看 SUPERCRZY BOT 历史会话。</p>
+        <h2>{{ $t('history.title') }}</h2>
+        <p class="page-desc">{{ $t('history.desc') }}</p>
       </div>
-      <n-input v-model:value="searchText" placeholder="搜索会话..." clearable class="search-input">
+      <n-input v-model:value="searchText" :placeholder="$t('history.searchPlaceholder')" clearable class="search-input">
         <template #prefix><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></template>
       </n-input>
     </header>
@@ -30,12 +30,12 @@
               <SvgIcon name="messages" :size="16" />
             </div>
             <div class="history-item-content" @click="viewSession(s)">
-              <div class="history-item-title">{{ s.first_msg || s.title || '新对话' }}</div>
+              <div class="history-item-title">{{ s.first_msg || s.title || $t('chat.newChat') }}</div>
               <div class="history-item-meta">
                 <span>{{ s.model }}</span>
                 <span>·</span>
                 <span>{{ formatDate(s.updatedAt || s.updated_at || '') }}</span>
-                <span v-if="s.message_count">· {{ s.message_count }} 条消息</span>
+                <span v-if="s.message_count">· {{ $t('history.count', { n: s.message_count }) }}</span>
               </div>
             </div>
             <n-button size="tiny" quaternary type="primary" @click="continueChat(s)">Continue</n-button>
@@ -44,10 +44,10 @@
       </div>
     </div>
 
-    <n-empty v-else description="暂无历史记录" class="empty-state" />
+    <n-empty v-else :description="$t('history.noHistory')" class="empty-state" />
 
     <!-- Session Detail Modal -->
-    <n-modal v-model:show="showDetail" preset="card" title="对话详情" style="width:800px;max-height:80vh">
+    <n-modal v-model:show="showDetail" preset="card" :title="$t('history.detailTitle')" style="width:800px;max-height:80vh">
       <div class="detail-messages" v-if="detailMessages.length">
         <div v-for="msg in detailMessages" :key="msg.id" class="detail-msg" :class="msg.role">
           <div class="detail-msg-header">
@@ -65,9 +65,11 @@
 import { ref, computed, onMounted, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { useChatStore } from '@/stores/chat'
+import { useI18n } from 'vue-i18n'
 import SvgIcon from '@/components/ui/SvgIcon.vue'
 
 const router = useRouter()
+const { t } = useI18n()
 const chatStore = useChatStore()
 
 function getSourceIcon(src: string): string {
@@ -138,8 +140,8 @@ function formatDate(d: string) {
   const date = new Date(d)
   const now = new Date()
   const diff = now.getTime() - date.getTime()
-  if (diff < 86400000) return '今天'
-  if (diff < 172800000) return '昨天'
+  if (diff < 86400000) return t('history.today')
+  if (diff < 172800000) return t('history.yesterday')
   return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
 }
 

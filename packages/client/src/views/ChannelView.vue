@@ -1,7 +1,7 @@
 <template>
-  <div class="page-container"><header class="page-header"><h2>工作区文件</h2><p class="page-desc">浏览和管理 SUPERCRZY BOT 工作区文件</p></header>
+  <div class="page-container"><header class="page-header"><h2>{{ $t('channel.title') }}</h2><p class="page-desc">{{ $t('channel.desc') }}</p></header>
     <div class="file-browser">
-      <div class="breadcrumb"><span v-for="(p,i) in pathParts" :key="i" class="breadcrumb-item" @click="navigateTo(i)">{{ p || '根目录' }}</span></div>
+      <div class="breadcrumb"><span v-for="(p,i) in pathParts" :key="i" class="breadcrumb-item" @click="navigateTo(i)">{{ p || $t('channel.root') }}</span></div>
       <div class="file-list">
         <div v-for="f in files" :key="f.name" class="file-item" @click="f.isDir ? enterDir(f.name) : null">
           <span class="file-icon">{{ f.isDir ? '📁' : fileIcon(f.name) }}</span>
@@ -9,7 +9,7 @@
           <span class="file-size">{{ formatSize(f.size) }}</span>
           <span class="file-time">{{ formatTime(f.mtime) }}</span>
         </div>
-        <n-empty v-if="files.length === 0" description="空目录" class="empty-state" />
+        <n-empty v-if="files.length === 0" :description="$t('channel.emptyDir')" class="empty-state" />
       </div>
     </div>
   </div>

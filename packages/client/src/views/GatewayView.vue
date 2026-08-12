@@ -8,7 +8,7 @@
     <div class="gateway-body">
       <!-- Connected Channels -->
       <div v-if="savedChannels.length > 0" class="section">
-        <h3 class="section-title">已配置通道</h3>
+        <h3 class="section-title">{{ $t('gateway.configuredChannels') }}</h3>
         <div class="channels-list">
           <div v-for="ch in savedChannels" :key="ch.id" class="channel-row"
             :class="{ enabled: ch.enabled }">
@@ -27,7 +27,7 @@
       </div>
 
       <!-- Platform Cards -->
-      <h3 class="section-title">添加新通道</h3>
+      <h3 class="section-title">{{ $t('gateway.addChannel') }}</h3>
       <div class="platforms-grid">
         <n-card v-for="p in platforms" :key="p.id" size="small" class="platform-card"
           :class="{ connected: p.id==='wechat' && wechatStatus.connected }">
@@ -57,7 +57,7 @@
     <!-- Config Modal -->
     <n-modal v-model:show="showConfig" preset="card" :title="'Configure ' + editingPlatform?.name" style="max-width:500px">
       <n-form v-if="editingPlatform" label-placement="top" size="small">
-        <n-form-item label="通道名称">
+        <n-form-item :label="$t('gateway.channelName')">
           <n-input v-model:value="editForm.name" placeholder="My Bot" />
         </n-form-item>
         <n-form-item v-for="f in editingPlatform.fields" :key="f.key" :label="f.label">

@@ -12,17 +12,17 @@
         <template v-if="stats.reasoningCount > 0">
           <span class="fold-segment">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a1 1 0 0 1-1 1h-6a1 1 0 0 1-1-1v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7z"/><path d="M9 22h6"/></svg>
-            {{ stats.reasoningCount }}轮推理
+            {{ $t('chatui.reasonCount', { n: stats.reasoningCount }) }}
           </span>
           <span class="fold-dot">·</span>
         </template>
         <span class="fold-segment">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
-          {{ stats.toolCallCount }}次工具调用
+          {{ $t('chatui.toolCount', { n: stats.toolCallCount }) }}
         </span>
         <span v-if="stats.errorCount > 0" class="fold-error">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-          {{ stats.errorCount }}个错误
+          {{ $t('chatui.errorCount', { n: stats.errorCount }) }}
         </span>
         <span v-if="stats.durationMs > 0" class="fold-duration">
           {{ formatDuration(stats.durationMs) }}

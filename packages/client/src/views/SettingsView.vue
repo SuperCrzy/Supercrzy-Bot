@@ -200,7 +200,7 @@ import { getModelSelectOptions } from '@/data/models'
 
 const appStore = useAppStore()
 const nMessage = useMessage()
-const { locale } = useI18n()
+const { locale, t } = useI18n()
 
 const activeTab = ref('account')
 const saving = ref(false)
@@ -208,24 +208,24 @@ const saving = ref(false)
 const showToken = ref(false)
 
 const themeOptions = [
-  { label: '浅色', value: 'light' },
-  { label: '深色', value: 'dark' },
+  { label: t('settings.themeLight'), value: 'light' },
+  { label: t('settings.themeDark'), value: 'dark' },
 ]
 
 const langOptions = [
-  { label: '中文', value: 'zh-CN' },
+  { label: t('settings.langZh'), value: 'zh-CN' },
   { label: 'English', value: 'en-US' },
 ]
 
 const toolStrategyOptions = [
-  { label: '自动', value: 'auto' },
-  { label: '手动确认', value: 'manual' },
+  { label: t('settings.auto'), value: 'auto' },
+  { label: t('settings.manual'), value: 'manual' },
 ]
 
 const resetModeOptions = [
-  { label: '仅空闲', value: 'idle' },
-  { label: '仅定时', value: 'scheduled' },
-  { label: '空闲 + 定时', value: 'idle_scheduled' },
+  { label: t('settings.idleOnly'), value: 'idle' },
+  { label: t('settings.scheduledOnly'), value: 'scheduled' },
+  { label: t('settings.idleScheduled'), value: 'idle_scheduled' },
 ]
 
 interface SettingsForm {
@@ -339,10 +339,10 @@ async function saveSettings() {
     appStore.darkMode = form.theme === 'dark'
     // 同步 completionSound 到 localStorage
     localStorage.setItem('supercrzy:completionSound', String(form.completionSound))
-    nMessage.success('设置已保存')
+    nMessage.success(t('settings.saved'))
   } catch (err: any) {
     console.error('[SettingsView] Save error:', err)
-    nMessage.error('保存失败: ' + err.message)
+    nMessage.error(t('settings.saveFail') + ': ' + err.message)
   } finally {
     saving.value = false
   }

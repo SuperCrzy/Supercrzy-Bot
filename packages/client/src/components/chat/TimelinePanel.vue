@@ -1,10 +1,10 @@
 <template>
   <div class="timeline-panel">
-    <div class="tab-hint">Agent 执行时间线</div>
+    <div class="tab-hint">{{ $t('chatui.timelineTitle') }}</div>
 
     <!-- 实时执行 -->
     <template v-if="liveTurns.length">
-      <div class="tl-section-title">当前执行</div>
+      <div class="tl-section-title">{{ $t('chatui.currentExec') }}</div>
       <div class="tl-list">
         <div
           v-for="(t, i) in liveTurns"
@@ -20,15 +20,15 @@
               <span class="tl-tool-status">{{ statusLabel(tool) }}</span>
               <span v-if="tool.duration" class="tl-tool-duration">{{ tool.duration }}s</span>
             </div>
-            <div v-if="t.tools.length === 0" class="tl-tool-placeholder">思考中...</div>
+            <div v-if="t.tools.length === 0" class="tl-tool-placeholder">{{ $t('chat.thinking') }}</div>
           </div>
         </div>
       </div>
     </template>
-    <div v-else class="tl-empty">发送任务后，这里会实时显示每一轮的思考与工具调用</div>
+    <div v-else class="tl-empty">{{ $t('chatui.timelineEmpty') }}</div>
 
     <!-- 历史执行记录 -->
-    <div class="tl-section-title">历史执行记录</div>
+    <div class="tl-section-title">{{ $t('chatui.historyExec') }}</div>
     <div v-if="checkpoints.length" class="tl-history">
       <div
         v-for="c in checkpoints"
@@ -38,23 +38,24 @@
         @click="toggleDetail(c)"
       >
         <div class="tl-history-head">
-          <span class="tl-history-turn">{{ c.turn }} 轮</span>
+          <span class="tl-history-turn">{{ $t('chatui.turns', { n: c.turn }) }}</span>
           <span class="tl-history-time">{{ shortTime(c.timestamp) }}</span>
         </div>
-        <div class="tl-history-msg">{{ c.firstUserMsg || '(无用户消息)' }}</div>
-        <div class="tl-history-meta">{{ c.toolCallCount }} 次工具 · {{ c.fileCount }} 个文件</div>
+        <div class="tl-history-msg">{{ c.firstUserMsg || $t('chatui.noUserMsg') }}</div>
+        <div class="tl-history-meta">{{ $t('chatui.toolFileCount', { tools: c.toolCallCount, files: c.fileCount }) }}</div>
         <div v-if="expandedId === c.id" class="tl-history-detail">
-          <button class="tl-resume" @click.stop="resumeFrom(c.id)">▶ 从这里继续</button>
+          <button class="tl-resume" @click.stop="resumeFrom(c.id)">▶ {{ $t('chatui.resume') }}</button>
         </div>
       </div>
     </div>
-    <div v-else class="tl-empty">暂无历史执行记录</div>
+    <div v-else class="tl-empty">{{ $t('chatui.noHistory') }}</div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useChatStore } from '@/stores/chat'
+import { useI18n } from 'vue-i18n'
 import type { ChatFlowNode } from '@/types'
 
 interface LiveTool { name: string; status: string; duration?: number }
@@ -68,6 +69,7 @@ interface CheckpointMeta {
   firstUserMsg: string
 }
 
+const { t: i18n } = useI18n()
 const props = defineProps<{ flow?: ChatFlowNode[] }>()
 
 const chatStore = useChatStore()
@@ -112,8 +114,8 @@ function resumeFrom(id: string) {
 
 function statusLabel(t: LiveTool) {
   if (t.status === 'done') return '✓'
-  if (t.status === 'running') return '执行中'
-  if (t.status === 'pending') return '待确认'
+  if (t.status === 'running') return i18n('chatui.running')
+  if (t.status === 'pending') return i18n('chatui.pending')
   return '✗'
 }
 

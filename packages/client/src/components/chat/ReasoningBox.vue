@@ -11,9 +11,9 @@
           <path d="M9 22h6"/>
         </svg>
       </div>
-      <span class="reasoning-label">思考</span>
+      <span class="reasoning-label">{{ $t('chatui.reasoning') }}</span>
       <span class="reasoning-meta">
-        {{ wordCount }}字
+        {{ $t('chatui.words', { n: wordCount }) }}
         <svg class="reasoning-chevron" :class="{ open: expanded }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
       </span>
     </div>

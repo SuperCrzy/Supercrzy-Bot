@@ -1,12 +1,12 @@
 <template>
   <div class="page-container">
     <div v-if="!pageReady" class="loading-state">
-      <span>加载中...</span>
+      <span>{{ $t('common.loading') }}</span>
     </div>
     <template v-else>
     <header class="page-header">
-      <h2>模型管理</h2>
-      <p class="page-desc">管理当前模型、API 提供商与已配置的模型</p>
+      <h2>{{ $t('models.title') }}</h2>
+      <p class="page-desc">{{ $t('models.desc') }}</p>
     </header>
 
     <!-- ===== 1. 当前模型 ===== -->
@@ -14,7 +14,7 @@
       <div class="cmb-left">
         <span class="cmb-icon">🔮</span>
         <div class="cmb-info">
-          <span class="cmb-label">当前模型</span>
+          <span class="cmb-label">{{ $t('models.currentModel') }}</span>
           <n-select
             v-model:value="currentModel"
             :options="allModelOptions"
@@ -26,7 +26,7 @@
       <div class="cmb-right">
         <span v-if="currentProvider.baseUrl" class="cmb-url">{{ currentProvider.baseUrl }}</span>
         <n-button size="tiny" @click="testCurrentModel" :loading="testing">
-          {{ testing ? '测试中...' : '测试连接' }}
+          {{ testing ? $t('models.testing') : $t('models.testConnection') }}
         </n-button>
       </div>
       <div v-if="testResult" class="cmb-test-result" :class="testResult.ok ? 'ok' : 'fail'">
@@ -36,8 +36,8 @@
 
     <!-- ===== 2. API 提供商 ===== -->
     <div class="provider-section">
-      <h3 class="section-title">API 提供商</h3>
-      <p class="section-desc">点击配置 API Key，配置完成后即可切换使用</p>
+      <h3 class="section-title">{{ $t('models.providers') }}</h3>
+      <p class="section-desc">{{ $t('models.providerHint') }}</p>
       <div class="provider-chips">
         <button
           v-for="p in presetProviders"
@@ -49,35 +49,35 @@
           <span class="chip-icon">{{ p.icon }}</span>
           <span class="chip-name">{{ p.label }}</span>
           <span v-if="p.configured" class="chip-check">✓</span>
-          <span v-if="currentProvider.id === p.id" class="chip-current">当前</span>
+          <span v-if="currentProvider.id === p.id" class="chip-current">{{ $t('models.current') }}</span>
         </button>
       </div>
     </div>
 
     <!-- ===== Provider Config Modal ===== -->
-    <n-modal v-model:show="showProviderModal" title="配置 API 提供商" preset="dialog" style="width:460px">
+    <n-modal v-model:show="showProviderModal" :title="$t('models.configProvider')" preset="dialog" style="width:460px">
       <n-form label-placement="top">
-        <n-form-item label="提供商">
+        <n-form-item :label="$t('models.provider')">
           <n-input :value="editingProvider.label" disabled />
         </n-form-item>
         <n-form-item label="API Key">
-          <n-input v-model:value="editingProvider.apiKey" type="password" show-password-on="click" placeholder="输入 API Key" />
+          <n-input v-model:value="editingProvider.apiKey" type="password" show-password-on="click" :placeholder="$t('models.apiKeyPlaceholder')" />
         </n-form-item>
         <n-form-item label="Base URL">
           <n-input v-model:value="editingProvider.baseUrl" placeholder="https://api.example.com/v1">
             <template #suffix>
-              <n-button size="tiny" @click="editingProvider.baseUrl = editingProvider.defaultBaseUrl" secondary>恢复默认</n-button>
+              <n-button size="tiny" @click="editingProvider.baseUrl = editingProvider.defaultBaseUrl" secondary>{{ $t('models.resetDefault') }}</n-button>
             </template>
           </n-input>
         </n-form-item>
-        <n-form-item label="默认模型">
+        <n-form-item :label="$t('models.defaultModel')">
           <n-input v-model:value="editingProvider.defaultModel" placeholder="e.g. deepseek-v4-pro" />
         </n-form-item>
       </n-form>
       <template #action>
         <n-space>
-          <n-button @click="showProviderModal = false">取消</n-button>
-          <n-button type="primary" @click="saveProvider" :loading="savingProvider">保存并切换</n-button>
+          <n-button @click="showProviderModal = false">{{ $t('common.cancel') }}</n-button>
+          <n-button type="primary" @click="saveProvider" :loading="savingProvider">{{ $t('models.saveAndSwitch') }}</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -85,89 +85,89 @@
     <!-- ===== 3. 已配置模型列表 ===== -->
     <div class="configured-models">
       <div class="models-header">
-        <h3 class="section-title">已配置模型</h3>
+        <h3 class="section-title">{{ $t('models.configuredModels') }}</h3>
         <n-button size="small" type="primary" @click="showAddModal = true">
           <template #icon>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           </template>
-          添加模型
+          {{ $t('models.addModel') }}
         </n-button>
       </div>
 
       <div v-if="displayModels.length === 0" class="empty-hint">
-        暂无自定义模型。点击"添加模型"或在上方配置 API 提供商。
+        {{ $t('models.noModels') }}
       </div>
 
       <div v-else class="models-table">
         <div class="table-header">
-          <span class="col-name">模型</span>
-          <span class="col-provider">提供商</span>
+          <span class="col-name">{{ $t('models.colModel') }}</span>
+          <span class="col-provider">{{ $t('models.colProvider') }}</span>
           <span class="col-key">API Key</span>
-          <span class="col-status">状态</span>
-          <span class="col-actions">操作</span>
+          <span class="col-status">{{ $t('models.colStatus') }}</span>
+          <span class="col-actions">{{ $t('models.colActions') }}</span>
         </div>
         <div v-for="model in displayModels" :key="model.id" class="table-row" :class="{ 'is-current': model.id === currentModel || model.modelId === currentModel, 'is-auto': model.isAutoDerived }">
           <span class="col-name">
             {{ model.displayName || model.modelId }}
-            <n-tag v-if="model.id === currentModel || model.modelId === currentModel" size="tiny" :bordered="false" type="success" style="margin-left:6px">当前</n-tag>
-            <n-tag v-if="model.isAutoDerived" size="tiny" :bordered="false" type="info" style="margin-left:4px">自动</n-tag>
+            <n-tag v-if="model.id === currentModel || model.modelId === currentModel" size="tiny" :bordered="false" type="success" style="margin-left:6px">{{ $t('models.current') }}</n-tag>
+            <n-tag v-if="model.isAutoDerived" size="tiny" :bordered="false" type="info" style="margin-left:4px">{{ $t('models.autoDerivedTag') }}</n-tag>
           </span>
           <span class="col-provider">{{ model.providerName }}</span>
-          <span class="col-key">{{ model.hasApiKey ? '已配置' : '未配置' }}</span>
+          <span class="col-key">{{ model.hasApiKey ? $t('models.configured') : $t('models.notConfigured') }}</span>
           <span class="col-status">
             <n-switch :value="model.enabled" :disabled="model.isAutoDerived" @update:value="(v:boolean) => toggleCustomModel(model.id, v)" size="small" />
           </span>
           <span class="col-actions">
-            <n-button v-if="!model.isAutoDerived" text size="tiny" type="primary" @click="editCustomModel(model)" style="margin-right:4px">编辑</n-button>
-            <n-button v-if="!model.isAutoDerived" text size="tiny" type="error" @click="confirmDelete(model)">删除</n-button>
-            <span v-else class="col-actions-hint" :title="'由 API 提供商配置自动派生，取消配置 API Key 即移除'">由提供商配置派生</span>
+            <n-button v-if="!model.isAutoDerived" text size="tiny" type="primary" @click="editCustomModel(model)" style="margin-right:4px">{{ $t('common.edit') }}</n-button>
+            <n-button v-if="!model.isAutoDerived" text size="tiny" type="error" @click="confirmDelete(model)">{{ $t('common.delete') }}</n-button>
+            <span v-else class="col-actions-hint" :title="$t('models.autoDerived')">由提供商配置派生</span>
           </span>
         </div>
       </div>
     </div>
 
     <!-- ===== Add Model Modal ===== -->
-    <n-modal v-model:show="showAddModal" title="添加模型" preset="dialog" style="width:480px">
+    <n-modal v-model:show="showAddModal" :title="$t('models.addModelTitle')" preset="dialog" style="width:480px">
       <n-form ref="formRef" :model="addForm" :rules="addRules" label-placement="top">
-        <n-form-item label="提供商" path="providerId">
-          <n-select v-model:value="addForm.providerId" :options="providerOptions" placeholder="选择提供商" @update:value="onProviderChange" />
+        <n-form-item :label="$t('models.provider')" path="providerId">
+          <n-select v-model:value="addForm.providerId" :options="providerOptions" :placeholder="$t('models.providerPlaceholder')" @update:value="onProviderChange" />
         </n-form-item>
-        <n-form-item label="模型 ID" path="modelId">
+        <n-form-item :label="$t('models.modelId')" path="modelId">
           <n-input v-model:value="addForm.modelId" placeholder="e.g. gpt-4o" />
         </n-form-item>
-        <n-form-item label="显示名称">
-          <n-input v-model:value="addForm.displayName" placeholder="留空则使用模型 ID" />
+        <n-form-item :label="$t('models.displayName')">
+          <n-input v-model:value="addForm.displayName" :placeholder="$t('models.displayNamePlaceholder')" />
         </n-form-item>
-        <n-form-item label="API 地址">
+        <n-form-item :label="$t('models.baseUrl')">
           <n-input v-model:value="addForm.baseUrl" placeholder="https://api.example.com/v1" />
         </n-form-item>
         <n-form-item label="API Key">
           <n-input v-model:value="addForm.apiKey" type="password" show-password-on="click" placeholder="sk-..." />
         </n-form-item>
-        <n-form-item label="能力">
+        <n-form-item :label="$t('models.capabilities')">
           <n-checkbox-group v-model:value="addForm.capabilities">
-            <n-checkbox value="chat" label="对话" />
-            <n-checkbox value="reasoning" label="推理" />
-            <n-checkbox value="tool-calling" label="工具调用" />
-            <n-checkbox value="vision" label="视觉" />
+            <n-checkbox value="chat" :label="$t('models.capChat')" />
+            <n-checkbox value="reasoning" :label="$t('models.capReasoning')" />
+            <n-checkbox value="tool-calling" :label="$t('models.capTools')" />
+            <n-checkbox value="vision" :label="$t('models.capVision')" />
           </n-checkbox-group>
         </n-form-item>
       </n-form>
       <template #action>
         <n-space>
-          <n-button @click="showAddModal = false">取消</n-button>
-          <n-button type="primary" @click="handleAddModel" :loading="adding">添加</n-button>
+          <n-button @click="showAddModal = false">{{ $t('common.cancel') }}</n-button>
+          <n-button type="primary" @click="handleAddModel" :loading="adding">{{ $t('common.create') }}</n-button>
         </n-space>
       </template>
     </n-modal>
 
     <!-- ===== Delete Confirm ===== -->
-    <n-modal v-model:show="showDeleteModal" title="确认删除" preset="dialog" type="warning">
-      <p>确定要删除模型 <strong>{{ deletingModel?.displayName || deletingModel?.modelId }}</strong> 吗？</p>
+    <n-modal v-model:show="showDeleteModal" :title="$t('models.confirmDeleteTitle')" preset="dialog" type="warning">
+      <p>{{ $t('models.confirmDeleteMsg') }} <strong>{{ deletingModel?.displayName || deletingModel?.modelId }}</strong>?</p>
       <template #action>
         <n-space>
-          <n-button @click="showDeleteModal = false">取消</n-button>
-          <n-button type="error" @click="handleDelete">删除</n-button>
+          <n-button @click="showDeleteModal = false">{{ $t('common.cancel') }}</n-button>
+          <n-button type="error" @click="handleDelete">{{ $t('common.delete') }}</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -179,10 +179,12 @@
 import { ref, computed, onMounted, reactive } from 'vue'
 import { NButton, NInput, NSelect, NTag, NModal, NForm, NFormItem, NSwitch, NCheckbox, NCheckboxGroup, NSpace, useMessage } from 'naive-ui'
 import { useAppStore } from '@/stores/app'
+import { useI18n } from 'vue-i18n'
 import { getModelShortName } from '@/data/models'
 import type { CustomModel, AddModelForm } from '@/types'
 
 const appStore = useAppStore()
+const { t } = useI18n()
 const message = useMessage()
 
 // ===== Providers =====
@@ -283,7 +285,7 @@ const currentModel = computed({
   get: () => appStore.currentModel,
   set: (v: string) => {
     appStore.currentModel = v
-    message.success(`已切换到 ${v}`)
+    message.success(t('models.switchedTo', { model: v }))
   },
 })
 const testing = ref(false)
@@ -347,7 +349,7 @@ const allModelOptions = computed(() => {
   if (result.length > 0 && customOpts.length > 0) {
     return [
       ...result,
-      { type: 'group' as const, label: '自定义模型', key: 'custom', children: customOpts },
+      { type: 'group' as const, label: t('models.customModels'), key: 'custom', children: customOpts },
     ]
   }
   return [...result, ...customOpts]
@@ -363,13 +365,13 @@ async function testCurrentModel() {
       body: JSON.stringify({ model: currentModel.value, messages: [{ role: 'user', content: 'ping' }], max_tokens: 10, temperature: 0 }),
     })
     if (res.ok) {
-      testResult.value = { ok: true, msg: `连接成功 — 模型: ${currentModel.value}` }
+      testResult.value = { ok: true, msg: t('models.connOk', { model: currentModel.value }) }
     } else {
       const e = await res.json().catch(() => ({}))
-      testResult.value = { ok: false, msg: `连接失败: ${(e as any).error?.message || res.statusText}` }
+      testResult.value = { ok: false, msg: t('models.connFail', { err: (e as any).error?.message || res.statusText }) }
     }
   } catch {
-    testResult.value = { ok: false, msg: '网络错误，请检查 API 地址' }
+    testResult.value = { ok: false, msg: t('models.networkErr') }
   } finally {
     testing.value = false
   }
@@ -465,10 +467,10 @@ async function saveProvider() {
     // 切换到该 provider 的默认模型
     appStore.currentModel = editingProvider.defaultModel
     showProviderModal.value = false
-    message.success(cfg.apiKey ? '配置已保存' : '配置已移除')
+    message.success(cfg.apiKey ? t('models.saved') : t('models.removed'))
     appStore.notifyProvidersChanged()
   } catch (err: any) {
-    message.error(err.message || '保存失败')
+    message.error(err.message || t('models.saveFail'))
   } finally {
     savingProvider.value = false
   }
@@ -528,13 +530,13 @@ const addForm = ref<AddModelForm & { baseUrl?: string; apiKey?: string; capabili
 })
 
 const addRules = {
-  providerId: [{ required: true, message: '请选择提供商', trigger: 'blur' }],
-  modelId: [{ required: true, message: '请输入模型标识', trigger: 'blur' }],
+  providerId: [{ required: true, message: t('models.requireProvider'), trigger: 'blur' }],
+  modelId: [{ required: true, message: t('models.requireModelId'), trigger: 'blur' }],
 }
 
 const providerOptions = computed(() => [
   ...PREDEFINED.map(p => ({ label: p.icon + ' ' + p.label, value: p.id })),
-  { label: '自定义', value: 'custom' },
+  { label: t('models.custom'), value: 'custom' },
 ])
 
 const showDeleteModal = ref(false)
@@ -566,12 +568,12 @@ async function handleAddModel() {
       body: JSON.stringify(addForm.value),
     })
     const data = await res.json()
-    if (!res.ok) { message.error(data.error || '添加失败'); return }
-    message.success('模型添加成功')
+    if (!res.ok) { message.error(data.error || t('models.addFail')); return }
+    message.success(t('models.added'))
     showAddModal.value = false
     addForm.value = { providerId: '', modelId: '', displayName: '', baseUrl: '', apiKey: '', capabilities: ['chat'] }
     await fetchCustomModels()
-  } catch (err: any) { message.error(err.message || '添加失败') } finally { adding.value = false }
+  } catch (err: any) { message.error(err.message || t('models.addFail')) } finally { adding.value = false }
 }
 
 async function toggleCustomModel(id: string, enabled: boolean) {
@@ -584,8 +586,8 @@ async function toggleCustomModel(id: string, enabled: boolean) {
     if (!res.ok) { const d = await res.json().catch(() => ({})); message.error((d as any).error || '操作失败'); return }
     const m = customModels.value.find(mod => mod.id === id)
     if (m) m.enabled = enabled
-    message.success(enabled ? '已启用' : '已禁用')
-  } catch (err: any) { message.error(err.message || '操作失败') }
+    message.success(enabled ? t('common.enabled') : t('common.disabled'))
+  } catch (err: any) { message.error(err.message || t('models.opFail')) }
 }
 
 function confirmDelete(model: CustomModel) {
@@ -598,11 +600,11 @@ async function handleDelete() {
   try {
     const res = await fetch(`/api/models/custom/${deletingModel.value.id}`, { method: 'DELETE' })
     if (!res.ok) { const d = await res.json().catch(() => ({})); message.error((d as any).error || '删除失败'); return }
-    message.success('已删除')
+    message.success(t('models.deleted'))
     showDeleteModal.value = false
     deletingModel.value = null
     await fetchCustomModels()
-  } catch (err: any) { message.error(err.message || '删除失败') }
+  } catch (err: any) { message.error(err.message || t('models.deleteFail')) }
 }
 
 onMounted(async () => {

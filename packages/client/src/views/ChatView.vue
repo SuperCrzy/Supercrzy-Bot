@@ -111,12 +111,12 @@
             <!-- 历史经验应用 -->
             <div v-if="msg.playbookUsed && msg.playbookUsed.length" class="playbook-row">
               <div v-for="p in msg.playbookUsed" :key="p.taskType" class="playbook-tip" :title="p.lesson">
-                📚 应用经验[{{ p.taskType }}]：{{ p.lesson }}
+                📚 {{ $t('chat.playbookUsedTitle') }}[{{ p.taskType }}]: {{ p.lesson }}
               </div>
             </div>
             <!-- Planner 执行计划 -->
             <div v-if="msg.planner && msg.planner.steps && msg.planner.steps.length" class="planner-card">
-              <div class="planner-title">📋 执行计划</div>
+              <div class="planner-title">📋 {{ $t('chat.plannerTitle') }}</div>
               <div v-for="(step, i) in msg.planner.steps" :key="i" class="planner-step">{{ step }}</div>
             </div>
             <!-- 时序流：思考/工具/正文按真实顺序交错 -->
@@ -148,7 +148,7 @@
             <div v-if="msg.retrying" class="retry-hint">🔄 {{ msg.retrying }}</div>
             <!-- 交付摘要 -->
             <div v-if="msg.deliverySummary && msg.deliverySummary.artifacts.length" class="delivery-summary">
-              <div class="ds-title">📦 交付产物 ({{ msg.deliverySummary.artifactCount }})</div>
+              <div class="ds-title">📦 {{ $t('chat.deliveryTitle') }} ({{ msg.deliverySummary.artifactCount }})</div>
               <div v-for="(a, i) in msg.deliverySummary.artifacts" :key="i" class="ds-item">
                 <span class="ds-icon">📄</span>
                 <span class="ds-name">{{ a.name }}</span>
@@ -189,7 +189,7 @@
 
         <div class="input-row">
           <!-- 上传按钮 -->
-          <label class="upload-button" :class="{ disabled: chatStore.isLoading }" title="上传文件（图片/PDF/Word/Excel等）">
+          <label class="upload-button" :class="{ disabled: chatStore.isLoading }" :title="$t('chat.uploadFileTitle')">
             <input
               type="file"
               multiple
@@ -205,7 +205,7 @@
           <n-input
             v-model:value="inputText"
             type="textarea"
-            :placeholder="'输入消息，Enter 发送  |  Shift+Enter 换行  |  📎 上传文件'"
+            :placeholder="$t('chat.inputPlaceholderFull')"
             :autosize="{ minRows: 1, maxRows: 5 }"
             :disabled="chatStore.isLoading"
             @keydown.enter.exact.prevent="handleSend"
@@ -229,7 +229,7 @@
         </div>
         <div class="input-hint">
           <span>{{ getModelShortName(appStore.currentModel) }}</span>
-          <span v-if="uploadedFiles.length > 0"> · {{ uploadedFiles.length }} 个文件</span>
+          <span v-if="uploadedFiles.length > 0"> · {{ $t('chat.fileCount', { n: uploadedFiles.length }) }}</span>
         </div>
       </div>
     </footer>
@@ -255,7 +255,7 @@ const chatStore = useChatStore()
 const appStore = useAppStore()
 const nMessage = useMessage()
 
-const { locale } = useI18n()
+const { locale, t } = useI18n()
 const inputText = ref('')
 const messagesRef = ref<HTMLElement>()
 const inputRef = ref()
@@ -323,13 +323,13 @@ async function handleFileSelect(event: Event) {
 
     if (!res.ok) {
       const err = await res.json()
-      throw new Error(err.error || '上传失败')
+      throw new Error(err.error || t('chat.uploadFailed'))
     }
 
     const data = await res.json()
     uploadedFiles.value.push(...data.files)
   } catch (err: any) {
-    nMessage.error(`文件上传失败：${err.message}`)
+    nMessage.error(t('chat.uploadFailMsg', { msg: err.message }))
   } finally {
     uploading.value = false
     // Reset input so same file can be re-selected
@@ -440,7 +440,7 @@ async function sendGhostMessage(suggestion: string) {
   } catch (err: any) {
     if (err.name !== 'AbortError') {
       const cur = messages.value.find((m) => m.id === assistantMsg.id)
-      if (cur) cur.content = `❌ 执行失败：${err.message || '未知错误'}`
+      if (cur) cur.content = `❌ ${t('chat.execFail', { msg: err.message || t('chat.unknownError') })}`
     }
   } finally {
     chatStore.setLoading(false)
@@ -460,7 +460,7 @@ async function resumeFromCheckpoint(ckptId: string) {
   }
   let session = chatStore.currentSession
   if (!session) {
-    session = await chatStore.createSession(`续跑 ${ckptId.slice(0, 8)}`)
+    session = await chatStore.createSession(t('chat.resumeTitle', { id: ckptId.slice(0, 8) }))
   }
   const assistantMsg: ChatMessage = {
     id: crypto.randomUUID(),
@@ -477,7 +477,7 @@ async function resumeFromCheckpoint(ckptId: string) {
   } catch (err: any) {
     if (err.name !== 'AbortError') {
       const cur = messages.value.find((m) => m.id === assistantMsg.id)
-      if (cur) cur.content = `❌ 续跑失败：${err.message || '未知错误'}`
+      if (cur) cur.content = `❌ ${t('chat.resumeFail', { msg: err.message || t('chat.unknownError') })}`
     }
   } finally {
     chatStore.setLoading(false)
@@ -516,14 +516,14 @@ function buildAPIMessage(m: ChatMessage) {
   let content = textOf(m.content)
   if (images.length > 0) {
     const imgNames = images.map(i => i.name).join(', ')
-    content += `\n\n[用户上传了 ${images.length} 张图片: ${imgNames}]`
+    content += `\n\n[${t('chat.imagesUploaded', { n: images.length, names: imgNames })}]`
     for (const img of images) {
       content += `\n[图片URL: ${img.url}]`
     }
   }
   if (docs.length > 0) {
     const docNames = docs.map(d => d.name).join(', ')
-    content += `\n\n[用户上传了 ${docs.length} 个文件: ${docNames}]`
+    content += `\n\n[${t('chat.docsUploaded', { n: docs.length, names: docNames })}]`
   }
 
   return { role: m.role, content }
@@ -549,7 +549,7 @@ async function handleSend() {
   const userMsg: ChatMessage = {
     id: crypto.randomUUID(),
     role: 'user',
-    content: text || '[文件]',
+    content: text || t('chat.filePlaceholder'),
     createdAt: new Date().toISOString(),
     attachments: files.length > 0 ? files : undefined,
   }
@@ -582,7 +582,7 @@ async function handleSend() {
   } catch (err: any) {
     if (err.name !== 'AbortError') {
       const cur = messages.value.find((m) => m.id === assistantMsg.id)
-      if (cur) cur.content = `❌ 请求失败：${err.message || '请检查 API Key 配置或网络连接'}`
+      if (cur) cur.content = `❌ ${t('chat.requestFail', { msg: err.message || t('chat.apiKeyHint') })}`
     }
   } finally {
     chatStore.setLoading(false)
@@ -663,7 +663,7 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage) {
       // 真实推理 → 累积到最近一个 thinking 节点
       let node = lastThinking()
       if (!node) {
-        node = { kind: 'thinking', turn: data.turn || 1, message: '思考中...', reasoning: '', completed: false }
+        node = { kind: 'thinking', turn: data.turn || 1, message: t('chat.thinking'), reasoning: '', completed: false }
         msg.flow.push(node)
       }
       node.reasoning += data.text || ''
@@ -755,7 +755,7 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage) {
     }
     case 'error': {
       if (data.retrying) {
-        msg.retrying = data.message || '正在重试...'
+        msg.retrying = data.message || t('chat.retrying')
       } else {
         msg.content = `❌ ${data.message}`
         markThinkingDone(msg)
@@ -784,7 +784,7 @@ function onToolAllow(tc: ToolCallEvent) {
 }
 function onToolDeny(tc: ToolCallEvent) {
   tc.status = 'error'
-  tc.result = '用户拒绝执行此操作'
+  tc.result = t('chat.userDenied')
 }
 
 /**

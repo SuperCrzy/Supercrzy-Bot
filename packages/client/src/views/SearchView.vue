@@ -1,8 +1,8 @@
 <template>
-  <div class="page-container"><header class="page-header"><h2>搜索</h2><p class="page-desc">搜索所有对话消息</p></header>
-    <div class="search-area"><n-input v-model:value="query" placeholder="输入关键词搜索对话..." size="large" clearable @keyup.enter="doSearch"><template #prefix><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></template></n-input></div>
-    <div class="results" v-if="results.length"><div v-for="r in results" :key="r.id" class="result-item"><div class="result-header"><n-tag size="tiny" :type="r.role === 'user' ? 'info' : 'success'">{{ r.role === 'user' ? '你' : 'AI' }}</n-tag><span class="result-time">{{ formatTime(r.created_at) }}</span><span class="result-session">{{ r.session_title }}</span></div><div class="result-content">{{ displayContent(r.content).slice(0, 300) }}{{ displayContent(r.content).length > 300 ? '...' : '' }}</div></div></div>
-    <n-empty v-else-if="query && searched" description="未找到结果" /></div>
+  <div class="page-container"><header class="page-header"><h2>{{ $t('search.title') }}</h2><p class="page-desc">{{ $t('search.desc') }}</p></header>
+    <div class="search-area"><n-input v-model:value="query" :placeholder="$t('search.searchPlaceholder')" size="large" clearable @keyup.enter="doSearch"><template #prefix><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></template></n-input></div>
+    <div class="results" v-if="results.length"><div v-for="r in results" :key="r.id" class="result-item"><div class="result-header"><n-tag size="tiny" :type="r.role === 'user' ? 'info' : 'success'">{{ r.role === 'user' ? $t('chat.roleUser') : 'AI' }}</n-tag><span class="result-time">{{ formatTime(r.created_at) }}</span><span class="result-session">{{ r.session_title }}</span></div><div class="result-content">{{ displayContent(r.content).slice(0, 300) }}{{ displayContent(r.content).length > 300 ? '...' : '' }}</div></div></div>
+    <n-empty v-else-if="query && searched" :description="$t('search.noResults')" /></div>
 </template>
 <script setup lang="ts">
 import { ref } from 'vue'; const query = ref(''); const results = ref<any[]>([]); const searched = ref(false)

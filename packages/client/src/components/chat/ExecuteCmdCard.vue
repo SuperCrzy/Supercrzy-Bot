@@ -11,7 +11,7 @@
     </div>
     <div v-if="expanded" class="ec-body">
       <pre v-if="output" class="ec-output"><code>{{ output }}</code></pre>
-      <div v-else-if="status === 'running'" class="ec-running-hint">执行中...</div>
+      <div v-else-if="status === 'running'" class="ec-running-hint">{{ $t('chatui.running') }}...</div>
     </div>
   </div>
 </template>
