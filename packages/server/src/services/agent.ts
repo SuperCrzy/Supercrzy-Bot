@@ -280,6 +280,41 @@ export async function runAgentLoop(
   const lastUserContent = lastUserMsg?.content as string || ''
   const systemPrompt = buildSystemPrompt(agentConfig.systemPrompt, lastUserContent, agentConfig.model)
 
+  // ---- Playbook 经验注入：匹配同类历史任务，避免重复弯路 ----
+  try {
+    const db = getDB()
+    const playbooks = db.prepare(
+      'SELECT task_type, lesson FROM playbook ORDER BY created_at DESC LIMIT 30'
+    ).all() as Array<{ task_type: string; lesson: string }>
+    const q = lastUserContent.toLowerCase()
+
+    /** 任务类型拆词：分词 + 滑动 2-gram，提高匹配召回 */
+    const splitWords = (t: string): string[] => {
+      const words = t.split(/[,，、\s]+/).filter((w) => w.length >= 2)
+      for (let i = 0; i < t.length - 1; i++) words.push(t.slice(i, i + 2))
+      return words
+    }
+
+    const relevant = playbooks
+      .filter((p) => {
+        const type = (p.task_type || '').toLowerCase()
+        if (!type || !q) return false
+        const words = splitWords(type)
+        return words.some((w) => q.includes(w))
+      })
+      .slice(0, 2)
+
+    if (relevant.length > 0) {
+      systemPrompt.prompt +=
+        '\n\n## 历史经验（同类任务）\n' +
+        relevant.map((p) => `- [${p.task_type}] ${p.lesson}`).join('\n') +
+        '\n\n参考上述经验，直接采用已验证的高效路径，避免重复弯路。'
+      for (const p of relevant) {
+        emitSSE(ctx, 'playbook_used', { taskType: p.task_type, lesson: p.lesson })
+      }
+    }
+  } catch { /* 经验注入失败不影响主流程 */ }
+
   for (const skillName of systemPrompt.matchedSkills) {
     emitSSE(ctx, 'skill_matched', { name: skillName })
   }
@@ -778,6 +813,91 @@ export async function runAgentLoop(
   }
 
   emitSSE(ctx, 'done', { turns: turn, maxTurns: effectiveMaxTurns, finished, summary: createdFiles.length > 0 ? `任务完成，共产生 ${createdFiles.length} 个文件` : undefined })
+
+  // ---- Playbook: 复杂任务完成后异步生成执行复盘（不阻塞主流程） ----
+  if (turn >= 3 && totalToolCalls.length > 0) {
+    const lastMsg = messages[messages.length - 1]
+    const lastContent = typeof lastMsg?.content === 'string' ? lastMsg.content : ''
+    generatePlaybook({
+      userTask: lastUserContent,
+      tools: [...totalToolCalls],
+      turns: turn,
+      files: createdFiles.length,
+      lastContent,
+      apiKey: agentConfig.apiKey,
+      baseUrl: agentConfig.baseUrl || config.deepseek.baseUrl,
+      checkpointId,
+    }).catch(() => { /* 复盘生成失败不影响主流程 */ })
+  }
+}
+
+/**
+ * Playbook 复盘生成：用便宜模型把一次任务执行提炼为可复用经验，存入 playbook 表
+ */
+async function generatePlaybook(opts: {
+  userTask: string
+  tools: string[]
+  turns: number
+  files: number
+  lastContent: string
+  apiKey: string
+  baseUrl: string
+  checkpointId: string
+}) {
+  const db = getDB()
+  const prompt = `你是任务复盘专家。根据以下 Agent 任务执行记录，提炼一条可复用的中文经验（≤120字），并给出任务类型标签。
+
+任务: ${opts.userTask.slice(0, 200)}
+执行轮数: ${opts.turns}
+工具调用序列: ${opts.tools.join(' → ')}
+产出文件: ${opts.files} 个
+最终结果: ${opts.lastContent.slice(0, 300)}
+
+严格输出 JSON（不要其他文字）:
+{"taskType": "简短任务类型标签，4-8字，如 代码审计/数据分析/网页抓取", "lesson": "关键经验：这次怎么做的、卡在哪里、下次同类任务应该怎么走更快"}`
+
+  try {
+    const resp = await fetch(`${normalizeBaseUrl(opts.baseUrl)}/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(opts.apiKey.startsWith('tp-') ? { 'api-key': opts.apiKey } : { Authorization: `Bearer ${opts.apiKey}` }),
+      },
+      body: JSON.stringify({
+        model: 'deepseek-v4-flash',
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 300,
+        temperature: 0.3,
+      }),
+    })
+    if (!resp.ok) return
+    const data = await resp.json() as any
+    const text = data.choices?.[0]?.message?.content || ''
+    if (!text) return
+    let parsed: any = null
+    try {
+      parsed = JSON.parse(text.replace(/```json|```/g, '').trim())
+    } catch {
+      const m = text.match(/\{[\s\S]*\}/)
+      if (m) { try { parsed = JSON.parse(m[0]) } catch {} }
+    }
+    if (!parsed || !parsed.lesson) return
+
+    db.prepare(
+      `INSERT INTO playbook (id, task_type, lesson, tools_used, turns, tool_calls, session_id, checkpoint_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+    ).run(
+      randomUUID(),
+      String(parsed.taskType || '通用任务').slice(0, 30),
+      String(parsed.lesson).slice(0, 500),
+      JSON.stringify(opts.tools),
+      opts.turns,
+      opts.tools.length,
+      null,
+      opts.checkpointId,
+    )
+    console.log(`[Playbook] 已生成经验: [${String(parsed.taskType || '通用任务').slice(0, 20)}] ${String(parsed.lesson).slice(0, 40)}...`)
+  } catch { /* ignore */ }
 }
 
 /**

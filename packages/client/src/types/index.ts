@@ -193,6 +193,8 @@ export interface ChatMessage {
   planner?: { steps: string[]; raw?: string }
   /** 重试提示（error 事件 retrying 时） */
   retrying?: string
+  /** 应用的历史经验（playbook_used 事件） */
+  playbookUsed?: Array<{ taskType: string; lesson: string }>
   /** 交付摘要 */
   deliverySummary?: {
     artifactCount: number

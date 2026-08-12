@@ -108,6 +108,12 @@
             <div v-if="msg.skills && msg.skills.length" class="skill-match-row">
               <span v-for="s in msg.skills" :key="s.name" class="skill-tag">⚡ {{ s.name }}</span>
             </div>
+            <!-- 历史经验应用 -->
+            <div v-if="msg.playbookUsed && msg.playbookUsed.length" class="playbook-row">
+              <div v-for="p in msg.playbookUsed" :key="p.taskType" class="playbook-tip" :title="p.lesson">
+                📚 应用经验[{{ p.taskType }}]：{{ p.lesson }}
+              </div>
+            </div>
             <!-- Planner 执行计划 -->
             <div v-if="msg.planner && msg.planner.steps && msg.planner.steps.length" class="planner-card">
               <div class="planner-title">📋 执行计划</div>
@@ -652,6 +658,13 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage) {
       if (!msg.skills.some((s) => s.name === data.name)) msg.skills.push({ name: data.name })
       break
     }
+    case 'playbook_used': {
+      if (!msg.playbookUsed) msg.playbookUsed = []
+      if (!msg.playbookUsed.some((p) => p.taskType === data.taskType)) {
+        msg.playbookUsed.push({ taskType: data.taskType, lesson: data.lesson })
+      }
+      break
+    }
     case 'planner_plan': {
       msg.planner = { steps: data.steps || [], raw: data.raw || '' }
       break
@@ -790,6 +803,19 @@ onMounted(async () => {
   background: var(--accent-muted, rgba(129, 140, 248, 0.12));
   color: var(--accent);
   border: 1px solid var(--border-color);
+}
+
+.playbook-row {
+  padding: 2px 0;
+}
+.playbook-tip {
+  font-size: 11px;
+  color: var(--success, #22c55e);
+  background: rgba(34, 197, 94, 0.08);
+  border-left: 2px solid var(--success, #22c55e);
+  padding: 4px 8px;
+  margin: 2px 0;
+  border-radius: 0 6px 6px 0;
 }
 
 .planner-card {

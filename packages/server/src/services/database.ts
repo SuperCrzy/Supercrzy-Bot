@@ -162,6 +162,25 @@ export function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_custom_models_provider ON custom_models(provider_id);
     CREATE INDEX IF NOT EXISTS idx_custom_providers_key ON custom_providers(provider_key);
 
+    -- 经验库（Playbook）：Agent 任务执行复盘，供同类任务注入
+    CREATE TABLE IF NOT EXISTS playbook (
+      id TEXT PRIMARY KEY,
+      task_type TEXT NOT NULL DEFAULT '',
+      lesson TEXT NOT NULL DEFAULT '',
+      tools_used TEXT NOT NULL DEFAULT '[]',
+      turns INTEGER NOT NULL DEFAULT 0,
+      tool_calls INTEGER NOT NULL DEFAULT 0,
+      outcome TEXT NOT NULL DEFAULT 'completed',
+      session_id TEXT,
+      checkpoint_id TEXT,
+      confidence REAL NOT NULL DEFAULT 0.5,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_playbook_task_type ON playbook(task_type);
+    CREATE INDEX IF NOT EXISTS idx_playbook_created ON playbook(created_at);
+
     -- Insert default settings
     INSERT OR IGNORE INTO settings (key, value) VALUES
       ('apiKey', ''),
