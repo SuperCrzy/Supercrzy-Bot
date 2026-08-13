@@ -33,20 +33,21 @@
 
 `.env`(真实 key)、`data/supercrzy.db`(含 QQ 凭据)、`data/checkpoints/`、`uploads/`、AI 记忆(含旧 QQ AppSecret)—— 均为本地运行产物,gitignore 已挡,clone 后不存在。
 
-## 四、开源前仍需完成的代码层安全项(批次 G 剩余)
+## 四、代码层安全项(批次 G — 已完成,commit 8a772b8)
 
-| # | 事项 | 风险 |
+| # | 事项 | 状态 |
 |---|------|------|
-| G-2 | `/api/preview/` 任意文件读取 | 高 — 路径拼接无白名单 |
-| G-3 | `shell_exec` 裸执行无白名单 | 高 — 敏感工具"先执行后确认" |
-| G-4 | CORS 全开 + API 无鉴权 | 中 — 需白名单/令牌 |
-| G-5 | xlsx@0.18.5 已知 CVE | 中 — 换库或移除 |
-| G-6 | Socket.IO/WS 死代码清理 | 低 — 维护面 |
-| G-7 | 文档过时、0 字节残留 | 低 |
+| G-2 | `/api/preview/` 任意文件读取 | ✅ 白名单目录 + 穿越防护 + 敏感类型拦截(/etc/passwd、.env 实测 403) |
+| G-3 | shell_exec 加固 | ✅ 敏感工具真正"先确认后执行"(挂起 + /api/chat/tool-confirm,120s 超时自动拒);危险命令黑名单(rm -rf /、sudo、dd、fork 炸弹、curl\|sh 等无条件拦截) |
+| G-4 | CORS + 鉴权 | ✅ CORS 白名单(默认 localhost,CORS_ORIGINS 可扩展;恶意 origin 无 CORS 头)+ 可选 API_TOKEN(非本地 /api 需 Bearer) |
+| G-5 | xlsx CVE | ✅ 移除 xlsx@0.18.5 → exceljs@4.4.0(微信附件解析) |
+| G-6 | 死代码 | ✅ 移除 Socket.IO(:3002) + agent-ws(/ws/agent) + 依赖;terminal ws 保留 |
+| G-7 | 残留 | ✅ 0 字节 db、_tmp_、.bak 已清 |
+| T-1 | Invalid Date | ✅ 消息时间 created_at→createdAt 映射 + formatTime 空值防御 |
 
 ## 五、开源操作指引(待用户执行)
 
 1. 建新仓库(建议 `SuperCrzy/supercrzy-agent`,废弃旧的 `deepseek-agent`)
 2. `git push -u origin main --force`(历史已重写,必须 force)
 3. 补 LICENSE / 贡献指南 / 示例配置
-4. 完成 G-2~G-5 后即可公开
+4. 代码层安全项(G-2~G-7)已全部完成,可直接公开
