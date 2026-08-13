@@ -183,6 +183,7 @@ export const useAppStore = defineStore('app', () => {
   }
 
   return {
+    hasApiKey,
     darkMode,
     currentModel,
     currentAgent,

@@ -1,70 +1,103 @@
-# SuperCrzy
+# SUPERCRZY BOT
 
-AI Agent Platform with Web UI, natively integrated with DeepSeek V4.
+一个开箱即用的 **AI Agent 平台** —— 统一大脑 + Agent Loop + 多工具 + 多平台网关,原生对接 DeepSeek V4。
 
-## Features
+## ✨ 功能亮点
 
-- **Agent Loop**: Multi-turn thinking with tool execution (memory, file ops, shell, web search)
-- **Monaco Editor**: Full code editing with syntax highlighting, auto-complete, and save
-- **Skills System**: 8 builtin skills with auto-matching, custom skill creation support
-- **CLI Mode**: Terminal-based chat with streaming and agent mode
-- **Workspace**: File browser + terminal + code editor in one view
-- **Channel Gateway**: Multi-platform messaging (WeChat Work, DingTalk, Feishu, QQ)
-- **Memory System**: Long-term persistent memory with auto-extraction
-- **18 DeepSeek Models**: Full model catalog from V4 Pro to R1 Distill
+- **Agent Loop**:多轮思考 + 工具执行(文件操作、Shell、网络搜索、网页抓取、记忆、技能)
+- **Agent 执行时间线**:每一步思考/工具调用实时可视化,历史可回放、**可分支续跑**
+- **经验库(Playbook)**:任务结束自动复盘,同类任务自动注入历史经验,越用越聪明
+- **幽灵模式**:感知工作区文件变化,低打扰地给出代码介入建议
+- **技能系统**:内置技能 + 自动匹配 + 支持从 GitHub 安装第三方技能
+- **长期记忆**:自动提取并持久化重要信息,跨会话生效
+- **工作台**:文件浏览器 + 终端 + 代码编辑器一站式
+- **多平台网关**:Web / 微信 / QQ 共享同一记忆、会话、技能库
+- **完整模型库**:DeepSeek V1~V4 / R1 全系列 18+ 模型目录
+- **安全默认**:敏感工具"先确认后执行"、危险命令黑名单、CORS 白名单、可选 API 令牌
 
-## Architecture
+## 🚀 快速开始(3 分钟)
 
-- **Frontend**: Vue 3 + NaiveUI + Monaco Editor + Vite + TypeScript
-- **Backend**: Koa2 + better-sqlite3 + TypeScript + SSE streaming
-- **Terminal**: xterm.js + WebSocket
-- **Package Manager**: pnpm workspace (monorepo)
-
-## Quick Start
+### 方式一:一键脚本(推荐)
 
 ```bash
-# Install dependencies
-pnpm install
-
-# Copy environment config
-cp .env.example .env
-# Edit .env and add your DEEPSEEK_API_KEY
-
-# Start Web UI + API server
-pnpm dev
-
-# Or start CLI mode
-pnpm cli
+git clone <你的仓库地址>
+cd supercrzy-agent
+./start.sh          # 自动检查环境 → 装依赖 → 生成 .env → 启动
 ```
 
-## Commands
+### 方式二:手动
 
-| Command | Description |
-|---------|-------------|
-| `pnpm dev` | Start Web UI + API server |
-| `pnpm dev:server` | Start backend only |
-| `pnpm dev:client` | Start frontend only |
-| `pnpm cli` | Terminal chat mode |
-| `pnpm build` | Production build |
+```bash
+# 1. 安装依赖(需 Node >= 20 与 pnpm)
+pnpm install
 
-## Project Structure
+# 2. 配置(二选一)
+cp .env.example .env        # 然后编辑 .env 填 DEEPSEEK_API_KEY=sk-...
+# 或跳过此步,启动后在 Web UI → 设置 里填 API Key(推荐,免重启)
+
+# 3. 启动
+pnpm dev
+```
+
+启动后打开 **http://localhost:5173**:
+- 首次使用,**首页会提示"配置 API Key"**,点击跳转设置页粘贴你的 DeepSeek Key 即可开聊
+- 数据库自动初始化,无需手动建表
+
+### 其他命令
+
+| 命令 | 说明 |
+|------|------|
+| `./start.sh` | 一键启动(Web UI + API) |
+| `pnpm dev` | 启动 Web UI + API |
+| `pnpm cli` | 终端对话模式(CLI 优先!) |
+| `pnpm build` | 生产构建(输出到 client/dist,由后端静态托管) |
+| `pnpm test` | 运行测试(服务端 37 + 客户端 9) |
+
+## 🎮 CLI 模式
+
+```bash
+pnpm cli
+```
+直接在终端与 Agent 对话,支持流式输出与工具调用,适合服务器/SSH 环境。
+
+## ⚙️ 环境变量(.env)
+
+| 变量 | 说明 | 默认 |
+|------|------|------|
+| `PORT` | 后端端口 | `3000` |
+| `DEEPSEEK_API_KEY` | DeepSeek API Key(兜底;UI 设置页配置后优先) | - |
+| `DEEPSEEK_BASE_URL` | API 地址 | `https://api.deepseek.com` |
+| `DEEPSEEK_MODEL` | 默认模型 | `deepseek-v4-pro` |
+| `CORS_ORIGINS` | CORS 白名单(逗号分隔) | 仅 localhost |
+| `API_TOKEN` | 可选:非本地 API 请求的 Bearer 令牌 | 空(不启用) |
+| `TUNNEL_ENABLED` | 开启内网穿透(默认关闭,纯本地) | `false` |
+
+## 🏗️ 架构
 
 ```
 supercrzy-agent/
 ├── packages/
-│   ├── client/          # Vue3 frontend + Monaco Editor
-│   │   └── src/views/   # 14 pages (chat, workspace, skills, etc.)
-│   └── server/          # Koa2 backend
+│   ├── client/          # Vue3 + NaiveUI + Monaco 前端
+│   │   └── src/views/   # 聊天/工作台/技能/记忆/模型/用量等页面
+│   └── server/          # Koa + better-sqlite3 后端
 │       └── src/
-│           ├── routes/  # 10 API route modules
-│           ├── services/ # Agent loop, tools, terminal
-│           └── cli.ts   # Terminal CLI mode
-├── .env.example
-├── LICENSE
-├── package.json
-└── pnpm-workspace.yaml
+│           ├── routes/  # API 路由(chat/settings/session/memory/gateway...)
+│           ├── services/ # Agent 循环、工具、终端、网关
+│           └── gateway/  # 微信/QQ 平台适配
+└── start.sh             # 一键启动
 ```
 
-## License
+- **聊天主通道**:SSE 流式(`POST /api/chat/agent`)
+- **终端**:WebSocket(`/ws/terminal`)
+- **存储**:SQLite(better-sqlite3,自动初始化)
 
-MIT © SuperCrzy
+## 🔒 安全说明
+
+- 敏感工具(执行命令/写删文件)在 UI **先确认后执行**,120 秒未确认自动拒绝
+- Shell 危险命令(删根目录、sudo、dd、fork 炸弹、下载即执行等)**无条件拦截**
+- 文件预览仅限工作区白名单,凭据/数据库类文件禁止读取
+- CORS 默认仅本地;部署到公网请配置 `API_TOKEN` 与 `CORS_ORIGINS`
+
+## 📄 License
+
+MIT License

@@ -36,6 +36,9 @@
         <div class="welcome-logo">SC</div>
         <h1 class="welcome-title">{{ $t('chat.welcomeTitle') }}</h1>
         <p class="welcome-subtitle">{{ $t('chat.welcomeDesc') }}</p>
+        <div v-if="!appStore.hasApiKey" class="welcome-key-hint">
+          <router-link to="/settings">{{ $t('chat.apiKeyHintTitle') }} → {{ $t('chat.apiKeyHintAction') }}</router-link>
+        </div>
         <div class="quick-prompts">
           <div class="quick-prompt" @click="sendQuick(t('chat.quickCode'))">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
@@ -1022,6 +1025,20 @@ onMounted(async () => {
   margin: 0;
 }
 
+.welcome-key-hint {
+  margin-top: 14px;
+  font-size: 13px;
+}
+.welcome-key-hint a {
+  color: var(--accent, #4f7cff);
+  text-decoration: none;
+  border: 1px solid currentColor;
+  border-radius: 20px;
+  padding: 5px 16px;
+  opacity: 0.9;
+  transition: opacity 0.2s;
+}
+.welcome-key-hint a:hover { opacity: 1; }
 .welcome-subtitle {
   font-size: 14px;
   color: var(--text-secondary);

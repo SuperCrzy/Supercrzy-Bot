@@ -31,3 +31,4 @@ packages/client/src/composables/useChatSearch.js
 articles/
 .git-rewrite/
 .git-rewrite/
+_tmp_*
