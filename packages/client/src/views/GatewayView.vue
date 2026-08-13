@@ -1,8 +1,8 @@
 <template>
   <div class="page-container">
     <header class="page-header">
-      <h2>Channel Gateway</h2>
-      <p class="page-desc">Connect WeChat, QQ, WeCom, DingTalk, Feishu and more</p>
+      <h2>{{ $t('gateway.title') }}</h2>
+      <p class="page-desc">{{ $t('gateway.desc') }}</p>
     </header>
 
     <div class="gateway-body">
@@ -20,8 +20,8 @@
               <div class="channel-meta">{{ ch.platform }} · {{ ch.status }}</div>
             </div>
             <n-switch :value="ch.enabled" @update:value="(v: boolean) => toggleChannel(ch, v)" size="small" />
-            <n-button size="tiny" quaternary @click="editChannel(ch)">Edit</n-button>
-            <n-button size="tiny" quaternary type="error" @click="deleteChannel(ch)">Delete</n-button>
+            <n-button size="tiny" quaternary @click="editChannel(ch)">{{ $t('common.edit') }}</n-button>
+            <n-button size="tiny" quaternary type="error" @click="deleteChannel(ch)">{{ $t('common.delete') }}</n-button>
           </div>
         </div>
       </div>
@@ -47,8 +47,8 @@
             <n-button v-if="p.isILink" size="small" :type="wechatStatus.connected ? 'default' : 'primary'" @click="openWechatQR">
               {{ wechatStatus.connected ? 'Reconnect' : 'Scan QR Code' }}
             </n-button>
-            <n-button v-if="p.isILink && wechatStatus.connected" size="small" quaternary type="error" @click="disconnectWechat">Disconnect</n-button>
-            <n-button v-if="!p.isILink" size="small" type="primary" ghost @click="openConfigDialog(p)">Configure</n-button>
+            <n-button v-if="p.isILink && wechatStatus.connected" size="small" quaternary type="error" @click="disconnectWechat">{{ $t('gateway.disconnect') }}</n-button>
+            <n-button v-if="!p.isILink" size="small" type="primary" ghost @click="openConfigDialog(p)">{{ $t('gateway.configure') }}</n-button>
           </div>
         </n-card>
       </div>
@@ -66,9 +66,9 @@
           <n-select v-else-if="f.type==='select'" v-model:value="editForm.config[f.key]" :options="(f.options||[]).map((o:string)=>({label:o,value:o}))" />
         </n-form-item>
         <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
-          <n-button size="small" @click="showConfig=false">Cancel</n-button>
-          <n-button size="small" type="primary" @click="saveChannel" :loading="saving">Save</n-button>
-          <n-button size="small" type="success" ghost @click="testChannel" :loading="testing">Test Connection</n-button>
+          <n-button size="small" @click="showConfig=false">{{ $t('common.cancel') }}</n-button>
+          <n-button size="small" type="primary" @click="saveChannel" :loading="saving">{{ $t('common.save') }}</n-button>
+          <n-button size="small" type="success" ghost @click="testChannel" :loading="testing">{{ $t('gateway.testConnection') }}</n-button>
         </div>
       </n-form>
     </n-modal>
@@ -77,20 +77,20 @@
     <n-modal v-model:show="showWechatQR" preset="card" title="Connect WeChat" style="max-width:420px;text-align:center">
       <div v-if="qrPhase==='loading'" style="padding:40px;color:var(--text-muted)">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spinning"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-        <p style="margin-top:12px">Generating QR code...</p>
+        <p style="margin-top:12px">{{ $t('gateway.generatingQr') }}</p>
       </div>
       <div v-else-if="qrPhase==='ready'" style="padding:16px">
         <img :src="qrImage" alt="QR" style="width:280px;height:280px;border-radius:8px;border:1px solid var(--border-color)" />
         <p style="font-size:13px;color:var(--text-secondary);margin-top:12px">
           Open WeChat and scan the QR code<br/>
-          <span style="font-size:11px;color:var(--text-muted)">Requires ClawBot plugin enabled</span>
+          <span style="font-size:11px;color:var(--text-muted)">{{ $t('gateway.requiresClawBot') }}</span>
         </p>
-        <n-button size="small" quaternary @click="pollQRStatus" :loading="qrPolling">Start polling</n-button>
+        <n-button size="small" quaternary @click="pollQRStatus" :loading="qrPolling">{{ $t('gateway.startPolling') }}</n-button>
       </div>
       <div v-else-if="qrPhase==='confirmed'" style="padding:40px">
         <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--success)"><polyline points="20 6 9 17 4 12"/></svg>
-        <p style="margin-top:16px;font-weight:600;color:var(--success)">Connected!</p>
-        <p style="font-size:13px;color:var(--text-muted)">WeChat is now linked. Try sending a message.</p>
+        <p style="margin-top:16px;font-weight:600;color:var(--success)">{{ $t('gateway.connected') }}</p>
+        <p style="font-size:13px;color:var(--text-muted)">{{ $t('gateway.wechatLinked') }}</p>
       </div>
     </n-modal>
   </div>
@@ -99,10 +99,12 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import { useMessage } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 import { errMsg } from '@/utils/i18n-error'
 import SvgIcon from '@/components/ui/SvgIcon.vue'
 
 const nMessage = useMessage()
+const { t } = useI18n({ useScope: 'global' })
 const platforms = ref<any[]>([])
 const savedChannels = ref<any[]>([])
 const showConfig = ref(false)
@@ -186,7 +188,7 @@ async function saveChannel() {
       })
     }
     showConfig.value = false
-    nMessage.success('Saved')
+    nMessage.success(t('gateway.saved'))
     await loadChannels()
   } catch { nMessage.error('Failed to save') }
   saving.value = false
@@ -229,16 +231,16 @@ async function toggleChannel(ch: any, enabled: boolean) {
       body: JSON.stringify({ enabled }),
     })
     await loadChannels()
-    nMessage.success(enabled ? 'Enabled' : 'Disabled')
-  } catch { nMessage.error('Failed') }
+    nMessage.success(enabled ? t('gateway.enabled') : t('gateway.disabled'))
+  } catch { nMessage.error(t('gateway.failed')) }
 }
 
 async function deleteChannel(ch: any) {
   try {
     await fetch(`/api/gateway/channels/${ch.id}`, { method: 'DELETE' })
     await loadChannels()
-    nMessage.success('Deleted')
-  } catch { nMessage.error('Failed') }
+    nMessage.success(t('gateway.deleted'))
+  } catch { nMessage.error(t('gateway.failed')) }
 }
 
 // ── WeChat QR ──────────────────────────────────────────
@@ -270,8 +272,8 @@ async function pollQRStatus() {
 async function disconnectWechat() {
   try {
     await fetch('/api/gateway/wechat/disconnect', { method:'POST' })
-    wechatStatus.value = { connected:false, running:false }; nMessage.success('Disconnected')
-  } catch { nMessage.error('Failed') }
+    wechatStatus.value = { connected:false, running:false }; nMessage.success(t('gateway.disconnected'))
+  } catch { nMessage.error(t('gateway.failed')) }
 }
 </script>
 
