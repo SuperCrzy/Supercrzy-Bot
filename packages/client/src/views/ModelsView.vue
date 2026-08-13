@@ -46,7 +46,7 @@
           :class="{ active: currentProvider.id === p.id, configured: p.configured }"
           @click="openProviderConfig(p)"
         >
-          <span class="chip-icon">{{ p.icon }}</span>
+          <ProviderBadge :provider="p.id" :size="22" />
           <span class="chip-name">{{ p.label }}</span>
           <span v-if="p.configured" class="chip-check">✓</span>
           <span v-if="currentProvider.id === p.id" class="chip-current">{{ $t('models.current') }}</span>
@@ -63,6 +63,22 @@
         <n-form-item label="API Key">
           <n-input v-model:value="editingProvider.apiKey" type="password" show-password-on="click" :placeholder="$t('models.apiKeyPlaceholder')" />
         </n-form-item>
+        <div class="discover-row">
+          <n-button size="small" secondary :disabled="!editingProvider.apiKey" :loading="discovering" @click="discoverModels">
+            {{ discoveredModels.length > 0 ? $t('models.redetect') : $t('models.detectModels') }}
+          </n-button>
+          <span v-if="discoverError" class="discover-error">{{ discoverError }}</span>
+          <span v-else-if="discoveredModels.length > 0" class="discover-count">{{ $t('models.detectedCount', { n: discoveredModels.length }) }}</span>
+        </div>
+        <n-form-item v-if="discoveredModels.length > 0" :label="$t('models.pickModel')">
+          <n-select
+            v-model:value="editingProvider.defaultModel"
+            :options="discoveredModels.map((m) => ({ label: m, value: m }))"
+            filterable
+            size="small"
+            :placeholder="$t('models.selectModel')"
+          />
+        </n-form-item>
         <n-form-item label="Base URL">
           <n-input v-model:value="editingProvider.baseUrl" placeholder="https://api.example.com/v1">
             <template #suffix>
@@ -73,6 +89,16 @@
         <n-form-item :label="$t('models.defaultModel')">
           <n-input v-model:value="editingProvider.defaultModel" placeholder="e.g. deepseek-v4-pro" />
         </n-form-item>
+        <div v-if="discoveredModels.length > 0" class="discover-list">
+          <span
+            v-for="m in discoveredModels.slice(0, 12)"
+            :key="m"
+            class="discover-chip"
+            :class="{ active: editingProvider.defaultModel === m }"
+            @click="editingProvider.defaultModel = m"
+          >{{ m }}</span>
+          <span v-if="discoveredModels.length > 12" class="discover-more">{{ $t('models.moreModels', { n: discoveredModels.length - 12 }) }}</span>
+        </div>
       </n-form>
       <template #action>
         <n-space>
@@ -180,6 +206,7 @@ import { ref, computed, onMounted, reactive } from 'vue'
 import { NButton, NInput, NSelect, NTag, NModal, NForm, NFormItem, NSwitch, NCheckbox, NCheckboxGroup, NSpace, useMessage } from 'naive-ui'
 import { useAppStore } from '@/stores/app'
 import { useI18n } from 'vue-i18n'
+import ProviderBadge from '@/components/ui/ProviderBadge.vue'
 import { getModelShortName } from '@/data/models'
 import type { CustomModel, AddModelForm } from '@/types'
 
@@ -191,15 +218,19 @@ const message = useMessage()
 interface ProviderDef {
   id: string; icon: string; label: string; baseUrl: string; defaultModel: string
 }
-interface ProviderConfig { apiKey: string; baseUrl: string; defaultModel: string }
+interface ProviderConfig { apiKey: string; baseUrl: string; defaultModel: string; models?: string[] }
 
 const PREDEFINED: ProviderDef[] = [
-  { id: 'deepseek',     icon: '🔮', label: 'DeepSeek',     baseUrl: 'https://api.deepseek.com/v1',     defaultModel: 'deepseek-v4-pro' },
-  { id: 'openai',       icon: '🤖', label: 'OpenAI',       baseUrl: 'https://api.openai.com/v1',        defaultModel: 'gpt-4o' },
-  { id: 'anthropic',    icon: '🧠', label: 'Anthropic',    baseUrl: 'https://api.anthropic.com/v1',     defaultModel: 'claude-sonnet-4-20250514' },
-  { id: 'zhipu',        icon: '✨', label: '智谱 GLM',     baseUrl: 'https://open.bigmodel.cn/api/paas/v4', defaultModel: 'glm-4.7' },
-  { id: 'kimi',         icon: '🌙', label: 'Kimi',         baseUrl: 'https://api.moonshot.cn/v1',        defaultModel: 'moonshot-v1-8k' },
-  { id: 'mimo',         icon: '📱', label: '小米 MiMo',    baseUrl: 'https://api.xiaomimimo.com/v1',     defaultModel: 'mimo-v2.5-pro' },
+  { id: 'deepseek',     icon: 'DS', label: 'DeepSeek',     baseUrl: 'https://api.deepseek.com/v1',          defaultModel: 'deepseek-v4-pro' },
+  { id: 'openai',       icon: 'OA', label: 'OpenAI',       baseUrl: 'https://api.openai.com/v1',             defaultModel: 'gpt-4o' },
+  { id: 'openrouter',   icon: 'OR', label: 'OpenRouter',   baseUrl: 'https://openrouter.ai/api/v1',          defaultModel: 'anthropic/claude-sonnet-4-20250514' },
+  { id: 'anthropic',    icon: 'AC', label: 'Anthropic',    baseUrl: 'https://api.anthropic.com/v1',          defaultModel: 'claude-sonnet-4-20250514' },
+  { id: 'grok',         icon: 'XA', label: 'xAI Grok',     baseUrl: 'https://api.x.ai/v1',                   defaultModel: 'grok-4' },
+  { id: 'gemini',       icon: 'GM', label: 'Google Gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', defaultModel: 'gemini-2.5-pro' },
+  { id: 'mistral',      icon: 'MS', label: 'Mistral',      baseUrl: 'https://api.mistral.ai/v1',             defaultModel: 'mistral-large-latest' },
+  { id: 'zhipu',        icon: 'GL', label: '智谱 GLM',     baseUrl: 'https://open.bigmodel.cn/api/paas/v4', defaultModel: 'glm-4.7' },
+  { id: 'kimi',         icon: 'KM', label: 'Kimi',         baseUrl: 'https://api.moonshot.cn/v1',            defaultModel: 'moonshot-v1-8k' },
+  { id: 'mimo',         icon: 'MM', label: '小米 MiMo',    baseUrl: 'https://api.xiaomimimo.com/v1',         defaultModel: 'mimo-v2.5-pro' },
 ]
 
 const LS_PREFIX = 'supercrzy:provider:'
@@ -381,6 +412,46 @@ async function testCurrentModel() {
 const showProviderModal = ref(false)
 const savingProvider = ref(false)
 const editingProvider = reactive({ id: '', label: '', apiKey: '', baseUrl: '', defaultBaseUrl: '', defaultModel: '' })
+const discovering = ref(false)
+const discoveredModels = ref<string[]>([])
+const discoverError = ref('')
+
+/** 用当前填写的 API Key 拉取该渠道可用模型列表 */
+async function discoverModels() {
+  if (!editingProvider.apiKey || discovering.value) return
+  discovering.value = true
+  discoverError.value = ''
+  try {
+    const res = await fetch('/api/models/discover', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        providerId: editingProvider.id,
+        apiKey: editingProvider.apiKey,
+        baseUrl: editingProvider.baseUrl,
+      }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      discoverError.value = data.error || `HTTP ${res.status}`
+      discoveredModels.value = []
+      return
+    }
+    discoveredModels.value = data.models || []
+    if (discoveredModels.value.length > 0) {
+      // 当前默认模型不在列表时,自动选中第一个
+      if (!discoveredModels.value.includes(editingProvider.defaultModel)) {
+        editingProvider.defaultModel = discoveredModels.value[0]
+      }
+    } else if (data.error) {
+      discoverError.value = data.error
+    }
+  } catch {
+    discoverError.value = t('models.detectFail')
+  } finally {
+    discovering.value = false
+  }
+}
 
 function openProviderConfig(p: typeof presetProviders.value[0]) {
   Object.assign(editingProvider, {
@@ -390,6 +461,8 @@ function openProviderConfig(p: typeof presetProviders.value[0]) {
     defaultBaseUrl: p.baseUrl,
     defaultModel: providerConfigs[p.id]?.defaultModel || p.defaultModel,
   })
+  discoveredModels.value = providerConfigs[p.id]?.models || []
+  discoverError.value = ''
   showProviderModal.value = true
 }
 
@@ -411,6 +484,7 @@ async function saveProvider() {
       apiKey: editingProvider.apiKey,
       baseUrl: editingProvider.baseUrl,
       defaultModel: editingProvider.defaultModel,
+      models: discoveredModels.value.length > 0 ? discoveredModels.value : undefined,
     }
 
     if (cfg.apiKey) {
@@ -423,7 +497,7 @@ async function saveProvider() {
       fetch(`/api/models/providers/${pid}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiKey: cfg.apiKey, baseUrl: cfg.baseUrl, enabled: true }),
+        body: JSON.stringify({ apiKey: cfg.apiKey, baseUrl: cfg.baseUrl, models: cfg.models || [], enabled: true }),
       }).catch(() => { /* 非关键，provider 可能在 DB 中不存在 */ })
 
       // 对于 DeepSeek，额外同步到 /api/settings（保持兼容）
@@ -643,6 +717,25 @@ onMounted(async () => {
 .provider-chip.active { border-color:#4F46E5;background:rgba(79,70,229,.08);font-weight:600 }
 .provider-chip.configured { border-color:#22c55e }
 .chip-icon { font-size:16px }
+
+.discover-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.discover-error { color: #e5484d; font-size: 12px; }
+.discover-count { color: #68738d; font-size: 12px; }
+.discover-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.discover-chip {
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(127,127,127,0.3);
+  color: #68738d;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.discover-chip:hover { border-color: var(--accent, #4f7cff); color: var(--accent, #4f7cff); }
+.discover-chip.active { background: var(--accent, #4f7cff); border-color: var(--accent, #4f7cff); color: #fff; }
+.discover-more { font-size: 11px; color: #98a2b3; align-self: center; }
+
 .chip-check { color:#22c55e;font-weight:700;font-size:11px }
 .chip-current { position:absolute;top:-6px;right:-6px;font-size:9px;padding:1px 5px;border-radius:6px;background:#4F46E5;color:#fff;font-weight:600 }
 

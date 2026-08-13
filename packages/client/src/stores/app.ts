@@ -85,7 +85,8 @@ export const useAppStore = defineStore('app', () => {
 
     // Map provider id to label
     const PROVIDER_LABELS: Record<string, string> = {
-      deepseek: 'DeepSeek', openai: 'OpenAI', anthropic: 'Anthropic',
+      deepseek: 'DeepSeek', openai: 'OpenAI', openrouter: 'OpenRouter',
+      anthropic: 'Anthropic', grok: 'Grok', gemini: 'Gemini', mistral: 'Mistral',
       zhipu: '智谱', kimi: 'Kimi', mimo: 'MiMo',
     }
 

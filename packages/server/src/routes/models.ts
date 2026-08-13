@@ -238,6 +238,70 @@ modelsRouter.delete('/custom/:id', (ctx: Context) => {
 })
 
 // ========================
+// Discover — 用用户 API Key 拉取该渠道可用模型列表
+// ========================
+modelsRouter.post('/discover', async (ctx: Context) => {
+  const { providerId, apiKey, baseUrl } = (ctx.request.body as any) || {}
+  if (!apiKey || !baseUrl) {
+    ctx.status = 400
+    ctx.body = { error: 'apiKey and baseUrl required' }
+    return
+  }
+
+  const normalize = (u: string) => u.replace(/\/v1\/?$/, '')
+  let url = ''
+  let headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  let parseModels: (json: any) => string[] = (json) =>
+    (json?.data || []).map((m: any) => m.id).filter(Boolean)
+
+  if (providerId === 'anthropic') {
+    // Anthropic 原生：x-api-key 头 + anthropic-version
+    url = `${normalize(baseUrl)}/models`
+    headers['x-api-key'] = apiKey
+    headers['anthropic-version'] = '2023-06-01'
+  } else if (providerId === 'gemini') {
+    // Gemini：x-goog-api-key 头，models[].name 带 'models/' 前缀
+    url = `${baseUrl}/models`
+    headers['x-goog-api-key'] = apiKey
+    parseModels = (json) =>
+      (json?.models || []).map((m: any) => String(m.name || '').replace(/^models\//, '')).filter(Boolean)
+  } else {
+    // OpenAI 兼容：Bearer + /models
+    url = `${normalize(baseUrl)}/models`
+    headers['Authorization'] = `Bearer ${apiKey}`
+  }
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 8000)
+  try {
+    const resp = await fetch(url, { headers, signal: controller.signal })
+    if (resp.status === 401 || resp.status === 403) {
+      ctx.status = 401
+      ctx.body = { error: 'API Key 无效或无权限' }
+      return
+    }
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '')
+      ctx.status = resp.status
+      ctx.body = { error: text.slice(0, 200) || `请求失败 (${resp.status})` }
+      return
+    }
+    const json = await resp.json().catch(() => ({}))
+    const models = parseModels(json)
+    if (models.length === 0) {
+      ctx.body = { models: [], error: '未识别到可用模型' }
+      return
+    }
+    ctx.body = { models }
+  } catch (err: any) {
+    ctx.status = 502
+    ctx.body = { error: err.name === 'AbortError' ? '请求超时' : `请求失败: ${err.message}` }
+  } finally {
+    clearTimeout(timer)
+  }
+})
+
+// ========================
 // Utilities
 // ========================
 
