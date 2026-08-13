@@ -32,6 +32,7 @@
             :options="allModelOptions"
             size="small"
             class="cmb-select"
+            :placeholder="$t('models.noModelSelected')"
           />
         </div>
       </div>
@@ -739,10 +740,11 @@ onMounted(async () => {
     appStore.fetchCustomModels?.(),
   ].filter(Boolean))
   pageReady.value = true
-  // 兜底：当前模型不在任何可用选项(历史脏数据/被删模型)时,落到第一个可用模型
+  // 兜底：仅当已有选择(非空)且不在可用选项(历史脏数据/被删模型)时,落到第一个可用模型。
+  // 空模型 = 用户尚未选择,不自动选中,保持"请选择模型"状态
   const opts = allModelOptions.value
   const vals = opts.flatMap((o: any) => (o.type === 'group' ? o.children.map((c: any) => c.value) : [o.value]))
-  if (vals.length > 0 && !vals.includes(appStore.currentModel)) {
+  if (appStore.currentModel && vals.length > 0 && !vals.includes(appStore.currentModel)) {
     appStore.currentModel = vals[0]
   }
 })

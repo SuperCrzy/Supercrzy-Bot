@@ -144,6 +144,8 @@ const messages = {
       plannerTitle: '执行计划',
       deliveryTitle: '交付产物',
       uploadFileTitle: '上传文件（图片/PDF/Word/Excel 等）',
+      noModelHint: '请先在模型页(/models)配置并选择模型',
+
       inputPlaceholderFull: '输入消息，Enter 发送  |  Shift+Enter 换行  |  📎 上传文件',
       fileCount: '{n} 个文件',
       uploadFailed: '上传失败',
@@ -332,6 +334,7 @@ const messages = {
       },
     },
     models: {
+      noModelSelected: '请选择模型',
              detectModels: '识别可用模型',
       redetect: '重新识别',
       detectedCount: '识别到 {n} 个模型',
@@ -649,6 +652,8 @@ const messages = {
       plannerTitle: 'Execution plan',
       deliveryTitle: 'Deliverables',
       uploadFileTitle: 'Upload files (images/PDF/Word/Excel)',
+      noModelHint: 'Please configure and select a model in Models (/models) first',
+
       inputPlaceholderFull: 'Type a message, Enter to send  |  Shift+Enter for newline  |  📎 Upload',
       fileCount: '{n} files',
       uploadFailed: 'Upload failed',
@@ -837,6 +842,7 @@ const messages = {
       },
     },
     models: {
+      noModelSelected: 'Select a model',
       detectModels: 'Detect models',
       redetect: 'Re-detect',
       detectedCount: '{n} models detected',

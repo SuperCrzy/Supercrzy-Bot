@@ -184,7 +184,7 @@ export function initDatabase() {
     -- Insert default settings
     INSERT OR IGNORE INTO settings (key, value) VALUES
       ('apiKey', ''),
-      ('model', 'deepseek-v4-pro'),
+      ('model', ''),
       ('systemPrompt', 'You are a helpful assistant powered by SUPERCRZY BOT.'),
       ('temperature', '0.7'),
       ('maxTokens', '8192');

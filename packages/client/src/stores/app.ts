@@ -6,7 +6,8 @@ import type { CustomModel } from '@/types'
 
 export const useAppStore = defineStore('app', () => {
   const darkMode = ref(false)
-  const currentModel = ref(localStorage.getItem('supercrzy:currentModel') || 'deepseek-v4-pro')
+  // 不预置默认模型：由用户在模型页自行配置并选择（当前模型为空 = 未选择）
+  const currentModel = ref(localStorage.getItem('supercrzy:currentModel') || '')
   const currentAgent = ref('default')
   const isConnected = ref(false)
   const detailPanelVisible = ref(false)

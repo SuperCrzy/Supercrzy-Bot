@@ -573,6 +573,12 @@ async function handleSend() {
 
   if (!text && files.length === 0) return
 
+  // 未选择模型 → 引导去模型页配置（不预置默认模型，用户自主选择）
+  if (!appStore.currentModel) {
+    nMessage.warning(t('chat.noModelHint'))
+    return
+  }
+
   let session = chatStore.currentSession
   if (!session) {
     session = await chatStore.createSession(text.slice(0, 50))
