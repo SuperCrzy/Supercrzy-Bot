@@ -64,7 +64,8 @@
         <div class="message" :class="msg.role">
           <div class="message-header">
             <div class="message-avatar">
-              {{ msg.role === 'user' ? 'U' : 'AI' }}
+              <img v-if="msg.role !== 'user'" src="/logo.png" alt="SUPERCRZY" class="avatar-logo" />
+              <span v-else class="avatar-user">U</span>
             </div>
             <div class="message-meta">
               <span class="message-role">{{ msg.role === 'user' ? $t('chat.roleUser') : $t('chat.roleAssistant') }}</span>
@@ -106,6 +107,11 @@
               <span class="dot"></span>
               <span class="dot"></span>
               <span class="dot"></span>
+            </div>
+            <!-- 角色分发 -->
+            <div v-if="msg.roleRouted" class="role-routed-row">
+              <span class="role-tag">{{ $t('chat.routedTo') }} {{ msg.roleRouted.roleName }}</span>
+              <span v-if="msg.roleRouted.matchedKeyword" class="role-keyword">{{ $t('chat.routedBy') }} "{{ msg.roleRouted.matchedKeyword }}"</span>
             </div>
             <!-- 技能匹配 -->
             <div v-if="msg.skills && msg.skills.length" class="skill-match-row">
@@ -264,7 +270,7 @@ import { useChatStore } from '@/stores/chat'
 import { useAppStore } from '@/stores/app'
 import { getModelShortName } from '@/data/models'
 import type { ChatMessage, Attachment, ToolCallEvent, ChatFlowNode } from '@/types'
-import { extractText } from '@/types'
+import { extractText, normalizeContent } from '@/types'
 import { errMsg } from '@/utils/i18n-error'
 import ThinkingBlock from '@/components/chat/ThinkingBlock.vue'
 import ToolCallBlock from '@/components/chat/ToolCallBlock.vue'
@@ -383,7 +389,7 @@ function renderMarkdown(content: string) {
 
 /** 统一 content 取值：兼容 string（流式）与 ContentBlock[]（历史消息） */
 function textOf(content: ChatMessage['content']): string {
-  if (typeof content === 'string') return content
+  if (typeof content === 'string') return normalizeContent(content)
   return extractText(content)
 }
 
@@ -754,6 +760,10 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage) {
       }
       break
     }
+    case 'role_routed': {
+      msg.roleRouted = { roleId: data.roleId, roleName: data.roleName, matchedKeyword: data.matchedKeyword || '' }
+      break
+    }
     case 'planner_plan': {
       msg.planner = { steps: data.steps || [], raw: data.raw || '' }
       break
@@ -893,6 +903,27 @@ onMounted(async () => {
   flex-wrap: wrap;
   gap: 6px;
   padding: 4px 0;
+}
+
+.role-routed-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+}
+.role-tag {
+  font-size: 11px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: rgba(16, 185, 129, 0.12);
+  color: #0d9488;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  font-weight: 500;
+}
+.role-keyword {
+  font-size: 11px;
+  color: var(--text-muted);
 }
 
 .skill-tag {
@@ -1042,7 +1073,14 @@ onMounted(async () => {
   height: 72px;
   border-radius: 20px;
   object-fit: contain;
+  padding: 8px;
+  background: #ffffff; /* 浅色模式纯白底 */
   box-shadow: 0 8px 24px rgba(254, 114, 25, 0.25);
+}
+
+.dark .welcome-logo {
+  background: #000000; /* 深色模式纯黑底 */
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
 }
 
 .welcome-title {
@@ -1100,7 +1138,7 @@ onMounted(async () => {
 }
 
 .message-wrapper {
-  margin-bottom: 8px;
+  margin-bottom: 12px;
 }
 
 .message {
@@ -1108,12 +1146,34 @@ onMounted(async () => {
   margin: 0 auto;
 }
 
+/* ===== 气泡聊天布局：用户右侧 / AI 左侧 ===== */
+.message.user {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.message.assistant {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
 .message-header {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 8px;
-  padding-left: 4px;
+  margin-bottom: 6px;
+  padding: 0 6px;
+}
+
+/* 用户消息：头像与标题在右侧（镜像排列） */
+.message.user .message-header {
+  flex-direction: row-reverse;
+}
+
+.message.user .message-meta {
+  justify-content: flex-end;
 }
 
 .message-avatar {
@@ -1126,6 +1186,25 @@ onMounted(async () => {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  overflow: hidden;
+}
+
+.avatar-logo {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  padding: 3px;
+  background: #ffffff; /* 浅色模式纯白底 */
+  border-radius: 7px;
+}
+
+.dark .avatar-logo {
+  background: #000000; /* 深色模式纯黑底 */
+}
+
+.avatar-user {
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .message.user .message-avatar {
@@ -1133,8 +1212,9 @@ onMounted(async () => {
   color: white;
 }
 
+/* assistant 头像由 LOGO 图片自带主题背景（纯白/纯黑），无需渐变底色 */
 .message.assistant .message-avatar {
-  background: linear-gradient(135deg, #06B6D4, #0EA5E9);
+  background: transparent;
   color: white;
 }
 
@@ -1155,7 +1235,51 @@ onMounted(async () => {
 }
 
 .message-body {
-  padding-left: 38px;
+  max-width: 92%;
+  padding: 10px 14px;
+  border-radius: 14px;
+  line-height: 1.7;
+}
+
+/* 用户消息：品牌色气泡 + 白字 */
+.message.user .message-body {
+  background: linear-gradient(135deg, #4F46E5, #6366F1);
+  color: #ffffff;
+  border-bottom-right-radius: 4px;
+}
+
+.message.user .message-content {
+  color: #ffffff;
+}
+
+.message.user .message-content :deep(p code) {
+  background: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.message.user .message-content :deep(blockquote) {
+  border-left-color: rgba(255, 255, 255, 0.6);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.message.user .message-content :deep(th), .message.user .message-content :deep(td) {
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+/* AI 消息：浅色气泡（跟随主题） */
+.message.assistant .message-body {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-bottom-left-radius: 4px;
+}
+
+/* 用户消息的卡片类子组件（技能/经验/思考等）保持可读 */
+.message.user .skill-tag,
+.message.user .playbook-tip,
+.message.user .role-tag {
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.35);
 }
 
 /* ===== Attachments in messages ===== */

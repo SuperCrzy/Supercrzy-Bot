@@ -3,9 +3,9 @@
 :root {
   /* Backgrounds */
   --bg-primary: #ffffff;
-  --bg-secondary: #f7f7f8;
-  --bg-tertiary: #eeeeef;
-  --bg-sidebar: #fafafa;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #fafafa;
+  --bg-sidebar: #ffffff;
   --bg-elevated: #ffffff;
   --bg-hover: rgba(0, 0, 0, 0.04);
   --bg-active: rgba(79, 70, 229, 0.08);
@@ -95,21 +95,21 @@
 
 /* Dark mode */
 .dark {
-  --bg-primary: #09090b;
-  --bg-secondary: #18181b;
-  --bg-tertiary: #27272a;
-  --bg-sidebar: #0f0f0f;
-  --bg-elevated: #1c1c1f;
+  --bg-primary: #000000;
+  --bg-secondary: #000000;
+  --bg-tertiary: #111111;
+  --bg-sidebar: #000000;
+  --bg-elevated: #0d0d0d;
   --bg-hover: rgba(255, 255, 255, 0.06);
   --bg-active: rgba(129, 140, 248, 0.12);
 
   --text-primary: #fafafa;
   --text-secondary: #a1a1aa;
   --text-muted: #71717a;
-  --text-inverse: #09090b;
+  --text-inverse: #ffffff;
 
-  --border-color: #27272a;
-  --border-hover: #3f3f46;
+  --border-color: #1f1f23;
+  --border-hover: #2e2e33;
   --border-focus: #818cf8;
 
   --accent: #818cf8;

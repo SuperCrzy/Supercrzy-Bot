@@ -119,7 +119,7 @@ function emitSSE(ctx: Context, event: string, data: any) {
 /**
  * 从数据库加载相关记忆并构建系统提示
  */
-function buildSystemPrompt(basePrompt: string, userMessage: string, model?: string): { prompt: string; matchedSkills: string[]; allowedTools: string[] } {
+function buildSystemPrompt(basePrompt: string, userMessage: string, model?: string, roleId?: string): { prompt: string; matchedSkills: string[]; allowedTools: string[] } {
   const db = getDB()
 
   // 读取记忆开关
@@ -130,9 +130,12 @@ function buildSystemPrompt(basePrompt: string, userMessage: string, model?: stri
   const memoryLimit = memoryCharLimitRow ? parseInt(memoryCharLimitRow.value) || 50000 : 50000
   const memoryItemLimit = Math.max(5, Math.floor(memoryLimit / 2000))  // 按字符预算估算条数
 
+  // 角色级记忆隔离：有 roleId 时只注入该角色的记忆（+全局记忆），无则全部
   const memories = memoryEnabled ? db.prepare(
-    `SELECT key, content, category, importance FROM agent_memory ORDER BY importance DESC LIMIT ${memoryItemLimit}`
-  ).all() as any[] : []
+    `SELECT key, content, category, importance FROM agent_memory
+     WHERE role_id IS NULL OR role_id = ? OR role_id = ''
+     ORDER BY importance DESC LIMIT ${memoryItemLimit}`
+  ).all(roleId || '') as any[] : []
 
   let memorySection = ''
   if (memories.length > 0) {
@@ -298,7 +301,27 @@ export async function runAgentLoop(
 
   const lastUserMsg = [...userMessages].reverse().find(m => m.role === 'user')
   const lastUserContent = lastUserMsg?.content as string || ''
-  const systemPrompt = buildSystemPrompt(agentConfig.systemPrompt, lastUserContent, agentConfig.model)
+
+  // ---- 角色分发：按消息匹配专家角色，命中则用角色系统提示 ----
+  let activeRole: { id: string; name: string } | null = null
+  try {
+    const { matchRole, getDefaultRole } = await import('./role-router')
+    const matched = matchRole(lastUserContent)
+    const role = matched.role || getDefaultRole()
+    if (role) {
+      activeRole = { id: role.id, name: role.name }
+      // 命中专家角色（非默认）或显式有角色的系统提示时，覆盖 basePrompt
+      if (role.system_prompt) {
+        agentConfig.systemPrompt = role.system_prompt
+      }
+      emitSSE(ctx, 'role_routed', { roleId: role.id, roleName: role.name, matchedKeyword: matched.matchedKeyword || '' })
+      console.log(`[Role] 任务分发 → ${role.name} (keyword: ${matched.matchedKeyword || 'default'})`)
+    }
+  } catch (err: any) {
+    console.warn(`[Role] 角色分发失败（回退默认）: ${err.message}`)
+  }
+
+  const systemPrompt = buildSystemPrompt(agentConfig.systemPrompt, lastUserContent, agentConfig.model, activeRole?.id)
 
   // ---- Playbook 经验注入：匹配同类历史任务，避免重复弯路 ----
   try {
@@ -685,16 +708,17 @@ export async function runAgentLoop(
         // ---- 空内容兜底：模型只返回 reasoning 没有实际内容 ----
         if (!contentBuffer || contentBuffer.trim().length === 0) {
           emptyContentCount++
-          if (emptyContentCount <= 2) {
+          // 推理模型收尾阶段常只输出 reasoning（自我确认已完成）——首次温和提示，
+          // 若连续空则判断为"任务已完成"，用 reasoning 兜底并终止，避免空转
+          if (emptyContentCount <= 1) {
             emitSSE(ctx, 'empty_content_retry', { attempt: emptyContentCount })
-            // 注入提示让模型输出实际内容，不要继续 reasoning
             messages.push({
               role: 'system',
-              content: `你的上一条回复是空的。请直接输出你的回答内容，不要继续内部推理。用简洁的文字回复用户。`,
+              content: `你的上一条回复只有内部推理、没有实际输出。如果任务已经完成，请直接输出最终结论（不要再调用工具、不要继续推理）；如果确实没完成，请输出下一步要做的内容。`,
             })
-            continue  // 重试
+            continue  // 重试一次
           }
-          // 重试 2 次仍然为空，用 reasoning 内容兜底
+          // 连续空回复 → 视为模型已收尾，用 reasoning 摘要兜底并终止循环
           let fallbackContent = '抱歉，模型未能生成回复。请重试或换个问法。'
           if (reasoningBuffer && reasoningBuffer.length > 50) {
             // 从 reasoning 中提取可能的有用内容（去掉思考过程的前缀）
@@ -864,6 +888,7 @@ export async function runAgentLoop(
       apiKey: agentConfig.apiKey,
       baseUrl: agentConfig.baseUrl || config.deepseek.baseUrl,
       checkpointId,
+      roleName: activeRole?.name || '',
     }).catch(() => { /* 复盘生成失败不影响主流程 */ })
   }
 }
@@ -880,6 +905,7 @@ async function generatePlaybook(opts: {
   apiKey: string
   baseUrl: string
   checkpointId: string
+  roleName?: string
 }) {
   const db = getDB()
   const prompt = `你是任务复盘专家。根据以下 Agent 任务执行记录，提炼一条可复用的中文经验（≤120字），并给出任务类型标签。
@@ -921,8 +947,8 @@ async function generatePlaybook(opts: {
     if (!parsed || !parsed.lesson) return
 
     db.prepare(
-      `INSERT INTO playbook (id, task_type, lesson, tools_used, turns, tool_calls, session_id, checkpoint_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+      `INSERT INTO playbook (id, task_type, lesson, tools_used, turns, tool_calls, session_id, checkpoint_id, role_name, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
     ).run(
       randomUUID(),
       String(parsed.taskType || '通用任务').slice(0, 30),
@@ -932,6 +958,7 @@ async function generatePlaybook(opts: {
       opts.tools.length,
       null,
       opts.checkpointId,
+      opts.roleName || '',
     )
     console.log(`[Playbook] 已生成经验: [${String(parsed.taskType || '通用任务').slice(0, 20)}] ${String(parsed.lesson).slice(0, 40)}...`)
   } catch { /* ignore */ }

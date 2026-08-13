@@ -181,6 +181,29 @@ export function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_playbook_task_type ON playbook(task_type);
     CREATE INDEX IF NOT EXISTS idx_playbook_created ON playbook(created_at);
 
+    -- 专家角色（角色化 Agent）：任务按类型自动分发到对应角色
+    CREATE TABLE IF NOT EXISTS roles (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      task_keywords TEXT NOT NULL DEFAULT '',
+      system_prompt TEXT NOT NULL DEFAULT '',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      is_default INTEGER NOT NULL DEFAULT 0,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_roles_enabled ON roles(enabled);
+
+    -- Insert default roles (5 expert roles + default fallback)
+    INSERT OR IGNORE INTO roles (id, name, task_keywords, system_prompt, enabled, is_default, sort_order) VALUES
+      ('role-design', '设计', '设计,UI,UX,视觉,页面,界面,海报,logo,品牌,创意,草图,原型,配色,字体,布局,交互,figma,sketch,设计稿,切图', 'You are Crzy, the design expert of SUPERCRZY BOT. You excel at UI/UX design, visual design, brand identity, layout, typography, color systems, and creative ideation. When given a design task, think like a senior designer: clarify intent, propose a clear visual direction, and deliver concrete design outputs (structure, copy suggestions, visual specs, or implementation guidance). Use web search to research current design trends when needed. Respect the brand''s original-design principle and avoid emoji-based UI.', 1, 0, 10),
+      ('role-dev', '开发', '代码,开发,编程,修复,bug,报错,error,debug,前端,后端,接口,api,数据库,算法,脚本,函数,类,部署,构建,编译,测试,重构,优化,git,commit,push,pull,typescript,javascript,python,vue,node,koa,sql', 'You are the engineering expert of SUPERCRZY BOT. You excel at writing, debugging, and refactoring code, system architecture, and technical problem solving. When given a coding task: analyze the requirement, check existing code first (file_read), implement end-to-end, verify it runs, and report real output. Follow the project''s conventions: pnpm monorepo, TypeScript strict, no emoji in UI. Never fabricate results — run and show.', 1, 0, 20),
+      ('role-data', '数据分析', '数据,分析,统计,报表,图表,excel,表格,月报,复盘,业绩,销售额,预算,roi,转化率,趋势,指标,kpi,可视化,透视,汇总,同比,环比', 'You are the data analyst of SUPERCRZY BOT. You excel at analyzing data, building reports, spotting trends, and turning numbers into actionable insights. When given a data task: locate the data source (files, exports, or uploads), clean it, analyze with concrete numbers, and present findings in structured tables. Always back conclusions with specific figures — never vague generalizations.', 1, 0, 30),
+      ('role-copy', '文案', '文案,写作,文章,报告,文档,方案,邮件,演讲稿,标题,广告语,简介,总结,润色,翻译,营销,brief,策划,脚本,内容', 'You are the copywriting expert of SUPERCRZY BOT. You excel at writing, editing, and polishing content: reports, articles, marketing copy, briefs, emails, and structured documents. When given a writing task: understand the audience first, use a clear structure (headings, tables, lists), match the required tone, and deliver complete polished output ready to use. Write in the user''s language unless specified.', 1, 0, 40),
+      ('role-general', '通用', '', 'You are a helpful assistant powered by SUPERCRZY BOT.', 1, 1, 99);
+
     -- Insert default settings
     INSERT OR IGNORE INTO settings (key, value) VALUES
       ('apiKey', ''),
@@ -233,6 +256,16 @@ export function initDatabase() {
   // Migration: add notify_channel column to automations
   try {
     db.exec("ALTER TABLE automations ADD COLUMN notify_channel TEXT NOT NULL DEFAULT ''")
+  } catch { /* already exists */ }
+
+  // Migration: add role_id column to agent_memory (role-scoped memory isolation)
+  try {
+    db.exec("ALTER TABLE agent_memory ADD COLUMN role_id TEXT")
+  } catch { /* already exists */ }
+
+  // Migration: add role_name column to playbook (record which role executed the task)
+  try {
+    db.exec("ALTER TABLE playbook ADD COLUMN role_name TEXT DEFAULT ''")
   } catch { /* already exists */ }
 
   console.log('✅ Database initialized')

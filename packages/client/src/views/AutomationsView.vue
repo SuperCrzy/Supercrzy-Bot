@@ -65,6 +65,9 @@
         <n-form-item label="Prompt">
           <n-input v-model:value="form.prompt" type="textarea" :rows="3" placeholder="What should the Agent do? e.g. Search and summarize today's AI news" />
         </n-form-item>
+        <n-form-item label="Notify">
+          <n-select v-model:value="form.notify_channel" :options="notifyOptions" style="width:100%" placeholder="Result push channel (optional)" clearable />
+        </n-form-item>
       </n-form>
       <template #action>
         <n-button @click="showModal=false">Cancel</n-button>
@@ -91,7 +94,18 @@ const form = reactive({
   name: '', prompt: '', schedule_type: 'recurring',
   freq: 'DAILY', time: 32400000, // 9:00
   weekdays: [] as string[], scheduled_at: null as number | null,
+  notify_channel: null as string | null,
 })
+
+const notifyOptions = [
+  { label: 'All channels', value: 'all' },
+  { label: 'WeChat', value: 'wechat' },
+  { label: 'QQ', value: 'qq' },
+  { label: 'Telegram', value: 'telegram' },
+  { label: 'Discord', value: 'discord' },
+  { label: 'Slack', value: 'slack' },
+  { label: 'Feishu', value: 'feishu' },
+]
 
 const freqOptions = [
   { label: 'Daily', value: 'DAILY' },
@@ -151,10 +165,11 @@ async function createAutomation() {
     body: JSON.stringify({
       name: form.name, prompt: form.prompt,
       schedule_type: form.schedule_type, rrule, scheduled_at: scheduledAt,
+      notify_channel: form.notify_channel || '',
     }),
   })
   showModal.value = false
-  form.name = ''; form.prompt = ''
+  form.name = ''; form.prompt = ''; form.notify_channel = null
   await loadAutomations()
 }
 
@@ -180,7 +195,7 @@ async function deleteAutomation(id: string) {
 function openCreate() {
   form.name = ''; form.prompt = ''; form.schedule_type = 'recurring'
   form.freq = 'DAILY'; form.time = 32400000; form.weekdays = []
-  form.scheduled_at = null
+  form.scheduled_at = null; form.notify_channel = null
   showModal.value = true
 }
 

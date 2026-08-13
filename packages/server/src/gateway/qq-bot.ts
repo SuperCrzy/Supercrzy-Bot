@@ -8,6 +8,7 @@
 import WebSocket from 'ws'
 import { getDB } from '../services/database'
 import { config } from '../config'
+import { formatForChannel } from '../services/channel-format'
 
 // ── 类型定义 ──────────────────────────────────────────
 
@@ -303,7 +304,7 @@ class QQBotInstance {
         const authorName = data.author?.username || data.author?.id || '未知'
         console.log(`[QQ Bot] 💬 私聊 [${authorName}]: ${data.content}`)
         const reply = await callAgent(data.content || '', authorName)
-        await sendQQMessage(this.token, data.author.id, data.id, reply, 'c2c')
+        await sendQQMessage(this.token, data.author.id, data.id, formatForChannel(reply, 'qq'), 'c2c')
         break
       }
 
@@ -311,7 +312,7 @@ class QQBotInstance {
         const authorName = data.author?.username || data.author?.id || '未知'
         console.log(`[QQ Bot] 👥 群聊 [${authorName}@${data.group_openid}]: ${data.content}`)
         const reply = await callAgent(data.content || '', authorName)
-        await sendQQMessage(this.token, data.group_openid, data.id, reply, 'group')
+        await sendQQMessage(this.token, data.group_openid, data.id, formatForChannel(reply, 'qq'), 'group')
         break
       }
 
@@ -319,7 +320,7 @@ class QQBotInstance {
         const authorName = data.author?.username || data.author?.id || '未知'
         console.log(`[QQ Bot] 📢 频道 [${authorName}]: ${data.content}`)
         const reply = await callAgent(data.content || '', authorName)
-        await sendQQMessage(this.token, data.channel_id, data.id, reply, 'channel')
+        await sendQQMessage(this.token, data.channel_id, data.id, formatForChannel(reply, 'qq'), 'channel')
         break
       }
 

@@ -26,6 +26,12 @@ import { statsRouter } from './routes/stats'
 import { memoryRouter } from './routes/memory'
 import { uploadRouter } from './routes/upload'
 import { gatewayRouter, initChannelsTable } from './routes/gateway'
+import { startAllTelegramChannels } from './gateway/telegram-bot'
+import { startAllDiscordChannels } from './gateway/discord-bot'
+import { startAllSlackChannels } from './gateway/slack-bot'
+import { startAllDingtalkChannels } from './gateway/dingtalk-bot'
+import { startAllFeishuChannels } from './gateway/feishu-bot'
+import { startAllWecomChannels } from './gateway/wecom-bot'
 import skillsRouter, { seedBuiltinSkills } from './routes/skills'
 import { syncFileSkills, initSkillsDirectory } from './services/skill-loader'
 import tasksRouter from './routes/tasks'
@@ -34,6 +40,8 @@ import { modelsRouter } from './routes/models'
 import { workspaceRouter } from './routes/workspace'
 import checkpointsRouter from './routes/checkpoints'
 import { playbookRouter } from './routes/playbook'
+import { rolesRouter } from './routes/roles'
+import { systemRouter } from './routes/system'
 import { ghostRouter } from './routes/ghost'
 import { startGhostWatcher } from './services/ghost-watch'
 import { startScheduler } from './services/scheduler'
@@ -386,7 +394,7 @@ async function bootstrap() {
   }
 
   // API Routes
-  const routers = [uploadRouter, chatRouter, settingsRouter, sessionRouter, historyRouter, statsRouter, memoryRouter, gatewayRouter, skillsRouter, tasksRouter, automationsRouter, modelsRouter, workspaceRouter, checkpointsRouter, playbookRouter, ghostRouter]
+  const routers = [uploadRouter, chatRouter, settingsRouter, sessionRouter, historyRouter, statsRouter, memoryRouter, gatewayRouter, skillsRouter, tasksRouter, automationsRouter, modelsRouter, workspaceRouter, checkpointsRouter, playbookRouter, rolesRouter, systemRouter, ghostRouter]
   for (const r of routers) {
     app.use(r.routes())
     app.use(r.allowedMethods())
@@ -452,6 +460,26 @@ async function bootstrap() {
     if (getTunnelUrl()) console.log(`   Tunnel:  ${getTunnelUrl()}`)
     console.log(`   Socket.IO: port ${process.env.IO_PORT || '3002'}`)
     console.log(`   Workspace: ${WORKSPACE_ROOT}\n`)
+
+    // 恢复已启用的各平台通道（常驻后台）
+    startAllTelegramChannels().catch((err: any) => {
+      console.error('[Bootstrap] Telegram channels restore failed:', err.message)
+    })
+    startAllDiscordChannels().catch((err: any) => {
+      console.error('[Bootstrap] Discord channels restore failed:', err.message)
+    })
+    startAllSlackChannels().catch((err: any) => {
+      console.error('[Bootstrap] Slack channels restore failed:', err.message)
+    })
+    startAllDingtalkChannels().catch((err: any) => {
+      console.error('[Bootstrap] Dingtalk channels restore failed:', err.message)
+    })
+    startAllFeishuChannels().catch((err: any) => {
+      console.error('[Bootstrap] Feishu channels restore failed:', err.message)
+    })
+    startAllWecomChannels().catch((err: any) => {
+      console.error('[Bootstrap] Wecom channels restore failed:', err.message)
+    })
   })
 
   // Graceful shutdown

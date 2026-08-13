@@ -25,11 +25,16 @@ const naiveLocale = computed(() => locale.value === 'en-US' ? enUS : zhCN)
 
 const theme = computed(() => appStore.darkMode ? darkTheme : null)
 
-const themeOverrides = {
+const themeOverrides = computed(() => ({
   common: {
     primaryColor: '#4F46E5',
     primaryColorHover: '#6366F1',
     primaryColorPressed: '#4338CA',
+    // 背景跟随全局 token：浅色纯白 / 深色纯黑
+    bodyColor: appStore.darkMode ? '#000000' : '#ffffff',
+    cardColor: appStore.darkMode ? '#0d0d0d' : '#ffffff',
+    modalColor: appStore.darkMode ? '#0d0d0d' : '#ffffff',
+    popoverColor: appStore.darkMode ? '#0d0d0d' : '#ffffff',
   },
-}
+}))
 </script>

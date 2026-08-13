@@ -6,7 +6,25 @@ import { fileURLToPath } from 'url'
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
 export default defineConfig({
   cacheDir: '/tmp/vite-cache',
-  plugins: [vue(), VitePWA({ registerType: 'autoUpdate', workbox: { maximumFileSizeToCacheInBytes: 10485760, globPatterns: ['**/*.{js,css,html,svg,png,woff2}'] }, manifest: { name:'SUPERCRZY BOT',short_name:'SUPERCRZY BOT',theme_color:'#1a1a2e',background_color:'#1a1a2e',display:'standalone',icons:[{src:'/logo-192.png',sizes:'192x192',type:'image/png'},{src:'/logo.png',sizes:'512x512',type:'image/png',purpose:'any maskable'}] } })],resolve:{alias:{'@':resolve(__dirname,'src')}},server:{port:5173,proxy:{'/api':{target:'http://localhost:3000',changeOrigin:true},'/ws':{target:'ws://localhost:3000',ws:true}}},
+  plugins: [vue(), VitePWA({ registerType: 'autoUpdate', workbox: { maximumFileSizeToCacheInBytes: 10485760, globPatterns: ['**/*.{js,css,html,svg,png,woff2}'] }, manifest: { name:'SUPERCRZY BOT',short_name:'SUPERCRZY BOT',theme_color:'#1a1a2e',background_color:'#1a1a2e',display:'standalone',icons:[{src:'/logo-192.png',sizes:'192x192',type:'image/png'},{src:'/logo.png',sizes:'512x512',type:'image/png',purpose:'any maskable'}] } })],resolve:{alias:{'@':resolve(__dirname,'src')}},server:{port:5173,proxy:{
+    '/api': {
+      target: 'http://localhost:3000',
+      changeOrigin: true,
+      // 关键：禁用 SSE 响应缓冲，否则开发环境下流式输出会变成一次性到达
+      configure: (proxy) => {
+        proxy.on('proxyRes', (proxyRes) => {
+          const ct = proxyRes.headers['content-type'] || ''
+          if (ct.includes('text/event-stream')) {
+            delete proxyRes.headers['content-length']
+            proxyRes.headers['cache-control'] = 'no-cache, no-transform'
+            proxyRes.headers['x-accel-buffering'] = 'no'
+            proxyRes.headers['connection'] = 'keep-alive'
+          }
+        })
+      }
+    },
+    '/ws': { target: 'ws://localhost:3000', ws: true }
+  }},
   build: {
     rollupOptions: {
       output: {

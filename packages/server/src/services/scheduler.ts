@@ -102,7 +102,7 @@ async function executeAutomation(auto: Automations): Promise<void> {
 
   // ── Notifier: 如果有 notify_channel，推送结果给用户 ──
   const channel = auto.notify_channel?.trim()
-  if (channel && (channel === 'wechat' || channel === 'qq' || channel === 'both')) {
+  if (channel) {
     const summary = result
       ? result.slice(0, 300).replace(/\n+/g, ' ').trim() + (result.length > 300 ? '...' : '')
       : '(no result)'
@@ -114,7 +114,7 @@ async function executeAutomation(auto: Automations): Promise<void> {
 
     console.log(`[Scheduler] Notifying via ${channel}: ${title}`)
     const notifyResult = await notify(channel as NotifyChannel, title, body)
-    console.log(`[Scheduler] Notify result: wechat=${notifyResult.wechat}, qq=${notifyResult.qq}`)
+    console.log(`[Scheduler] Notify result: ${JSON.stringify(notifyResult)}`)
   }
 }
 

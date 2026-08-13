@@ -195,6 +195,8 @@ export interface ChatMessage {
   retrying?: string
   /** 应用的历史经验（playbook_used 事件） */
   playbookUsed?: Array<{ taskType: string; lesson: string }>
+  /** 角色分发（role_routed 事件） */
+  roleRouted?: { roleId: string; roleName: string; matchedKeyword: string }
   /** 交付摘要 */
   deliverySummary?: {
     artifactCount: number
@@ -245,6 +247,7 @@ export interface Task {
 
 // ===== 向后兼容：辅助函数（实现已移至 utils/content-blocks.ts）=====
 export {
+  normalizeContent,
   extractText,
   extractReasoning,
   extractToolCalls,

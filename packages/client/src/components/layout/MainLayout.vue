@@ -217,7 +217,11 @@
           </button>
         </div>
         <div class="version-info">
-          <a href="#" class="version-link">SUPERCRZY BOT v1.0.0</a>
+          <span class="version-link">SUPERCRZY BOT v{{ APP_VERSION }}</span>
+          <button class="changelog-btn" @click="showChangelog = true" title="更新日志">
+            <SvgIcon name="zap" :size="12" />
+            <span>{{ $t('nav.changelog') }}</span>
+          </button>
         </div>
       </div>
     </aside>
@@ -234,6 +238,39 @@
       @toggle="appStore.toggleDetailPanel"
       @update:tab="appStore.setDetailPanelTab"
     />
+
+    <!-- ========== CHANGELOG MODAL ========== -->
+    <n-modal v-model:show="showChangelog" preset="card" :title="$t('nav.changelogTitle')" style="max-width:560px" @update:show="(v: boolean) => { if (!v) dismissChangelog() }">
+      <div class="changelog-list">
+        <div v-for="entry in CHANGELOG" :key="entry.version" class="changelog-entry">
+          <div class="changelog-header">
+            <span class="changelog-version">v{{ entry.version }}</span>
+            <span class="changelog-date">{{ entry.date }}</span>
+            <span class="changelog-title">{{ entry.title }}</span>
+          </div>
+          <ul v-if="entry.features.length" class="changelog-items">
+            <li v-for="(f, i) in entry.features" :key="'f' + i" class="changelog-feature">{{ f }}</li>
+          </ul>
+          <ul v-if="entry.fixes.length" class="changelog-items">
+            <li v-for="(f, i) in entry.fixes" :key="'x' + i" class="changelog-fix">{{ f }}</li>
+          </ul>
+        </div>
+      </div>
+      <template #action>
+        <div class="changelog-actions">
+          <span class="changelog-seen-hint">v{{ APP_VERSION }} · {{ gitHead }}</span>
+          <div class="changelog-action-btns">
+            <n-button v-if="updating" size="small" type="primary" loading disabled>{{ $t('nav.updating') }}</n-button>
+            <n-button v-else size="small" type="primary" @click="runUpdate">{{ $t('nav.updateNow') }}</n-button>
+          </div>
+        </div>
+        <div v-if="updateLog" class="update-log">
+          <div v-for="(line, i) in updateLog" :key="i" class="update-log-line" :class="{ err: line.ok === false }">
+            <span class="update-log-step">{{ line.message }}</span>
+          </div>
+        </div>
+      </template>
+    </n-modal>
   </div>
 </template>
 
@@ -244,12 +281,14 @@ import { useAppStore } from '@/stores/app'
 import { useI18n } from 'vue-i18n'
 import { useChatStore, formatRelativeTime } from '@/stores/chat'
 import { getModelShortName } from '@/data/models'
+import { APP_VERSION, CHANGELOG, type ChangelogEntry } from '@/data/changelog'
 import SvgIcon from '@/components/ui/SvgIcon.vue'
 import DetailPanel from '@/components/layout/DetailPanel.vue'
 
 const router = useRouter()
 const route = useRoute()
 const appStore = useAppStore()
+const showChangelog = ref(false)
 const chatStore = useChatStore()
 
 const sidebarCollapsed = ref(false)
@@ -285,10 +324,83 @@ function handleNewChat() { chatStore.createSession() }
 function selectSession(id: string) { chatStore.selectSession(id) }
 function delSession(id: string) { chatStore.deleteSession(id) }
 
+const CHANGELOG_SEEN_KEY = 'supercrzy:changelog_seen'
+
+const updating = ref(false)
+const updateLog = ref<Array<{ message: string; ok: boolean | null }>>([])
+const gitHead = ref('')
+
+/** 一键更新：调后端 /api/system/update，SSE 流式接收进度 */
+async function runUpdate() {
+  if (updating.value) return
+  updating.value = true
+  updateLog.value = []
+  try {
+    const res = await fetch('/api/system/update', { method: 'POST' })
+    const reader = res.body?.getReader()
+    if (!reader) return
+    const decoder = new TextDecoder()
+    let buf = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      const lines = buf.split('\n')
+      buf = lines.pop() || ''
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const d = JSON.parse(line.slice(6))
+            if (d.step && d.message) {
+              updateLog.value.push({ message: `${d.step}${d.ok === false ? ' ✗' : d.ok === true ? ' ✓' : '...'}: ${d.message}`, ok: d.ok })
+            }
+          } catch {}
+        }
+      }
+    }
+  } catch (err: any) {
+    updateLog.value.push({ message: `更新请求失败: ${err.message}`, ok: false })
+  } finally {
+    updating.value = false
+    // 刷新版本信息
+    loadVersion()
+  }
+}
+
+/** 拉取后端版本信息（git head） */
+async function loadVersion() {
+  try {
+    const r = await fetch('/api/system/version')
+    const d = await r.json()
+    gitHead.value = d.gitHead || ''
+  } catch {}
+}
+
 onMounted(() => {
   appStore.loadSettings()
   chatStore.loadSessions()
+  loadVersion()
+  // 版本更新提示：已读版本 ≠ 当前版本 → 自动弹出更新日志
+  checkChangelogAutoOpen()
 })
+
+/** 自动版本提示：新版本发布后首次打开应用弹更新日志 */
+function checkChangelogAutoOpen() {
+  try {
+    const seen = localStorage.getItem(CHANGELOG_SEEN_KEY)
+    if (seen !== APP_VERSION) {
+      // 延迟到页面渲染稳定后弹出
+      setTimeout(() => { showChangelog.value = true }, 600)
+    }
+  } catch { /* localStorage 不可用时静默 */ }
+}
+
+function dismissChangelog(remember = true) {
+  showChangelog.value = false
+  if (remember) {
+    try { localStorage.setItem(CHANGELOG_SEEN_KEY, APP_VERSION) } catch {}
+  }
+}
 </script>
 
 <style scoped>
@@ -616,11 +728,129 @@ onMounted(() => {
   color: var(--text-muted);
   text-align: center;
   margin-top: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
 }
 
 .version-link {
   color: var(--text-muted);
   text-decoration: none;
+}
+
+.changelog-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 8px;
+  font-size: 11px;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+
+.changelog-btn:hover {
+  background: var(--accent-subtle);
+  border-color: var(--accent);
+}
+
+/* ===== Changelog Modal ===== */
+.changelog-list {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.changelog-entry {
+  border-left: 3px solid var(--border-color);
+  padding-left: 14px;
+}
+
+.changelog-entry:first-child {
+  border-left-color: var(--accent);
+}
+
+.changelog-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.changelog-version {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.changelog-date {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.changelog-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.changelog-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.changelog-feature,
+.changelog-fix {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  padding-left: 14px;
+  position: relative;
+}
+
+.changelog-feature::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.changelog-fix::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--warning);
+}
+
+.changelog-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.changelog-seen-hint {
+  font-size: 11px;
+  color: var(--text-muted);
 }
 
 /* ===== Main Content ===== */
