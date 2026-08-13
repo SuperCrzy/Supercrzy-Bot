@@ -359,7 +359,9 @@ function textOf(content: ChatMessage['content']): string {
 }
 
 function formatTime(dateStr: string) {
+  if (!dateStr) return ''
   const d = new Date(dateStr)
+  if (isNaN(d.getTime())) return ''
   return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
 }
 
@@ -782,10 +784,20 @@ function markThinkingDone(msg: ChatMessage) {
 /** 工具确认：当前版本后端对敏感工具发 pending 后仍会执行，确认仅更新前端展示状态（后端真拦截在安全批次做） */
 function onToolAllow(tc: ToolCallEvent) {
   tc.status = 'running'
+  fetch('/api/chat/tool-confirm', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ toolCallId: tc.id, decision: 'allow' }),
+  }).catch(() => {})
 }
 function onToolDeny(tc: ToolCallEvent) {
   tc.status = 'error'
   tc.result = t('chat.userDenied')
+  fetch('/api/chat/tool-confirm', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ toolCallId: tc.id, decision: 'deny' }),
+  }).catch(() => {})
 }
 
 /**

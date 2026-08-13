@@ -99,6 +99,7 @@ export const useChatStore = defineStore('chat', () => {
           // 兼容旧数据：将字符串 content 转为 ContentBlock[]
           const normalized = data.messages.map((m: any) => ({
             ...m,
+            createdAt: m.created_at || m.createdAt,
             content: normalizeContent(m.content),
           }))
           messages.value.set(sessionId, normalized)

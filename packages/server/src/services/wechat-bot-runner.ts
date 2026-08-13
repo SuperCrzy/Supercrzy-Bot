@@ -28,15 +28,19 @@ async function tryParseDocx(buffer: Buffer): Promise<string | null> {
 
 async function tryParseXlsx(buffer: Buffer): Promise<string | null> {
   try {
-    const XLSX = await import('xlsx')
-    const wb = XLSX.read(buffer, { type: 'buffer' })
+    const ExcelJS = await import('exceljs')
+    const wb = new ExcelJS.Workbook()
+    await wb.xlsx.load(buffer as any)
     const lines: string[] = []
-    for (const sheetName of wb.SheetNames) {
-      const ws = wb.Sheets[sheetName]
-      const data = XLSX.utils.sheet_to_csv(ws)
-      if (data.trim()) {
-        lines.push(`=== Sheet: ${sheetName} ===`)
-        lines.push(data.trim())
+    for (const ws of wb.worksheets) {
+      const rows: string[] = []
+      ws.eachRow((row: any) => {
+        const vals = (row.values as any[]).slice(1).map((v: any) => (v == null ? '' : String(v)))
+        rows.push(vals.join(','))
+      })
+      if (rows.length > 0) {
+        lines.push(`=== Sheet: ${ws.name} ===`)
+        lines.push(rows.join('\n'))
       }
     }
     return lines.length > 0 ? lines.join('\n') : null

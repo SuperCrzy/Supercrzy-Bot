@@ -15,8 +15,6 @@ import { createServer } from 'http'
 import { config } from './config'
 import { initDatabase } from './services/database'
 import { createTerminalServer } from './services/terminal'
-import { createAgentWSServer } from './services/agent-ws'
-import { createAgentIOServer } from './services/agent-socketio'
 // ── ECC-inspired enhancements ──
 import "./services/hooks"
 import { startTunnel, stopTunnel, renderPreviewPage, getTunnelUrl, createPreviewLink } from './services/tunnel'
@@ -45,7 +43,7 @@ import { QQBotRunner } from './services/qqbot-runner'
 import { getDB } from './services/database'
 import { randomUUID } from 'crypto'
 import { readFileSync, readdirSync, statSync, existsSync } from 'fs'
-import { join, relative, dirname } from 'path'
+import { join, relative, dirname, resolve, sep } from 'path'
 import { fileURLToPath } from 'url'
 import os from 'os'
 
@@ -353,8 +351,32 @@ async function bootstrap() {
     console.log('[Bootstrap] QQ Bot: no credentials configured')
   }
 
-  app.use(cors())
+  // CORS 白名单（默认仅本地，可用 CORS_ORIGINS 逗号分隔扩展）
+  const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000')
+    .split(',').map((s: string) => s.trim()).filter(Boolean)
+  app.use(cors({
+    origin: (ctx) => {
+      const origin = ctx.request.header.origin
+      if (!origin) return '*'
+      return allowedOrigins.includes(origin) ? origin : ''
+    },
+  }))
   app.use(bodyParser())
+
+  // API 鉴权：配置 API_TOKEN 后，非本地来源的 /api 请求需 Authorization: Bearer <token>
+  const API_TOKEN = process.env.API_TOKEN || ''
+  app.use(async (ctx, next) => {
+    if (!API_TOKEN || !ctx.path.startsWith('/api/') || ctx.path === '/api/health') return next()
+    const origin = ctx.request.header.origin || ''
+    const isLocal = !origin || origin.includes('localhost') || origin.includes('127.0.0.1')
+    if (isLocal) return next()
+    if (ctx.request.header.authorization !== `Bearer ${API_TOKEN}`) {
+      ctx.status = 401
+      ctx.body = { error: 'Unauthorized: invalid or missing API token' }
+      return
+    }
+    return next()
+  })
 
   // 托管前端构建产物（dist 目录）
   const distPath = join(__dirname, '../../client/dist')
@@ -376,14 +398,24 @@ async function bootstrap() {
       ctx.body = { status: 'ok', model: config.deepseek.defaultModel, uptime: process.uptime(), tunnel: getTunnelUrl() || 'offline' }
       return
     }
-    // 文件预览
+    // 文件预览（安全加固：仅允许白名单目录内文件，防任意文件读取）
     if (ctx.path.startsWith('/api/preview/')) {
       let filePath = decodeURIComponent(ctx.path.slice('/api/preview/'.length))
       let absPath = filePath.startsWith('/') ? filePath : join(WORKSPACE_ROOT, filePath)
-      if (!existsSync(absPath)) {
-        absPath = join(WORKSPACE_ROOT, filePath.split('/').pop() || '')
+      absPath = resolve(absPath)
+      // 白名单：必须在工作区或 uploads 内
+      const allowedRoots = [resolve(WORKSPACE_ROOT), resolve(join(WORKSPACE_ROOT, 'uploads'))]
+      const inside = allowedRoots.some((root) => absPath === root || absPath.startsWith(root + sep))
+      if (!inside) { ctx.status = 403; ctx.body = 'Forbidden: outside allowed workspace'; return }
+      // 拒绝敏感文件（凭据/数据库/密钥/日志/git 内部）
+      if (/(^|\/)\.[^/]+|\.(env|key|pem|db|db-wal|db-shm|log|tsbuildinfo)$/.test(absPath)) {
+        ctx.status = 403; ctx.body = 'Forbidden: sensitive file type'; return
       }
-      if (!existsSync(absPath)) { ctx.status = 404; ctx.body = `File not found: ${filePath}`; return }
+      if (!existsSync(absPath)) {
+        const fallback = join(WORKSPACE_ROOT, filePath.split('/').pop() || '')
+        if (resolve(fallback) !== absPath || !existsSync(fallback)) { ctx.status = 404; ctx.body = `File not found: ${filePath}`; return }
+        absPath = fallback
+      }
       const content = readFileSync(absPath, 'utf-8')
       ctx.type = 'html'
       ctx.body = renderPreviewPage(filePath, content)
@@ -403,12 +435,6 @@ async function bootstrap() {
 
   // Terminal WebSocket
   createTerminalServer(server)
-
-  // Agent WebSocket
-  createAgentWSServer(server)
-
-  // Agent Socket.IO
-  createAgentIOServer(server)
 
   // Cloudflare Tunnel（默认关闭，TUNNEL_ENABLED=true 才开启）
   const tunnelSubdomain = process.env.TUNNEL_SUBDOMAIN || config.tunnel.subdomain

@@ -14,6 +14,25 @@ import type { Context } from 'koa'
 import { config } from '../config'
 import { getDB } from '../services/database'
 import { toolDefinitions, executeToolCalls, type ToolCall, type ToolResultWithMeta, getToolMeta } from './tools'
+
+// ---- 敏感工具确认机制（先确认后执行）----
+const pendingConfirmations = new Map<string, (decision: 'allow' | 'deny') => void>()
+
+export function resolveToolConfirmation(id: string, decision: 'allow' | 'deny') {
+  pendingConfirmations.get(id)?.(decision)
+  pendingConfirmations.delete(id)
+}
+
+function waitForToolConfirmation(id: string, timeoutMs = 120000): Promise<'allow' | 'deny'> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      pendingConfirmations.delete(id)
+      resolve('deny')
+    }, timeoutMs)
+    pendingConfirmations.set(id, (d) => { clearTimeout(timer); resolve(d) })
+  })
+}
+
 import { classifyApiError, jitteredBackoff } from './error-classifier'
 import { ToolGuardrailController } from './tool-guardrails'
 import { shouldCompress, compressContext, pruneOldToolResults } from './context-compressor'
@@ -573,12 +592,45 @@ export async function runAgentLoop(
         messages.push(assistantMsg)
 
         // P0: wrap executeToolCalls with 60s per-tool timeout
+        // 敏感工具先确认后执行：挂起等待用户 allow/deny（120s 超时自动拒绝）
+        const sensitiveCalls = toolCalls.filter((tc: any) => SENSITIVE_TOOLS.has(tc.function.name))
+        const regularCalls = toolCalls.filter((tc: any) => !SENSITIVE_TOOLS.has(tc.function.name))
+        let allowSensitive: ('allow' | 'deny')[] = []
+        if (sensitiveCalls.length > 0) {
+          allowSensitive = await Promise.all(sensitiveCalls.map((tc: any) => waitForToolConfirmation(tc.id)))
+          for (let i = 0; i < sensitiveCalls.length; i++) {
+            if (allowSensitive[i] !== 'allow') {
+              emitSSE(ctx, 'tool_result', {
+                name: sensitiveCalls[i].function.name,
+                content: '用户拒绝执行此操作',
+                tool_call_id: sensitiveCalls[i].id,
+              })
+            }
+          }
+        }
+        const executeList = [
+          ...regularCalls,
+          ...sensitiveCalls.filter((_, i) => allowSensitive[i] === 'allow'),
+        ]
         const toolResults = await Promise.race([
-          executeToolCalls(toolCalls as any),
+          executeToolCalls(executeList as any),
           new Promise<any[]>((_, reject) =>
             setTimeout(() => reject(new Error("工具执行超时（60秒）")), 60000)
           ),
         ])
+
+        // 被拒绝的敏感工具调用也注入结果，让 LLM 感知
+        if (sensitiveCalls.length > 0) {
+          for (let i = 0; i < sensitiveCalls.length; i++) {
+            if (allowSensitive[i] !== 'allow') {
+              messages.push({
+                role: 'tool' as const,
+                tool_call_id: sensitiveCalls[i].id,
+                content: '用户拒绝执行此操作',
+              })
+            }
+          }
+        }
 
         for (const result of toolResults) {
           const tc = toolCalls.find((t: any) => t.id === result.tool_call_id)

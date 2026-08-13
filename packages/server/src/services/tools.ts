@@ -166,6 +166,21 @@ const toolExecutors: Record<string, ToolExecutor> = {
 
   // ---- Shell 工具 ----
   async shell_exec(args) {
+    // 危险命令黑名单：无条件拦截（即使已确认也禁止）
+    const cmd = String(args.command || '').trim()
+    const BLOCKED = [
+      /rm\s+-rf\s+\/\s*(\s|$)/,            // 删除根目录
+      /\bmkfs\b/, /\bdd\s+if=/, /\bshutdown\b/, /\breboot\b/,
+      /\bsudo\b/, /\brm\s+-rf\s+~/, /\bchmod\s+-R\s+777\s+\//,
+      /:[\(\|][:\|]\{/,                      // fork 炸弹
+      /\b(curl|wget)\b.*\|\s*(ba)?sh\b/,    // 下载即执行
+      /\bbase64\s+-d\b.*\|\s*(ba)?sh\b/,
+    ]
+    for (const pattern of BLOCKED) {
+      if (pattern.test(cmd)) {
+        return `❌ 已拦截危险命令（禁止执行）: ${cmd.slice(0, 80)}`
+      }
+    }
     return new Promise((resolve) => {
       const timeout = args.timeout || 30000
       exec(args.command, { timeout, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
