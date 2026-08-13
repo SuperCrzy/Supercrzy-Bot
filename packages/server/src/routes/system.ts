@@ -6,9 +6,23 @@ import Router from 'koa-router'
 import type { Context } from 'koa'
 import { exec, execSync } from 'child_process'
 import { promisify } from 'util'
+import { existsSync } from 'fs'
+import { join, dirname } from 'path'
 
 const execAsync = promisify(exec)
-const PROJECT_ROOT = process.cwd()
+
+// 仓库根目录：从后端 cwd 上溯，直到找到 pnpm-workspace.yaml
+function findProjectRoot(start: string): string {
+  let dir = start
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    if (existsSync(join(dir, 'pnpm-workspace.yaml'))) return dir
+    const parent = dirname(dir)
+    if (parent === dir) return start // 到根了还没找到，回退 cwd
+    dir = parent
+  }
+}
+const PROJECT_ROOT = findProjectRoot(process.cwd())
 
 export const systemRouter = new Router({ prefix: '/api/system' })
 
