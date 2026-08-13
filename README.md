@@ -33,14 +33,14 @@ pnpm install
 
 # 2. 配置(二选一)
 cp .env.example .env        # 然后编辑 .env 填 DEEPSEEK_API_KEY=sk-...
-# 或跳过此步,启动后在 Web UI → 设置 里填 API Key(推荐,免重启)
+# 或跳过此步,启动后在 Web UI → 模型 (/models) 页配置 API Key(推荐,免重启)
 
 # 3. 启动
 pnpm dev
 ```
 
 启动后打开 **http://localhost:5173**:
-- 首次使用,**首页会提示"配置 API Key"**,点击跳转设置页粘贴你的 DeepSeek Key 即可开聊
+- 首次使用,**首页会提示"配置 API Key"**,点击跳转到 **模型页 (/models)** 配置提供商与 Key,即可开聊
 - 数据库自动初始化,无需手动建表
 
 ### 其他命令
@@ -65,7 +65,7 @@ pnpm cli
 | 变量 | 说明 | 默认 |
 |------|------|------|
 | `PORT` | 后端端口 | `3000` |
-| `DEEPSEEK_API_KEY` | DeepSeek API Key(兜底;UI 设置页配置后优先) | - |
+| `DEEPSEEK_API_KEY` | DeepSeek API Key(兜底;UI 模型页配置后优先) | - |
 | `DEEPSEEK_BASE_URL` | API 地址 | `https://api.deepseek.com` |
 | `DEEPSEEK_MODEL` | 默认模型 | `deepseek-v4-pro` |
 | `CORS_ORIGINS` | CORS 白名单(逗号分隔) | 仅 localhost |
