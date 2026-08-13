@@ -58,9 +58,9 @@ systemRouter.post('/update', async (ctx: Context) => {
     ctx.res.write(`data: ${JSON.stringify({ step, message, ok: ok ?? null })}\n\n`)
   }
 
-  const steps: Array<{ name: string; cmd: string; cwd?: string }> = [
+  const steps: Array<{ name: string; cmd: string; cwd?: string; tolerant?: boolean }> = [
     { name: '提交当前改动', cmd: 'git add -A && git commit -m "chore: auto commit before update $(date +%Y%m%d-%H%M%S)" --no-verify' },
-    { name: '拉取最新代码', cmd: 'git pull --ff-only' },
+    { name: '拉取最新代码', cmd: 'git pull --ff-only', tolerant: true },
     { name: '安装依赖', cmd: 'pnpm install' },
     { name: '构建前端', cmd: 'pnpm --filter @supercrzy/client build' },
   ]
@@ -77,10 +77,14 @@ systemRouter.post('/update', async (ctx: Context) => {
         const tail = (stdout + stderr).trim().split('\n').slice(-3).join('\n')
         send(step.name, tail || 'done', true)
       } catch (err: any) {
-        // commit 无改动时 git 报错（nothing to commit）→ 不算失败，继续
         const msg = err.message || ''
+        // commit 无改动时 git 报错（nothing to commit）→ 不算失败，继续
         if (step.name === '提交当前改动' && (msg.includes('nothing to commit') || msg.includes('no changes'))) {
           send(step.name, '无待提交改动，跳过', true)
+        }
+        // 拉取失败（远程不存在/未配置/无网络）→ 降级：本地自更新继续
+        else if (step.tolerant && (msg.includes('Repository not found') || msg.includes('Could not resolve host') || msg.includes('not a git repository') || msg.includes('no such remote'))) {
+          send(step.name, `远程不可用，跳过拉取（${msg.split('\n')[0]?.slice(0, 80)}）`, true)
         } else {
           send(step.name, `失败: ${msg.slice(0, 300)}`, false)
           send('error', `更新中断于「${step.name}」`, false)
