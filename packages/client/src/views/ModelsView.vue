@@ -231,7 +231,7 @@ const message = useMessage()
 interface ProviderDef {
   id: string; icon: string; label: string; baseUrl: string; defaultModel: string
 }
-interface ProviderConfig { apiKey: string; baseUrl: string; defaultModel: string; models?: string[] }
+interface ProviderConfig { apiKey: string; baseUrl: string; defaultModel: string; models?: string[]; hasServerKey?: boolean }
 
 const PREDEFINED: ProviderDef[] = [
   { id: 'ollama',       icon: 'OL', label: 'Ollama (本地)', baseUrl: 'http://localhost:11434/v1',          defaultModel: 'llama3.1' },
@@ -283,6 +283,37 @@ function removeLSConfig(id: string) {
 
 // providerConfigs 用 reactive 而非 ref，确保深层变更触发视图更新
 const providerConfigs = reactive<Record<string, ProviderConfig>>(loadLSConfigs())
+
+/** 从数据库 custom_providers 合并已配置的 provider（换浏览器/清 localStorage 后不丢配置） */
+async function loadServerProviders() {
+  try {
+    const res = await fetch('/api/models/providers')
+    if (!res.ok) return
+    const providers = await res.json()
+    for (const p of providers as Array<{ providerKey: string; hasApiKey: boolean; baseUrl: string; models: string[] }>) {
+      const preset = PREDEFINED.find(pr => pr.id === p.providerKey)
+      if (!preset) continue
+      const cfg = providerConfigs[p.providerKey]
+      const models = Array.isArray(p.models) && p.models.length > 0 ? p.models : undefined
+      if (!cfg) {
+        // 本地无配置但服务器有 key → 标记已配置（Key 本身只存在服务器，本地不留）
+        providerConfigs[p.providerKey] = {
+          apiKey: '',
+          baseUrl: p.baseUrl || preset.baseUrl,
+          defaultModel: models?.[0] || preset.defaultModel,
+          models,
+          hasServerKey: p.hasApiKey,
+        }
+        saveLSConfig(p.providerKey, providerConfigs[p.providerKey])
+      } else if (p.hasApiKey && !cfg.hasServerKey) {
+        // 本地已有配置，补服务器标记（Key 以本地为准，服务器 key 兜底）
+        cfg.hasServerKey = true
+        if (!cfg.baseUrl && p.baseUrl) cfg.baseUrl = p.baseUrl
+        if ((!cfg.models || cfg.models.length === 0) && models) cfg.models = models
+      }
+    }
+  } catch { /* ignore */ }
+}
 
 /** 全局 settings 表里是否已配置 API Key（脱敏后接口只返回 hasApiKey，不返回明文） */
 const hasGlobalKey = ref(false)
@@ -364,7 +395,7 @@ const currentProvider = computed(() => {
 const presetProviders = computed(() =>
   PREDEFINED.map(p => ({
     ...p,
-    configured: !!(providerConfigs[p.id]?.apiKey) || (p.id === 'deepseek' && hasGlobalKey.value),
+    configured: !!(providerConfigs[p.id]?.apiKey) || !!providerConfigs[p.id]?.hasServerKey || (p.id === 'deepseek' && hasGlobalKey.value),
   }))
 )
 
@@ -376,7 +407,7 @@ const allModelOptions = computed(() => {
   // 1. 已配置的 provider 默认模型（从 providerConfigs 读取）
   for (const p of PREDEFINED) {
     const cfg = providerConfigs[p.id]
-    const isConfigured = !!cfg?.apiKey || (p.id === 'deepseek' && hasGlobalKey.value)
+    const isConfigured = !!cfg?.apiKey || !!cfg?.hasServerKey || (p.id === 'deepseek' && hasGlobalKey.value)
     if (isConfigured && cfg?.defaultModel && !seen.has(cfg.defaultModel)) {
       seen.add(cfg.defaultModel)
       const short = getModelShortName(cfg.defaultModel)
@@ -703,6 +734,7 @@ async function handleDelete() {
 onMounted(async () => {
   await Promise.all([
     loadGlobalSettings(),
+    loadServerProviders(),
     fetchCustomModels(),
     appStore.fetchCustomModels?.(),
   ].filter(Boolean))

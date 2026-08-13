@@ -77,7 +77,7 @@ export const useAppStore = defineStore('app', () => {
       if (key && key.startsWith(LS_PREFIX)) {
         try {
           const cfg = JSON.parse(localStorage.getItem(key)!)
-          if (cfg.apiKey && cfg.defaultModel) {
+          if ((cfg.apiKey || cfg.hasServerKey) && cfg.defaultModel) {
             providerModels.push({ modelId: cfg.defaultModel, providerLabel: key.replace(LS_PREFIX, '') })
           }
         } catch { /* ignore */ }

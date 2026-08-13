@@ -189,17 +189,23 @@ export function initDatabase() {
       ('temperature', '0.7'),
       ('maxTokens', '8192');
 
-    -- Insert preset providers
+    -- Insert preset providers (14 channels, synced with client PREDEFINED)
     INSERT OR IGNORE INTO custom_providers (id, name, provider_key, base_url, api_key, models, capabilities, is_preset, sort_order) VALUES
-      ('preset-deepseek', 'DeepSeek', 'deepseek', 'https://api.deepseek.com', '', '["deepseek-v4-pro","deepseek-v4-flash","deepseek-v3.2","deepseek-v3.2-speciale","deepseek-chat","deepseek-r1","deepseek-r1-0528"]', '["chat","reasoning","tool-calling"]', 1, 0),
-      ('preset-openai', 'OpenAI', 'openai', 'https://api.openai.com/v1', '', '["gpt-4o","gpt-4o-mini","gpt-4.1","o4-mini","o3"]', '["chat","reasoning","tool-calling","vision"]', 1, 1),
-      ('preset-anthropic', 'Anthropic', 'anthropic', 'https://api.anthropic.com', '', '["claude-sonnet-4-20250514","claude-opus-4-20250514","claude-haiku-3.5"]', '["chat","reasoning","tool-calling","vision"]', 1, 2),
-      ('preset-glm', '智谱 GLM', 'glm', 'https://open.bigmodel.cn/api/paas/v4', '', '["glm-4.7","glm-4-plus","glm-4-flash"]', '["chat","reasoning","tool-calling","vision"]', 1, 3),
-      ('preset-kimi', 'Kimi / Moonshot', 'kimi', 'https://api.moonshot.cn/v1', '', '["moonshot-v1-8k","moonshot-v1-32k","moonshot-v1-128k"]', '["chat","tool-calling"]', 1, 4),
-      ('preset-minimax', 'MiniMax', 'minimax', 'https://api.minimax.chat/v1', '', '["abab7-chat","abab6.5s-chat"]', '["chat","reasoning","tool-calling"]', 1, 5),
-      ('preset-hunyuan', '腾讯混元', 'hunyuan', 'https://api.hunyuan.cloud.tencent.com/v1', '', '["hunyuan-turbos-latest","hunyuan-pro","hunyuan-lite"]', '["chat","tool-calling"]', 1, 6),
-      ('preset-ollama', 'Ollama (本地)', 'ollama', 'http://localhost:11434/v1', '', '[]', '["chat"]', 1, 7),
-      ('preset-custom', '自定义 API', 'custom', '', '', '[]', '["chat"]', 1, 8);
+      ('preset-ollama', 'Ollama (本地)', 'ollama', 'http://localhost:11434/v1', '', '["llama3.1"]', '["chat"]', 1, 0),
+      ('preset-meta', 'Meta Llama', 'meta', 'https://api.groq.com/openai/v1', '', '["llama-3.3-70b-versatile"]', '["chat","reasoning","tool-calling"]', 1, 1),
+      ('preset-nvidia', 'NVIDIA NIM', 'nvidia', 'https://integrate.api.nvidia.com/v1', '', '["nvidia/llama-3.1-nemotron-ultra-253b-v1"]', '["chat","reasoning","tool-calling"]', 1, 2),
+      ('preset-qwen', '阿里 Qwen', 'qwen', 'https://dashscope.aliyuncs.com/compatible-mode/v1', '', '["qwen-max"]', '["chat","reasoning","tool-calling"]', 1, 3),
+      ('preset-deepseek', 'DeepSeek', 'deepseek', 'https://api.deepseek.com', '', '["deepseek-v4-pro","deepseek-v4-flash","deepseek-v3.2","deepseek-chat","deepseek-r1"]', '["chat","reasoning","tool-calling"]', 1, 4),
+      ('preset-openai', 'OpenAI', 'openai', 'https://api.openai.com/v1', '', '["gpt-4o","gpt-4o-mini"]', '["chat","reasoning","tool-calling","vision"]', 1, 5),
+      ('preset-openrouter', 'OpenRouter', 'openrouter', 'https://openrouter.ai/api/v1', '', '["anthropic/claude-sonnet-4-20250514"]', '["chat","reasoning","tool-calling"]', 1, 6),
+      ('preset-anthropic', 'Anthropic', 'anthropic', 'https://api.anthropic.com', '', '["claude-sonnet-4-20250514","claude-opus-4-20250514","claude-haiku-3.5"]', '["chat","reasoning","tool-calling","vision"]', 1, 7),
+      ('preset-grok', 'xAI Grok', 'grok', 'https://api.x.ai/v1', '', '["grok-4"]', '["chat","reasoning","tool-calling"]', 1, 8),
+      ('preset-gemini', 'Google Gemini', 'gemini', 'https://generativelanguage.googleapis.com/v1beta', '', '["gemini-2.5-pro"]', '["chat","reasoning","vision"]', 1, 9),
+      ('preset-mistral', 'Mistral', 'mistral', 'https://api.mistral.ai/v1', '', '["mistral-large-latest"]', '["chat","reasoning","tool-calling"]', 1, 10),
+      ('preset-zhipu', '智谱 GLM', 'zhipu', 'https://open.bigmodel.cn/api/paas/v4', '', '["glm-4.7","glm-4-plus","glm-4-flash"]', '["chat","reasoning","tool-calling","vision"]', 1, 11),
+      ('preset-kimi', 'Kimi / Moonshot', 'kimi', 'https://api.moonshot.cn/v1', '', '["moonshot-v1-8k","moonshot-v1-32k","moonshot-v1-128k"]', '["chat","tool-calling"]', 1, 12),
+      ('preset-mimo', '小米 MiMo', 'mimo', 'https://api.xiaomimimo.com/v1', '', '["mimo-v2.5-pro"]', '["chat","reasoning","tool-calling"]', 1, 13),
+      ('preset-custom', '自定义 API', 'custom', '', '', '[]', '["chat"]', 1, 14);
   `)
 
   // Migration: add attachments column to messages
