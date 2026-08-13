@@ -15,6 +15,20 @@
 - **完整模型库**:DeepSeek V1~V4 / R1 全系列 18+ 模型目录
 - **安全默认**:敏感工具"先确认后执行"、危险命令黑名单、CORS 白名单、可选 API 令牌
 
+## 🌍 海外模型渠道
+
+模型页 (/models) 内置 10 个 provider 预设,支持 OpenAI 兼容协议:
+
+| 渠道 | 说明 |
+|------|------|
+| **OpenRouter**(推荐) | **一个 Key 聚合所有海外模型**——Claude、GPT、Gemini、Grok、Mistral 等 200+ 模型,OpenAI 兼容,`https://openrouter.ai/api/v1` |
+| **OpenAI** | GPT-4o 等,`https://api.openai.com/v1` |
+| **xAI Grok** | Grok 系列,`https://api.x.ai/v1` |
+| **Mistral** | Mistral 系列,`https://api.mistral.ai/v1` |
+| Anthropic / Gemini | 原生 API 协议不同,建议经 OpenRouter 使用 Claude / Gemini 模型 |
+
+用法:模型页点击渠道 → 填 API Key(可改 baseUrl)→ 测试连接 → 切换使用。API Key 支持多 provider 并存,随时切换。
+
 ## 🚀 快速开始(3 分钟)
 
 ### 方式一:一键脚本(推荐)
