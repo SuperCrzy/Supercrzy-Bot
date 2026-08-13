@@ -64,7 +64,7 @@
           <n-input v-model:value="editingProvider.apiKey" type="password" show-password-on="click" :placeholder="$t('models.apiKeyPlaceholder')" />
         </n-form-item>
         <div class="discover-row">
-          <n-button size="small" secondary :disabled="!editingProvider.apiKey" :loading="discovering" @click="discoverModels">
+          <n-button size="small" type="primary" :disabled="!editingProvider.apiKey" :loading="discovering" @click="discoverModels">
             {{ discoveredModels.length > 0 ? $t('models.redetect') : $t('models.detectModels') }}
           </n-button>
           <span v-if="discoverError" class="discover-error">{{ discoverError }}</span>
@@ -221,6 +221,7 @@ interface ProviderDef {
 interface ProviderConfig { apiKey: string; baseUrl: string; defaultModel: string; models?: string[] }
 
 const PREDEFINED: ProviderDef[] = [
+  { id: 'ollama',       icon: 'OL', label: 'Ollama (本地)', baseUrl: 'http://localhost:11434/v1',          defaultModel: 'llama3.1' },
   { id: 'deepseek',     icon: 'DS', label: 'DeepSeek',     baseUrl: 'https://api.deepseek.com/v1',          defaultModel: 'deepseek-v4-pro' },
   { id: 'openai',       icon: 'OA', label: 'OpenAI',       baseUrl: 'https://api.openai.com/v1',             defaultModel: 'gpt-4o' },
   { id: 'openrouter',   icon: 'OR', label: 'OpenRouter',   baseUrl: 'https://openrouter.ai/api/v1',          defaultModel: 'anthropic/claude-sonnet-4-20250514' },

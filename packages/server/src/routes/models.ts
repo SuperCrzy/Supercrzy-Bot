@@ -254,7 +254,12 @@ modelsRouter.post('/discover', async (ctx: Context) => {
   let parseModels: (json: any) => string[] = (json) =>
     (json?.data || []).map((m: any) => m.id).filter(Boolean)
 
-  if (providerId === 'anthropic') {
+  if (providerId === 'ollama') {
+    // Ollama 本地模型:GET /api/tags → { models: [{ name: 'llama3.1:8b' }] }
+    url = `${normalize(baseUrl)}/api/tags`
+    parseModels = (json) =>
+      (json?.models || []).map((m: any) => m.name).filter(Boolean)
+  } else if (providerId === 'anthropic') {
     // Anthropic 原生：x-api-key 头 + anthropic-version
     url = `${normalize(baseUrl)}/models`
     headers['x-api-key'] = apiKey

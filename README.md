@@ -27,7 +27,11 @@
 | **Mistral** | Mistral 系列,`https://api.mistral.ai/v1` |
 | Anthropic / Gemini | 原生 API 协议不同,建议经 OpenRouter 使用 Claude / Gemini 模型 |
 
-用法:模型页点击渠道 → 填 API Key(可改 baseUrl)→ 测试连接 → 切换使用。API Key 支持多 provider 并存,随时切换。
+用法:模型页点击渠道 → 填 API Key(可改 baseUrl)→ 点「识别可用模型」自动列出该 Key 可用模型 → 点选使用。API Key 支持多 provider 并存,随时切换。
+
+### 本地模型(Ollama)
+
+内置 **Ollama (本地)** 渠道:安装 [Ollama](https://ollama.com) 并 `ollama pull llama3.1` 后,模型页选 Ollama → 点「识别可用模型」→ 自动列出本地已拉取的模型(`llama3.1:8b` 等),点选即用。API Key 留空即可(本地无需鉴权)。
 
 ## 🚀 快速开始(3 分钟)
 
