@@ -172,13 +172,18 @@
 
       <!-- ===== Session List (integrated in sidebar) ===== -->
       <div class="sidebar-chats" v-show="!sidebarCollapsed">
-        <div class="chats-header">
+        <div class="chats-header" @click="toggleChatsCollapsed">
           <span class="chats-title">{{ $t('nav.chatGroup') }}</span>
-          <n-button size="tiny" quaternary @click="handleNewChat">
-            <template #icon><SvgIcon name="plus" :size="16" /></template>
-          </n-button>
+          <span class="chats-actions" @click.stop>
+            <button class="chats-collapse-btn" @click="toggleChatsCollapsed" :title="chatsCollapsed ? $t('nav.expand') : $t('nav.collapse')">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :style="{ transform: chatsCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)', transition: 'transform .2s' }"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
+            <n-button size="tiny" quaternary @click="handleNewChat">
+              <template #icon><SvgIcon name="plus" :size="16" /></template>
+            </n-button>
+          </span>
         </div>
-        <div class="chats-list">
+        <div class="chats-list" v-show="!chatsCollapsed">
           <div
             v-for="s in chatStore.sessions"
             :key="s.id"
@@ -197,26 +202,6 @@
           </div>
           <div v-if="chatStore.sessions.length === 0" class="chats-empty">{{ $t('nav.noSessions') }}</div>
         </div>
-      </div>
-
-      <!-- ===== Model Selector in Sidebar ===== -->
-      <div class="sidebar-model" v-show="!sidebarCollapsed">
-        <label class="model-label">{{ $t('models.currentModel') }}</label>
-        <select
-          class="sidebar-model-select"
-          :value="appStore.currentModel"
-          @change="appStore.setModel(($event.target as HTMLSelectElement).value)"
-        >
-          <template v-for="opt in appStore.modelSelectOptions" :key="optKey(opt)">
-            <optgroup v-if="isGroup(opt)" :label="opt.label">
-              <option v-for="child in optChildren(opt)" :key="child.value" :value="child.value">
-                {{ child.label }}
-              </option>
-            </optgroup>
-            <option v-else :value="optValue(opt)">{{ opt.label }}</option>
-          </template>
-        </select>
-        <router-link to="/models" class="model-add-link">+ {{ $t('models.addOrConfig') }}</router-link>
       </div>
 
       <!-- Footer -->
@@ -271,6 +256,7 @@ const sidebarCollapsed = ref(false)
 const mobileMenuOpen = ref(false)
 const isMobile = ref(false)
 const advancedOpen = ref(false)
+const chatsCollapsed = ref(false)
 
 // ---- 模型选择器选项（联合类型：普通项 / 分组项）----
 type ModelSelectOption =
@@ -293,6 +279,7 @@ const groups = reactive({ chat: true, agent: true, monitor: true, system: true }
 
 function toggleGroup(g: keyof typeof groups) { groups[g] = !groups[g] }
 function toggleSidebar() { sidebarCollapsed.value = !sidebarCollapsed.value }
+function toggleChatsCollapsed() { chatsCollapsed.value = !chatsCollapsed.value }
 function navigate(name: string) { router.push({ name }) }
 function handleNewChat() { chatStore.createSession() }
 function selectSession(id: string) { chatStore.selectSession(id) }
@@ -445,13 +432,20 @@ onMounted(() => {
 
 /* ===== Sidebar Chats (integrated session list) ===== */
 .sidebar-chats {
-  flex: 1 1 120px;
+  flex: 1;
   display: flex;
   flex-direction: column;
   border-top: 1px solid var(--border-color);
-  min-height: 120px;
+  min-height: 40px;
   overflow: hidden;
 }
+.chats-actions { display: flex; align-items: center; gap: 2px; }
+.chats-collapse-btn {
+  background: none; border: none; cursor: pointer;
+  color: var(--text-muted); padding: 4px; border-radius: 6px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.chats-collapse-btn:hover { background: var(--bg-hover, rgba(127,127,127,.12)); color: var(--text-primary); }
 
 .chats-header {
   display: flex;
@@ -544,31 +538,9 @@ onMounted(() => {
 }
 
 /* ===== Sidebar Model Selector ===== */
-.sidebar-model {
-  padding: 10px 12px;
-  border-top: 1px solid var(--border-color);
-}
-.model-label {
-  font-size: 10px;
-  color: var(--text-muted);
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin-bottom: 4px;
-  display: block;
-}
-.sidebar-model-select {
-  width: 100%;
-  padding: 6px 8px;
-  border-radius: 6px;
-  border: 1px solid var(--border-color);
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  font-size: 12px;
-  cursor: pointer;
-  outline: none;
-  appearance: auto;
-}
+/* .sidebar-model removed (moved to chat composer) */
+
+
 .sidebar-model-select:focus {
   border-color: var(--accent, #4F46E5);
 }
@@ -576,14 +548,7 @@ onMounted(() => {
   background: var(--bg-primary);
   color: var(--text-primary);
 }
-.model-add-link {
-  display: block;
-  font-size: 11px;
-  color: var(--text-muted);
-  text-decoration: none;
-  padding: 4px 0 0;
-  transition: color 0.15s;
-}
+
 .model-add-link:hover { color: var(--accent); }
 
 /* ===== Sidebar Footer (always at bottom) ===== */

@@ -59,6 +59,8 @@ const messages = {
     nav: {
       chatGroup: '对话',
       agentGroup: '代理',
+      collapse: '收起',
+      expand: '展开',
       monitorGroup: '监控',
       systemGroup: '系统',
       chat: '对话',
@@ -562,6 +564,8 @@ const messages = {
     nav: {
       chatGroup: 'Chat',
       agentGroup: 'Agent',
+      collapse: 'Collapse',
+      expand: 'Expand',
       monitorGroup: 'Monitor',
       systemGroup: 'System',
       chat: 'Chat',

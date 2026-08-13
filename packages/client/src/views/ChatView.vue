@@ -231,7 +231,24 @@
           </n-button>
         </div>
         <div class="input-hint">
-          <span>{{ getModelShortName(appStore.currentModel) }}</span>
+          <span class="input-hint-model">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="input-hint-icon"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+            <select
+              class="input-model-select"
+              :value="appStore.currentModel"
+              @change="appStore.setModel(($event.target as HTMLSelectElement).value)"
+              :title="$t('models.currentModel')"
+            >
+              <template v-for="opt in appStore.modelSelectOptions" :key="optKey(opt)">
+                <optgroup v-if="isGroup(opt)" :label="opt.label">
+                  <option v-for="child in optChildren(opt)" :key="child.value" :value="child.value">
+                    {{ child.label }}
+                  </option>
+                </optgroup>
+                <option v-else :value="optValue(opt)">{{ opt.label }}</option>
+              </template>
+            </select>
+          </span>
           <span v-if="uploadedFiles.length > 0"> · {{ $t('chat.fileCount', { n: uploadedFiles.length }) }}</span>
         </div>
       </div>
@@ -257,6 +274,15 @@ import 'highlight.js/styles/github-dark.css'
 
 const chatStore = useChatStore()
 const appStore = useAppStore()
+
+// ---- 模型选择器选项(与侧边栏同源)----
+type ModelSelectOption =
+  | { label: string; value: string }
+  | { type: 'group'; label: string; key: string; children: Array<{ label: string; value: string }> }
+const isGroup = (opt: ModelSelectOption): opt is Extract<ModelSelectOption, { type: 'group' }> => 'type' in opt
+const optKey = (opt: ModelSelectOption) => (isGroup(opt) ? opt.key : opt.value)
+const optValue = (opt: ModelSelectOption) => (isGroup(opt) ? '' : opt.value)
+const optChildren = (opt: ModelSelectOption) => (isGroup(opt) ? opt.children : [])
 const nMessage = useMessage()
 
 const { locale, t } = useI18n({ useScope: 'global' })
@@ -1401,6 +1427,27 @@ onMounted(async () => {
   padding: 0;
   border-radius: 10px;
 }
+
+.input-hint-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.input-hint-icon { opacity: 0.7; }
+.input-model-select {
+  background: transparent;
+  border: none;
+  color: inherit;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 1px 2px;
+  border-radius: 4px;
+  max-width: 180px;
+  outline: none;
+}
+.input-model-select:hover { background: var(--bg-hover, rgba(127,127,127,.12)); }
+.input-model-select option { background: var(--bg-secondary, #1e1e2e); color: var(--text-primary, #fff); }
 
 .input-hint {
   font-size: 11px;
