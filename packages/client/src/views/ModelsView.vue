@@ -297,11 +297,12 @@ async function loadServerProviders() {
       const cfg = providerConfigs[p.providerKey]
       const models = Array.isArray(p.models) && p.models.length > 0 ? p.models : undefined
       if (!cfg) {
-        // 本地无配置但服务器有 key → 标记已配置（Key 本身只存在服务器，本地不留）
+        // 本地无配置但服务器有 key → 标记已配置（Key 本身只存在服务器，本地不留）。
+        // defaultModel 留空：不自动选中任何模型，由用户从该渠道可用模型中选择
         providerConfigs[p.providerKey] = {
           apiKey: '',
           baseUrl: p.baseUrl || preset.baseUrl,
-          defaultModel: models?.[0] || preset.defaultModel,
+          defaultModel: '',
           models,
           hasServerKey: p.hasApiKey,
         }
@@ -400,40 +401,8 @@ const presetProviders = computed(() =>
   }))
 )
 
-/** 当前模型选择器选项 — 只显示已配置的模型，和侧边栏保持一致 */
-const allModelOptions = computed(() => {
-  const seen = new Set<string>()
-  const result: Array<{ label: string; value: string } | { type: 'group'; label: string; key: string; children: Array<{ label: string; value: string }> }> = []
-
-  // 1. 已配置的 provider 默认模型（从 providerConfigs 读取）
-  for (const p of PREDEFINED) {
-    const cfg = providerConfigs[p.id]
-    const isConfigured = !!cfg?.apiKey || !!cfg?.hasServerKey || (p.id === 'deepseek' && hasGlobalKey.value)
-    if (isConfigured && cfg?.defaultModel && !seen.has(cfg.defaultModel)) {
-      seen.add(cfg.defaultModel)
-      const short = getModelShortName(cfg.defaultModel)
-      const label = short !== cfg.defaultModel ? `${short} (${p.label})` : `${cfg.defaultModel} (${p.label})`
-      result.push({ label, value: cfg.defaultModel })
-    }
-  }
-
-  // 2. 自定义模型
-  const customOpts = customModels.value
-    .filter(m => m.enabled && !seen.has(m.modelId))
-    .map(m => {
-      seen.add(m.modelId)
-      return { label: `${m.displayName || m.modelId} (${m.providerName})`, value: m.modelId }
-    })
-
-  // 3. 组装
-  if (result.length > 0 && customOpts.length > 0) {
-    return [
-      ...result,
-      { type: 'group' as const, label: t('models.customModels'), key: 'custom', children: customOpts },
-    ]
-  }
-  return [...result, ...customOpts]
-})
+/** 当前模型选择器选项 — 与输入区/全局保持一致（单一数据源 appStore.modelSelectOptions） */
+const allModelOptions = computed(() => appStore.modelSelectOptions)
 
 /** 兜底：当前模型不在任何选项(历史脏数据/被删模型)时,自动落到第一个可用模型 */
 

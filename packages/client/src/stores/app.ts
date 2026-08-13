@@ -6,8 +6,10 @@ import type { CustomModel } from '@/types'
 
 export const useAppStore = defineStore('app', () => {
   const darkMode = ref(false)
-  // 不预置默认模型：由用户在模型页自行配置并选择（当前模型为空 = 未选择）
-  const currentModel = ref(localStorage.getItem('supercrzy:currentModel') || '')
+  // 不预置默认模型：由用户在模型页自行配置并选择（当前模型为空 = 未选择）。
+  // 不信任 localStorage 初始值（历史残留会显示未配置的模型）；用户选择经 setModel 持久化，
+  // 刷新后由 loadSettings 从后端 settings.model 恢复。
+  const currentModel = ref('')
   const currentAgent = ref('default')
   const isConnected = ref(false)
   const detailPanelVisible = ref(false)
@@ -78,8 +80,14 @@ export const useAppStore = defineStore('app', () => {
       if (key && key.startsWith(LS_PREFIX)) {
         try {
           const cfg = JSON.parse(localStorage.getItem(key)!)
-          if ((cfg.apiKey || cfg.hasServerKey) && cfg.defaultModel) {
-            providerModels.push({ modelId: cfg.defaultModel, providerLabel: key.replace(LS_PREFIX, '') })
+          if (cfg.apiKey || cfg.hasServerKey) {
+            // 列出该渠道全部可用模型（识别结果）；无识别结果时回退到默认模型
+            const list = Array.isArray(cfg.models) && cfg.models.length > 0
+              ? cfg.models
+              : (cfg.defaultModel ? [cfg.defaultModel] : [])
+            for (const m of list) {
+              if (m) providerModels.push({ modelId: m, providerLabel: key.replace(LS_PREFIX, '') })
+            }
           }
         } catch { /* ignore */ }
       }
