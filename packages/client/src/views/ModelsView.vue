@@ -222,6 +222,9 @@ interface ProviderConfig { apiKey: string; baseUrl: string; defaultModel: string
 
 const PREDEFINED: ProviderDef[] = [
   { id: 'ollama',       icon: 'OL', label: 'Ollama (本地)', baseUrl: 'http://localhost:11434/v1',          defaultModel: 'llama3.1' },
+  { id: 'meta',         icon: 'ML', label: 'Meta Llama',    baseUrl: 'https://api.groq.com/openai/v1',        defaultModel: 'llama-3.3-70b-versatile' },
+  { id: 'nvidia',       icon: 'NV', label: 'NVIDIA NIM',    baseUrl: 'https://integrate.api.nvidia.com/v1',   defaultModel: 'nvidia/llama-3.1-nemotron-ultra-253b-v1' },
+  { id: 'qwen',         icon: 'QW', label: '阿里 Qwen',     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', defaultModel: 'qwen-max' },
   { id: 'deepseek',     icon: 'DS', label: 'DeepSeek',     baseUrl: 'https://api.deepseek.com/v1',          defaultModel: 'deepseek-v4-pro' },
   { id: 'openai',       icon: 'OA', label: 'OpenAI',       baseUrl: 'https://api.openai.com/v1',             defaultModel: 'gpt-4o' },
   { id: 'openrouter',   icon: 'OR', label: 'OpenRouter',   baseUrl: 'https://openrouter.ai/api/v1',          defaultModel: 'anthropic/claude-sonnet-4-20250514' },

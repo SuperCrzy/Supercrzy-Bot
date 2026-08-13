@@ -25,6 +25,9 @@
 | **OpenAI** | GPT-4o 等,`https://api.openai.com/v1` |
 | **xAI Grok** | Grok 系列,`https://api.x.ai/v1` |
 | **Mistral** | Mistral 系列,`https://api.mistral.ai/v1` |
+| **Meta Llama** | Llama 系列,经 Groq 免费托管,`https://api.groq.com/openai/v1` |
+| **NVIDIA NIM** | NVIDIA 官方推理端点,`https://integrate.api.nvidia.com/v1` |
+| **阿里 Qwen** | 通义千问官方兼容端点,`https://dashscope.aliyuncs.com/compatible-mode/v1` |
 | Anthropic / Gemini | 原生 API 协议不同,建议经 OpenRouter 使用 Claude / Gemini 模型 |
 
 用法:模型页点击渠道 → 填 API Key(可改 baseUrl)→ 点「识别可用模型」自动列出该 Key 可用模型 → 点选使用。API Key 支持多 provider 并存,随时切换。

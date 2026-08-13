@@ -87,7 +87,7 @@ export const useAppStore = defineStore('app', () => {
     const PROVIDER_LABELS: Record<string, string> = {
       deepseek: 'DeepSeek', openai: 'OpenAI', openrouter: 'OpenRouter',
       anthropic: 'Anthropic', grok: 'Grok', gemini: 'Gemini', mistral: 'Mistral',
-      zhipu: '智谱', kimi: 'Kimi', mimo: 'MiMo', ollama: 'Ollama',
+      zhipu: '智谱', kimi: 'Kimi', mimo: 'MiMo', ollama: 'Ollama', meta: 'Meta', nvidia: 'NVIDIA', qwen: 'Qwen',
     }
 
     // 2. 已配置的 provider 模型

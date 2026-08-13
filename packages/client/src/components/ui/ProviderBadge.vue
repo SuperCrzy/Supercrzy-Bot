@@ -32,6 +32,9 @@ import ollamaLogo from '@/assets/logos/ollama.png'
 import zhipuLogo from '@/assets/logos/zhipu.png'
 import kimiLogo from '@/assets/logos/kimi.png'
 import mimoLogo from '@/assets/logos/mimo.png'
+import metaLogo from '@/assets/logos/meta.png'
+import nvidiaLogo from '@/assets/logos/nvidia.png'
+import qwenLogo from '@/assets/logos/qwen.png'
 
 const props = withDefaults(defineProps<{
   provider: string
@@ -61,6 +64,9 @@ const LOGOS: Record<string, string> = {
   zhipu: zhipuLogo,
   kimi: kimiLogo,
   mimo: mimoLogo,
+  meta: metaLogo,
+  nvidia: nvidiaLogo,
+  qwen: qwenLogo,
 }
 
 /** 兜底(无官方图渠道):品牌色 + 缩写 */

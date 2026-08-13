@@ -71,6 +71,11 @@ a:hover {
   transition-timing-function: var(--ease-in-out);
 }
 
+/* ===== Page Containers ===== */
+.page-container {
+  padding: 20px 24px;
+}
+
 /* ===== Mobile Responsive ===== */
 /* Tablet: allow sidebar collapse but keep vertical layout */
 @media (min-width: 769px) and (max-width: 1024px) {
