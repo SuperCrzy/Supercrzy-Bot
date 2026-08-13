@@ -37,7 +37,7 @@
         <h1 class="welcome-title">{{ $t('chat.welcomeTitle') }}</h1>
         <p class="welcome-subtitle">{{ $t('chat.welcomeDesc') }}</p>
         <div v-if="!appStore.hasApiKey" class="welcome-key-hint">
-          <router-link to="/settings">{{ $t('chat.apiKeyHintTitle') }} → {{ $t('chat.apiKeyHintAction') }}</router-link>
+          <router-link to="/models">{{ $t('chat.apiKeyHintTitle') }} → {{ $t('chat.apiKeyHintAction') }}</router-link>
         </div>
         <div class="quick-prompts">
           <div class="quick-prompt" @click="sendQuick(t('chat.quickCode'))">

@@ -132,7 +132,7 @@ const messages = {
       dragOrClick: '点击或拖拽文件到此处上传',
       fileTooLarge: '文件大小超过限制',
       maxFiles: '最多上传5个文件',      quickCode: '帮我写一个 Python 快速排序函数，并测试它',      apiKeyHintTitle: '需要配置 API Key 才能开始对话',
-      apiKeyHintAction: '前往设置',
+      apiKeyHintAction: '前往模型配置',
 
       quickSearch: '用中文搜索并总结今天的 AI 领域重要新闻',
       quickPref: '请记住：我喜欢简洁的中文回答，用表格式呈现数据',
@@ -628,7 +628,7 @@ const messages = {
       dragOrClick: 'Click or drag files to upload',
       fileTooLarge: 'File size exceeds limit',
       maxFiles: 'Maximum 5 files',      quickCode: 'Write a Python quicksort function and test it',      apiKeyHintTitle: 'Configure an API key to start chatting',
-      apiKeyHintAction: 'Open Settings',
+      apiKeyHintAction: 'Configure models',
 
       quickSearch: "Search and summarize today's top AI news",
       quickPref: 'Remember: I like concise Chinese answers with tabular data',
