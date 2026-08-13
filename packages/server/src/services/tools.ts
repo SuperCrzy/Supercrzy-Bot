@@ -5,10 +5,11 @@
 import { getDB } from './database'
 import { randomUUID } from 'crypto'
 import { readFile, writeFile, access } from 'fs/promises'
-import { exec } from 'child_process'
+import { exec, execFile } from 'child_process'
 import { constants } from 'fs'
 import { installSkillFromGitHub, initSkillsDirectory } from './skill-loader'
 import { join } from 'path'
+import { scanDangerousPath, sandboxify, WORKSPACE_ROOT, assertSafeFilePath } from './sandbox'
 
 // ============================
 // 类型定义
@@ -131,8 +132,10 @@ const toolExecutors: Record<string, ToolExecutor> = {
     ).join('\n')
   },
 
-  // ---- 文件工具 ----
+  // ---- 文件工具（沙箱路径白名单） ----
   async file_read(args) {
+    const guard = assertSafeFilePath(args.path)
+    if (guard) return `❌ 已拦截（沙箱规则）: ${guard}`
     try {
       const content = await readFile(args.path, 'utf-8')
       // 限制长度
@@ -147,6 +150,8 @@ const toolExecutors: Record<string, ToolExecutor> = {
   },
 
   async file_write(args) {
+    const guard = assertSafeFilePath(args.path)
+    if (guard) return `❌ 已拦截（沙箱规则）: ${guard}`
     try {
       await writeFile(args.path, args.content, 'utf-8')
       return `✅ 文件已写入：${args.path} (${args.content.length} 字符)`
@@ -156,6 +161,8 @@ const toolExecutors: Record<string, ToolExecutor> = {
   },
 
   async file_exists(args) {
+    const guard = assertSafeFilePath(args.path)
+    if (guard) return `❌ 已拦截（沙箱规则）: ${guard}`
     try {
       await access(args.path, constants.F_OK)
       return `true - 文件存在：${args.path}`
@@ -164,9 +171,9 @@ const toolExecutors: Record<string, ToolExecutor> = {
     }
   },
 
-  // ---- Shell 工具 ----
+  // ---- Shell 工具（三层沙箱防护） ----
   async shell_exec(args) {
-    // 危险命令黑名单：无条件拦截（即使已确认也禁止）
+    // L1 危险命令黑名单：无条件拦截（即使已确认也禁止）
     const cmd = String(args.command || '').trim()
     const BLOCKED = [
       /rm\s+-rf\s+\/\s*(\s|$)/,            // 删除根目录
@@ -181,16 +188,35 @@ const toolExecutors: Record<string, ToolExecutor> = {
         return `❌ 已拦截危险命令（禁止执行）: ${cmd.slice(0, 80)}`
       }
     }
+
+    // L2 软沙箱：危险路径扫描（.ssh/.aws/.env、home 白名单外绝对路径等）
+    const danger = scanDangerousPath(cmd)
+    if (danger) {
+      return `❌ 已拦截（沙箱规则）: ${danger}\n命令: ${cmd.slice(0, 80)}`
+    }
+
+    // L3 硬沙箱：sandbox-exec 内核级隔离（不可用时自动降级，仍保留 L1/L2）
+    const sb = await sandboxify(cmd)
+    if (!sb.sandboxed && sb.reason) {
+      console.warn(`[Sandbox] ${sb.reason}，命令以软沙箱保护执行: ${cmd.slice(0, 60)}`)
+    }
+
     return new Promise((resolve) => {
       const timeout = args.timeout || 30000
-      exec(args.command, { timeout, maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
+      const opts = { timeout, maxBuffer: 1024 * 1024, cwd: WORKSPACE_ROOT }
+      const done: (error: any, stdout: string, stderr: string) => void = (error, stdout, stderr) => {
         if (error) {
           resolve(`❌ 命令执行失败 (exit code ${error.code}):\n${stderr || error.message}`)
         } else {
           const output = stdout + (stderr ? `\n[stderr]\n${stderr}` : '')
           resolve(output.slice(0, 8000) || '(无输出)')
         }
-      })
+      }
+      if (sb.sandboxed && sb.args) {
+        execFile(sb.exec, sb.args, opts, done)
+      } else {
+        exec(cmd, opts, done)
+      }
     })
   },
 
