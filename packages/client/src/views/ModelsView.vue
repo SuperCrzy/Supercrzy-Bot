@@ -307,11 +307,12 @@ async function loadServerProviders() {
           hasServerKey: p.hasApiKey,
         }
         saveLSConfig(p.providerKey, providerConfigs[p.providerKey])
-      } else if (p.hasApiKey && !cfg.hasServerKey) {
-        // 本地已有配置，补服务器标记（Key 以本地为准，服务器 key 兜底）
+      } else if (p.hasApiKey) {
+        // 服务器有 key：以服务器为权威源，models 始终用服务器最新列表覆盖本地旧数据
+        // （避免历史遗留的已下线模型继续显示；Key 以本地为准，服务器 key 兜底）
         cfg.hasServerKey = true
         if (!cfg.baseUrl && p.baseUrl) cfg.baseUrl = p.baseUrl
-        if ((!cfg.models || cfg.models.length === 0) && models) cfg.models = models
+        if (models) cfg.models = models
       }
     }
   } catch { /* ignore */ }

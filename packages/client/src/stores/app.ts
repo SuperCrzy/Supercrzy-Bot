@@ -61,6 +61,24 @@ export const useAppStore = defineStore('app', () => {
         }
       }
     } catch { /* ignore */ }
+
+    // 合并服务器已配置渠道（hasServerKey），让模型选择器在任意页面都可用（服务器 models 为权威）
+    try {
+      const provRes = await fetch('/api/models/providers')
+      if (provRes.ok) {
+        const providers = await provRes.json()
+        for (const p of providers as Array<{ providerKey: string; hasApiKey: boolean; models: string[] }>) {
+          if (!p.hasApiKey) continue
+          const lskey = `supercrzy:provider:${p.providerKey}`
+          let cfg: any = {}
+          try { cfg = JSON.parse(localStorage.getItem(lskey) || '{}') } catch { /* ignore */ }
+          const models = Array.isArray(p.models) && p.models.length > 0 ? p.models : undefined
+          const merged = { ...cfg, hasServerKey: true, ...(models ? { models } : {}) }
+          localStorage.setItem(lskey, JSON.stringify(merged))
+        }
+        _providerVersion.value++ // 触发 modelSelectOptions 重算
+      }
+    } catch { /* ignore */ }
   }
 
   // 初始化：调用一次确保侧边栏有数据

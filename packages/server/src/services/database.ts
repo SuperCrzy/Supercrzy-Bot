@@ -195,7 +195,7 @@ export function initDatabase() {
       ('preset-meta', 'Meta Llama', 'meta', 'https://api.groq.com/openai/v1', '', '["llama-3.3-70b-versatile"]', '["chat","reasoning","tool-calling"]', 1, 1),
       ('preset-nvidia', 'NVIDIA NIM', 'nvidia', 'https://integrate.api.nvidia.com/v1', '', '["nvidia/llama-3.1-nemotron-ultra-253b-v1"]', '["chat","reasoning","tool-calling"]', 1, 2),
       ('preset-qwen', '阿里 Qwen', 'qwen', 'https://dashscope.aliyuncs.com/compatible-mode/v1', '', '["qwen-max"]', '["chat","reasoning","tool-calling"]', 1, 3),
-      ('preset-deepseek', 'DeepSeek', 'deepseek', 'https://api.deepseek.com', '', '["deepseek-v4-pro","deepseek-v4-flash","deepseek-v3.2","deepseek-chat","deepseek-r1"]', '["chat","reasoning","tool-calling"]', 1, 4),
+      ('preset-deepseek', 'DeepSeek', 'deepseek', 'https://api.deepseek.com', '', '["deepseek-v4-pro","deepseek-v4-flash"]', '["chat","reasoning","tool-calling"]', 1, 4),
       ('preset-openai', 'OpenAI', 'openai', 'https://api.openai.com/v1', '', '["gpt-4o","gpt-4o-mini"]', '["chat","reasoning","tool-calling","vision"]', 1, 5),
       ('preset-openrouter', 'OpenRouter', 'openrouter', 'https://openrouter.ai/api/v1', '', '["anthropic/claude-sonnet-4-20250514"]', '["chat","reasoning","tool-calling"]', 1, 6),
       ('preset-anthropic', 'Anthropic', 'anthropic', 'https://api.anthropic.com', '', '["claude-sonnet-4-20250514","claude-opus-4-20250514","claude-haiku-3.5"]', '["chat","reasoning","tool-calling","vision"]', 1, 7),
