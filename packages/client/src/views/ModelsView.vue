@@ -12,7 +12,19 @@
     <!-- ===== 1. 当前模型 ===== -->
     <div class="current-model-bar">
       <div class="cmb-left">
-        <span class="cmb-icon">🔮</span>
+        <span class="cmb-icon">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true">
+            <defs>
+              <linearGradient id="cmb-gem-grad" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%" stop-color="#5b8cff" />
+                <stop offset="100%" stop-color="#8b5cf6" />
+              </linearGradient>
+            </defs>
+            <path d="M7.5 2.5h9l4.5 6.5L12 21.5 3 9l4.5-6.5z" fill="url(#cmb-gem-grad)" />
+            <path d="M3 9h18M7.5 2.5l2.2 6.5L12 2.5l2.3 6.5 2.2-6.5" stroke="rgba(255,255,255,0.55)" stroke-width="0.9" stroke-linejoin="round" fill="none" />
+            <path d="M12 21.5 8.7 9H5.5L12 21.5z" fill="rgba(255,255,255,0.22)" />
+          </svg>
+        </span>
         <div class="cmb-info">
           <span class="cmb-label">{{ $t('models.currentModel') }}</span>
           <n-select
@@ -211,6 +223,7 @@ import { getModelShortName } from '@/data/models'
 import type { CustomModel, AddModelForm } from '@/types'
 
 const appStore = useAppStore()
+
 const { t } = useI18n({ useScope: 'global' })
 const message = useMessage()
 
@@ -389,6 +402,8 @@ const allModelOptions = computed(() => {
   }
   return [...result, ...customOpts]
 })
+
+/** 兜底：当前模型不在任何选项(历史脏数据/被删模型)时,自动落到第一个可用模型 */
 
 async function testCurrentModel() {
   testing.value = true
@@ -692,6 +707,12 @@ onMounted(async () => {
     appStore.fetchCustomModels?.(),
   ].filter(Boolean))
   pageReady.value = true
+  // 兜底：当前模型不在任何可用选项(历史脏数据/被删模型)时,落到第一个可用模型
+  const opts = allModelOptions.value
+  const vals = opts.flatMap((o: any) => (o.type === 'group' ? o.children.map((c: any) => c.value) : [o.value]))
+  if (vals.length > 0 && !vals.includes(appStore.currentModel)) {
+    appStore.currentModel = vals[0]
+  }
 })
 </script>
 

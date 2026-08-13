@@ -35,7 +35,8 @@ export const useAppStore = defineStore('app', () => {
         const data = await res.json()
         hasApiKey.value = !!(data.apiKey || data.apiKeyMasked)
         // ✅ 服务器模型为准：Web UI + 微信 Bot 统一使用同一个 model
-        if (data.model) {
+        // 防御：UUID/异常值(历史脏数据)不回写,保持默认模型
+        if (data.model && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(data.model)) {
           currentModel.value = data.model
           localStorage.setItem('supercrzy:currentModel', data.model)
         }
