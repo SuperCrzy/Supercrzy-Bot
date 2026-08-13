@@ -11,7 +11,7 @@
           <line x1="6" y1="6" x2="18" y2="18" v-if="mobileMenuOpen"/>
         </svg>
       </button>
-      <div class="mobile-logo">SC</div>
+      <img src="/logo.png" alt="SUPERCRZY" class="mobile-logo" />
       <span class="mobile-title">{{ currentPageTitle }}</span>
       <button class="mobile-new-chat" @click="handleNewChat">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -25,7 +25,7 @@
     <aside class="sidebar" :class="{ collapsed: sidebarCollapsed, 'mobile-open': mobileMenuOpen }">
       <!-- Logo -->
       <div class="sidebar-header" @click="navigate('Chat')">
-        <div class="logo-icon">SC</div>
+        <img src="/logo.png" alt="SUPERCRZY" class="logo-icon" />
         <span class="logo-text" v-show="!sidebarCollapsed">SUPERCRZY BOT</span>
       </div>
 
@@ -343,15 +343,11 @@ onMounted(() => {
   width: 28px;
   height: 28px;
   border-radius: var(--radius-md);
-  background: linear-gradient(135deg, #4F46E5, #06B6D4);
-  color: #fff;
-  font-weight: 700;
-  font-size: 11px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  font-family: 'Saira Stencil One', sans-serif;
+  object-fit: contain;
 }
 
 .logo-text {
@@ -707,10 +703,9 @@ onMounted(() => {
   .mobile-logo {
     width: 24px; height: 24px;
     border-radius: 6px;
-    background: linear-gradient(135deg, #4F46E5, #06B6D4);
-    color: #fff; font-weight: 700; font-size: 9px;
     display: flex; align-items: center; justify-content: center;
     flex-shrink: 0;
+    object-fit: contain;
   }
 
   .mobile-title {

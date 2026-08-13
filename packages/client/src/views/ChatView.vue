@@ -33,7 +33,7 @@
     <div class="messages-area" ref="messagesRef" @scroll="onScroll">
       <!-- Welcome -->
       <div v-if="messages.length === 0" class="welcome-area">
-        <div class="welcome-logo">SC</div>
+        <img src="/logo.png" alt="SUPERCRZY" class="welcome-logo" />
         <h1 class="welcome-title">{{ $t('chat.welcomeTitle') }}</h1>
         <p class="welcome-subtitle">{{ $t('chat.welcomeDesc') }}</p>
         <div v-if="!appStore.hasApiKey" class="welcome-key-hint">
@@ -1009,14 +1009,8 @@ onMounted(async () => {
   width: 72px;
   height: 72px;
   border-radius: 20px;
-  background: linear-gradient(135deg, #4F46E5, #06B6D4);
-  color: white;
-  font-weight: bold;
-  font-size: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 8px 24px rgba(79, 70, 229, 0.3);
+  object-fit: contain;
+  box-shadow: 0 8px 24px rgba(254, 114, 25, 0.25);
 }
 
 .welcome-title {
