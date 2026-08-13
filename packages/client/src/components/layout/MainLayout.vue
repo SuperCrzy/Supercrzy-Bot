@@ -853,6 +853,27 @@ function dismissChangelog(remember = true) {
   color: var(--text-muted);
 }
 
+.update-log {
+  margin-top: 12px;
+  max-height: 160px;
+  overflow-y: auto;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+
+.update-log-line {
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text-secondary);
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+.update-log-line.err {
+  color: var(--error);
+}
+
 /* ===== Main Content ===== */
 .main-content {
   flex: 1;
