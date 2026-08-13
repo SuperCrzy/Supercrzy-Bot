@@ -50,6 +50,30 @@ systemRouter.get('/version', (ctx: Context) => {
   }
 })
 
+// 检查是否有更新：git fetch 后比较本地/远程 HEAD
+systemRouter.get('/check-update', async (ctx: Context) => {
+  if (!isLocalhost(ctx)) {
+    ctx.status = 403
+    ctx.body = { error: 'Forbidden' }
+    return
+  }
+  const localHead = getGitHead()
+  try {
+    // 先尝试获取远程（不拉取代码，只更新远程跟踪分支）
+    execSync('git fetch origin', { cwd: PROJECT_ROOT, timeout: 30000 })
+    const remoteHead = execSync('git rev-parse --short origin/main 2>/dev/null || git rev-parse --short origin/HEAD 2>/dev/null || echo unknown', { cwd: PROJECT_ROOT }).toString().trim()
+    if (remoteHead === 'unknown') {
+      ctx.body = { hasUpdate: false, localHead, remoteHead: null, reason: 'no-remote-branch', message: '远程分支不可用' }
+      return
+    }
+    const hasUpdate = remoteHead !== localHead
+    ctx.body = { hasUpdate, localHead, remoteHead, reason: hasUpdate ? 'behind' : 'latest' }
+  } catch (err: any) {
+    // 远程不可达（仓库不存在/无网络）→ 无法检查，视为本地最新
+    ctx.body = { hasUpdate: false, localHead, remoteHead: null, reason: 'remote-unavailable', message: (err.message || '').split('\n')[0]?.slice(0, 100) || '远程不可达' }
+  }
+})
+
 // 一键更新：commit 当前改动 → git pull → 安装依赖 → 构建前端
 systemRouter.post('/update', async (ctx: Context) => {
   if (!isLocalhost(ctx)) {

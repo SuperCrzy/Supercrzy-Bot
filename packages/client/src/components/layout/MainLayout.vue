@@ -246,13 +246,13 @@
           <div class="changelog-header">
             <span class="changelog-version">v{{ entry.version }}</span>
             <span class="changelog-date">{{ entry.date }}</span>
-            <span class="changelog-title">{{ entry.title }}</span>
+            <span class="changelog-title">{{ isZh ? entry.title : entry.titleEn }}</span>
           </div>
-          <ul v-if="entry.features.length" class="changelog-items">
-            <li v-for="(f, i) in entry.features" :key="'f' + i" class="changelog-feature">{{ f }}</li>
+          <ul v-if="(isZh ? entry.features : entry.featuresEn).length" class="changelog-items">
+            <li v-for="(f, i) in (isZh ? entry.features : entry.featuresEn)" :key="'f' + i" class="changelog-feature">{{ f }}</li>
           </ul>
-          <ul v-if="entry.fixes.length" class="changelog-items">
-            <li v-for="(f, i) in entry.fixes" :key="'x' + i" class="changelog-fix">{{ f }}</li>
+          <ul v-if="(isZh ? entry.fixes : entry.fixesEn).length" class="changelog-items">
+            <li v-for="(f, i) in (isZh ? entry.fixes : entry.fixesEn)" :key="'x' + i" class="changelog-fix">{{ f }}</li>
           </ul>
         </div>
       </div>
@@ -277,6 +277,7 @@
 <script setup lang="ts">
 import { reactive, ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { useMessage } from 'naive-ui'
 import { useAppStore } from '@/stores/app'
 import { useI18n } from 'vue-i18n'
 import { useChatStore, formatRelativeTime } from '@/stores/chat'
@@ -287,6 +288,7 @@ import DetailPanel from '@/components/layout/DetailPanel.vue'
 
 const router = useRouter()
 const route = useRoute()
+const nMessage = useMessage()
 const appStore = useAppStore()
 const showChangelog = ref(false)
 const chatStore = useChatStore()
@@ -310,7 +312,10 @@ const optChildren = (opt: ModelSelectOption) => (isGroup(opt) ? opt.children : [
 function checkMobile() { isMobile.value = window.innerWidth <= 768 }
 onMounted(() => { checkMobile(); window.addEventListener('resize', checkMobile) })
 
-const { t } = useI18n({ useScope: 'global' })
+const { t, locale } = useI18n({ useScope: 'global' })
+
+/** 是否中文界面（更新日志按语言展示） */
+const isZh = computed(() => locale.value.startsWith('zh'))
 
 const currentPageTitle = computed(() => (route.meta.title ? t(route.meta.title as string) : 'SUPERCRZY BOT'))
 
@@ -330,9 +335,19 @@ const updating = ref(false)
 const updateLog = ref<Array<{ message: string; ok: boolean | null }>>([])
 const gitHead = ref('')
 
-/** 一键更新：调后端 /api/system/update，SSE 流式接收进度 */
+/** 一键更新：先检查是否最新，有更新才执行，SSE 流式接收进度 */
 async function runUpdate() {
   if (updating.value) return
+
+  // 先检查版本
+  try {
+    const check = await (await fetch('/api/system/check-update')).json()
+    if (check.hasUpdate === false) {
+      nMessage.success(t('nav.alreadyLatest'))
+      return
+    }
+  } catch { /* 检查失败不阻塞，继续尝试更新 */ }
+
   updating.value = true
   updateLog.value = []
   try {
