@@ -116,6 +116,54 @@ function normalizeQuestionOptions(options: any): string[] {
   }).filter(Boolean)
 }
 
+/**
+ * 工具消息序列清洗（2026-08-28 修复 400 "assistant tool_calls 后缺 tool 消息"）：
+ * OpenAI 兼容协议要求 assistant 带 tool_calls 后，每个 tool_call_id 必须有对应 tool 消息。
+ * 孤立 tool_calls 来源：①检查点恢复残缺 ②上下文压缩丢弃 tool 响应 ③工具超时/中断（assistantMsg 已 push 但 tool 结果不全）。
+ * 策略：发请求前扫描，若 assistant.tool_calls 中某 id 未被后续 tool 消息响应 → 剔除该 tool_calls（防 400）。
+ */
+export function sanitizeToolCallSequence(msgs: AgentMessage[]): AgentMessage[] {
+  const out: AgentMessage[] = []
+  let pendingIds = new Set<string>()  // 当前待配对的 tool_call_id（来自最近一条 assistant.tool_calls）
+
+  for (const m of msgs) {
+    if (m.role === 'assistant' && Array.isArray((m as any).tool_calls) && (m as any).tool_calls.length > 0) {
+      pendingIds = new Set((m as any).tool_calls.map((tc: any) => tc?.id).filter(Boolean))
+      out.push(m)
+      continue
+    }
+    if (m.role === 'tool' && m.tool_call_id) {
+      pendingIds.delete(m.tool_call_id)
+      out.push(m)
+      continue
+    }
+    out.push(m)
+  }
+
+  // 若还有未配对的 tool_calls（孤立，没后续 tool 消息响应）→ 回退：从最近一条 assistant 移除这些 tool_calls，
+  // 保留其 content（若有）；避免发孤儿 tool_call 触发 400。
+  if (pendingIds.size > 0) {
+    const fixed: AgentMessage[] = []
+    for (const m of out) {
+      if (m.role === 'assistant' && Array.isArray((m as any).tool_calls)) {
+        const kept = (m as any).tool_calls.filter((tc: any) => !pendingIds.has(tc?.id))
+        if (kept.length > 0) {
+          const copy: any = { ...m, tool_calls: kept }
+          fixed.push(copy)
+        } else {
+          // 全部 tool_calls 孤立 → 退化为普通文本消息（保 content，去 tool_calls）
+          const copy: any = { role: 'assistant', content: (m as any).content || '（工具结果未返回，任务已中断）' }
+          fixed.push(copy)
+        }
+      } else {
+        fixed.push(m)
+      }
+    }
+    return fixed
+  }
+  return out
+}
+
 /** 读取 settings 配置（工具授权模式等） */
 // 思考档位 → 模型参数映射（UI 五档：极简/轻/平衡/深/极深）
 function mapReasoningLevel(level?: string): string {
@@ -917,9 +965,11 @@ export async function runAgentLoop(
       }
     }
 
+    // 工具消息序列清洗（2026-08-28 修复 400：检查点/压缩/中断可能留下孤立 tool_calls，发请求前兜底）
+    const sanitizedMessages = sanitizeToolCallSequence(messages)
     const apiMessages = [
       { role: 'system', content: systemPrompt.prompt },
-      ...messages,
+      ...sanitizedMessages,
     ]
 
     // P0: 在接近上限时提示模型压缩输出
