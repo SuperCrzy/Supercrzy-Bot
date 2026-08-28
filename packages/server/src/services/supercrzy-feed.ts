@@ -45,19 +45,28 @@ function classifyNews(title: string, url: string): string {
   return 'News'
 }
 
-/** RSS description 去 HTML 标签 + 去首图（<img>） → 纯文本摘要 */
-function cleanSummary(desc: string): string {
-  return desc
-    .replace(/<img[^>]*>/gi, '') // 去首图
-    .replace(/<[^>]*>/g, '')     // 去其余 HTML 标签
+/** HTML 实体解码（&apos;/&quot;/&amp;/&lt;/&gt;/&#N; —— RSS 标题/摘要常见，2026-08-28 加） */
+function decodeEntities(s: string): string {
+  return s
     .replace(/&apos;/g, "'")
     .replace(/&quot;/g, '"')
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&#(\d+);/g, (_m, n) => String.fromCharCode(Number(n)))
+}
+
+/** RSS description 去 HTML 标签 + 去首图（<img>） + 实体解码 → 纯文本摘要 */
+function cleanSummary(desc: string): string {
+  return desc
+    .replace(/<img[^>]*>/gi, '') // 去首图
+    .replace(/<[^>]*>/g, '')     // 去其余 HTML 标签
     .replace(/\s+/g, ' ')
     .trim()
+}
+/** 摘要实体解码（cleanSummary 去标签后再解码） */
+function cleanSummaryDecoded(desc: string): string {
+  return decodeEntities(cleanSummary(desc))
 }
 
 /** 提取 RSS description 开头的封面图 URL（<img src="...">），无则空 */
@@ -81,7 +90,7 @@ export function parseFeedXml(xml: string): SupercrzyNewsItem[] {
     const linkM = item.match(linkRegex)
     const descM = item.match(descRegex)
     const dateM = item.match(dateRegex)
-    const title = titleM ? (titleM[1] || titleM[2] || '').trim() : ''
+    const title = decodeEntities(titleM ? (titleM[1] || titleM[2] || '').trim() : '')
     const url = linkM ? linkM[1].trim() : ''
     if (!title || !url) continue
     const date = dateM ? new Date(dateM[1].trim()).toISOString() : ''
@@ -89,7 +98,7 @@ export function parseFeedXml(xml: string): SupercrzyNewsItem[] {
     items.push({
       title,
       url,
-      summary: cleanSummary(rawDesc).slice(0, 300),
+      summary: cleanSummaryDecoded(rawDesc).slice(0, 300),
       date,
       image: extractFirstImage(rawDesc),
       category: classifyNews(title, url),

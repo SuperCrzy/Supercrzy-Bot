@@ -34,10 +34,6 @@
     <!-- 新闻列表 -->
     <div v-else class="nv-list">
       <div v-for="it in news" :key="it.url" class="nv-item">
-        <!-- 封面图（RSS description 首图，2026-08-28 加） -->
-        <a v-if="imgSrc(it.image)" class="nv-thumb" :href="it.url" target="_blank" rel="noopener">
-          <img :src="imgSrc(it.image)" :alt="it.title" loading="lazy" />
-        </a>
         <div class="nv-item-body">
           <div class="nv-item-top">
             <span class="nv-cat-tag">{{ it.category }}</span>
@@ -50,6 +46,10 @@
             <button class="nv-research" @click="deepResearch(it)">{{ $t('news.deepResearch') }}</button>
           </div>
         </div>
+        <!-- 封面图放在标题右边（卡片右侧，2026-08-28 改） -->
+        <a v-if="imgSrc(it.image)" class="nv-thumb" :href="it.url" target="_blank" rel="noopener">
+          <img :src="imgSrc(it.image)" :alt="it.title" loading="lazy" />
+        </a>
       </div>
     </div>
   </div>
