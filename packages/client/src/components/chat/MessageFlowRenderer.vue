@@ -954,17 +954,32 @@ function shouldCollapse(msg: ChatMessage): boolean {
 <!-- 全局样式：复制按钮由 ChatView enhanceCodeBlocks 动态创建（无 scope 属性），scoped 匹配不到——
      必须用非 scoped 样式才能让按钮浮在代码块右上角（否则退化成代码下方一行普通文本，老板 2026-08-21） -->
 <style>
-/* 正文链接样式（2026-08-28 加：markdown 渲染的 <a> 之前无样式，用浏览器默认色黑/白模式难辨认——
-   导流 supercrzy.com 需要清晰链接，改用主题 accent 色 + 下划线，两种主题都清楚） */
+/* 正文链接样式（2026-08-28 加固：markdown <a> 用 var(--accent) 自动适应浅色/深色——浅色靛蓝高对比、
+   深色亮紫蓝；加下划线+粗体，明显可点。双选择器确保 `.dark` 加在 body/.app-layout 任一都生效） */
 .message-content a {
   color: var(--accent, #4f8cff);
   text-decoration: underline;
-  text-underline-offset: 2px;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 3px;
+  font-weight: 500;
+  word-break: break-all; /* 长 URL 自动折行 */
 }
-.message-content a:hover { opacity: 0.8; }
-.message-content a:visited { color: color-mix(in srgb, var(--accent, #4f8cff) 80%, #9342f0); }
+.message-content a:hover { color: var(--accent-hover, #6366f1); text-decoration-thickness: 2px; }
+/* 深色模式：亮天蓝，深底高对比（覆盖 .dark 加在 html/body/app-layout/[data-theme] 的情况） */
+html.dark .message-content a,
+body.dark .message-content a,
+.app-layout.dark .message-content a,
+[data-theme='dark'] .message-content a,
+.dark .message-content a {
+  color: #7dd3fc;
+  text-decoration-color: rgba(125, 211, 252, 0.55);
+}
+html.dark .message-content a:hover,
+body.dark .message-content a:hover,
+.app-layout.dark .message-content a:hover { color: #bae6fd; }
 .message-content pre {
   position: relative;
+
 }
 .code-copy-btn {
   position: absolute;
