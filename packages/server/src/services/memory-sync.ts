@@ -60,7 +60,7 @@ async function llmJson(system: string, user: string, fallback: unknown): Promise
 
 const SYNC_SYSTEM = `You are a memory curator for an AI agent. After a conversation turn, decide whether the exchange contains facts worth remembering long-term: user preferences, personal facts, project facts, or important decisions. Be conservative — only extract durable, reusable information, not one-off task details.`
 
-const VALID_CATEGORIES = new Set(['user', 'knowledge', 'general'])
+const VALID_CATEGORIES = new Set(['user', 'knowledge', 'general', 'topic'])
 
 /**
  * turn 后记忆同步：LLM 从本次对话提取值得长期记住的信息（最多 3 条）写入 agent_memory
@@ -78,9 +78,10 @@ export async function syncTurnMemories(userContent: string, assistantContent: st
 Extract 0-3 durable memories worth storing long-term. Categories:
 - "user": user preferences, personal facts, identity (我叫/我喜欢/我在做X)
 - "knowledge": project facts, technical decisions, domain facts stated with confidence
+- "topic": 用户长期关注/感兴趣的方向（如"关注推理成本""关注某模型""对机器人领域有兴趣"）——用于后续 news_search 主动提醒进展
 - "general": anything else durable
 Rules: skip task-specific details, skip obvious content, skip anything already covered by the exchange itself. Prefer short keys.
-Return JSON: {"memories": [{"key": "简短键名(中文)", "content": "一句话事实", "category": "user|knowledge|general", "importance": 5}]}`
+Return JSON: {"memories": [{"key": "简短键名(中文)", "content": "一句话事实", "category": "user|knowledge|topic|general", "importance": 5}]}`
 
   let memories: Array<{ key: string; content: string; category: string; importance: number }> = []
   try {

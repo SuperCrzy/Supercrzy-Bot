@@ -4,9 +4,10 @@
  */
 import type { ToolDef } from './types'
 import getGoalTool from './get-goal'
+import newsSearchTool from './news-search'
 
 /** 全部工具定义（供 toolDefinitions 合并） */
-export const directoryTools: ToolDef[] = [getGoalTool]
+export const directoryTools: ToolDef[] = [getGoalTool, newsSearchTool]
 
 /** 执行器映射：name → execute（供 toolExecutors 合并） */
 export const directoryExecutors: Record<string, ToolDef['execute']> = Object.fromEntries(
