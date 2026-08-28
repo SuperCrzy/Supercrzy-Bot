@@ -1,5 +1,5 @@
 <template>
-  <aside class="detail-panel" :class="{ visible }">
+  <aside class="detail-panel" :class="{ visible, maximized, wide: isWideTab }">
     <!-- Tab 头部 -->
     <div class="panel-tabs">
       <button
@@ -22,29 +22,78 @@
 
     <!-- Tab 内容区 -->
     <div class="panel-body">
-      <!-- 产物 Tab -->
-      <div v-if="activeTab === 'artifacts'" class="tab-content">
-        <div class="tab-hint">{{ $t('detail.artifactsHint') }}</div>
-        <div v-if="artifactFiles.length === 0" class="tab-empty">
-          <n-empty :description="$t('detail.noArtifacts')" />
+      <!-- 产物 Tab — AI 产出卡片流（对齐 Harness turn-deliverables：按轮分组、类型 icon、状态角标） -->
+      <div v-if="activeTab === 'deliverables'" class="tab-content deliverables-tab">
+        <div v-if="deliverableGroups.length === 0" class="tab-empty">
+          <n-empty :description="$t('detail.noDeliverables')" />
         </div>
-        <div v-else class="file-list">
-          <div
-            v-for="f in artifactFiles"
-            :key="f.path"
-            class="file-row"
-            @click="loadAndPreviewFile(f.path)"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-            <span class="file-name">{{ f.name }}</span>
-            <span class="file-path">{{ f.path }}</span>
-            <span v-if="f.size" class="file-size">{{ formatSize(f.size) }}</span>
+        <div v-for="g in visibleGroups" :key="g.turn" class="deliverable-group">
+          <div class="deliverable-group-head" @click="toggleTurn(g.turn)">
+            <svg class="deliverable-chevron" :class="{ open: isTurnExpanded(g.turn) }" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+            <span class="deliverable-turn">{{ $t('detail.turn', { n: g.turn }) }}</span>
+            <span class="deliverable-summary" v-if="g.summary">{{ g.summary }}</span>
+            <span class="deliverable-count">{{ g.items.length }}</span>
+          </div>
+          <div v-show="isTurnExpanded(g.turn)" class="deliverable-list">
+            <div
+              v-for="(item, idx) in g.items"
+              :key="`${g.turn}-${idx}`"
+              class="deliverable-card"
+              :class="[item.kind, { error: item.status === 'error' }]"
+              @click="onDeliverableClick(item)"
+            >
+              <div class="deliverable-icon">
+                <svg v-if="item.kind === 'diagram'" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+                <svg v-else width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              </div>
+              <div class="deliverable-info">
+                <div class="deliverable-name">{{ item.name }}</div>
+                <div class="deliverable-path" v-if="item.path">{{ item.path }}</div>
+              </div>
+              <div class="deliverable-status" :class="item.status" v-if="item.kind === 'edit'">
+                {{ item.status === 'error' ? $t('detail.failed') : $t('detail.done') }}
+              </div>
+              <button
+                v-if="item.msgId"
+                class="deliverable-jump"
+                :title="$t('detail.jumpToMsg')"
+                @click.stop="appStore.focusMessage(item.msgId)"
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+              </button>
+            </div>
+            <!-- 图产物展开预览（点击图卡片切换） -->
+            <div
+              v-if="g.items.some((i) => i.svg && expandedDiagramSvg === i.svg)"
+              class="deliverable-diagram-preview"
+              v-html="expandedDiagramSvg"
+            ></div>
           </div>
         </div>
+        <button v-if="collapsedGroupCount > 0" class="deliverable-more" @click="showAllGroups = !showAllGroups">
+          {{ showAllGroups ? $t('detail.collapseAll') : $t('detail.showMore', { n: collapsedGroupCount }) }}
+        </button>
       </div>
 
-      <!-- 文件 Tab — 工作区文件树 -->
+      <!-- 文件 Tab — 工作区文件树（含「本次会话产物」分组，产物并入文件，去重复） -->
       <div v-if="activeTab === 'files'" class="tab-content">
+        <!-- 本次会话产物（AI 生成/修改的文件，高亮标记） -->
+        <div v-if="artifactFiles.length > 0" class="artifact-group">
+          <div class="group-title">{{ $t('detail.sessionArtifacts') }}</div>
+          <div class="file-list">
+            <div
+              v-for="f in artifactFiles"
+              :key="f.path"
+              class="file-row is-artifact"
+              @click="loadAndPreviewFile(f.path)"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              <span class="file-name">{{ f.name }}</span>
+              <span class="file-size" v-if="f.size">{{ formatSize(f.size) }}</span>
+            </div>
+          </div>
+        </div>
+        <!-- 工作区文件树 -->
         <div class="tab-hint">{{ $t('detail.currentDir') }}: {{ currentDir || '/' }}</div>
         <button class="refresh-btn" @click="() => loadFiles()" :disabled="loadingFiles">{{ $t('common.refresh') }}</button>
         <div v-if="loadingFiles" class="loading-hint">{{ $t('common.loading') }}</div>
@@ -82,39 +131,63 @@
         <div v-if="showDiffEditor" class="diff-editor-container" ref="diffEditorRef"></div>
       </div>
 
-      <!-- 预览 Tab -->
-      <div v-if="activeTab === 'preview'" class="tab-content">
-        <div v-if="previewFileName" class="mobile-tip">
-          <div class="qr-section" v-if="previewUrl || previewFileName">
-            <div class="qr-label">📱 {{ $t('detail.qrPreview') }}</div>
-            <img
-              :src="qrCodeURL"
-              class="qr-code"
-              alt="Scan to preview on phone"
-            />
-            <div class="qr-url">{{ mobilePreviewURL }}</div>
-          </div>
+      <!-- 预览 Tab（L1 实时渲染：AI 生成 html 自动弹出；手动点文件也可预览） -->
+      <div v-if="activeTab === 'preview'" class="tab-content preview-tab">
+        <div class="preview-toolbar">
+          <span class="preview-label">{{ $t('detail.autoPreview') }}</span>
+          <template v-if="isSvgPreview">
+            <button class="preview-max-btn preview-act" @click="downloadSvg" :title="$t('detail.downloadSvg')">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              {{ $t('detail.downloadSvg') }}
+            </button>
+            <button class="preview-max-btn preview-act" @click="copySvg" :title="$t('detail.copySvg')">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              {{ $t('detail.copySvg') }}
+            </button>
+          </template>
+          <button class="preview-max-btn" @click="maximized = !maximized" :title="maximized ? $t('detail.previewRestore') : $t('detail.previewMax')">
+            <svg v-if="!maximized" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+            <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/></svg>
+          </button>
         </div>
         <div class="tab-hint">{{ $t('detail.previewHint') }}</div>
-        <div v-if="!previewContent && !previewUrl" class="tab-empty">
+        <!-- AI 生成图片预览：最近一次生图产物优先显示 -->
+        <div v-if="previewImage" class="preview-image-box">
+          <div class="preview-header">{{ previewImage.title || $t('detail.imagePreviewLabel') }}</div>
+          <img class="preview-image-obj" :src="previewImage.data" alt="generated" />
+          <div class="preview-image-actions">
+            <!-- 下载生成图（2026-08-27 加：dataURL/URL 均可，SVG 有下载这里补 PNG/jpg） -->
+            <button class="preview-max-btn" @click="downloadPreviewImage" :title="$t('detail.downloadImage')">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            </button>
+            <button class="preview-max-btn" @click="openInMax(previewImage.data)" :title="$t('detail.previewMax')">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+            </button>
+          </div>
+        </div>
+        <div v-else-if="!livePreviewContent && !previewContent && !previewHtml" class="tab-empty">
           <n-empty :description="$t('detail.selectToPreview')" />
         </div>
+        <HtmlPreview
+          v-else-if="livePreviewContent || previewHtml"
+          :content="livePreviewContent || previewHtml"
+          :path="livePreviewPath || previewFileName"
+          show-header
+        />
         <div v-else-if="previewContent" class="preview-content">
           <div class="preview-header">{{ previewFileName }}</div>
           <pre class="preview-code"><code>{{ previewContent }}</code></pre>
         </div>
-        <div v-else-if="previewHtml" class="preview-content">
-          <div class="preview-header">{{ $t('detail.htmlPreview') }}</div>
-          <iframe :srcdoc="previewHtml" class="preview-iframe" sandbox="allow-scripts"></iframe>
-        </div>
-        <div v-else-if="previewUrl" class="preview-content">
-          <iframe :src="previewUrl" class="preview-iframe"></iframe>
-        </div>
       </div>
 
       <!-- 时间线 Tab -->
+      <!-- 时间线 Tab — 全对话轨迹回放（对齐 Harness TrajectoryTable：每轮思考/工具/产物/token 用量，可搜索） -->
       <div v-if="activeTab === 'timeline'" class="tab-content">
-        <TimelinePanel :flow="lastAssistantFlow" />
+        <TimelinePanel
+          :messages="chatStore.currentMessages"
+          @preview-file="loadAndPreviewFile"
+          @focus-message="appStore.focusMessage"
+        />
       </div>
 
       <!-- 幽灵 Tab -->
@@ -135,6 +208,7 @@ import { extractFiles } from '@/types'
 import type { ChatFlowNode } from '@/types'
 import TimelinePanel from '@/components/chat/TimelinePanel.vue'
 import GhostPanel from '@/components/chat/GhostPanel.vue'
+import HtmlPreview from '@/components/chat/HtmlPreview.vue'
 import type { FileBlock } from '@/types'
 import * as monaco from 'monaco-editor'
 
@@ -147,17 +221,135 @@ interface FileEntry {
 
 const props = defineProps<{
   visible: boolean
-  activeTab: 'artifacts' | 'files' | 'changes' | 'preview' | 'timeline' | 'ghost'
+  activeTab: 'deliverables' | 'files' | 'changes' | 'preview' | 'timeline' | 'ghost'
 }>()
 
 const emit = defineEmits<{
   (e: 'toggle'): void
-  (e: 'update:tab', tab: 'artifacts' | 'files' | 'changes' | 'preview' | 'timeline' | 'ghost'): void
+  (e: 'update:tab', tab: 'deliverables' | 'files' | 'changes' | 'preview' | 'timeline' | 'ghost'): void
 }>()
 
 const appStore = useAppStore()
 const { t } = useI18n({ useScope: 'global' })
 const chatStore = useChatStore()
+
+// ===== L1/L2 实时预览：store 数据 + 800ms 防抖 + 配套 css/js 内联 =====
+const maximized = ref(false)
+/** 宽内容 Tab（预览/变更 diff/图）：自动加宽至 58%，不覆盖用户手动 maximized（P2 内容自适应宽度） */
+const isWideTab = computed(() => !maximized.value && (props.activeTab === 'preview' || props.activeTab === 'changes'))
+const livePreviewPath = ref('')
+
+// ===== SVG 预览操作：下载 / 复制代码 =====
+const isSvgPreview = computed(() => {
+  const p = (livePreviewPath.value || '').toLowerCase()
+  return p.endsWith('.svg') || (livePreviewContent.value || '').trimStart().startsWith('<svg')
+})
+function downloadSvg() {
+  const svg = livePreviewContent.value || ''
+  if (!svg) return
+  const blob = new Blob([svg], { type: 'image/svg+xml' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = livePreviewPath.value || 'diagram.svg'
+  a.click()
+  URL.revokeObjectURL(url)
+}
+/** 下载预览的生成图（2026-08-27 加：dataURL 直接下；远程 URL 先转 Blob 再下，画质无损） */
+async function downloadPreviewImage() {
+  const img = previewImage.value
+  if (!img?.data) return
+  const title = (img.title || 'image').replace(/[\s\/\\:*?"<>|]+/g, '-').slice(0, 60)
+  try {
+    if (img.isUrl) {
+      // 远程 URL（如 pollinations 直链）：fetch 转 Blob 下载（规避跨域 cors 直链 a.click 失效）
+      const resp = await fetch(img.data)
+      const blob = await resp.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${title}.png`
+      a.click()
+      URL.revokeObjectURL(url)
+    } else {
+      // dataURL / base64：直接创建链接下载
+      const a = document.createElement('a')
+      a.href = img.data
+      a.download = `${title}.png`
+      a.click()
+    }
+  } catch {
+    // 兜底：直接打开新窗口（允许用户手动保存）
+    window.open(img.data, '_blank')
+  }
+}
+async function copySvg() {
+  const svg = livePreviewContent.value || ''
+  if (!svg) return
+  try {
+    await navigator.clipboard.writeText(svg)
+    copiedSvg.value = true
+    setTimeout(() => (copiedSvg.value = false), 1500)
+  } catch { /* 剪贴板不可用时静默 */ }
+}
+const copiedSvg = ref(false)
+const livePreviewContent = ref('')
+let previewDebounce: ReturnType<typeof setTimeout> | null = null
+watch(
+  () => appStore.previewTs,
+  () => {
+    if (previewDebounce) clearTimeout(previewDebounce)
+    previewDebounce = setTimeout(() => {
+      livePreviewPath.value = appStore.previewPath
+      livePreviewContent.value = inlineAssets(appStore.previewContent, appStore.previewPath, appStore.previewFiles)
+    }, 800)
+  },
+)
+
+/**
+ * 内联配套资源：把 html 里引用的同目录 css/js 替换为内联内容。
+ * iframe srcdoc 无 base URL，相对路径的 <link href="x.css"> / <script src="y.js"> 加载不到，
+ * 必须内联才能完整渲染（支持 AI 生成 html+css+js 整套网页）。
+ */
+function inlineAssets(html: string, htmlPath: string, files: Record<string, string>): string {
+  if (!html) return html
+  let out = html
+  // <link rel="stylesheet" href="xxx.css"> → <style>内容</style>
+  out = out.replace(/<link[^>]*rel=["']stylesheet["'][^>]*href=["']([^"']+)["'][^>]*>/gi, (m, href: string) => {
+    const css = findAsset(href, htmlPath, files, 'css')
+    return css ? `<style>\n${css}\n</style>` : m
+  })
+  // 外链脚本（script 标签带 src）→ 内联内容
+  out = out.replace(/<script[^>]*src=["']([^"']+)["'][^>]*>\s*<\/script>/gi, (m, src: string) => {
+    const js = findAsset(src, htmlPath, files, 'js')
+    // 注意：源码禁止出现 script 闭合标签字面量（Vue SFC 解析器会截断 script 块），用拼接
+    const openTag = '<scr' + 'ipt>'
+    const closeTag = '</scr' + 'ipt>'
+    return js ? openTag + '\n' + js + '\n' + closeTag : m
+  })
+  return out
+}
+function findAsset(href: string, htmlPath: string, files: Record<string, string>, ext: string): string {
+  if (!/\.(css|js)$/i.test(href)) return ''
+  // 去掉查询参数/锚点
+  const clean = href.split(/[?#]/)[0]
+  // 候选：绝对路径（/a/b.css）、相对路径（./b.css / b.css / ../x/b.css）
+  const htmlDir = htmlPath.split('/').slice(0, -1).join('/')
+  const candidates = [
+    clean,
+    `${htmlDir}/${clean.replace(/^\.\//, '')}`,
+    `${htmlDir}/${clean}`,
+  ]
+  for (const c of candidates) {
+    const hit = Object.keys(files).find((p) => {
+      const norm = p.replace(/\\/g, '/')
+      const nc = c.replace(/\\/g, '/')
+      return norm === nc || norm.endsWith('/' + nc.split('/').pop())
+    })
+    if (hit) return files[hit]
+  }
+  return ''
+}
 
 /** 当前会话最后一条 assistant 消息的时序流（时间线数据源） */
 const lastAssistantFlow = computed<ChatFlowNode[] | undefined>(() => {
@@ -170,6 +362,95 @@ const lastAssistantFlow = computed<ChatFlowNode[] | undefined>(() => {
   }
   return undefined
 })
+
+// ===== Deliverables（产物卡片流：对齐 Harness turn-deliverables + fitProducedFiles）=====
+interface DeliverableItem {
+  kind: 'edit' | 'diagram'
+  name: string
+  path?: string
+  turn: number
+  status: 'done' | 'error'
+  svg?: string
+  /** 所属消息 id（产物↔消息联动：点击定位到消息区对应消息） */
+  msgId?: string
+}
+interface DeliverableGroup {
+  turn: number
+  summary: string
+  items: DeliverableItem[]
+}
+
+const FILE_PRODUCER_TOOLS = new Set(['file_write', 'multi_edit'])
+
+function toolPath(args: string): string {
+  try {
+    const a = JSON.parse(args || '{}')
+    return String(a.path || a.filePath || a.file || a.name || '')
+  } catch { return '' }
+}
+function toolError(result?: string): boolean {
+  if (!result) return false
+  return /error|❌|失败|denied|refused/i.test(result.slice(0, 400))
+}
+
+const deliverableGroups = computed<DeliverableGroup[]>(() => {
+  const msgs = chatStore.currentMessages
+  const groups: DeliverableGroup[] = []
+  let turn = 0
+  for (const m of msgs) {
+    if (m.role !== 'assistant') continue
+    turn++
+    const items: DeliverableItem[] = []
+    let summary = ''
+    for (const node of m.flow || []) {
+      if (!summary && node.kind === 'text') summary = node.text.trim().replace(/\s+/g, ' ').slice(0, 24)
+      if (node.kind === 'tool') {
+        const t = node.tool
+        if (FILE_PRODUCER_TOOLS.has(t.name)) {
+          const path = toolPath(t.arguments)
+          if (path) items.push({ kind: 'edit', name: path.split('/').pop() || path, path, turn, status: toolError(t.result) ? 'error' : 'done', msgId: m.id })
+        }
+      } else if (node.kind === 'diagram' && node.svg && !node.pending) {
+        items.push({ kind: 'diagram', name: node.title || '图', turn, status: 'done', svg: node.svg.slice(0, 4000), msgId: m.id })
+      }
+    }
+    // content file 块（最终产物；与 flow 工具产物去重，同路径保留 flow 优先）
+    const seen = new Set(items.filter((i) => i.kind === 'edit' && i.path).map((i) => i.path))
+    for (const b of Array.isArray(m.content) ? m.content : []) {
+      if (b.type === 'file' && !seen.has(b.path)) {
+        items.push({ kind: 'edit', name: b.name || b.path.split('/').pop() || b.path, path: b.path, turn, status: 'done', msgId: m.id })
+      }
+    }
+    if (items.length > 0) groups.push({ turn, summary, items })
+  }
+  return groups.reverse() // 最新轮次在前
+})
+
+const expandedTurns = ref<Set<number>>(new Set())
+const showAllGroups = ref(false)
+const MAX_VISIBLE_GROUPS = 2
+const collapsedGroupCount = computed(() => Math.max(0, deliverableGroups.value.length - MAX_VISIBLE_GROUPS))
+const visibleGroups = computed(() =>
+  showAllGroups.value ? deliverableGroups.value : deliverableGroups.value.slice(0, MAX_VISIBLE_GROUPS),
+)
+function isTurnExpanded(turn: number): boolean {
+  // 默认展开最新轮，其余折叠（组头可点切换）
+  if (expandedTurns.value.has(turn)) return true
+  return turn === (deliverableGroups.value[0]?.turn)
+}
+function toggleTurn(turn: number) {
+  const s = new Set(expandedTurns.value)
+  if (s.has(turn)) s.delete(turn); else s.add(turn)
+  expandedTurns.value = s
+}
+const expandedDiagramSvg = ref<string | null>(null)
+function onDeliverableClick(item: DeliverableItem) {
+  if (item.kind === 'diagram' && item.svg) {
+    expandedDiagramSvg.value = expandedDiagramSvg.value === item.svg ? null : item.svg
+    return
+  }
+  if (item.path) loadAndPreviewFile(item.path)
+}
 
 // ----- Artifacts -----
 const artifactFiles = computed<FileBlock[]>(() => {
@@ -218,42 +499,31 @@ watch(() => ({ visible: true, tab: null }), () => {
 
 // ----- Preview -----
 const previewContent = ref('')
-const previewUrl = ref('')
 const previewHtml = ref('')
 const previewFileName = ref('')
+// AI 生成图预览（从 appStore 读：generate_image 工具产物 + flow 图点击）
+const previewImage = computed(() => appStore.previewImage)
+function openInMax(src: string) {
+  // dataURL 在新窗口展示；URL 直接打开
+  const w = window.open('', '_blank')
+  if (w) {
+    if (src.startsWith('data:')) { w.document.write(`<img src="${src}" style="width:100%;height:auto"/>`); w.document.close() }
+    else w.location.href = src
+  }
+}
 
-// 手机扫码预览：本地模式用当前 origin 生成预览链接，二维码由 server /api/qrcode 生成
-const mobilePreviewURL = computed(() =>
-  previewFileName.value
-    ? `${window.location.origin}/api/preview/${encodeURIComponent(previewFileName.value)}`
-    : ''
-)
-const qrCodeURL = computed(() =>
-  mobilePreviewURL.value
-    ? `/api/qrcode?text=${encodeURIComponent(mobilePreviewURL.value)}`
-    : ''
-)
-const diffFiles = ref<Array<{ name: string; path: string; oldContent?: string; newContent?: string }>>([])
+const diffEditorRef = ref<HTMLElement | null>(null)
 const selectedDiff = ref(0)
 const showDiffEditor = ref(false)
-const diffEditorRef = ref<HTMLElement | null>(null)
 let diffEditor: monaco.editor.IStandaloneDiffEditor | null = null
 
-// 从 tool-call 收集中提取文件变更
-watch([() => chatStore.currentMessages, () => props.visible], () => {
-  const files: typeof diffFiles.value = []
-  for (const m of chatStore.currentMessages) {
-    for (const b of Array.isArray(m.content) ? m.content : []) {
-      if (b.type === 'tool-call' && b.name === 'file_write') {
-        try {
-          const args = JSON.parse(b.args || '{}')
-          files.push({ name: args.path?.split('/').pop() || 'file', path: args.path || '', newContent: args.content, oldContent: args.old_str })
-        } catch { files.push({ name: 'file', path: '', newContent: b.args?.slice(0, 500) }) }
-      }
-    }
-  }
-  diffFiles.value = files
-})
+// 变更数据源：store 里的 file_changed 事件（file_write 写入时后端推送，含真实改前/改后内容）
+const diffFiles = computed(() => appStore.fileChanges.map((c: { name: string; path: string; oldContent: string; newContent: string }) => ({
+  name: c.name,
+  path: c.path,
+  oldContent: c.oldContent,
+  newContent: c.newContent,
+})))
 
 function showDiff() {
   showDiffEditor.value = true
@@ -280,7 +550,6 @@ async function loadAndPreviewFile(filePath: string) {
       const data = await res.json()
       const content = data.content.substring(0, 100000)
       previewFileName.value = filePath
-      previewUrl.value = ''
       previewContent.value = ''
       previewHtml.value = ''
 
@@ -311,7 +580,7 @@ watch(() => appStore.previewFilePath, (path) => {
   }
 })
 
-function switchTab(tab: 'artifacts' | 'files' | 'changes' | 'preview' | 'timeline' | 'ghost') {
+function switchTab(tab: 'deliverables' | 'files' | 'changes' | 'preview' | 'timeline' | 'ghost') {
   emit('update:tab', tab)
   if (tab === 'files' && fileTree.value.length === 0) {
     loadFiles()
@@ -325,7 +594,7 @@ function formatSize(bytes: number): string {
 }
 
 const tabs = [
-  { key: 'artifacts' as const, label: t('detail.tabArtifacts'), icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>' },
+  { key: 'deliverables' as const, label: t('detail.tabArtifacts'), icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>' },
   { key: 'files' as const, label: t('detail.tabFiles'), icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>' },
   { key: 'changes' as const, label: t('detail.tabChanges'), icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>' },
   { key: 'preview' as const, label: t('detail.tabPreview'), icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>' },
@@ -355,21 +624,202 @@ const tabs = [
   opacity: 1;
 }
 
+/* 宽内容 Tab（preview 预览/图、changes 变更 diff）自动加宽：长代码/表格/宽图不挤在 320px */
+.detail-panel.visible.wide {
+  width: 58%;
+  min-width: 480px;
+}
+
+/* 预览最大化：展开覆盖聊天区，大屏查看（L1） */
+.detail-panel.visible.maximized {
+  width: 70%;
+  min-width: 480px;
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 50;
+  box-shadow: -4px 0 16px rgba(0, 0, 0, .12);
+}
+
+/* 预览 Tab 工具条 */
+.preview-tab { display: flex; flex-direction: column; gap: 6px; }
+
+/* 产物卡片流（对齐 Harness turn-deliverables） */
+.deliverables-tab { display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
+.deliverable-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.deliverable-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  cursor: pointer;
+  user-select: none;
+  background: color-mix(in srgb, var(--bg-hover, rgba(127,127,127,0.06)) 60%, transparent);
+}
+.deliverable-group-head:hover { background: var(--bg-hover, rgba(127,127,127,0.1)); }
+.deliverable-chevron { flex-shrink: 0; transition: transform 0.18s ease; color: var(--text-muted); }
+.deliverable-chevron.open { transform: rotate(180deg); }
+.deliverable-turn { font-size: 11px; font-weight: 600; color: var(--accent, #4f7cff); white-space: nowrap; }
+.deliverable-summary {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.deliverable-count {
+  font-size: 10px;
+  color: var(--text-muted);
+  background: var(--bg-hover, rgba(127,127,127,0.12));
+  border-radius: 8px;
+  padding: 0 6px;
+  line-height: 15px;
+}
+.deliverable-list { display: flex; flex-direction: column; gap: 4px; padding: 6px 8px 8px; }
+.deliverable-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.deliverable-card:hover { background: var(--bg-hover, rgba(127,127,127,0.08)); border-color: var(--border-color); }
+.deliverable-card.error { opacity: 0.75; }
+.deliverable-icon {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent, #4f7cff);
+  background: color-mix(in srgb, var(--accent, #4f7cff) 12%, transparent);
+}
+.deliverable-card.diagram .deliverable-icon { color: #a78bfa; background: color-mix(in srgb, #a78bfa 14%, transparent); }
+.deliverable-info { flex: 1; min-width: 0; }
+.deliverable-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-color);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.deliverable-path {
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.deliverable-status {
+  flex-shrink: 0;
+  font-size: 10px;
+  padding: 1px 7px;
+  border-radius: 8px;
+  white-space: nowrap;
+}
+.deliverable-status.done { color: #34d399; background: color-mix(in srgb, #34d399 14%, transparent); }
+.deliverable-status.error { color: #f87171; background: color-mix(in srgb, #f87171 14%, transparent); }
+.deliverable-jump {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+.deliverable-card:hover .deliverable-jump { opacity: 1; }
+.deliverable-jump:hover { background: var(--bg-hover, rgba(127,127,127,0.12)); color: var(--accent, #4f7cff); }
+.deliverable-diagram-preview {
+  margin-top: 4px;
+  padding: 6px;
+  border-radius: 6px;
+  background: var(--bg-input, rgba(127,127,127,0.06));
+  overflow: auto;
+  max-height: 280px;
+}
+.deliverable-diagram-preview :deep(svg) { width: 100%; height: auto; }
+.deliverable-more {
+  align-self: center;
+  font-size: 11px;
+  color: var(--text-muted);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 3px 12px;
+  background: transparent;
+  cursor: pointer;
+}
+.deliverable-more:hover { color: var(--accent, #4f7cff); border-color: var(--accent, #4f7cff); }
+
+/* 本次会话产物分组（并入文件 tab） */
+.artifact-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px dashed var(--border-color);
+}
+.group-title { font-size: 11px; font-weight: 500; color: var(--accent, #4f7cff); }
+.file-row.is-artifact { color: var(--accent, #4f7cff); }
+.file-row.is-artifact .file-name { font-weight: 500; }
+.preview-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.preview-label { font-size: 11px; color: var(--text-secondary); }
+.preview-max-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 3px;
+  display: flex;
+  border-radius: 4px;
+}
+.preview-max-btn:hover { background: var(--border-color); color: var(--text-primary); }
+.preview-tab .html-preview { min-height: 300px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); overflow: hidden; }
+
 .panel-tabs {
   display: flex;
   align-items: center;
   border-bottom: 1px solid var(--border-color);
-  padding: 0 6px;
-  gap: 2px;
+  padding: 0 4px;
+  gap: 1px;
   flex-shrink: 0;
 }
 
 .panel-tab {
   display: flex;
   align-items: center;
-  gap: 5px;
-  padding: 8px 10px;
-  font-size: 12px;
+  justify-content: center;
+  flex: 1 1 0;
+  gap: 3px;
+  padding: 7px 4px;
+  font-size: 11px;
   color: var(--text-muted);
   background: none;
   border: none;
@@ -382,7 +832,7 @@ const tabs = [
 .panel-tab.active { color: var(--accent); border-bottom: 2px solid var(--accent); margin-bottom: -1px; }
 
 .tab-icon { display: flex; align-items: center; flex-shrink: 0; }
-.tab-label { font-weight: 500; }
+.tab-label { font-weight: 500; white-space: nowrap; flex-shrink: 0; }
 
 .panel-close-btn {
   margin-left: auto;
@@ -423,7 +873,12 @@ const tabs = [
 /* Preview */
 .preview-header { font-size: 11px; color: var(--text-muted); padding: 4px 0; border-bottom: 1px solid var(--border-color); margin-bottom: 4px; }
 .preview-code { font-family: var(--font-mono); font-size: 11px; line-height: 1.5; white-space: pre-wrap; overflow-x: auto; max-height: 100%; padding: 8px; background: var(--bg-primary); border-radius: var(--radius-sm); color: var(--text-primary); }
-.preview-iframe { width: 100%; min-height: 400px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); }
+.preview-image-box { display: flex; flex-direction: column; height: 100%; }
+.preview-image-obj { width: 100%; height: auto; object-fit: contain; border-radius: var(--radius-sm); border: 1px solid var(--border-color); margin: 6px 0; }
+.preview-image-actions { display: flex; gap: 6px; justify-content: flex-end; }
+/* 最大化遮罩显示大图（DataURL 下内联渲染） */
+.overlay-image { position: fixed; inset: 0; z-index: 2000; background: rgba(0,0,0,.75); display: flex; align-items: center; justify-content: center; cursor: zoom-out; }
+.overlay-image img { max-width: 92%; max-height: 92%; border-radius: 8px; }.preview-iframe { width: 100%; min-height: 400px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); }
 
 /* Diff */
 .diff-list { display: flex; flex-direction: column; gap: 2px; }

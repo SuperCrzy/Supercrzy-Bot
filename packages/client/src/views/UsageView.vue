@@ -15,7 +15,7 @@
       <div class="overview-card accent">
         <div class="overview-value">{{ formatNumber(stats.total.tokens) }}</div>
         <div class="overview-label">{{ $t('usage.totalTokenCost') }}</div>
-        <div class="overview-sub">{{ $t('usage.about') }} ¥{{ stats.total.cost?.toFixed(4) || '0' }}</div>
+        <div class="overview-sub">{{ $t('usage.about') }} {{ formatCurrency(stats.total.cost) }}</div>
       </div>
       <div class="overview-card success">
         <div class="overview-value">{{ stats.today.messages }}</div>
@@ -23,7 +23,7 @@
         <div class="overview-sub">{{ formatNumber(stats.today.tokens) }} tokens</div>
       </div>
       <div class="overview-card warning">
-        <div class="overview-value">¥{{ stats.today.cost?.toFixed(6) || '0' }}</div>
+        <div class="overview-value">{{ formatCurrency(stats.today.cost, 6) }}</div>
         <div class="overview-label">{{ $t('usage.todayCost') }}</div>
         <div class="overview-sub">{{ $t('usage.messageCount', { n: stats.today.messages }) }}</div>
       </div>
@@ -56,7 +56,7 @@
             <td><code class="model-name">{{ m.model }}</code></td>
             <td>{{ m.count }}</td>
             <td>{{ formatNumber(m.tokens) }}</td>
-            <td>¥{{ m.cost?.toFixed(6) || '0' }}</td>
+            <td>{{ formatCurrency(m.cost, 6) }}</td>
             <td>{{ m.lastUsed || '-' }}</td>
           </tr>
         </tbody>
@@ -68,6 +68,7 @@
 
 <script setup lang="ts">
 import { reactive, computed, onMounted } from 'vue'
+import i18n from '@/i18n'
 import { NTable } from 'naive-ui'
 import VChart from 'vue-echarts'
 import { use } from 'echarts/core'
@@ -97,13 +98,18 @@ const stats = reactive({
   today: { messages: 0, tokens: 0, cost: 0 },
   total: { sessions: 0, messages: 0, tokens: 0, cost: 0 },
   weekly: [] as WeeklyPoint[],
+  byModel: [] as Array<{ model: string; count: number; tokens: number; cost: number; last_used: string | null }>,
 })
 
 const modelStats = computed<ModelStat[]>(() => {
-  // 简化：按模型分组统计（需要后端支持，这里先用通用统计）
-  return [
-    { model: 'deepseek-v4-pro', count: stats.total.messages, tokens: stats.total.tokens, cost: stats.total.cost, lastUsed: '刚刚' },
-  ]
+  // 后端按模型分组统计（真实数据）；无数据时保持空表
+  return stats.byModel.map((m) => ({
+    model: m.model,
+    count: m.count,
+    tokens: m.tokens,
+    cost: m.cost || 0,
+    lastUsed: m.last_used ? formatShortDate(m.last_used) : '-',
+  }))
 })
 
 const maxMsgs = computed(() => Math.max(...stats.weekly.map(d => d.messages), 1))
@@ -116,6 +122,12 @@ function formatNumber(n: number) {
   if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M'
   if (n >= 1000) return (n / 1000).toFixed(1) + 'K'
   return String(Math.floor(n))
+}
+
+/** 货币格式化：跟随界面语言（zh ¥ / en $） */
+function formatCurrency(amount?: number, digits = 4) {
+  const v = (amount ?? 0).toFixed(digits)
+  return (i18n().global.locale.value === 'zh-CN' ? '¥' : '$') + v
 }
 
 function formatShortDate(d: string) {
@@ -134,7 +146,7 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.page-container { height: 100vh; display: flex; flex-direction: column; overflow-y: auto; }
+.page-container { height: 100%; display: flex; flex-direction: column; overflow-y: auto; }
 .page-header { padding: 16px 24px; border-bottom: 1px solid var(--border-color); flex-shrink: 0; }
 .page-header h2 { font-size: 16px; font-weight: 600; margin: 0; }
 .page-desc { font-size: 12px; color: var(--text-muted); margin: 4px 0 0; }

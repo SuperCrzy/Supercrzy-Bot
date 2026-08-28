@@ -4,8 +4,38 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/logo-32.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <link href="https://fonts.googleapis.com/css2?family=Saira+Stencil+One&amp;display=swap" rel="stylesheet">
+    <!-- 品牌字体本地化：外网 Google Fonts 会渲染阻塞（网络不可达时白屏），改本地 @font-face -->
+    <style>
+      @font-face {
+        font-family: 'Saira Stencil One';
+        font-style: normal;
+        font-weight: 400;
+        font-display: swap;
+        src: url('/fonts/SairaStencilOne.ttf') format('truetype');
+      }
+    </style>
     <title>SUPERCRZY BOT</title>
+    <!-- PWA 可安装增强（2026-08-26）：manifest 声明 + iOS Safari"添加到主屏幕"支持 + 独立窗口/app 图标 -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#1a1a2e" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="SUPERCRZY BOT" />
+    <link rel="apple-touch-icon" href="/logo-192.png" />
+    <link rel="apple-touch-startup-image" href="/logo-192.png" />
+    <script>
+      // 主题预载：HTML 解析前根据偏好加 dark 类，避免深色用户闪白
+      // （完整恢复仍由 appStore.loadSettings 从后端 settings.theme 执行）
+      ;(function () {
+        try {
+          var t = localStorage.getItem('supercrzy:theme')
+          if (t === 'dark' || (!t && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.documentElement.classList.add('dark')
+          }
+        } catch (e) {}
+      })()
+    </script>
   </head>
   <body>
     <div id="app"></div>

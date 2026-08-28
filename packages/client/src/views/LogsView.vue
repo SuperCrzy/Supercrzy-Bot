@@ -17,10 +17,8 @@
       <div class="filter-bar">
         <n-button-group size="tiny">
           <n-button :type="levelFilter === 'all' ? 'primary' : 'default'" @click="levelFilter = 'all'" ghost>{{ $t('logs.levelAll') }}</n-button>
-          <n-button :type="levelFilter === 'info' ? 'info' : 'default'" @click="levelFilter = 'info'" ghost>INFO</n-button>
-          <n-button :type="levelFilter === 'warn' ? 'warning' : 'default'" @click="levelFilter = 'warn'" ghost>WARN</n-button>
-          <n-button :type="levelFilter === 'error' ? 'error' : 'default'" @click="levelFilter = 'error'" ghost>ERROR</n-button>
-          <n-button :type="levelFilter === 'debug' ? 'default' : 'default'" @click="levelFilter = 'debug'" ghost>DEBUG</n-button>
+          <n-button :type="levelFilter === 'assistant' ? 'info' : 'default'" @click="levelFilter = 'assistant'" ghost>{{ $t('logs.aiReply') }}</n-button>
+          <n-button :type="levelFilter === 'user' ? 'warning' : 'default'" @click="levelFilter = 'user'" ghost>{{ $t('logs.userMsg') }}</n-button>
         </n-button-group>
         <span class="log-count">{{ $t('logs.count', { n: filteredLogs.length }) }}</span>
       </div>
@@ -63,6 +61,7 @@ interface LogEntry {
   time: string
   level: 'info' | 'warn' | 'error' | 'debug'
   type: string
+  role?: string
   message: string
   sessionTitle?: string
   tokens?: number
@@ -82,7 +81,7 @@ let refreshTimer: ReturnType<typeof setInterval> | null = null
 const filteredLogs = computed(() => {
   let result = logs.value
   if (levelFilter.value !== 'all') {
-    result = result.filter(l => l.level === levelFilter.value)
+    result = result.filter(l => l.role === levelFilter.value)
   }
   if (searchQuery.value) {
     const q = searchQuery.value.toLowerCase()
@@ -105,6 +104,7 @@ async function loadLogs() {
       logs.value = data.map((m: any) => ({
         time: m.created_at || new Date().toISOString(),
         level: 'info',
+        role: m.role,
         type: m.role === 'user' ? t('logs.userMsg') : m.role === 'assistant' ? t('logs.aiReply') : m.role || t('logs.system'),
         message: (m.content || '').slice(0, 100),
         sessionTitle: m.session_title || undefined,
@@ -136,7 +136,7 @@ onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
 </script>
 
 <style scoped>
-.page-container { height: 100vh; display: flex; flex-direction: column; }
+.page-container { height: 100%; display: flex; flex-direction: column; }
 .page-header { padding: 16px 20px; border-bottom: 1px solid var(--border-color); flex-shrink: 0; }
 
 .header-row { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }

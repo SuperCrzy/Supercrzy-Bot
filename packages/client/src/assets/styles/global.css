@@ -52,10 +52,10 @@ a:hover {
   text-decoration: underline;
 }
 
-/* Selection */
+/* Selection（浅色模式：浅灰底深字，柔和清晰——老板 2026-08-21 多次调浅） */
 ::selection {
-  background: var(--accent-muted);
-  color: var(--text-primary);
+  background: #d4d4d8;
+  color: #18181b;
 }
 
 /* Focus outline */
@@ -64,11 +64,21 @@ a:hover {
   outline-offset: 2px;
 }
 
-/* Transition helper */
+/* 主题切换过渡：让背景/边框平滑渐变，但文字颜色(尤其 markdown 内容区大量节点)瞬时切换——
+   全局给 color 加 transition 会导致主题切换时对话文字颜色逐个缓慢渐变（看起来"切换很慢"，老板反馈）。
+   文字变色交给具体交互元素自己的 transition，正文/内容区颜色跟随主题瞬时生效。 */
 * {
-  transition-property: background-color, border-color, color;
+  transition-property: background-color, border-color;
   transition-duration: var(--duration-fast);
   transition-timing-function: var(--ease-in-out);
+}
+
+/* 主题切换瞬时模式：切换的一瞬间禁用所有 transition，避免侧边栏对话标题、AI 回复正文等
+   大量元素同时做 color/background 渐变导致"文字切换很慢"（app.ts applyThemeClass 会临时加此 class，
+   下一帧移除——只影响切换瞬间，不影响平时的 hover/交互过渡）。 */
+html.theme-switching,
+html.theme-switching * {
+  transition: none !important;
 }
 
 /* ===== Page Containers ===== */
@@ -76,9 +86,35 @@ a:hover {
   padding: 20px 24px;
 }
 
+/* ===== 品牌徽章（BOT 圆角矩形底）=====
+   浅色模式：黑底白字；深色模式：白底黑字（独立产品线标识）
+   对齐：父级用 inline-flex + align-items:center 实现垂直居中 */
+.bot-badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: #0a0a0a;
+  color: #ffffff;
+  font-size: 0.82em;
+  font-weight: 700;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  letter-spacing: 0.5px;
+  line-height: 1.4;
+}
+.dark .bot-badge {
+  background: #ffffff;
+  color: #0a0a0a;
+}
+
 /* ===== Mobile Responsive ===== */
 /* Tablet: allow sidebar collapse but keep vertical layout */
 @media (min-width: 769px) and (max-width: 1024px) {
   .sidebar { width: 180px !important; min-width: 180px !important; }
   .sidebar.collapsed { width: 48px !important; min-width: 48px !important; }
+}
+
+/* ===== 文字选中高亮（仅深色模式：中性灰底白字，不覆盖浅色模式——老板 2026-08-21） ===== */
+.dark ::selection {
+  background: #52525b;
+  color: #ffffff;
 }

@@ -8,16 +8,16 @@
 
     <div v-for="s in suggestions" :key="s.id" class="ghost-item" :class="{ executed: s.executed }">
       <div class="ghost-head">
-        <span class="ghost-badge">👻</span>
+        <svg class="ghost-badge" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a7 7 0 0 0-7 7v7h14v-7a7 7 0 0 0-7-7z"/><path d="M8 14h.01M16 14h.01M8 18v3M16 18v3"/></svg>
         <span class="ghost-file">{{ shortFile(s.file) }}</span>
         <span class="ghost-time">{{ shortTime(s.time) }}</span>
       </div>
       <div class="ghost-suggestion">{{ s.suggestion }}</div>
+      <div class="ghost-reason" :title="s.reason">{{ s.reason }}</div>
       <div class="ghost-foot">
-        <span class="ghost-reason" :title="s.reason">{{ s.reason }}</span>
         <span class="ghost-conf">{{ $t('ghost.confidence', { n: Math.round(s.confidence * 100) }) }}</span>
-        <button v-if="!s.executed" class="ghost-exec" @click="execute(s)">▶ {{ $t('ghost.execute') }}</button>
-        <span v-else class="ghost-done">✓ {{ $t('ghost.executed') }}</span>
+        <button v-if="!s.executed" class="ghost-exec" @click="execute(s)">{{ $t('ghost.execute') }}</button>
+        <span v-else class="ghost-done">{{ $t('ghost.executed') }}</span>
       </div>
     </div>
   </div>
@@ -98,16 +98,15 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 .ghost-time { font-size: 10px; color: var(--text-muted); flex-shrink: 0; }
-.ghost-suggestion { font-size: 12px; line-height: 1.6; margin-bottom: 6px; }
-.ghost-foot { display: flex; align-items: center; gap: 8px; }
+.ghost-suggestion { font-size: 12px; line-height: 1.6; margin-bottom: 4px; }
 .ghost-reason {
-  flex: 1;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.5;
+  margin-bottom: 8px;
+  word-break: break-all;
 }
+.ghost-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .ghost-conf { font-size: 10px; color: var(--accent); flex-shrink: 0; }
 .ghost-exec {
   flex-shrink: 0;

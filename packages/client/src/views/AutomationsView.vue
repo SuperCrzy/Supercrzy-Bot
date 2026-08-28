@@ -30,7 +30,7 @@
         <p class="auto-prompt">{{ a.prompt }}</p>
         <div class="auto-meta">
           <n-tag size="tiny" :bordered="false" :type="a.schedule_type==='once'?'warning':'info'">
-            {{ a.schedule_type === 'once' ? 'Once' : 'Recurring' }}
+            {{ a.schedule_type === 'once' ? 'Once' : a.schedule_type === 'event' ? '⚡ ' + (a.event_trigger || 'Event') : 'Recurring' }}
           </n-tag>
           <span class="auto-schedule">{{ formatSchedule(a) }}</span>
           <span v-if="a.last_run_at" class="auto-last">Last: {{ fmtTime(a.last_run_at) }}</span>
@@ -48,7 +48,14 @@
           <n-radio-group v-model:value="form.schedule_type">
             <n-radio value="recurring">Recurring</n-radio>
             <n-radio value="once">One-time</n-radio>
+            <n-radio value="event">Event</n-radio>
           </n-radio-group>
+        </n-form-item>
+        <n-form-item v-if="form.schedule_type==='event'" label="Trigger">
+          <n-select v-model:value="form.event_trigger" :options="eventOptions" style="width:100%" placeholder="Select trigger event" />
+        </n-form-item>
+        <n-form-item v-if="form.schedule_type==='event'" label="Context hint">
+          <n-input v-model:value="form.event_context" placeholder="Optional: {{context}} placeholder in prompt gets event details" size="small" />
         </n-form-item>
         <n-form-item v-if="form.schedule_type==='recurring'" label="Frequency">
           <n-select v-model:value="form.freq" :options="freqOptions" style="width:140px" />
@@ -85,6 +92,7 @@ interface Automations {
   id: string; name: string; prompt: string; status: string; schedule_type: string
   rrule: string; scheduled_at: string | null; next_run_at: number; last_run_at: number | null
   model_id: string | null; created_at: number; updated_at: number
+  event_trigger?: string
 }
 
 const automations = ref<Automations[]>([])
@@ -95,7 +103,14 @@ const form = reactive({
   freq: 'DAILY', time: 32400000, // 9:00
   weekdays: [] as string[], scheduled_at: null as number | null,
   notify_channel: null as string | null,
+  event_trigger: 'file-changed', event_context: '',
 })
+
+const eventOptions = [
+  { label: 'File changed (workspace)', value: 'file-changed' },
+  { label: 'Message received', value: 'message-received' },
+  { label: 'Manual trigger', value: 'manual' },
+]
 
 const notifyOptions = [
   { label: 'All channels', value: 'all' },
@@ -132,6 +147,7 @@ function buildRrule(): string {
 }
 
 function formatSchedule(a: Automations): string {
+  if (a.schedule_type === 'event') return `On ${a.event_trigger || 'event'}`
   if (a.schedule_type === 'once') return `Once at ${a.scheduled_at ? new Date(a.scheduled_at).toLocaleString() : '--'}`
   const match = a.rrule?.match(/FREQ=(\w+)/)
   const freq = match?.[1] || ''
@@ -158,14 +174,20 @@ async function loadAutomations() {
 async function createAutomation() {
   const rrule = form.schedule_type === 'recurring' ? buildRrule() : ''
   const scheduledAt = form.schedule_type === 'once' ? form.scheduled_at ? new Date(form.scheduled_at).toISOString() : null : null
+  // 事件型：prompt 里支持 {{context}} 占位符（事件详情注入），前端提供独立上下文输入
+  let prompt = form.prompt
+  if (form.schedule_type === 'event' && form.event_context && !prompt.includes('{{context}}')) {
+    prompt = `${prompt}\n\n[事件上下文] ${form.event_context}`
+  }
 
   await fetch('/api/automations', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      name: form.name, prompt: form.prompt,
+      name: form.name, prompt,
       schedule_type: form.schedule_type, rrule, scheduled_at: scheduledAt,
       notify_channel: form.notify_channel || '',
+      event_trigger: form.schedule_type === 'event' ? form.event_trigger : '',
     }),
   })
   showModal.value = false
@@ -203,7 +225,7 @@ onMounted(() => { loadAutomations() })
 </script>
 
 <style scoped>
-.page-container { height:100vh; display:flex; flex-direction:column }
+.page-container { height:100%; display:flex; flex-direction:column }
 .page-header { display:flex; align-items:center; justify-content:space-between; padding:16px 24px; border-bottom:1px solid var(--border-color); flex-shrink:0 }
 .page-header h2 { font-size:var(--text-lg); font-weight:600; margin:0 }
 .page-desc { font-size:var(--text-sm); color:var(--text-muted); margin:4px 0 0 }

@@ -5,7 +5,10 @@ import { resolve } from 'path'
 import { fileURLToPath } from 'url'
 const __dirname = fileURLToPath(new URL('.', import.meta.url))
 export default defineConfig({
-  cacheDir: '/tmp/vite-cache',
+  // 相对路径 base：Electron file:// 加载需要（绝对路径 /assets 在 file:// 下解析到磁盘根 → 黑屏）；
+  // 网页部署到子路径也兼容
+  base: './',
+  // 依赖缓存用项目内默认（node_modules/.vite）——曾配 /tmp/vite-cache 导致 deps 并发加载挂起（@fs 对 /tmp 的边界问题）
   plugins: [vue(), VitePWA({ registerType: 'autoUpdate', workbox: { maximumFileSizeToCacheInBytes: 10485760, globPatterns: ['**/*.{js,css,html,svg,png,woff2}'] }, manifest: { name:'SUPERCRZY BOT',short_name:'SUPERCRZY BOT',theme_color:'#1a1a2e',background_color:'#1a1a2e',display:'standalone',icons:[{src:'/logo-192.png',sizes:'192x192',type:'image/png'},{src:'/logo.png',sizes:'512x512',type:'image/png',purpose:'any maskable'}] } })],resolve:{alias:{'@':resolve(__dirname,'src')}},server:{port:5173,proxy:{
     '/api': {
       target: 'http://localhost:3000',

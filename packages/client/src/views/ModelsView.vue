@@ -60,7 +60,7 @@
           @click="openProviderConfig(p)"
         >
           <ProviderBadge :provider="p.id" :size="22" />
-          <span class="chip-name">{{ p.label }}</span>
+          <span class="chip-name">{{ l10n(p.label, p.labelEn) }}</span>
           <span v-if="p.configured" class="chip-check">✓</span>
           <span v-if="currentProvider.id === p.id" class="chip-current">{{ $t('models.current') }}</span>
         </button>
@@ -73,9 +73,33 @@
         <n-form-item :label="$t('models.provider')">
           <n-input :value="editingProvider.label" disabled />
         </n-form-item>
-        <n-form-item label="API Key">
-          <n-input v-model:value="editingProvider.apiKey" type="password" show-password-on="click" :placeholder="$t('models.apiKeyPlaceholder')" />
+        <!-- 计费方式切换（2026-08-27 加：该 provider 支持 Token Plan 时，可切换 API按量 / Token Plan，自动换 baseUrl+key前缀） -->
+        <n-form-item v-if="hasPlanToggle" :label="$t('models.billingMode')">
+          <div class="billing-toggle">
+            <button
+              type="button"
+              class="billing-opt"
+              :class="{ active: !isPlanMode }"
+              @click="setBillingMode(false)"
+            >{{ $t('models.billingApi') }}</button>
+            <button
+              type="button"
+              class="billing-opt"
+              :class="{ active: isPlanMode }"
+              @click="setBillingMode(true)"
+            >{{ $t('models.billingPlan') }}</button>
+          </div>
         </n-form-item>
+        <n-form-item label="API Key">
+          <n-input
+            v-model:value="editingProvider.apiKey"
+            type="password"
+            show-password-on="click"
+            :placeholder="apiKeyPlaceholder"
+          />
+        </n-form-item>
+        <!-- Token Plan 订阅提示：专属 key 前缀与说明（2026-08-27 加） -->
+        <div v-if="isPlanMode && hasPlanToggle" class="tokenplan-hint">{{ tokenPlanHint }}</div>
         <div class="discover-row">
           <n-button size="small" type="primary" :disabled="!editingProvider.apiKey" :loading="discovering" @click="discoverModels">
             {{ discoveredModels.length > 0 ? $t('models.redetect') : $t('models.detectModels') }}
@@ -159,7 +183,7 @@
           <span class="col-actions">
             <n-button v-if="!model.isAutoDerived" text size="tiny" type="primary" @click="editCustomModel(model)" style="margin-right:4px">{{ $t('common.edit') }}</n-button>
             <n-button v-if="!model.isAutoDerived" text size="tiny" type="error" @click="confirmDelete(model)">{{ $t('common.delete') }}</n-button>
-            <span v-else class="col-actions-hint" :title="$t('models.autoDerived')">由提供商配置派生</span>
+            <span v-else class="col-actions-hint" :title="$t('models.autoDerived')">{{ $t('models.autoDerivedHint') }}</span>
           </span>
         </div>
       </div>
@@ -191,6 +215,9 @@
             <n-checkbox value="vision" :label="$t('models.capVision')" />
           </n-checkbox-group>
         </n-form-item>
+        <n-form-item :label="$t('models.contextWindow')">
+          <n-select v-model:value="addForm.contextWindow" :options="contextWindowOptions" />
+        </n-form-item>
       </n-form>
       <template #action>
         <n-space>
@@ -221,6 +248,7 @@ import { useAppStore } from '@/stores/app'
 import { useI18n } from 'vue-i18n'
 import ProviderBadge from '@/components/ui/ProviderBadge.vue'
 import { getModelShortName } from '@/data/models'
+import { l10n } from '@/utils/i18n-field'
 import type { CustomModel, AddModelForm } from '@/types'
 
 const appStore = useAppStore()
@@ -230,15 +258,16 @@ const message = useMessage()
 
 // ===== Providers =====
 interface ProviderDef {
-  id: string; icon: string; label: string; baseUrl: string; defaultModel: string
+  id: string; icon: string; label: string; labelEn?: string; baseUrl: string; defaultModel: string
+  /** Token Plan 订阅模式 baseUrl（2026-08-27 加：有值 = 支持"API按量 / Token Plan"计费切换，切换自动换 baseUrl）；planKeyPrefix：该订阅 key 前缀提示 */
+  planBaseUrl?: string; planKeyPrefix?: string; planModel?: string
 }
 interface ProviderConfig { apiKey: string; baseUrl: string; defaultModel: string; models?: string[]; hasServerKey?: boolean }
 
 const PREDEFINED: ProviderDef[] = [
-  { id: 'ollama',       icon: 'OL', label: 'Ollama (本地)', baseUrl: 'http://localhost:11434/v1',          defaultModel: 'llama3.1' },
-  { id: 'meta',         icon: 'ML', label: 'Meta Llama',    baseUrl: 'https://api.groq.com/openai/v1',        defaultModel: 'llama-3.3-70b-versatile' },
+  { id: 'ollama',       icon: 'OL', label: 'Ollama (本地)', labelEn: 'Ollama (Local)', baseUrl: 'http://localhost:11434/v1',          defaultModel: 'llama3.1' },
   { id: 'nvidia',       icon: 'NV', label: 'NVIDIA NIM',    baseUrl: 'https://integrate.api.nvidia.com/v1',   defaultModel: 'nvidia/llama-3.1-nemotron-ultra-253b-v1' },
-  { id: 'qwen',         icon: 'QW', label: '阿里 Qwen',     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', defaultModel: 'qwen-max' },
+  { id: 'qwen',         icon: 'QW', label: '阿里 Qwen',     labelEn: 'Alibaba Qwen', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', defaultModel: 'qwen-max', planBaseUrl: 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1', planKeyPrefix: 'sk-sp-', planModel: 'qwen3.7-max' },
   { id: 'deepseek',     icon: 'DS', label: 'DeepSeek',     baseUrl: 'https://api.deepseek.com/v1',          defaultModel: 'deepseek-v4-pro' },
   { id: 'openai',       icon: 'OA', label: 'OpenAI',       baseUrl: 'https://api.openai.com/v1',             defaultModel: 'gpt-4o' },
   { id: 'openrouter',   icon: 'OR', label: 'OpenRouter',   baseUrl: 'https://openrouter.ai/api/v1',          defaultModel: 'anthropic/claude-sonnet-4-20250514' },
@@ -246,9 +275,9 @@ const PREDEFINED: ProviderDef[] = [
   { id: 'grok',         icon: 'XA', label: 'xAI Grok',     baseUrl: 'https://api.x.ai/v1',                   defaultModel: 'grok-4' },
   { id: 'gemini',       icon: 'GM', label: 'Google Gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', defaultModel: 'gemini-2.5-pro' },
   { id: 'mistral',      icon: 'MS', label: 'Mistral',      baseUrl: 'https://api.mistral.ai/v1',             defaultModel: 'mistral-large-latest' },
-  { id: 'zhipu',        icon: 'GL', label: '智谱 GLM',     baseUrl: 'https://open.bigmodel.cn/api/paas/v4', defaultModel: 'glm-4.7' },
+  { id: 'zhipu',        icon: 'GL', label: '智谱 GLM',     labelEn: 'Zhipu GLM', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', defaultModel: 'glm-4.7' },
   { id: 'kimi',         icon: 'KM', label: 'Kimi',         baseUrl: 'https://api.moonshot.cn/v1',            defaultModel: 'moonshot-v1-8k' },
-  { id: 'mimo',         icon: 'MM', label: '小米 MiMo',    baseUrl: 'https://api.xiaomimimo.com/v1',         defaultModel: 'mimo-v2.5-pro' },
+  { id: 'mimo',         icon: 'MM', label: '小米 MiMo',    labelEn: 'Xiaomi MiMo', baseUrl: 'https://api.xiaomimimo.com/v1',         defaultModel: 'mimo-v2.5-pro', planBaseUrl: 'https://token-plan-cn.xiaomimimo.com/v1', planKeyPrefix: 'tp-', planModel: 'mimo-v2.5-pro' },
 ]
 
 const LS_PREFIX = 'supercrzy:provider:'
@@ -437,6 +466,42 @@ const discovering = ref(false)
 const discoveredModels = ref<string[]>([])
 const discoverError = ref('')
 
+// ===== Token Plan 计费方式切换（2026-08-27 加：同一 provider 内切换 API按量 / Token Plan，自动换 baseUrl+key前缀） =====
+/** 当前编辑的 provider 定义（从 PREDEFINED 找） */
+const editingPreset = computed<ProviderDef | undefined>(() => PREDEFINED.find((p) => p.id === editingProvider.id))
+/** 该 provider 是否支持 Token Plan 切换（有 planBaseUrl） */
+const hasPlanToggle = computed(() => !!editingPreset.value?.planBaseUrl)
+/** 当前是否是 Token Plan 模式（baseUrl 已切到 planBaseUrl） */
+const isPlanMode = computed(() => hasPlanToggle.value && editingProvider.baseUrl === editingPreset.value?.planBaseUrl)
+/** 当前应显示的 key 前缀提示（Plan 模式显示订阅前缀，否则通用） */
+const apiKeyPlaceholder = computed(() => {
+  if (isPlanMode.value) {
+    const prefix = editingPreset.value?.planKeyPrefix || ''
+    return prefix ? `订阅专属 Key（${prefix}... 开头）` : t('models.apiKeyPlaceholder')
+  }
+  return t('models.apiKeyPlaceholder')
+})
+/** Token Plan 提示文案：说明这是订阅通道、填订阅拿到的专属 key */
+const tokenPlanHint = computed(() => {
+  const prefix = editingPreset.value?.planKeyPrefix || ''
+  return t('models.tokenPlanHint', { prefix })
+})
+/** 切换计费方式：plan=true → baseUrl 切到 planBaseUrl + 默认模型切到 planModel；plan=false → 切回按量 */
+function setBillingMode(plan: boolean) {
+  const preset = editingPreset.value
+  if (!preset?.planBaseUrl) return
+  if (plan && preset.planBaseUrl) {
+    editingProvider.baseUrl = preset.planBaseUrl
+    if (preset.planModel) editingProvider.defaultModel = preset.planModel
+  } else if (!plan && preset.baseUrl) {
+    editingProvider.baseUrl = preset.baseUrl
+    editingProvider.defaultModel = preset.defaultModel
+  }
+  // 切换后清空已探测的模型提示用户重新识别
+  discoveredModels.value = []
+  discoverError.value = ''
+}
+
 /** 用当前填写的 API Key 拉取该渠道可用模型列表 */
 async function discoverModels() {
   if (!editingProvider.apiKey || discovering.value) return
@@ -620,8 +685,15 @@ const displayModels = computed(() => {
 const showAddModal = ref(false)
 const adding = ref(false)
 const formRef = ref<any>(null)
-const addForm = ref<AddModelForm & { baseUrl?: string; apiKey?: string; capabilities?: string[] }>({
-  providerId: '', modelId: '', displayName: '', baseUrl: '', apiKey: '', capabilities: ['chat'],
+// 上下文窗口选项（体验补强 1：按模型动态配置）
+const contextWindowOptions = [
+  { label: '128K', value: 128000 },
+  { label: '256K', value: 256000 },
+  { label: '1M', value: 1000000 },
+  { label: '2M', value: 2000000 },
+]
+const addForm = ref<AddModelForm & { baseUrl?: string; apiKey?: string; capabilities?: string[]; contextWindow?: number }>({
+  providerId: '', modelId: '', displayName: '', baseUrl: '', apiKey: '', capabilities: ['chat'], contextWindow: 128000,
 })
 
 const addRules = {
@@ -666,7 +738,7 @@ async function handleAddModel() {
     if (!res.ok) { message.error(data.error || t('models.addFail')); return }
     message.success(t('models.added'))
     showAddModal.value = false
-    addForm.value = { providerId: '', modelId: '', displayName: '', baseUrl: '', apiKey: '', capabilities: ['chat'] }
+    addForm.value = { providerId: '', modelId: '', displayName: '', baseUrl: '', apiKey: '', capabilities: ['chat'], contextWindow: 128000 }
     await fetchCustomModels()
   } catch (err: any) { message.error(err.message || t('models.addFail')) } finally { adding.value = false }
 }
@@ -749,6 +821,41 @@ onMounted(async () => {
 
 .discover-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .discover-error { color: #e5484d; font-size: 12px; }
+/* 计费方式切换（2026-08-27 加）：API按量 / Token Plan 分段开关 */
+.billing-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  overflow: hidden;
+  width: 100%;
+}
+.billing-opt {
+  flex: 1;
+  padding: 6px 10px;
+  border: none;
+  background: var(--bg-secondary, transparent);
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.billing-opt + .billing-opt { border-left: 1px solid var(--border-color); }
+.billing-opt.active {
+  background: var(--accent, #6366f1);
+  color: #fff;
+  font-weight: 500;
+}
+/* Token Plan 订阅提示（2026-08-27 加）：订阅专属 key 前缀说明 */
+.tokenplan-hint {
+  font-size: 12px;
+  color: var(--text-muted, #68738d);
+  background: color-mix(in srgb, var(--accent, #6366f1) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent, #6366f1) 15%, transparent);
+  border-radius: 6px;
+  padding: 6px 10px;
+  margin: 2px 0 4px;
+  line-height: 1.5;
+}
 .discover-count { color: #68738d; font-size: 12px; }
 .discover-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
 .discover-chip {

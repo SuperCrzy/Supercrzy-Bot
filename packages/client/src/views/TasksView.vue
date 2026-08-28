@@ -463,7 +463,7 @@ onMounted(() => { loadTasks() })
 
 <style scoped>
 .page-container {
-  height: 100vh;
+  height: 100%;
   display: flex;
   background: var(--bg-primary);
 }

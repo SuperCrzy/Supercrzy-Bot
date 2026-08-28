@@ -1,11 +1,11 @@
 /* ===== Design Tokens — SuperCrzy ===== */
 /* Light mode (default) */
 :root {
-  /* Backgrounds */
+  /* Backgrounds — 侧边栏比内容区深一档制造层次（对齐 WorkBuddy: home-bg-primary #f2f2f2 / secondary #ffffff） */
   --bg-primary: #ffffff;
   --bg-secondary: #ffffff;
   --bg-tertiary: #fafafa;
-  --bg-sidebar: #ffffff;
+  --bg-sidebar: #f7f7f8;
   --bg-elevated: #ffffff;
   --bg-hover: rgba(0, 0, 0, 0.04);
   --bg-active: rgba(79, 70, 229, 0.08);
@@ -13,6 +13,7 @@
   /* Text */
   --text-primary: #18181b;
   --text-secondary: #52525b;
+  --text-tertiary: #8b8d98;
   --text-muted: #a1a1aa;
   --text-inverse: #ffffff;
 
@@ -20,6 +21,12 @@
   --border-color: #e4e4e7;
   --border-hover: #d4d4d8;
   --border-focus: #4F46E5;
+  /* 输入框/可交互组件专用边框：比通用边框深一档，保证在纯白页面/纯黑页面都可辨（naive Input 同款 #b8b8c0/#3a3a42） */
+  --border-input: #b8b8c0;
+
+  /* Code block（浅色 one-light：浅灰底，深字深色系 token——比页面白底深一档，代码块明显可辨） */
+  --bg-code: #edeef1;
+  --bg-code-header: #e3e5e9;
 
   /* Accent */
   --accent: #4F46E5;
@@ -93,24 +100,31 @@
   --accent-light: var(--accent-muted);
 }
 
-/* Dark mode */
+/* Dark mode — 对齐 WorkBuddy 深色：侧边栏 #1f1f1f（比内容区亮一档），内容区 #141414 */
 .dark {
-  --bg-primary: #000000;
-  --bg-secondary: #000000;
-  --bg-tertiary: #111111;
-  --bg-sidebar: #000000;
-  --bg-elevated: #0d0d0d;
+  --bg-primary: #141414;
+  --bg-secondary: #141414;
+  --bg-tertiary: #1a1a1a;
+  --bg-sidebar: #1f1f1f;
+  --bg-elevated: #202020;
   --bg-hover: rgba(255, 255, 255, 0.06);
   --bg-active: rgba(129, 140, 248, 0.12);
 
   --text-primary: #fafafa;
   --text-secondary: #a1a1aa;
+  --text-tertiary: #71717a;
   --text-muted: #71717a;
   --text-inverse: #ffffff;
 
   --border-color: #1f1f23;
   --border-hover: #2e2e33;
   --border-focus: #818cf8;
+  /* 输入框/可交互组件专用边框：比通用边框亮一档，保证在纯黑页面可辨（naive Input 同款） */
+  --border-input: #3a3a42;
+
+  /* Code block（深色 one-dark：比纯黑页面明显亮一档的深灰底 + 更亮 header，代码块清晰可辨） */
+  --bg-code: #1e1f24;
+  --bg-code-header: #26272e;
 
   --accent: #818cf8;
   --accent-hover: #a5b4fc;

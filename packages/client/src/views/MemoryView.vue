@@ -4,6 +4,10 @@
       <h2>{{ $t('memory.title') }}</h2>
       <p class="page-desc">{{ $t('memory.desc') }}</p>
       <div class="header-actions">
+        <label class="memory-toggle">
+          <span class="memory-toggle-label">{{ $t('settings.memoryEnabled') }}</span>
+          <n-switch :value="memoryEnabled" size="small" @update:value="toggleMemoryEnabled" />
+        </label>
         <n-input
           v-model:value="searchQuery"
           :placeholder="$t('memory.searchPlaceholder')"
@@ -23,6 +27,12 @@
           clearable
           style="width: 130px"
         />
+        <n-button size="small" secondary @click="showImportModal = true" :title="$t('memory.importTitle')">
+          <template #icon>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          </template>
+          {{ $t('memory.importMemory') }}
+        </n-button>
         <n-button size="small" type="primary" @click="showCreateModal = true">
           <template #icon>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -97,6 +107,62 @@
           {{ editForm.id ? $t('common.update') : $t('common.create') }}
         </n-button>
       </template>
+    </n-modal>
+
+    <!-- 导入对话文件：AI 梳理记忆候选 → 用户确认/编辑 → 批量保存 -->
+    <n-modal v-model:show="showImportModal" preset="card" :title="$t('memory.importTitle')" style="max-width: 660px" :mask-closable="false">
+      <div class="import-modal">
+        <!-- 步骤1：选择文件 -->
+        <div v-if="!importFileText && !importing && importCandidates.length === 0" class="import-pick">
+          <input ref="importFileInput" type="file" accept=".md,.markdown,.txt" hidden @change="onImportFilePick" />
+          <div class="import-drop" @click="importFileInput?.click()" @dragover.prevent @drop.prevent="onImportDrop">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            <p>{{ $t('memory.importPick') }}</p>
+            <p class="import-hint">{{ $t('memory.importDesc') }}</p>
+          </div>
+        </div>
+
+        <!-- 步骤2：AI 梳理中 -->
+        <div v-else-if="importing" class="import-analyzing">
+          <n-spin size="large" />
+          <p>{{ $t('memory.importAnalyzing') }}</p>
+        </div>
+
+        <!-- 步骤3：候选确认 -->
+        <div v-else-if="importCandidates.length > 0" class="import-candidates">
+          <div class="import-cand-head">
+            <span>{{ $t('memory.importCandHint') }}</span>
+            <n-button size="tiny" quaternary @click="toggleAllImported">
+              {{ allImportedChecked ? $t('memory.importUncheckAll') : $t('memory.importCheckAll') }}
+            </n-button>
+          </div>
+          <div v-for="(c, i) in importCandidates" :key="i" class="import-cand" :class="{ dimmed: !c.checked }">
+            <div class="cand-row1">
+              <n-checkbox v-model:checked="c.checked" />
+              <n-input v-model:value="c.key" size="small" :placeholder="$t('memory.keyPlaceholder')" style="flex:1" />
+              <n-select v-model:value="c.category" size="small" :options="categoryOpts.filter(o => o.value !== 'all')" style="width:120px" />
+              <n-rate v-model:value="c.importance" :count="5" size="small" />
+            </div>
+            <div class="cand-row2">
+              <n-input v-model:value="c.content" type="textarea" :rows="2" :placeholder="$t('memory.contentPlaceholder')" />
+            </div>
+          </div>
+          <div class="import-foot">
+            <n-button size="small" @click="resetImport">{{ $t('common.cancel') }}</n-button>
+            <n-button size="small" type="primary" :loading="saving" :disabled="checkedImportedCount === 0" @click="saveImported">
+              {{ $t('memory.importSave', { count: checkedImportedCount }) }}
+            </n-button>
+          </div>
+        </div>
+
+        <!-- 空结果 -->
+        <div v-else class="import-empty">
+          <p>{{ $t('memory.importEmpty') }}</p>
+          <n-button size="small" @click="resetImport">{{ $t('common.ok') }}</n-button>
+        </div>
+
+        <div v-if="importError" class="import-error">{{ importError }}</div>
+      </div>
     </n-modal>
   </div>
 </template>
@@ -184,6 +250,111 @@ function formatTime(d: string): string {
   return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
+// ---- 导入对话文件（AI 梳理记忆候选 → 确认/编辑 → 批量保存）----
+const showImportModal = ref(false)
+const importFileInput = ref<HTMLInputElement | null>(null)
+const importFileText = ref('')
+const importing = ref(false)
+const importError = ref('')
+interface ImportCandidate { checked: boolean; key: string; content: string; category: string; importance: number }
+const importCandidates = ref<ImportCandidate[]>([])
+
+const checkedImportedCount = computed(() => importCandidates.value.filter((c) => c.checked).length)
+const allImportedChecked = computed(() => importCandidates.value.length > 0 && importCandidates.value.every((c) => c.checked))
+
+function onImportFilePick(e: Event) {
+  const file = (e.target as HTMLInputElement).files?.[0]
+  if (!file) return
+  readImportFile(file)
+}
+
+function onImportDrop(e: DragEvent) {
+  const file = e.dataTransfer?.files?.[0]
+  if (!file) return
+  readImportFile(file)
+}
+
+function readImportFile(file: File) {
+  const reader = new FileReader()
+  reader.onload = async () => {
+    importFileText.value = String(reader.result || '')
+    await runImport()
+  }
+  reader.onerror = () => { importError.value = t('memory.importReadFailed') }
+  reader.readAsText(file)
+}
+
+async function runImport() {
+  if (!importFileText.value.trim()) return
+  importing.value = true
+  importError.value = ''
+  importCandidates.value = []
+  try {
+    const res = await fetch('/api/memory/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: importFileText.value }),
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      importError.value = data.error || 'import failed'
+    } else {
+      importCandidates.value = (data.candidates || []).map((c: any) => ({
+        checked: true,
+        key: c.key || '',
+        content: c.content || '',
+        category: c.category || 'general',
+        importance: c.importance || 1,
+      }))
+    }
+  } catch (e: any) {
+    importError.value = e.message
+  } finally {
+    importing.value = false
+  }
+}
+
+function toggleAllImported() {
+  const next = !allImportedChecked.value
+  importCandidates.value.forEach((c) => { c.checked = next })
+}
+
+function resetImport() {
+  showImportModal.value = false
+  importFileText.value = ''
+  importCandidates.value = []
+  importError.value = ''
+  if (importFileInput.value) importFileInput.value.value = ''
+}
+
+async function saveImported() {
+  const selected = importCandidates.value.filter((c) => c.checked && c.key.trim() && c.content.trim())
+  if (selected.length === 0) {
+    nMessage.warning(t('memory.needKeyContent'))
+    return
+  }
+  saving.value = true
+  let ok = 0
+  for (const c of selected) {
+    try {
+      const res = await fetch('/api/memory', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: c.key.trim(), content: c.content.trim(), category: c.category, importance: c.importance }),
+      })
+      if (res.ok) ok++
+    } catch { /* 单条失败继续 */ }
+  }
+  saving.value = false
+  if (ok > 0) {
+    nMessage.success(t('memory.importSaved', { count: ok }))
+    resetImport()
+    await fetchMemories()
+  } else {
+    nMessage.error(t('memory.importSaveFailed'))
+  }
+}
+
 async function fetchMemories() {
   loading.value = true
   try {
@@ -264,12 +435,34 @@ async function deleteMemory(id: string) {
 
 onMounted(() => {
   fetchMemories()
+  // 记忆开关（原在设置页"记忆" tab，已合并到本页统一管理）
+  fetch('/api/settings')
+    .then((r) => r.json())
+    .then((d) => {
+      if (d.memoryEnabled !== undefined) memoryEnabled.value = !!d.memoryEnabled
+    })
+    .catch(() => {})
 })
+
+// 记忆开关：切换即保存到后端设置
+const memoryEnabled = ref(true)
+async function toggleMemoryEnabled(v: boolean) {
+  memoryEnabled.value = v
+  try {
+    await fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ memoryEnabled: v }),
+    })
+  } catch (err) {
+    console.error('Failed to save memoryEnabled:', err)
+  }
+}
 </script>
 
 <style scoped>
 .page-container {
-  height: 100vh;
+  height: 100%;
   display: flex;
   flex-direction: column;
 }
@@ -294,6 +487,17 @@ onMounted(() => {
   display: flex;
   gap: 8px;
   align-items: center;
+}
+.memory-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.memory-toggle-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
 }
 .search-input {
   width: 220px;
@@ -359,5 +563,96 @@ onMounted(() => {
   font-weight: 500;
   color: var(--text-secondary);
   margin-bottom: 4px;
+}
+
+/* ---- 导入对话文件（AI 梳理记忆候选） ---- */
+.import-modal {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.import-pick .import-drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 36px 20px;
+  border: 1.5px dashed var(--border-color);
+  border-radius: 10px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: border-color 0.2s, color 0.2s;
+}
+.import-pick .import-drop:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.import-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 0;
+  text-align: center;
+}
+.import-analyzing {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 40px 0;
+  color: var(--text-secondary);
+}
+.import-candidates {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 52vh;
+  overflow-y: auto;
+}
+.import-cand-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.import-cand {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-tertiary);
+}
+.import-cand.dimmed {
+  opacity: 0.45;
+}
+.cand-row1 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cand-row2 {
+  padding-left: 22px;
+}
+.import-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 4px;
+}
+.import-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 30px 0;
+  color: var(--text-secondary);
+}
+.import-error {
+  color: var(--error);
+  font-size: 12px;
+  padding: 4px 0;
 }
 </style>

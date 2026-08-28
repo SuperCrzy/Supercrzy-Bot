@@ -24,7 +24,7 @@ function displayContent(content: any): string {
 function formatTime(d: string) { return new Date(d).toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) }
 </script>
 <style scoped>
-.page-container { height: 100vh; display: flex; flex-direction: column; }
+.page-container { height: 100%; display: flex; flex-direction: column; }
 .page-header { padding: 16px 24px; border-bottom: 1px solid var(--border-color); }
 .page-header h2 { font-size: 16px; font-weight: 600; margin: 0; } .page-desc { font-size: 12px; color: var(--text-muted); margin: 4px 0 0; }
 .search-area { padding: 32px 24px 16px; max-width: 640px; }

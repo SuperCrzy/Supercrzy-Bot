@@ -91,18 +91,34 @@
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spinning"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
         <p style="margin-top:12px">{{ $t('gateway.generatingQr') }}</p>
       </div>
-      <div v-else-if="qrPhase==='ready'" style="padding:16px">
+      <div v-else-if="qrPhase==='ready' || qrPhase==='polling'" style="padding:16px">
         <img :src="qrImage" alt="QR" style="width:280px;height:280px;border-radius:8px;border:1px solid var(--border-color)" />
         <p style="font-size:13px;color:var(--text-secondary);margin-top:12px">
           {{ $t('gateway.scan') }}<br/>
           <span style="font-size:11px;color:var(--text-muted)">{{ $t('gateway.requiresClawBot') }}</span>
         </p>
-        <n-button size="small" quaternary @click="pollQRStatus" :loading="qrPolling">{{ $t('gateway.startPolling') }}</n-button>
+        <!-- polling：二维码保持显示 + 检测提示（之前缺这个分支导致弹窗内容空白） -->
+        <p v-if="qrPhase==='polling'" style="font-size:12px;color:var(--accent);margin-top:10px">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spinning" style="vertical-align:-2px;margin-right:4px"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+          {{ $t('gateway.pollingStatus') }}
+        </p>
+        <n-button v-if="qrPhase==='ready'" size="small" quaternary @click="pollQRStatus" :loading="qrPolling">{{ $t('gateway.startPolling') }}</n-button>
+      </div>
+      <div v-else-if="qrPhase==='verifycode'" style="padding:24px">
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--warning)"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        <p style="margin-top:16px;font-weight:600">{{ $t('gateway.needVerifyCode') }}</p>
+        <p style="font-size:13px;color:var(--text-muted);margin-top:6px">{{ $t('gateway.needVerifyCodeHint') }}</p>
+        <p style="font-size:12px;color:var(--text-muted);margin-top:10px">{{ $t('gateway.pollingContinue') }}</p>
       </div>
       <div v-else-if="qrPhase==='confirmed'" style="padding:40px">
         <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--success)"><polyline points="20 6 9 17 4 12"/></svg>
         <p style="margin-top:16px;font-weight:600;color:var(--success)">{{ $t('gateway.connected') }}</p>
         <p style="font-size:13px;color:var(--text-muted)">{{ $t('gateway.wechatLinked') }}</p>
+      </div>
+      <div v-else-if="qrPhase==='expired'" style="padding:40px">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--error)"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <p style="margin-top:16px;font-weight:600;color:var(--error)">{{ $t('gateway.expired') }}</p>
+        <p style="font-size:12px;color:var(--text-muted);margin-top:6px">{{ $t('gateway.retryScan') }}</p>
       </div>
     </n-modal>
   </div>
@@ -310,17 +326,28 @@ async function openWechatQR() {
     if (d.error) { qrPhase.value='expired'; return }
     qrImage.value = d.qrDataUrl; qrCode.value = d.qrcode
     qrPhase.value = 'ready'
+    // 自动开始轮询扫码状态（无需用户再点"开始轮询"，扫码确认后自动绑定）
+    pollQRStatus()
   } catch { qrPhase.value = 'expired' }
 }
 
 async function pollQRStatus() {
   if (!qrCode.value) return
   qrPolling.value = true; qrPhase.value = 'polling'
+  // 总超时：二维码有效期 3 分钟，前端最多轮询 120s 后判过期
+  const pollStart = Date.now()
+  const POLL_TIMEOUT = 120000
   pollTimer = setInterval(async () => {
     try {
+      // 超时保护：防止用户不扫码时无限轮询
+      if (Date.now() - pollStart > POLL_TIMEOUT) {
+        clearInterval(pollTimer!); qrPolling.value = false; qrPhase.value = 'expired'
+        return
+      }
       const r = await fetch(`/api/gateway/wechat/qrcode/status?qrcode=${encodeURIComponent(qrCode.value)}`)
       const d = await r.json()
       if (d.status==='confirmed') { qrPhase.value='confirmed'; clearInterval(pollTimer!); qrPolling.value=false; await checkWechatStatus(); setTimeout(() => { showWechatQR.value=false }, 2500) }
+      else if (d.status==='need_verifycode') { qrPhase.value='verifycode' }  // 提示用户输验证码，继续轮询
       else if (d.status==='expired') { qrPhase.value='expired'; clearInterval(pollTimer!); qrPolling.value=false }
     } catch { clearInterval(pollTimer!); qrPolling.value=false; qrPhase.value='expired' }
   }, 3000)
@@ -335,11 +362,11 @@ async function disconnectWechat() {
 </script>
 
 <style scoped>
-.page-container { height:100vh; display:flex; flex-direction:column; background:var(--bg-secondary) }
+.page-container { height:100%; display:flex; flex-direction:column; background:var(--bg-secondary) }
 .page-header { padding:16px 24px; border-bottom:1px solid var(--border-color); background:var(--bg-primary); flex-shrink:0 }
 .page-header h2 { font-size:16px; font-weight:600; margin:0 }
 .page-desc { font-size:12px; color:var(--text-muted); margin:4px 0 0 }
-.gateway-body { flex:1; overflow-y:auto; padding:24px; max-width:700px }
+.gateway-body { flex:1; overflow-y:auto; padding:24px; }
 
 .section { margin-bottom:24px }
 .section-title { font-size:13px; font-weight:600; margin:0 0 12px; color:var(--text-secondary); text-transform:uppercase; letter-spacing:.5px }
