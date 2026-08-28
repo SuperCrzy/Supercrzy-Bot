@@ -63,6 +63,50 @@ describe('error-classifier', () => {
     expect(c.reason).toBe('unknown')
   })
 
+  // ---- 2026-08-28 系统性根治：402 / 通用 4xx / 状态码兜底解析 ----
+  it('402 余额不足 → billing 不可重试(重试换模型都救不了)', () => {
+    const c = classifyApiError({ status: 402, message: 'Insufficient Balance' })
+    expect(c.reason).toBe('billing')
+    expect(c.retryable).toBe(false)
+    expect(c.shouldFallback).toBe(true)
+  })
+
+  it('只有消息文本无 status 字段时也能解析出 402(修 throw 丢状态码)', () => {
+    const c = classifyApiError({ message: 'API error 402: Insufficient Balance' })
+    expect(c.reason).toBe('billing')
+    expect(c.retryable).toBe(false)
+  })
+
+  it('英文原文 Insufficient Balance 顺序反了也要命中 billing', () => {
+    // 历史 bug：只有 /balance.*insufficient/i，匹配不上 "Insufficient Balance" → 落入 unknown 盲重试
+    const c = classifyApiError({ status: 0, message: 'HTTP 402: Insufficient Balance, please recharge' })
+    expect(c.reason).toBe('billing')
+  })
+
+  it('通用 4xx(400/404/422) 不可重试 —— 同样请求重试永远同样错', () => {
+    for (const status of [400, 404, 422]) {
+      const c = classifyApiError({ status, message: 'bad request' })
+      expect(c.retryable, `status ${status} 不应重试`).toBe(false)
+    }
+  })
+
+  it('瞬态 4xx(408/409/429) 仍可重试', () => {
+    for (const status of [408, 409, 429]) {
+      const c = classifyApiError({ status, message: 'transient' })
+      expect(c.retryable, `status ${status} 应可重试`).toBe(true)
+    }
+  })
+
+  it('5xx 仍可重试', () => {
+    expect(classifyApiError({ status: 503, message: 'Service Unavailable' }).retryable).toBe(true)
+  })
+
+  it('正文中的普通数字不被误判为状态码', () => {
+    // "4096" 是 4 位数且 \b 不匹配内部；纯数字 500 出现在正文也不该被当状态码
+    const c = classifyApiError({ message: 'request took 500 ms and used 4096 tokens' })
+    expect(c.retryable).toBe(true) // 未命中 4xx → unknown 仍可重试（网络抖动语义）
+  })
+
   it('jitteredBackoff 单调且不超过上限的 1.5 倍(jitter 加噪)', () => {
     const b1 = jitteredBackoff(1, 100, 5000)
     const b2 = jitteredBackoff(2, 100, 5000)

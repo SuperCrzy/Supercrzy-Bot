@@ -30,6 +30,13 @@ const BILLING_PATTERNS = [
   /billing/i,
   /payment.*required/i,
   /balance.*insufficient/i,
+  // 2026-08-28 补：DeepSeek 原文是 "Insufficient Balance"（Insufficient 在前），
+  // 原有的 /balance.*insufficient/i 顺序反了，永远匹配不上 → 402 落入 unknown 盲重试 3 次。
+  /insufficient.*balance/i,
+  /insufficient.*credit/i,
+  /out of.*balance/i,
+  /余额不足/i,
+  /免费额度.*用尽/i,
   /free.*tier.*exceeded/i,
   /AllocationQuota\.FreeTierOnly/i,
   /exceed.*limit/i,
@@ -76,14 +83,49 @@ const TOOL_SEQUENCE_PATTERNS = [
 ]
 
 /**
+ * 从错误中提取 HTTP 状态码。
+ * 2026-08-28 加：历史上多处 throw 只拼了消息文本（"API error 402: ..."），没挂 status 字段，
+ * 导致按 status 分类的分支全是死代码。这里做消息文本兜底解析，即使上游没挂 status 也能正确分类。
+ */
+export function extractStatus(err: any, message: string): number {
+  const direct = err?.status ?? err?.statusCode ?? err?.response?.status ?? err?.code
+  if (typeof direct === 'number' && direct >= 100 && direct < 600) return direct
+  // 文本兜底（锚定关键词，避免把正文里的普通数字误判成状态码）：
+  // "API error 402:" / "HTTP 402" / "status code 402" / "错误码 402"
+  const m = message.match(/(?:error|code|status|HTTP|错误码|状态码)[\s:：]*?(\d{3})\b/i)
+  if (m) {
+    const n = parseInt(m[1], 10)
+    if (n >= 400 && n < 600) return n
+  }
+  return 0
+}
+
+/** 幂等/瞬态的 4xx —— 这些重试有意义，其他 4xx 重试无意义（同样的请求永远同样的错） */
+const RETRYABLE_4XX = new Set([408, 409, 425, 429])
+
+/**
  * 分类 API 错误，返回恢复策略
  */
 export function classifyApiError(err: any): ClassifiedError {
   const message = err?.message || String(err)
-  const status = err?.status || err?.statusCode || err?.response?.status || 0
+  const status = extractStatus(err, message)
   const body = err?.response?.body || err?.body || ''
 
   // 1. HTTP 状态码优先
+  if (status === 402) {
+    // 2026-08-28 加：402 Payment Required（余额不足/额度用尽）。
+    // 之前无此分支 → 落入 unknown → 可重试 → 盲重试 3 次必败 → 长任务反复"unknown (3/3)"中断。
+    // 余额是账户级问题，重试和换模型都救不了，必须直接告诉用户去充值。
+    return {
+      reason: 'billing',
+      retryable: false,
+      shouldFallback: true,
+      shouldCompress: false,
+      shouldRotateCredential: false,
+      message,
+    }
+  }
+
   if (status === 429) {
     return {
       reason: 'rate_limit',
@@ -220,7 +262,21 @@ export function classifyApiError(err: any): ClassifiedError {
     }
   }
 
-  // 4. 未知错误 — 默认可重试
+  // 4. 兜底：其他 4xx 客户端错误 —— 同样的请求重试一万次还是同样的错。
+  // 2026-08-28 加：此前这类错误默认 retryable:true，盲重试 3 次（400/404/422…）白白拖长失败时间，
+  // 用户只看到"连续 4 次 API 失败 (unknown)"。除幂等/瞬态的 408/409/425/429 外一律不重试。
+  if (status >= 400 && status < 500 && !RETRYABLE_4XX.has(status)) {
+    return {
+      reason: 'unknown',
+      retryable: false,
+      shouldFallback: true,
+      shouldCompress: false,
+      shouldRotateCredential: false,
+      message: `[HTTP ${status}] ${message}`.slice(0, 400),
+    }
+  }
+
+  // 5. 未知错误 — 默认可重试（网络抖动/服务端瞬时问题走这里）
   return {
     reason: 'unknown',
     retryable: true,

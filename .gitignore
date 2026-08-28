@@ -12,6 +12,8 @@ dist/
 *.db-shm
 *.db-wal
 /data/
+# 2026-08-28：任务检查点是运行时数据（packages/server/data/checkpoints/*.json），不该进仓库
+packages/server/data/
 uploads/
 nul# 任务日志（2026-08-26 起写到用户目录 ~/.supercrzy/logs；此条兜底防误入库）
 logs/

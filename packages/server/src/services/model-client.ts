@@ -48,9 +48,23 @@ export async function requestChat(o: RequestChatOpts): Promise<Response> {
   } as any)
   if (!res.ok) {
     const errText = await res.text().catch(() => '')
-    throw new Error(`API error ${res.status}: ${errText}`)
+    throw buildApiError(res.status, errText, 'API error')
   }
   return res
+}
+
+/**
+ * 构造带 HTTP 状态码与响应体的 API 错误。
+ * 2026-08-28 系统性修复：此前只 `throw new Error('API error 402: ...')`，status 信息丢失，
+ * classifyApiError 的 status 分支（429/401/403/413/5xx/402）全部失效，402 余额不足落入 unknown
+ * → 盲重试 3 次必败 → 用户只看到"连续 4 次 API 失败 (unknown)"，长任务反复中断。
+ * 现在统一挂上 status/body，让分类器能对症下药。
+ */
+export function buildApiError(status: number, errText: string, prefix = 'API error'): Error & { status: number; body: string } {
+  const err = new Error(`${prefix} ${status}: ${errText}`) as Error & { status: number; body: string }
+  err.status = status
+  err.body = errText
+  return err
 }
 
 export interface ChatCompletionOpts {

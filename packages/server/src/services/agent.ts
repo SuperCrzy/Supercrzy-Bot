@@ -15,7 +15,7 @@ import { existsSync, readdirSync } from 'fs'
 import type { Context } from 'koa'
 import { config } from '../config'
 import { rankMemories, memoryRankedSearch } from './memory-search'
-import { requestChat, chatCompletion, normalizeBaseUrl } from './model-client'
+import { requestChat, chatCompletion, normalizeBaseUrl, buildApiError } from './model-client'
 import { getDB } from '../services/database'
 import { toolDefinitions, executeToolCalls, type ToolCall, type ToolResultWithMeta, getToolMeta, type ToolExecCtx } from './tools'
 import { pushMemorySync, pushReflection } from './memory-worker'
@@ -117,6 +117,61 @@ function normalizeQuestionOptions(options: any): string[] {
 }
 
 /**
+ * 把分类后的 API 错误翻译成"用户看得懂、能动手"的提示（2026-08-28 加）。
+ * 背景：此前所有失败一律输出"API 服务异常，建议切换模型或稍后重试"，
+ * 真实原因是 402 余额不足时用户完全无从下手，只会觉得"这么简单的任务都搞不定"。
+ */
+export function humanizeApiError(c: { reason: string; message: string }): string {
+  const detail = (c.message || '').slice(0, 300)
+  switch (c.reason) {
+    case 'billing':
+      return [
+        '**账户余额不足 / 额度已用尽**，本次请求被服务商拒绝（HTTP 402）。',
+        '',
+        '这不是 BOT 的问题，重试和切换模型都无效——请到所用服务商后台充值，或在「设置 → 模型」里换一个可用额度的 API Key。',
+        '',
+        '当前进度已保存，充值后可直接继续本次任务。',
+        '',
+        `详情: ${detail}`,
+      ].join('\n')
+    case 'auth':
+      return [
+        '**API Key 无效或已过期**（HTTP 401/403）。',
+        '',
+        '请到「设置 → 模型」检查 API Key 是否正确、是否已被禁用。',
+        '',
+        `详情: ${detail}`,
+      ].join('\n')
+    case 'rate_limit':
+      return [
+        '**触发服务商限流**（HTTP 429）。稍等几十秒再试即可。',
+        '',
+        `详情: ${detail}`,
+      ].join('\n')
+    case 'context_overflow':
+      return [
+        '**上下文超出模型上限**，自动压缩后仍无法继续。',
+        '',
+        '建议新开一个会话，或让任务拆小一些再执行。',
+        '',
+        `详情: ${detail}`,
+      ].join('\n')
+    case 'server_error':
+      return [
+        '**服务商后端异常**（5xx）。这是对方的问题，稍后重试通常能恢复。',
+        '',
+        `详情: ${detail}`,
+      ].join('\n')
+    default:
+      return [
+        `**请求被拒绝**（${c.reason}）。这类错误重试不会变好，请按下方详情排查。`,
+        '',
+        `详情: ${detail}`,
+      ].join('\n')
+  }
+}
+
+/**
  * 工具消息序列清洗（2026-08-28 修复 400 "assistant tool_calls 后缺 tool 消息"）：
  * OpenAI 兼容协议要求 assistant 带 tool_calls 后，每个 tool_call_id 必须有对应 tool 消息。
  * 孤立 tool_calls 来源：①检查点恢复残缺 ②上下文压缩丢弃 tool 响应 ③工具超时/中断（assistantMsg 已 push 但 tool 结果不全）。
@@ -155,6 +210,26 @@ export function sanitizeToolCallSequence(msgs: AgentMessage[]): AgentMessage[] {
     }
     return m
   })
+}
+
+/**
+ * 是否存在"孤立 tool_calls"（assistant 带 tool_calls 但某个 id 没有对应 tool 消息）。
+ * 2026-08-28 加：agent 重试前需要知道"清洗到底能不能解决问题"——
+ * 若返回 false 说明序列本身是配对的，API 仍报 tool_sequence 则是别的原因
+ * （如 reasoning_content 未原样传回），此时继续重试必然失败，不该白烧轮次。
+ */
+export function hasOrphanToolCalls(msgs: AgentMessage[]): boolean {
+  const responded = new Set<string>()
+  for (const m of msgs) {
+    if (m.role === 'tool' && m.tool_call_id) responded.add(m.tool_call_id)
+  }
+  for (const m of msgs) {
+    if (m.role !== 'assistant' || !Array.isArray((m as any).tool_calls)) continue
+    const calls = (m as any).tool_calls as Array<{ id?: string }>
+    if (calls.length === 0) continue
+    if (!calls.every((tc) => tc?.id && responded.has(tc.id))) return true
+  }
+  return false
 }
 
 /** 读取 settings 配置（工具授权模式等） */
@@ -867,6 +942,7 @@ export async function runAgentLoop(
   let toolErrorCount = 0  // 工具失败计数器，避免无限重试提示
   let consecutiveApiErrors = 0  // API 连续错误计数器
   let compressionAttempts = 0  // 压缩尝试次数
+  let toolSequenceRetries = 0  // 工具序列清洗重试次数（2026-08-28：防清洗无效时死循环吃光 maxTurns）
   let emptyContentCount = 0  // 空内容重试计数
   const guardrail = new ToolGuardrailController()  // 工具循环防护
   let roundStartMs = Date.now()
@@ -1014,11 +1090,16 @@ export async function runAgentLoop(
         response = await doFetch(requestBody)
         if (!response.ok) {
           const errorText = await response.text()
-          throw new Error(`API error ${response.status}: ${errorText}`)
+          throw buildApiError(response.status, errorText, 'API error')
         }
       } catch (err: any) {
         // P2-1 模型 fallback：主模型失败 → 切备用模型重试一次（WorkBuddy fallbackModel 同款）
-        const fb = readSetting('fallbackModel') || 'deepseek-v4-flash'
+        // 2026-08-28：只对"换模型有意义"的错误 fallback。tool_sequence 是我们自己的消息序列问题
+        // （换模型照样报），4xx 客户端错误（除 429 限流）换模型也不会变好——白烧一次贵请求。
+        const preClassified = classifyApiError(err)
+        const worthFallback = preClassified.reason === 'rate_limit' || preClassified.reason === 'server_error'
+          || preClassified.reason === 'timeout' || preClassified.reason === 'connection'
+        const fb = worthFallback ? (readSetting('fallbackModel') || 'deepseek-v4-flash') : ''
         if (!fb || fb === agentConfig.model || modelFallbackUsed) throw err
         modelFallbackUsed = true
         console.warn(`[Fallback] 主模型 ${agentConfig.model} 失败（${err.message}），切备用 ${fb} 重试`)
@@ -1027,7 +1108,7 @@ export async function runAgentLoop(
         response = await doFetch(requestBody)
         if (!response.ok) {
           const errorText = await response.text()
-          throw new Error(`Fallback API error ${response.status}: ${errorText}`)
+          throw buildApiError(response.status, errorText, 'Fallback API error')
         }
       }
 
@@ -1524,8 +1605,11 @@ export async function runAgentLoop(
           needFallback: true,
           reason: classified.reason,
         })
+        // 2026-08-28：按错误原因给"看得懂、能动手"的提示。此前一律"API 服务异常，建议切换模型"，
+        // 余额不足时用户根本不知道要充值，只会觉得"这么简单的任务都搞不定"。
+        const userHint = humanizeApiError(classified)
         emitSSE(ctx, 'content', {
-          content: `API 服务异常 (${classified.reason})，建议切换模型或稍后重试。\n\n详情: ${classified.message.slice(0, 300)}`,
+          content: userHint,
           error: true,
         })
         interrupted = classified.reason  // 2026-08-26：费用耗尽/需切换模型 → 中断，保存检查点
@@ -1538,22 +1622,43 @@ export async function runAgentLoop(
         // 工具/思考消息序列错误：重试前先清洗 messages（修 assistant.tool_calls 无配对 / reasoning 不一致），
         // 否则重试用的还是坏序列，必败 3 次（此前落入 unknown 正是如此）。2026-08-28 系统性根治
         if (classified.reason === 'tool_sequence') {
-          const before = messages.length
-          messages = sanitizeToolCallSequence(messages)
-          emitSSE(ctx, 'error', {
-            message: `检测到消息序列问题（tool_calls/思考内容失配），已清洗消息序列（${before}→${messages.length} 条）后重试...`,
-            retrying: true,
-            reason: 'tool_sequence',
-          })
-          consecutiveApiErrors++  // 只计一次，不无限刷
-          await new Promise(r => setTimeout(r, 500))
-          continue
+          // 2026-08-28 二次修复：原实现 `consecutiveApiErrors++; continue` 没做上限判断，
+          // 且清洗常常"5→5 条"（序列本身已配对，真因是 reasoning_content 未原样传回之类），
+          // 于是每次失败都 continue 重试 → 死循环吃光 maxTurns，用户就看到"20 轮进程已保留"。
+          // 现在：①只在真有孤立 tool_calls 时重试 ②最多重试 2 次 ③否则按普通可重试错误走退避/放弃。
+          const orphan = hasOrphanToolCalls(messages)
+          if (orphan && toolSequenceRetries < 2) {
+            toolSequenceRetries++
+            const before = messages.length
+            messages = sanitizeToolCallSequence(messages)
+            emitSSE(ctx, 'error', {
+              message: `检测到孤立工具调用（tool_calls 无配对响应），已清洗消息序列（${before}→${messages.length} 条）后重试（第 ${toolSequenceRetries}/2 次）...`,
+              retrying: true,
+              reason: 'tool_sequence',
+            })
+            await new Promise(r => setTimeout(r, 500))
+            continue
+          }
+          if (!orphan) {
+            // 序列本身没问题 → 清洗解决不了，重试无意义，直接把原因讲清楚
+            emitSSE(ctx, 'error', {
+              message: `模型拒绝了该请求（tool_sequence）。消息序列已自检通过（无孤立 tool_calls），通常是思考内容（reasoning_content）需原样传回所致。`,
+              reason: 'tool_sequence',
+            })
+          }
+          // 落到下方统一退避/放弃逻辑，不再无限 continue
         }
         consecutiveApiErrors++
         if (consecutiveApiErrors > 3) {
           emitSSE(ctx, 'error', { message: `连续 ${consecutiveApiErrors} 次失败 (${classified.reason})，停止重试` })
           emitSSE(ctx, 'content', {
-            content: `抱歉，连续 ${consecutiveApiErrors} 次 API 失败 (${classified.reason})。请稍后再试。\n\n错误: ${classified.message.slice(0, 300)}`,
+            content: [
+              `抱歉，连续 ${consecutiveApiErrors} 次 API 失败 (${classified.reason})。`,
+              '',
+              humanizeApiError(classified),
+              '',
+              '进度已保存，可切换模型后继续。',
+            ].join('\n'),
             error: true,
           })
           interrupted = classified.reason  // 2026-08-26：连续 API 失败 → 中断，保存检查点
@@ -1571,7 +1676,7 @@ export async function runAgentLoop(
       } else {
         // 不可重试的错误
         emitSSE(ctx, 'error', { message: `[${classified.reason}] ${classified.message.slice(0, 200)}` })
-        emitSSE(ctx, 'content', { content: `执行出错 (${classified.reason}): ${classified.message.slice(0, 300)}`, error: true })
+        emitSSE(ctx, 'content', { content: humanizeApiError(classified), error: true })
         interrupted = classified.reason  // 2026-08-26：不可重试错误 → 中断，保存检查点
         finished = true
       }
