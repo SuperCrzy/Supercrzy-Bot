@@ -123,56 +123,41 @@ function normalizeQuestionOptions(options: any): string[] {
  * 策略：发请求前扫描，若 assistant.tool_calls 中某 id 未被后续 tool 消息响应 → 剔除该 tool_calls（防 400）。
  */
 export function sanitizeToolCallSequence(msgs: AgentMessage[]): AgentMessage[] {
-  const out: AgentMessage[] = []
-  let pendingIds = new Set<string>()  // 当前待配对的 tool_call_id（来自最近一条 assistant.tool_calls）
-  const pendingAssistant: AgentMessage | null = null  // eslint-disable-line (占位,避免误删)
+  // 加固（2026-08-28 修复 DeepSeek 400 "tool_calls must be followed by tool messages"）：
+  // 全量校验——对每条 assistant.tool_calls，若某 tool_call_id 未被任何后续 tool 消息响应，
+  // 则整体把该 assistant 的 tool_calls 移除、降级为纯文本（绝不留"半孤儿"tool_calls）。
+  // 根源：上下文压缩按 token 切分 head/tail 会把 assistant.tool_calls 与其 tool 响应拆开，
+  // 或检查点续跑/工具超时中断留下未配对的 tool_calls。
+  const responded = new Set<string>()
+  const orphans: number[] = []  // 需要降级的 assistant 消息索引
 
+  // 第一遍：收集所有被 tool 消息响应的 tool_call_id
   for (const m of msgs) {
-    if (m.role === 'assistant' && Array.isArray((m as any).tool_calls) && (m as any).tool_calls.length > 0) {
-      pendingIds = new Set((m as any).tool_calls.map((tc: any) => tc?.id).filter(Boolean))
-      // 深度思考兼容：assistant 带 tool_calls 的消息必须有 reasoning_content 字段，
-      // 否则 DeepSeek 深度思考模式报 "reasoning_content must be passed back"（2026-08-28 补）
-      if (!('reasoning_content' in (m as any))) {
-        const copy: any = { ...m, reasoning_content: (m as any).reasoning_content || '' }
-        out.push(copy)
-      } else {
-        out.push(m)
-      }
-      continue
-    }
-    if (m.role === 'tool' && m.tool_call_id) {
-      pendingIds.delete(m.tool_call_id)
-      out.push(m)
-      continue
-    }
-    out.push(m)
+    if (m.role === 'tool' && m.tool_call_id) responded.add(m.tool_call_id)
   }
+  // 找出孤立的 assistant.tool_calls（部分或全部 id 未被响应）
+  for (let i = 0; i < msgs.length; i++) {
+    const m = msgs[i]
+    if (m.role !== 'assistant' || !Array.isArray((m as any).tool_calls)) continue
+    const calls = (m as any).tool_calls as Array<{ id?: string }>
+    if (calls.length === 0) continue
+    const incomplete = !calls.every((tc) => tc?.id && responded.has(tc.id))
+    if (incomplete) orphans.push(i)
+  }
+  if (orphans.length === 0) return msgs  // 都配对了，原样返回（含 reasoning_content 补字段见下方）
 
-  // 若还有未配对的 tool_calls（孤立：assistant 声明了工具但后续 tool 消息缺失——
-  // 源于压缩切分 / 检查点续跑 / 工具超时中断）。不剔除以保留上下文，改为补占位 tool 消息
-  // 满足"每个 tool_call_id 必须有对应 tool 消息"的协议要求（2026-08-28 强化：从"剔除"改为"补全"）。
-  if (pendingIds.size > 0) {
-    const fixed: AgentMessage[] = []
-    for (let i = 0; i < out.length; i++) {
-      const m = out[i]
-      fixed.push(m)
-      // 找到 leading assistant.tool_calls 消息，随后立即补缺失的占位 tool 响应（同一轮内）
-      if (m.role === 'assistant' && Array.isArray((m as any).tool_calls) && (m as any).tool_calls.length > 0) {
-        const missing = (m as any).tool_calls.filter((tc: any) => pendingIds.has(tc?.id))
-        for (const tc of missing) {
-          fixed.push({
-            role: 'tool' as const,
-            tool_call_id: tc.id,
-            content: '（该工具调用因中断/压缩未获得实际结果，请基于已有信息继续）',
-          })
-        }
-        // 这些已补全，从 pending 移除（避免下一处 assistant 处重复补）
-        for (const tc of missing) pendingIds.delete(tc.id)
-      }
+  // 第二遍：重建——孤立 assistant.tool_calls 降级为纯文本；其余保留并补 reasoning_content
+  return msgs.map((m, i) => {
+    if (orphans.includes(i)) {
+      const text = (m as any).content || '（该轮工具调用因中断/压缩未完成，任务已保存进度）'
+      return { role: 'assistant' as const, content: text }
     }
-    return fixed
-  }
-  return out
+    // 完整配对的 tool_calls：确保带 reasoning_content 字段（深度思考兼容，修 "must be passed back" 400）
+    if (m.role === 'assistant' && Array.isArray((m as any).tool_calls) && (m as any).tool_calls.length > 0 && !('reasoning_content' in m)) {
+      return { ...m, reasoning_content: (m as any).reasoning_content || '' }
+    }
+    return m
+  })
 }
 
 /** 读取 settings 配置（工具授权模式等） */

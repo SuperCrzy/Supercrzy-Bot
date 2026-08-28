@@ -17,24 +17,24 @@ describe('sanitizeToolCallSequence（2026-08-28 修复 400 孤立 tool_calls）'
     expect((out[2] as any).tool_calls).toHaveLength(2)
   })
 
-  it('孤立 tool_calls（assistant 声明但 tool 结果缺失）→ 补占位 tool 消息防止 400', () => {
+  it('孤立 tool_calls（assistant 声明但 tool 结果缺失）→ 降级纯文本防 400', () => {
     // 场景：检查点/中断后，assistant 带 tool_calls 但没有 tool 响应
     const msgs = [sys, usr, asstTool(['a']), asst('next without tool result')]
     const out = sanitizeToolCallSequence(msgs)
-    // 应为 asstTool 补一条 tool 占位消息
-    const toolMsgs = out.filter(m => m.role === 'tool')
-    expect(toolMsgs.length).toBeGreaterThan(0)
-    expect(toolMsgs[0].tool_call_id).toBe('a')
+    // 原 asstTool 应被降级为纯文本，不再带 tool_calls
+    const asstWithCalls = out.filter(m => m.role === 'assistant' && (m as any).tool_calls)
+    expect(asstWithCalls.length).toBe(0)
+    // 且不超过原条数（没新增）
+    expect(out.length).toBeLessThanOrEqual(msgs.length)
   })
 
-  it('同轮多个 tool_calls 仅部分有工具结果 → 补缺失的占位', () => {
-    // assistant 请求 a,b,c 三个 tool，但只有 a,b 有 tool 响应 → 补 c
+  it('同轮多个 tool_calls 仅部分有工具结果 → 整体降级（不留半孤儿）', () => {
+    // assistant 请求 a,b,c 三个 tool，但只有 a,b 有 tool 响应 → c 孤立 → 整条保持 tool_calls 但需 c 被响应。
+    // 新策略：任一孤立则整条降级为纯文本（最安全）。
     const msgs = [sys, usr, asstTool(['a', 'b', 'c']), tool('a'), tool('b'), asst('final')]
     const out = sanitizeToolCallSequence(msgs)
-    const toolIds = out.filter(m => m.role === 'tool').map(m => m.tool_call_id)
-    expect(toolIds).toContain('a')
-    expect(toolIds).toContain('b')
-    expect(toolIds).toContain('c') // c 被补上
+    const asstWithCalls = out.find(m => m.role === 'assistant' && (m as any).tool_calls)
+    expect(asstWithCalls).toBeUndefined() // c 孤立 → 整条降级
   })
 
   it('连续多轮正常工具调用不误伤', () => {
