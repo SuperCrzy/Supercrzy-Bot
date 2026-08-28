@@ -3,6 +3,7 @@
  * 每个工具包含 OpenAI Function Calling 格式的 schema 和执行函数
  */
 import { getDB } from './database'
+import { runSearchChain, SEARCH_PROVIDERS } from './search-providers'
 import { memoryRankedSearch, memoryRankedSearchHybrid } from './memory-search'
 import { randomUUID } from 'crypto'
 import { readFile, writeFile, access, appendFile, stat, readdir, rm, rmdir } from 'fs/promises'
@@ -1104,198 +1105,22 @@ export const toolExecutors: Record<string, ToolExecutor> = {
   },
 
   async web_search(args) {
-    // 搜索提供商分层（2026-08-22 修复：本地直连 Bing RSS 在中国网络被 302 到 cn.bing.com 后接口失效返回 0 条，
-    // DuckDuckGo 不可达——免费源几乎全废。改为"服务端 API 优先"（服务器在国外，天然不受本地网络限制，配一次 key 即"零配置"体验））：
-    // 1) Tavily（AI 原生搜索，Tavily key，免费 1000 次/月）→ relevance 过滤摘要
-    // 2) Serper（Google 原生结果，Serper key，免费 2500 次/月，质量最好）
-    // 3) Bing RSS（免费兜底，无需 key，接受可能 0 条）
-    // 4) DuckDuckGo lite（免费兜底）
+    // 搜索 Provider 抽象（2026-08-28 重构：从 5 层 if 嵌套改为 search-providers 插件式，见 services/search-providers.ts）
+    // 优先级：Tavily → Serper → SearXNG → DeepSeek → Bing，探测→降级；新增引擎=加 provider 对象
     try {
       const query = String(args.query || '').trim()
       if (!query) return '❌ 缺少查询参数 query'
       const count = Math.min(args.count || 8, 10)
-      // 时间范围过滤（防止抓到老信息）：day/week/month/year → 各引擎参数 + 后处理最大天数
       const timeRange = ['day', 'week', 'month', 'year'].includes(args.timeRange) ? args.timeRange : ''
-      // 2026-08-25：对齐"近24小时/近1周"语义（原来 day=2 会把昨天也包进来，用户问"今天"却给昨天的）
-      const rangeDays: Record<string, number> = { day: 1, week: 7, month: 31, year: 365 }
-      // 2026-08-25：新闻语义自动兜底——模型未显式传 source=news 时，query 含新闻时效词 + 有时效窗口 → 自动切新闻流。
-      // 新闻流（categories=news）结果每条带精确发布日期，模型可直接按日期筛选，杜绝"逐条打开网页核实"的 5 分钟风暴
       const NEWS_HINTS = /新闻|今日|今天|最新|快讯|报道|发布|速递|资讯|简报|News|Breaking|Today|Latest|Headline/i
       const effectiveSource = args.source === 'news' || (NEWS_HINTS.test(query) && timeRange) ? 'news' : (args.source || '')
-      const maxAgeDays = timeRange ? rangeDays[timeRange] : 0 // 0 = 不过滤
-
-      // ---- 优先：Tavily（AI 优化搜索，免费层 1000 次/月）----
-      const tavilyKey = readSetting('tavilyApiKey')
-      if (tavilyKey) {
-        try {
-          const tv = await fetch('https://api.tavily.com/search', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              api_key: tavilyKey,
-              query,
-              max_results: count,
-              search_depth: args.depth === 'advanced' ? 'advanced' : 'basic',
-              include_answer: false,
-              ...(timeRange ? { days: maxAgeDays } : {}),
-              ...(effectiveSource === 'news' ? { topic: 'news' } : {}),
-            }),
-          })
-          if (tv.ok) {
-            const data = await tv.json() as { results?: Array<{ title: string; url: string; content: string; score?: number }> }
-            const results = (data.results || []).map((r) => ({
-              title: r.title,
-              url: r.url,
-              description: (r.content || '').slice(0, 400),
-              score: r.score,
-            }))
-            return JSON.stringify({ engine: 'tavily', results: postProcessSearchResults(results, count, maxAgeDays), query })
-          }
-          // Tavily 失败 → 降级 Serper
-        } catch {}
-      }
-
-      // ---- 2) Serper（Google 原生结果，免费 2500 次/月；服务端执行不受本地网络限制）----
-      const serperKey = readSetting('serperApiKey')
-      if (serperKey) {
-        try {
-          const sr = await fetch('https://google.serper.dev/search', {
-            method: 'POST',
-            headers: { 'X-API-KEY': serperKey, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ q: query, num: count, gl: 'cn', hl: 'zh-cn', ...(timeRange ? { tbs: `qdr:${timeRange[0]}` } : {}), ...(effectiveSource === 'news' ? { type: 'news' } : {}) }),
-            signal: AbortSignal.timeout(10000),
-          })
-          if (sr.ok) {
-            const data = await sr.json() as { organic?: Array<{ title: string; link: string; snippet: string; date?: string }> }
-            const results = (data.organic || []).map((r) => ({
-              title: r.title,
-              url: r.link,
-              description: (r.snippet || '').slice(0, 300),
-              date: r.date,
-            }))
-            if (results.length > 0) return JSON.stringify({ engine: 'serper', results: postProcessSearchResults(results, count, maxAgeDays), query })
-          }
-          // Serper 失败 → 降级 SearXNG
-        } catch {}
-      }
-
-      // ---- 3) SearXNG（自建开源元搜索，聚合 70+ 引擎；配 searxngUrl 才启用，美国 VPS 部署最佳）----
-      const searxngUrl = readSetting('searxngUrl')
-      if (searxngUrl) {
-        try {
-          // 2026-08-25 修复：①透传 time_range（之前完全没传，timeRange 对 SearXNG 无效 → 旧闻混入）
-          // ②source=news 时加 categories=news 走新闻流——实测 20 条结果每条带精确 ISO 日期，模型可直接按日期筛选
-          const sxParams = new URLSearchParams({ q: query, format: 'json', language: 'zh-CN', safesearch: '0' })
-          if (effectiveSource === 'news') sxParams.set('categories', 'news')
-          if (timeRange) sxParams.set('time_range', timeRange)
-          const sx = await fetch(`${searxngUrl.replace(/\/+$/, '')}/search?${sxParams.toString()}`, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (compatible; SUPERCRZY-BOT/1.0)', 'Accept': 'application/json' },
-            signal: AbortSignal.timeout(12000),
-          })
-          if (sx.ok) {
-            const sd = await sx.json()
-            const results = (sd.results || []).map((r: any) => ({
-              title: r.title || '',
-              url: r.url || '',
-              description: (r.content || r.snippet || '').slice(0, 300),
-              date: r.publishedDate || '',
-              engine: r.engine ? (Array.isArray(r.engine) ? r.engine.join(',') : String(r.engine)) : '',
-            }))
-            if (results.length > 0) return JSON.stringify({ engine: 'searxng', results: postProcessSearchResults(results, count, maxAgeDays), query })
-          }
-        } catch {}
-      }
-
-      // ---- 4) DeepSeek 官方原生搜索（web_search_20250305 服务器工具，2026-08-23 接入）
-      // 复用同一个 DeepSeek key（零配置：一个 key 全包聊天+视觉+搜索）；服务器侧执行，官方质量；
-      // 每次调用=一次完整模型轮次（约 1-2 分钱），未触发搜索/失败自动降级下一层 ----
-      const dsLayer = await deepseekNativeSearch(query, count)
-      if (dsLayer.results.length > 0) {
-        return JSON.stringify({ engine: 'deepseek', results: postProcessSearchResults(dsLayer.results, count, maxAgeDays), query })
-      }
-
-      // ---- 5) Bing RSS（免费兜底；注意中国网络下可能 302 到 cn.bing.com 返回 0 条）----
-      const encoded = encodeURIComponent(query)
-      const url = `https://www.bing.com/search?format=rss&q=${encoded}&count=${count}`
-
-      const response = await fetch(url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (compatible; SUPERCRZY-BOT/1.0)',
-          'Accept': 'application/rss+xml, application/xml, text/xml',
-        },
-        redirect: 'follow',
-      })
-
-      if (response.ok) {
-        const xml = await response.text()
-        if (xml.includes('<item>')) {
-          // 解析 RSS XML
-          const itemRegex = /<item>([\s\S]*?)<\/item>/g
-          const titleRegex = /<title><!\[CDATA\[(.*?)\]\]><\/title>|<title>(.*?)<\/title>/
-          const linkRegex = /<link>(.*?)<\/link>/
-          const descRegex = /<description><!\[CDATA\[(.*?)\]\]><\/description>|<description>(.*?)<\/description>/
-          const dateRegex = /<pubDate>(.*?)<\/pubDate>/
-
-          const results: Array<{ title: string; url: string; desc: string; date: string }> = []
-          let match
-          while ((match = itemRegex.exec(xml)) !== null && results.length < 10) {
-            const item = match[1]
-            const titleM = item.match(titleRegex)
-            const linkM = item.match(linkRegex)
-            const descM = item.match(descRegex)
-            const dateM = item.match(dateRegex)
-
-            const title = titleM ? (titleM[1] || titleM[2] || '').trim() : ''
-            const url = linkM ? linkM[1].trim() : ''
-            const desc = descM ? (descM[1] || descM[2] || '').trim().replace(/<[^>]*>/g, '') : ''
-            const date = dateM ? dateM[1].trim() : ''
-
-            if (title && url) {
-              results.push({ title, url, desc: desc.slice(0, 300), date })
-            }
-          }
-
-          if (results.length > 0) {
-            return JSON.stringify({
-              engine: 'bing-rss',
-              results: postProcessSearchResults(results.map(r => ({ title: r.title, url: r.url, description: r.desc, date: r.date })), count, maxAgeDays),
-              query: args.query,
-            })
-          }
-        }
-      }
-
-      // ---- 4) DuckDuckGo lite（免费兜底，部分网络可达）----
-      try {
-        const dg = await fetch(`https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}`, {
-          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; SUPERCRZY-BOT/1.0)' },
-          redirect: 'follow',
-          signal: AbortSignal.timeout(10000),
-        })
-        if (dg.ok) {
-          const html = await dg.text()
-          const linkRegex = /<a[^>]*class="result-link"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/g
-          const snipRegex = /<td[^>]*class="result-snippet"[^>]*>([\s\S]*?)<\/td>/g
-          const results: Array<{ title: string; url: string; description: string }> = []
-          let lm: RegExpExecArray | null
-          const snips: string[] = []
-          let sm: RegExpExecArray | null
-          while ((sm = snipRegex.exec(html)) !== null && snips.length < 10) snips.push(sm[1].replace(/<[^>]*>/g, '').trim())
-          let i = 0
-          while ((lm = linkRegex.exec(html)) !== null && results.length < 10) {
-            const title = lm[2].replace(/<[^>]*>/g, '').trim()
-            let url = lm[1]
-            if (url.startsWith('//')) url = 'https:' + url
-            if (title && url.startsWith('http')) results.push({ title, url, description: snips[i] || '' })
-            i++
-          }
-          if (results.length > 0) return JSON.stringify({ engine: 'duckduckgo', results: postProcessSearchResults(results, count, maxAgeDays), query })
-        }
-      } catch {}
-
-      return JSON.stringify({ results: [], query: args.query, message: `未找到关于 "${args.query}" 的搜索结果。` })
+      const maxAgeDays = timeRange ? ({ day: 1, week: 7, month: 31, year: 365 } as Record<string, number>)[timeRange] : 0
+      // 遍历 provider 链：取第一个产出非空结果的引擎（runSearchChain 内部已探测→降级→后处理）
+      const { engine, results } = await runSearchChain({ query, count, timeRange, depth: args.depth || 'basic', source: effectiveSource, maxAgeDays })
+      if (results.length === 0) return JSON.stringify({ results: [], query, message: '未找到关于 "' + query + '" 的搜索结果。' })
+      return JSON.stringify({ engine, results, query })
     } catch (err: any) {
-      return `❌ 搜索失败：${err.message}`
+      return '❌ 搜索失败：' + err.message
     }
   },
 

@@ -18,8 +18,7 @@ import { rankMemories, memoryRankedSearch } from './memory-search'
 import { requestChat, chatCompletion, normalizeBaseUrl } from './model-client'
 import { getDB } from '../services/database'
 import { toolDefinitions, executeToolCalls, type ToolCall, type ToolResultWithMeta, getToolMeta, type ToolExecCtx } from './tools'
-import { runReflection } from './reflection'
-import { syncTurnMemories } from './memory-sync'
+import { pushMemorySync, pushReflection } from './memory-worker'
 
 // ---- 敏感工具确认机制（先确认后执行）----
 const pendingConfirmations = new Map<string, (decision: 'allow' | 'deny') => void>()
@@ -1411,15 +1410,11 @@ export async function runAgentLoop(
         messages.push(finalMsg)
 
         await autoExtractMemories(contentBuffer, lastUserContent)
-        // Memory sync_turn：LLM 提取本次对话的持久信息（用户偏好/项目事实）→ 记忆（异步不阻塞）
-        syncTurnMemories(lastUserContent, contentBuffer)
-          .catch((e) => console.log(`[MemorySync] 异步同步异常: ${e?.message || e}`))
-        // P1.5 Experience Reflection：任务完成 5 问反思 → experience 记忆（异步不阻塞回复）
+        // Memory sync_turn + Experience Reflection：收拢到后台 worker 串行提取（2026-08-28 改，
+        // 原 fire-and-forget 每轮开一个 LLM 提取调用，高频对话会堆积并发 → 单 worker 串行节流）
+        pushMemorySync(lastUserContent, contentBuffer)
         const reflectTools = [...totalToolCalls]
-        if (reflectTools.length > 0) {
-          runReflection({ userContent: lastUserContent, toolCalls: reflectTools, summary: contentBuffer.slice(0, 3000) })
-            .catch((e) => console.log(`[Reflection] 异步反思异常: ${e?.message || e}`))
-        }
+        pushReflection({ userContent: lastUserContent, toolCalls: reflectTools, summary: contentBuffer.slice(0, 3000) })
       }
 
       // 本轮结束：把真实 token 用量发给前端（有 usage 时），cost 按模型单价估算
