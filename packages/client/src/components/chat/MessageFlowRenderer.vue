@@ -977,6 +977,20 @@ body.dark .message-content a,
 html.dark .message-content a:hover,
 body.dark .message-content a:hover,
 .app-layout.dark .message-content a:hover { color: #bae6fd; }
+/* 用户消息气泡是蓝色渐变底(#4F46E5→#6366F1)、正文白字——链接若用 accent(靛蓝)会蓝底蓝字看不清。
+   改为白色下划线链接，蓝底上清晰可点（2026-08-28 修"看不清"真根因） */
+.message.user .message-content a {
+  color: #ffffff;
+  text-decoration: underline;
+  text-decoration-color: rgba(255, 255, 255, 0.7);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 3px;
+  font-weight: 500;
+}
+.message.user .message-content a:hover {
+  color: #e0e7ff;
+  text-decoration-color: #ffffff;
+}
 .message-content pre {
   position: relative;
 
