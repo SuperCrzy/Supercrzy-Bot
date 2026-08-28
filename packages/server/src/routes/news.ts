@@ -36,3 +36,31 @@ newsRouter.get('/categories', async (ctx: Context) => {
     ctx.body = { error: `分类获取失败: ${e?.message || e}` }
   }
 })
+
+/**
+ * 图片代理（2026-08-28 加：用户浏览器/网络直连 supercrzy.com/uploads 加载图可能被代理拉慢/失败）。
+ * 前端用 /api/news/image?url= 走后端拿图，规避跨域/直连网络问题（后端能访问源，已验证可达）。
+ */
+newsRouter.get('/image', async (ctx: Context) => {
+  const url = String(ctx.query.url || '')
+  // 只允许 supercrzy.com 域名，防 SSRF
+  let host: string
+  try { host = new URL(url).host } catch { ctx.status = 400; ctx.body = { error: 'url 无效' }; return }
+  if (host !== 'supercrzy.com' && !host.endsWith('.supercrzy.com')) {
+    ctx.status = 400
+    ctx.body = { error: '仅允许 supercrzy.com 图片' }
+    return
+  }
+  try {
+    const resp = await fetch(url, { signal: AbortSignal.timeout(12000) })
+    if (!resp.ok) { ctx.status = resp.status; ctx.body = Buffer.alloc(0); return }
+    const type = resp.headers.get('content-type') || 'image/jpeg'
+    const buf = await resp.arrayBuffer()
+    ctx.set('Content-Type', type)
+    ctx.set('Cache-Control', 'public, max-age=300')
+    ctx.body = Buffer.from(buf)
+  } catch (e: any) {
+    ctx.status = 502
+    ctx.body = { error: `图片代理失败: ${e?.message || e}` }
+  }
+})

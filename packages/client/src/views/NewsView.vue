@@ -35,8 +35,8 @@
     <div v-else class="nv-list">
       <div v-for="it in news" :key="it.url" class="nv-item">
         <!-- 封面图（RSS description 首图，2026-08-28 加） -->
-        <a v-if="it.image" class="nv-thumb" :href="it.url" target="_blank" rel="noopener">
-          <img :src="it.image" :alt="it.title" loading="lazy" />
+        <a v-if="imgSrc(it.image)" class="nv-thumb" :href="it.url" target="_blank" rel="noopener">
+          <img :src="imgSrc(it.image)" :alt="it.title" loading="lazy" />
         </a>
         <div class="nv-item-body">
           <div class="nv-item-top">
@@ -85,6 +85,12 @@ function fmtDate(d: string): string {
   return dt.toLocaleDateString(locale(), { month: 'short', day: 'numeric' })
 }
 function locale(): string { return (localStorage.getItem('supercrzy:lang') || 'zh-CN') }
+
+/** 封面图走后端代理加载（规避浏览器直连 supercrzy.com 的跨域/网络问题，2026-08-28 加） */
+function imgSrc(url: string | undefined): string {
+  if (!url) return ''
+  return `/api/news/image?url=${encodeURIComponent(url)}`
+}
 
 async function loadNews() {
   loading.value = true
