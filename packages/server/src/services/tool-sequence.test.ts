@@ -17,25 +17,24 @@ describe('sanitizeToolCallSequence（2026-08-28 修复 400 孤立 tool_calls）'
     expect((out[2] as any).tool_calls).toHaveLength(2)
   })
 
-  it('孤立 tool_calls（assistant 声明但 tool 结果缺失）→ 回退普通文本防 400', () => {
+  it('孤立 tool_calls（assistant 声明但 tool 结果缺失）→ 补占位 tool 消息防止 400', () => {
     // 场景：检查点/中断后，assistant 带 tool_calls 但没有 tool 响应
     const msgs = [sys, usr, asstTool(['a']), asst('next without tool result')]
     const out = sanitizeToolCallSequence(msgs)
-    // 第3条（原 asstTool) 应被退化为普通文本，不再带 tool_calls
-    const stripped = out.find(m => m.role === 'assistant' && m.content === '')
-    expect(stripped).toBeUndefined()
-    // 最终无任何 assistant 消息带 tool_calls
-    const hasOrphan = out.some(m => m.role === 'assistant' && (m as any).tool_calls?.length > 0)
-    expect(hasOrphan).toBe(false)
+    // 应为 asstTool 补一条 tool 占位消息
+    const toolMsgs = out.filter(m => m.role === 'tool')
+    expect(toolMsgs.length).toBeGreaterThan(0)
+    expect(toolMsgs[0].tool_call_id).toBe('a')
   })
 
-  it('同轮多个 tool_calls 仅部分有工具结果 → 移除未响应部分', () => {
-    // assistant 请求 a,b,c 三个 tool，但只有 a,b 有 tool 响应 → 剔除 c
+  it('同轮多个 tool_calls 仅部分有工具结果 → 补缺失的占位', () => {
+    // assistant 请求 a,b,c 三个 tool，但只有 a,b 有 tool 响应 → 补 c
     const msgs = [sys, usr, asstTool(['a', 'b', 'c']), tool('a'), tool('b'), asst('final')]
     const out = sanitizeToolCallSequence(msgs)
-    const withCalls = out.find(m => m.role === 'assistant' && (m as any).tool_calls)
-    // 应保留 a,b（有配对）剔除 c
-    expect((withCalls as any).tool_calls.map((t: any) => t.id)).toEqual(['a', 'b'])
+    const toolIds = out.filter(m => m.role === 'tool').map(m => m.tool_call_id)
+    expect(toolIds).toContain('a')
+    expect(toolIds).toContain('b')
+    expect(toolIds).toContain('c') // c 被补上
   })
 
   it('连续多轮正常工具调用不误伤', () => {

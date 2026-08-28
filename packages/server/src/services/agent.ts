@@ -125,11 +125,19 @@ function normalizeQuestionOptions(options: any): string[] {
 export function sanitizeToolCallSequence(msgs: AgentMessage[]): AgentMessage[] {
   const out: AgentMessage[] = []
   let pendingIds = new Set<string>()  // 当前待配对的 tool_call_id（来自最近一条 assistant.tool_calls）
+  const pendingAssistant: AgentMessage | null = null  // eslint-disable-line (占位,避免误删)
 
   for (const m of msgs) {
     if (m.role === 'assistant' && Array.isArray((m as any).tool_calls) && (m as any).tool_calls.length > 0) {
       pendingIds = new Set((m as any).tool_calls.map((tc: any) => tc?.id).filter(Boolean))
-      out.push(m)
+      // 深度思考兼容：assistant 带 tool_calls 的消息必须有 reasoning_content 字段，
+      // 否则 DeepSeek 深度思考模式报 "reasoning_content must be passed back"（2026-08-28 补）
+      if (!('reasoning_content' in (m as any))) {
+        const copy: any = { ...m, reasoning_content: (m as any).reasoning_content || '' }
+        out.push(copy)
+      } else {
+        out.push(m)
+      }
       continue
     }
     if (m.role === 'tool' && m.tool_call_id) {
@@ -140,23 +148,26 @@ export function sanitizeToolCallSequence(msgs: AgentMessage[]): AgentMessage[] {
     out.push(m)
   }
 
-  // 若还有未配对的 tool_calls（孤立，没后续 tool 消息响应）→ 回退：从最近一条 assistant 移除这些 tool_calls，
-  // 保留其 content（若有）；避免发孤儿 tool_call 触发 400。
+  // 若还有未配对的 tool_calls（孤立：assistant 声明了工具但后续 tool 消息缺失——
+  // 源于压缩切分 / 检查点续跑 / 工具超时中断）。不剔除以保留上下文，改为补占位 tool 消息
+  // 满足"每个 tool_call_id 必须有对应 tool 消息"的协议要求（2026-08-28 强化：从"剔除"改为"补全"）。
   if (pendingIds.size > 0) {
     const fixed: AgentMessage[] = []
-    for (const m of out) {
-      if (m.role === 'assistant' && Array.isArray((m as any).tool_calls)) {
-        const kept = (m as any).tool_calls.filter((tc: any) => !pendingIds.has(tc?.id))
-        if (kept.length > 0) {
-          const copy: any = { ...m, tool_calls: kept }
-          fixed.push(copy)
-        } else {
-          // 全部 tool_calls 孤立 → 退化为普通文本消息（保 content，去 tool_calls）
-          const copy: any = { role: 'assistant', content: (m as any).content || '（工具结果未返回，任务已中断）' }
-          fixed.push(copy)
+    for (let i = 0; i < out.length; i++) {
+      const m = out[i]
+      fixed.push(m)
+      // 找到 leading assistant.tool_calls 消息，随后立即补缺失的占位 tool 响应（同一轮内）
+      if (m.role === 'assistant' && Array.isArray((m as any).tool_calls) && (m as any).tool_calls.length > 0) {
+        const missing = (m as any).tool_calls.filter((tc: any) => pendingIds.has(tc?.id))
+        for (const tc of missing) {
+          fixed.push({
+            role: 'tool' as const,
+            tool_call_id: tc.id,
+            content: '（该工具调用因中断/压缩未获得实际结果，请基于已有信息继续）',
+          })
         }
-      } else {
-        fixed.push(m)
+        // 这些已补全，从 pending 移除（避免下一处 assistant 处重复补）
+        for (const tc of missing) pendingIds.delete(tc.id)
       }
     }
     return fixed
@@ -967,6 +978,9 @@ export async function runAgentLoop(
 
     // 工具消息序列清洗（2026-08-28 修复 400：检查点/压缩/中断可能留下孤立 tool_calls，发请求前兜底）
     const sanitizedMessages = sanitizeToolCallSequence(messages)
+    if (sanitizedMessages.length !== messages.length) {
+      console.warn(`[Sanitize] turn ${turn}: 清洗 ${messages.length}→${sanitizedMessages.length} 条消息（移除孤立 tool_calls）`)
+    }
     const apiMessages = [
       { role: 'system', content: systemPrompt.prompt },
       ...sanitizedMessages,
