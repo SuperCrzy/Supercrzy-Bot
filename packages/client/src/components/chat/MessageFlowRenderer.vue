@@ -954,6 +954,15 @@ function shouldCollapse(msg: ChatMessage): boolean {
 <!-- 全局样式：复制按钮由 ChatView enhanceCodeBlocks 动态创建（无 scope 属性），scoped 匹配不到——
      必须用非 scoped 样式才能让按钮浮在代码块右上角（否则退化成代码下方一行普通文本，老板 2026-08-21） -->
 <style>
+/* 正文链接样式（2026-08-28 加：markdown 渲染的 <a> 之前无样式，用浏览器默认色黑/白模式难辨认——
+   导流 supercrzy.com 需要清晰链接，改用主题 accent 色 + 下划线，两种主题都清楚） */
+.message-content a {
+  color: var(--accent, #4f8cff);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.message-content a:hover { opacity: 0.8; }
+.message-content a:visited { color: color-mix(in srgb, var(--accent, #4f8cff) 80%, #9342f0); }
 .message-content pre {
   position: relative;
 }
