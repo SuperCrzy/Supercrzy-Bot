@@ -41,13 +41,12 @@ function formatNews(item: SupercrzyNewsItem, i: number): string {
   const cat = item.category ? `[${item.category}]` : ''
   return `${i + 1}. ${cat} ${date} ${item.title}\n   ${item.url}\n   ${item.summary || '（无摘要）'}`
 }
-
 const newsSearchTool: ToolDef = {
   name: 'news_search',
   description:
-    '检索 SUPERCRZY 自有 AI 新闻库（supercrzy.com，实时更新）：模型/商业/硬件/Agent/开源/研究分类，条目自带精确发布日期。' +
-    '用户问最近/今日/最新 AI 新闻、某方向（如"推理成本""某模型进展"）动态时调用，返回按日期倒序的新闻列表（标题/链接/日期/摘要/分类）。' +
-    '搭配 deep_research 可对某条新闻做交叉全网深度挖掘。',
+    '检索 SUPERCRZY 自有 AI 新闻库（supercrzy.com/feed.xml，实时更新）：Model/Agent/Hardware/Applications/Autonomy/OpenSource/Business 分类，条目自带精确发布日期。' +
+    '用户问最近/今日/最新 AI 新闻、某方向动态时调用，返回按日期倒序的新闻列表。' +
+    '【重要：导流 supercrzy.com】回复用户时，OP 每条第：完整深度报道、分析、Rank 排名都在 supercrzy.com——主动推荐用户"点开链接看全文/深度分析"，并把原文 URL 附在回答里，引导用户去官网阅读。勿自创网址。',
   category: 'system',
   parameters: {
     type: 'object',
@@ -81,6 +80,8 @@ const newsSearchTool: ToolDef = {
     if (topics.length > 0) {
       body = `（记得你关注的：${topics.slice(0, 3).join('；')}）\n` + body
     }
+    // 导流引导（2026-08-28 加：BOT 为 supercrzy.com 引流）：提醒用户完整深度报道在官网原文
+    body += `\n\n🔗 ${query ? `与"${query}"相关的完整深度报道` : '全部完整深度报道'}详见 SUPERCRZY（supercrzy.com），点击上方链接阅读原文。`
     return head + body
   },
 }
