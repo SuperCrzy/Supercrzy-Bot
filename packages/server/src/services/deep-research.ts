@@ -32,6 +32,11 @@ interface SerpQuery {
 
 const CONCURRENCY = 2
 const MAX_CONTENT_CHARS = 25000
+// 2026-08-28 修复"深度研究卡住"：整体硬时限。breadth=4/depth=2 结构上展开为 20 次 web_search +
+// 21 次 LLM 调用，且每次搜索在 SearXNG 主引擎最坏可等 60s —— 总时长可达 20+ 分钟，
+// 用户只看到"一直在深度思考"。给一个整体预算，超时即用已收集的学习点收尾，而不是无限等。
+const DEEP_RESEARCH_TOTAL_TIMEOUT_MS = 5 * 60 * 1000   // 整体 5 分钟硬超时
+const MAX_TOTAL_QUERIES = 24                            // 全局搜索次数预算（防结构爆炸）
 
 function readSetting(key: string): string {
   try {
@@ -142,12 +147,38 @@ Return JSON: {"reportMarkdown": "the full report in Markdown"}`
   return report + urlsSection
 }
 
-/** 并发限制 map（p-limit 手写版） */
-async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+/** 共享研究预算/中止控制器（2026-08-28 加：防止任务爆炸 + 支持整体超时中止） */
+export interface ResearchBudget {
+  queriesUsed: number
+  maxQueryBudget: number
+  deadline: number          // 整体硬超时时间戳
+  aborted: boolean
+  lateStarters: boolean     // 全局预算用尽后，后续递归层的生成查询直接跳过
+}
+
+function createBudget(opts: { maxQueries?: number; timeoutMs?: number }): ResearchBudget {
+  return {
+    queriesUsed: 0,
+    maxQueryBudget: opts.maxQueries ?? MAX_TOTAL_QUERIES,
+    deadline: Date.now() + (opts.timeoutMs ?? DEEP_RESEARCH_TOTAL_TIMEOUT_MS),
+    aborted: false,
+    lateStarters: false,
+  }
+}
+
+/** 是否还能继续跑新的搜索（预算未超 / 未超时 / 未中止）。导出供测试。 */
+export function canContinue(b: ResearchBudget): boolean {
+  return !b.aborted && Date.now() < b.deadline && b.queriesUsed < b.maxQueryBudget
+}
+
+/** 并发限制 map（p-limit 手写版）。支持：预算耗尽/超时/中止时跳过未开始的项。 */
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>, budget?: ResearchBudget): Promise<R[]> {
   const results = new Array<R>(items.length)
   let idx = 0
   const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
     while (idx < items.length) {
+      // 整个循环最便宜的"刹车"：预算/超时/中止 → 不再派发新项
+      if (budget && !canContinue(budget)) break
       const i = idx++
       results[i] = await fn(items[i])
     }
@@ -155,7 +186,6 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promis
   await Promise.all(workers)
   return results
 }
-
 /** 深度研究主循环（递归下钻） */
 export async function deepResearch(opts: {
   query: string
@@ -164,8 +194,9 @@ export async function deepResearch(opts: {
   learnings?: string[]
   visitedUrls?: string[]
   onProgress?: (p: DeepResearchProgress) => void
+  budget?: ResearchBudget
 }): Promise<{ learnings: string[]; visitedUrls: string[] }> {
-  const { query, breadth, depth, learnings = [], visitedUrls = [], onProgress } = opts
+  const { query, breadth, depth, learnings = [], visitedUrls = [], onProgress, budget } = opts
   const progress: DeepResearchProgress = {
     currentDepth: depth,
     totalDepth: depth,
@@ -179,8 +210,27 @@ export async function deepResearch(opts: {
   const serpQueries = await generateSerpQueries(query, learnings, breadth)
   report({ totalQueries: serpQueries.length, currentQuery: serpQueries[0]?.query })
 
+  // 2026-08-28：优先用已收集的 learnings 直接收尾，避免任务爆炸。
+  // generateSerpQueries 是一次 LLM 往返；若每次递归都无条件生成 breadth 个查询，
+  // breadth=4/depth=2 会展开为 20 次搜索 + 21 次 LLM，可持续 20+ 分钟让用户误以为"卡住"。
+  if (budget) {
+    const overBudget = budget.queriesUsed >= budget.maxQueryBudget
+    const pastDeadline = Date.now() >= budget.deadline
+    if (overBudget || pastDeadline) {
+      budget.lateStarters = true
+      console.log(`[DeepResearch] 预算已用尽或超时，跳过第 ${depth} 轮下钻：` +
+        `used=${budget.queriesUsed}/${budget.maxQueryBudget} timeout=${pastDeadline}`)
+      return { learnings: [...learnings], visitedUrls: [...visitedUrls] }
+    }
+  }
+
   const results = await mapLimit(serpQueries, CONCURRENCY, async (serpQuery) => {
     try {
+      // 每次真实搜索前占一个预算名额（并发中的多次调用都能精确递减）；预算/超时/中止则跳过
+      if (budget) {
+        if (!canContinue(budget)) return { learnings: [...learnings], visitedUrls: [...visitedUrls] }
+        budget.queriesUsed++
+      }
       const { webSearchChain } = await import('./tools.js')
       const search = await webSearchChain(serpQuery.query, { count: 8, timeRange: depth >= 2 ? 'month' : '' })
       const searchResults = search.results || []
@@ -208,6 +258,7 @@ export async function deepResearch(opts: {
           learnings: allLearnings,
           visitedUrls: allUrls,
           onProgress,
+          budget,
         })
       }
       report({
@@ -220,7 +271,7 @@ export async function deepResearch(opts: {
       console.log(`[DeepResearch] 查询失败 ${serpQuery.query}: ${e?.message || e}`)
       return { learnings: [...learnings], visitedUrls: [...visitedUrls] }
     }
-  })
+  }, budget)
 
   return {
     learnings: [...new Set(results.flatMap((r) => r.learnings))],
@@ -228,7 +279,7 @@ export async function deepResearch(opts: {
   }
 }
 
-/** 顶层入口：研究 + 最终报告 */
+/** 顶层入口：研究 + 最终报告（含整体硬超时，防止长任务拖到用户崩溃） */
 export async function runDeepResearch(opts: {
   query: string
   breadth?: number
@@ -237,12 +288,39 @@ export async function runDeepResearch(opts: {
 }): Promise<DeepResearchResult> {
   const breadth = Math.min(Math.max(opts.breadth || 4, 2), 6)
   const depth = Math.min(Math.max(opts.depth || 2, 1), 3)
+
+  // 2026-08-28：整体 5 分钟硬超时。breadth=4/depth=2 结构上会展开 20 次搜索，
+  // 若还让深度到 3 会更爆炸。预算用尽/超时即用已收集的学习点收尾，而不是无限等。
+  const budget = createBudget({ maxQueries: MAX_TOTAL_QUERIES, timeoutMs: DEEP_RESEARCH_TOTAL_TIMEOUT_MS })
+  if (budget.maxQueryBudget < breadth * 2) {
+    // 预算下限保护：至少允许跑满首层 breadth 次
+    budget.maxQueryBudget = Math.max(budget.maxQueryBudget, breadth)
+  }
+
+  let truncated = false
   const { learnings, visitedUrls } = await deepResearch({
     query: opts.query,
     breadth,
     depth,
-    onProgress: opts.onProgress,
+    onProgress: (p) => {
+      if (budget.aborted || Date.now() >= budget.deadline) truncated = true
+      opts.onProgress?.(p)
+    },
+    budget,
+  }).catch((e) => {
+    truncated = true
+    console.log(`[DeepResearch] 研究中断（按预算收尾）：${e?.message || e}`)
+    return { learnings: [], visitedUrls: [] }
   })
+
+  if (truncated) {
+    opts.onProgress?.({
+      currentDepth: 0, totalDepth: depth, currentBreadth: breadth, totalBreadth: breadth,
+      totalQueries: budget.queriesUsed, completedQueries: budget.queriesUsed,
+      currentQuery: '（已达研究预算/时限，用已收集信息收尾）',
+    })
+  }
+
   const report = await writeFinalReport(opts.query, learnings, visitedUrls)
   return { learnings, visitedUrls, report }
 }

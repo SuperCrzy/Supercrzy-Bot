@@ -1586,9 +1586,27 @@ export async function runAgentLoop(
         }
         const toolResults = await Promise.race([
           executeToolCalls(executeList as any, toolCtx),
-          new Promise<any[]>((_, reject) =>
-            setTimeout(() => reject(new Error("工具执行超时（60秒）")), 60000)
-          ),
+          // 2026-08-28 关键修复：工具执行（尤其 deep_research）可能超时。
+          // 原实现 `reject` 会留下"带 tool_calls 的 assistantMsg 入 messages 但 tool 结果从未加入"
+          // 的坏序列 → 下一轮 DeepSeek 400 tool_sequence → 反复重试必败（"深研必卡"根因）。
+          // 现在超时**为所有未完成调用补占位 tool 结果**，保证 assistant.tool_calls 总有配对，
+          // 既不让序列变坏，也让模型知道哪些调用没跑完。
+          // deep_research 单独给更长时限（结构上需多轮搜索），其余工具 60s。
+          new Promise<any[]>((resolve) => {
+            const hasSlowTool = executeList.some((tc: any) => tc.function?.name === 'deep_research')
+            const toolTimeoutMs = hasSlowTool ? 360000 : 60000  // deep_research 6 分钟
+            setTimeout(() => {
+              console.warn(`[Tool] 工具执行超时（${toolTimeoutMs / 1000}s），为 ${executeList.length} 个未完成调用补占位结果`)
+              resolve(
+                executeList.map((tc: any) => ({
+                  role: 'tool' as const,
+                  tool_call_id: tc.id,
+                  content: '（该工具调用执行超时，未获得结果。请勿重试相同调用；基于已有信息继续或换一种方法。）',
+                  duration: toolTimeoutMs,
+                })),
+              )
+            }, toolTimeoutMs)
+          }),
         ])
 
         // 被拒绝的敏感工具调用也注入结果，让 LLM 感知并自主决策
