@@ -44,7 +44,6 @@
             <span class="nv-date">{{ fmtDate(it.date) }}</span>
           </div>
           <a class="nv-item-title" :href="it.url" target="_blank" rel="noopener">{{ it.title }}</a>
-          <p class="nv-item-summary">{{ it.summary }}</p>
           <div class="nv-item-actions">
             <a class="nv-open" :href="it.url" target="_blank" rel="noopener">{{ $t('news.open') }} →</a>
             <button class="nv-research" @click="deepResearch(it)">{{ $t('news.deepResearch') }}</button>
@@ -167,9 +166,8 @@ onMounted(loadNews)
 .nv-item-top { display: flex; align-items: center; gap: 8px; }
 .nv-cat-tag { font-size: 11px; padding: 1px 8px; border-radius: 10px; background: rgba(99,102,241,0.12); color: var(--accent, #6366f1); }
 .nv-date { font-size: 11px; color: var(--text-tertiary, #68738d); margin-left: auto; }
-.nv-item-title { font-size: 15px; font-weight: 600; color: var(--text-primary); text-decoration: none; display: block; line-height: 1.4; }
+.nv-item-title { font-size: 17px; font-weight: 600; color: var(--text-primary); text-decoration: none; display: block; line-height: 1.35; flex: 1; }
 .nv-item-title:hover { color: var(--accent, #6366f1); }
-.nv-item-summary { font-size: 13px; color: var(--text-secondary); line-height: 1.6; margin: 0; flex: 1; }
 .nv-item-actions { display: flex; align-items: center; gap: 12px; margin-top: 4px; }
 .nv-open { font-size: 12px; color: var(--accent, #6366f1); text-decoration: none; }
 .nv-research {
