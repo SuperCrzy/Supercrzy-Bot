@@ -51,3 +51,8 @@ _tmp_*
 # server 试验残留（2026-08-28 加）
 packages/server/test_stream_*.py
 packages/server/union-demo.html
+# desktop 构建产物（2026-08-28 加，只入库源码）
+packages/desktop/node_modules/
+packages/desktop/dist/
+packages/desktop/releases/
+packages/desktop/.deploy-server/
