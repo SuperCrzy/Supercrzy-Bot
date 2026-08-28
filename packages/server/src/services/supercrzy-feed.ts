@@ -13,12 +13,14 @@ import { getDB } from './database'
 export interface SupercrzyNewsItem {
   title: string
   url: string
-  /** 摘要（RSS description 去 HTML/去掉首图） */
+  /** 摘要（RSS description 去 HTML、去掉首图） */
   summary: string
   /** ISO 日期（RSS pubDate → 归一化） */
   date: string
   /** 分类推断（从标题/URL 关键词，见 NEWS_CATEGORIES） */
   category: string
+  /** 封面图 URL（RSS description 首部的 <img>，2026-08-28 加；可能为空） */
+  image?: string
 }
 
 /** feed 源 URL（可用 settings.supercrzyFeedUrl 覆盖） */
@@ -58,6 +60,12 @@ function cleanSummary(desc: string): string {
     .trim()
 }
 
+/** 提取 RSS description 开头的封面图 URL（<img src="...">），无则空 */
+export function extractFirstImage(desc: string): string {
+  const m = desc.match(/<img[^>]*src=["']([^"']+)["']/i)
+  return m ? m[1] : ''
+}
+
 /** 解析 RSS XML 成新闻条目（导出供单测） */
 export function parseFeedXml(xml: string): SupercrzyNewsItem[] {
   const items: SupercrzyNewsItem[] = []
@@ -77,11 +85,13 @@ export function parseFeedXml(xml: string): SupercrzyNewsItem[] {
     const url = linkM ? linkM[1].trim() : ''
     if (!title || !url) continue
     const date = dateM ? new Date(dateM[1].trim()).toISOString() : ''
+    const rawDesc = descM ? descM[1] : ''
     items.push({
       title,
       url,
-      summary: cleanSummary(descM ? descM[1] : '').slice(0, 300),
+      summary: cleanSummary(rawDesc).slice(0, 300),
       date,
+      image: extractFirstImage(rawDesc),
       category: classifyNews(title, url),
     })
   }

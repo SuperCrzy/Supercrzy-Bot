@@ -34,15 +34,21 @@
     <!-- 新闻列表 -->
     <div v-else class="nv-list">
       <div v-for="it in news" :key="it.url" class="nv-item">
-        <div class="nv-item-top">
-          <span class="nv-cat-tag">{{ it.category }}</span>
-          <span class="nv-date">{{ fmtDate(it.date) }}</span>
-        </div>
-        <a class="nv-item-title" :href="it.url" target="_blank" rel="noopener">{{ it.title }}</a>
-        <p class="nv-item-summary">{{ it.summary }}</p>
-        <div class="nv-item-actions">
-          <a class="nv-open" :href="it.url" target="_blank" rel="noopener">{{ $t('news.open') }} →</a>
-          <button class="nv-research" @click="deepResearch(it)">{{ $t('news.deepResearch') }}</button>
+        <!-- 封面图（RSS description 首图，2026-08-28 加） -->
+        <a v-if="it.image" class="nv-thumb" :href="it.url" target="_blank" rel="noopener">
+          <img :src="it.image" :alt="it.title" loading="lazy" />
+        </a>
+        <div class="nv-item-body">
+          <div class="nv-item-top">
+            <span class="nv-cat-tag">{{ it.category }}</span>
+            <span class="nv-date">{{ fmtDate(it.date) }}</span>
+          </div>
+          <a class="nv-item-title" :href="it.url" target="_blank" rel="noopener">{{ it.title }}</a>
+          <p class="nv-item-summary">{{ it.summary }}</p>
+          <div class="nv-item-actions">
+            <a class="nv-open" :href="it.url" target="_blank" rel="noopener">{{ $t('news.open') }} →</a>
+            <button class="nv-research" @click="deepResearch(it)">{{ $t('news.deepResearch') }}</button>
+          </div>
         </div>
       </div>
     </div>
@@ -58,7 +64,7 @@ import { useRouter } from 'vue-router'
 const { t } = useI18n({ useScope: 'global' })
 const router = useRouter()
 
-interface NewsItem { title: string; url: string; summary: string; date: string; category: string }
+interface NewsItem { title: string; url: string; summary: string; date: string; category: string; image?: string }
 
 const news = ref<NewsItem[]>([])
 const categories = ref<string[]>(['all', 'Models', 'Business', 'Hardware', 'Agents', 'Open Source', 'Research'])
@@ -139,7 +145,12 @@ onMounted(loadNews)
   border: 1px solid var(--border-color, rgba(128,128,128,0.25));
   border-radius: 12px; padding: 14px 16px;
   background: var(--bg-secondary, rgba(128,128,128,0.03));
+  display: flex; gap: 14px;
 }
+/* 封面图（2026-08-28 加） */
+.nv-thumb { flex-shrink: 0; width: 120px; height: 76px; border-radius: 8px; overflow: hidden; display: block; }
+.nv-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.nv-item-body { flex: 1; min-width: 0; }
 .nv-item-top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .nv-cat-tag { font-size: 11px; padding: 1px 8px; border-radius: 10px; background: rgba(99,102,241,0.12); color: var(--accent, #6366f1); }
 .nv-date { font-size: 11px; color: var(--text-tertiary, #68738d); margin-left: auto; }
