@@ -48,3 +48,6 @@ _tmp_*
 /start.bat
 /start.sh
 
+# server 试验残留（2026-08-28 加）
+packages/server/test_stream_*.py
+packages/server/union-demo.html
