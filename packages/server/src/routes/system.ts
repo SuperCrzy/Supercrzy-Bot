@@ -59,8 +59,8 @@ systemRouter.get('/check-update', async (ctx: Context) => {
   }
   const localHead = getGitHead()
   try {
-    // 先尝试获取远程（不拉取代码，只更新远程跟踪分支）
-    execSync('git fetch origin', { cwd: PROJECT_ROOT, timeout: 30000 })
+    // 先尝试获取远程（不拉取代码，只更新远程跟踪分支）；GIT_TERMINAL_PROMPT=0 防凭据交互卡死；8s 超时避免弹窗久等
+    execSync('GIT_TERMINAL_PROMPT=0 git fetch origin', { cwd: PROJECT_ROOT, timeout: 8000 })
     const remoteHead = execSync('git rev-parse --short origin/main 2>/dev/null || git rev-parse --short origin/HEAD 2>/dev/null || echo unknown', { cwd: PROJECT_ROOT }).toString().trim()
     if (remoteHead === 'unknown') {
       ctx.body = { hasUpdate: false, localHead, remoteHead: null, reason: 'no-remote-branch', message: '远程分支不可用' }

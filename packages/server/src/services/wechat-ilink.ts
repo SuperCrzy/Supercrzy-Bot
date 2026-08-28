@@ -13,8 +13,9 @@ import { existsSync, readFileSync, writeFileSync } from 'fs'
 // ============================
 
 function randomUin(): string {
-  const uint32 = randomBytes(4).readUInt32BE(0)
-  return Buffer.from(String(uint32), 'utf-8').toString('base64')
+  // 协议要求：base64(random_uint32) —— 4 字节随机数的标准 base64（8 字符）
+  // 之前的实现是"十进制数字字符串的 base64"（22 字符），iLink 校验失败 → 状态查询返回 expired
+  return randomBytes(4).toString('base64')
 }
 
 const ILINK_BASE = 'https://ilinkai.weixin.qq.com'
@@ -294,14 +295,14 @@ async function ilinkPost<T>(baseUrl: string, path: string, body: Record<string, 
   }
 }
 
-async function ilinkGet<T>(path: string): Promise<T> {
+async function ilinkGet<T>(path: string, baseUrl = ILINK_BASE): Promise<T> {
   const existingTokens = loadCredentials()?.token ? [loadCredentials()!.token] : []
   const bodyStr = JSON.stringify({
     base_info: { channel_version: '2.0.0', bot_agent: 'SuperCrzyAgent/1.0' },
     local_token_list: existingTokens,
   })
 
-  const res = await fetch(`${ILINK_BASE}/ilink/bot/${path}`, {
+  const res = await fetch(`${baseUrl}/ilink/bot/${path}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -349,7 +350,7 @@ export async function getBotQRCode(): Promise<QRCodeData> {
 // 轮询扫码状态
 // ============================
 
-export type QRStatus = 'wait' | 'scaned' | 'confirmed' | 'expired'
+export type QRStatus = 'wait' | 'scaned' | 'confirmed' | 'expired' | 'need_verifycode' | 'binded_redirect'
 
 export interface QRStatusResult {
   status: QRStatus
@@ -359,7 +360,18 @@ export interface QRStatusResult {
   userId?: string
 }
 
+/**
+ * 轮询扫码状态（完整支持 iLink 协议所有状态）：
+ * - wait / scaned：继续轮询
+ * - confirmed：扫码+确认成功，携带 bot_token
+ * - scaned_but_redirect：需切换到 redirect_host 继续轮询（IDC 重定向）
+ * - binded_redirect：该 bot 已绑定到本客户端（local_token_list 命中）→ 复用本地凭据视为成功
+ * - need_verifycode：需用户在手机端确认并输入验证码（返回该状态由前端提示）
+ * - verify_code_blocked：验证码错误次数过多，二维码失效
+ * - expired：二维码过期
+ */
 export async function pollQRCodeStatus(qrcode: string, maxAttempts = 60): Promise<QRStatusResult> {
+  let baseUrl = ILINK_BASE
   for (let i = 0; i < maxAttempts; i++) {
     const res = await ilinkGet<{
       ret: number
@@ -368,7 +380,8 @@ export async function pollQRCodeStatus(qrcode: string, maxAttempts = 60): Promis
       baseurl?: string
       ilink_bot_id?: string
       ilink_user_id?: string
-    }>(`get_qrcode_status?qrcode=${encodeURIComponent(qrcode)}`)
+      redirect_host?: string
+    }>(`get_qrcode_status?qrcode=${encodeURIComponent(qrcode)}`, baseUrl)
 
     if (res.status === 'confirmed') {
       return {
@@ -380,11 +393,41 @@ export async function pollQRCodeStatus(qrcode: string, maxAttempts = 60): Promis
       }
     }
 
-    if (res.status === 'expired') {
+    if (res.status === 'scaned_but_redirect' && res.redirect_host) {
+      // IDC 重定向：切换轮询地址继续
+      baseUrl = `https://${res.redirect_host}`
+      continue
+    }
+
+    if (res.status === 'binded_redirect') {
+      // 已绑定到此客户端（local_token_list 命中）→ 复用本地凭据
+      const creds = loadCredentials()
+      if (creds) {
+        return {
+          status: 'confirmed',
+          token: creds.token,
+          baseUrl: creds.baseUrl,
+          accountId: creds.accountId,
+          userId: creds.userId,
+        }
+      }
+      continue
+    }
+
+    if (res.status === 'need_verifycode') {
+      // 需要手机端验证码：前端提示用户，继续轮询（用户确认后变 confirmed/scaned）
+      return { status: 'need_verifycode' }
+    }
+
+    if (res.status === 'expired' || res.status === 'verify_code_blocked') {
       return { status: 'expired' }
     }
 
-    // wait or scaned — continue polling
+    // wait / scaned（或未识别状态）→ 原样返回，由前端按节奏继续轮询。
+    // 注意：不能掉出循环返回 expired，否则前端每次都收到"已过期"
+    return { status: (res.status === 'scaned' ? 'scaned' : 'wait') }
+
+    // 多轮内部轮询保留（maxAttempts > 1 时使用）
     await new Promise(r => setTimeout(r, 2000))
   }
 

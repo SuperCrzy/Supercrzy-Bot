@@ -63,10 +63,12 @@ export function estimateMessagesTokens(messages: AgentMessage[]): number {
 
 /**
  * 判断是否需要压缩
+ * @param contextWindow 模型上下文窗口（tokens），不传用默认 128K —— 支持按模型动态配置
  */
-export function shouldCompress(messages: AgentMessage[]): boolean {
+export function shouldCompress(messages: AgentMessage[], contextWindow?: number): boolean {
   const tokens = estimateMessagesTokens(messages)
-  const threshold = COMPRESSION_CONFIG.MAX_CONTEXT_TOKENS * COMPRESSION_CONFIG.THRESHOLD_RATIO
+  const window = contextWindow && contextWindow > 0 ? contextWindow : COMPRESSION_CONFIG.MAX_CONTEXT_TOKENS
+  const threshold = window * COMPRESSION_CONFIG.THRESHOLD_RATIO
   return tokens > threshold
 }
 

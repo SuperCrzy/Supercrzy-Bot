@@ -1,5 +1,6 @@
 import Router from 'koa-router'
 import type { Context } from 'koa'
+import { randomBytes } from 'crypto'
 import { getDB } from '../services/database'
 
 export const settingsRouter = new Router({ prefix: '/api/settings' })
@@ -10,10 +11,10 @@ export function maskSecret(value: string, headLen: number): string {
 }
 
 // Numeric keys that should be parsed as float
-const FLOAT_KEYS = ['temperature', 'maxTokens', 'maxTurns', 'gatewayTimeout', 'drainTimeout', 'memoryCharLimit', 'userProfileCharLimit', 'idleTimeout', 'scheduledResetHour']
+const FLOAT_KEYS = ['temperature', 'maxTokens', 'maxTurns', 'gatewayTimeout', 'memoryCharLimit', 'idleTimeout']
 
 // Boolean keys that should be parsed as boolean
-const BOOL_KEYS = ['streamingEnabled', 'compactMode', 'showReasoning', 'showCost', 'inlineDiff', 'completionSound', 'busyInputMode', 'memoryEnabled', 'userProfileEnabled', 'sessionAuthEnabled', 'liveMonitorHumanOnly', 'piiMaskingEnabled']
+const BOOL_KEYS = ['streamingEnabled', 'compactMode', 'showReasoning', 'showCost', 'completionSound', 'busyInputMode', 'memoryEnabled', 'piiMaskingEnabled']
 
 // Get all settings
 settingsRouter.get('/', (ctx: Context) => {
@@ -40,6 +41,12 @@ settingsRouter.get('/', (ctx: Context) => {
     settings.hasQqAppSecret = true
     delete settings.qqAppSecret
   }
+  // 访问令牌：不返回明文，只返回 masked + 标记（明文仅在生成时一次性展示）
+  if (settings.accessToken) {
+    settings.accessTokenMasked = maskSecret(settings.accessToken, 8)
+    settings.hasAccessToken = true
+    delete settings.accessToken
+  }
   ctx.body = settings
 })
 
@@ -60,20 +67,32 @@ settingsRouter.post('/', (ctx: Context) => {
       // API & Model
       'apiKey', 'model', 'systemPrompt', 'temperature', 'maxTokens', 'enabledModels',
       // UI
-      'language', 'theme',
+      'language', 'theme', 'currentSessionId',
       // 显示 Display
       'streamingEnabled', 'compactMode', 'showReasoning', 'showCost',
-      'inlineDiff', 'completionSound', 'busyInputMode',
+      'completionSound', 'busyInputMode',
       // 代理 Agent
-      'maxTurns', 'gatewayTimeout', 'drainTimeout', 'toolStrategy',
+      'maxTurns', 'gatewayTimeout',
       // 记忆 Memory
-      'memoryEnabled', 'userProfileEnabled', 'memoryCharLimit', 'userProfileCharLimit',
-      // 会话 Session
-      'sessionAuthEnabled', 'resetMode', 'idleTimeout', 'scheduledResetHour', 'liveMonitorHumanOnly',
+      'memoryEnabled', 'memoryCharLimit',
       // 隐私 Privacy
       'piiMaskingEnabled',
+      // 工具授权模式（auto=始终允许 / prompt=每次询问 / deny=一律拒绝）
+      'toolApprovalMode', 'toolAutoApproveSeconds', 'reasoningLevel', 'fallbackModel',
+      // Tavily 搜索 API key（web_search 工具优先用，未配置时回退 Serper/Bing RSS）
+      'tavilyApiKey',
+      // Serper 搜索 API key（Google 原生结果，免费 2500 次/月；服务端执行不受本地网络限制）
+      'serperApiKey',
+      // SearXNG 自建元搜索地址（如 http://VPS_IP:8080；聚合 70+ 引擎，配了之后 Serper/Bing 之间优先）
+      'searxngUrl',
+      // Jina Reader API key（web_fetch 优先用官方端点，更稳定、免费 100w token/月）
+      'jinaApiKey',
+      // Embedding 混合检索（memory_recall：FTS5 + 语义余弦融合 α=0.8；配 key 才激活，默认硅基流动 BGE-M3）
+      'embeddingApiKey', 'embeddingBaseUrl', 'embeddingModel',
+      // 生图 Provider 配置（generate_image 工具：pollinations 免key / doubao 火山方舟 / gemini 谷歌 / stability / replicate / openai）
+      'imageProvider', 'imageApiKey', 'doubaoModel', 'geminiImageModel', 'openaiImageModel', 'replicateModel',
       // 账户 Account
-      'username',
+      'username', 'userName', 'userAvatar', 'accessToken',
     ]
     const stmt = db.prepare("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))")
 
@@ -116,4 +135,12 @@ settingsRouter.post('/', (ctx: Context) => {
     ctx.status = 500
     ctx.body = { error: err.message }
   }
+})
+
+// 生成新的访问令牌（旧令牌立即失效）。明文仅在本次响应返回，后续只能看到掩码
+settingsRouter.post('/token', (ctx: Context) => {
+  const db = getDB()
+  const token = randomBytes(24).toString('hex')
+  db.prepare("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('accessToken', ?, datetime('now'))").run(token)
+  ctx.body = { token, masked: maskSecret(token, 8) }
 })

@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SUPERCRZY BOT — 产品介绍</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+    color: #fff;
+    min-height: 100vh;
+  }
+  nav {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 20px 60px; background: rgba(0,0,0,0.3);
+    position: sticky; top: 0; backdrop-filter: blur(10px);
+  }
+  .logo { font-size: 22px; font-weight: 700; letter-spacing: 1px; }
+  .logo span { color: #7c5cff; }
+  nav a { color: #ccc; text-decoration: none; margin-left: 30px; transition: .3s; }
+  nav a:hover { color: #fff; }
+  .hero {
+    text-align: center; padding: 120px 20px 80px;
+    background: radial-gradient(circle at 50% 30%, rgba(124,92,255,0.3), transparent 60%);
+  }
+  .hero h1 { font-size: 56px; font-weight: 800; margin-bottom: 20px; }
+  .hero h1 em { font-style: normal; color: #7c5cff; }
+  .hero p { font-size: 20px; color: #b8b8d0; max-width: 600px; margin: 0 auto 40px; line-height: 1.8; }
+  .btn {
+    padding: 14px 40px; border-radius: 50px; font-size: 16px; font-weight: 600;
+    border: none; cursor: pointer; transition: .3s;
+  }
+  .btn-primary { background: #7c5cff; color: #fff; }
+  .btn-primary:hover { background: #9278ff; transform: translateY(-2px); box-shadow: 0 10px 30px rgba(124,92,255,0.4); }
+  .features {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 30px; padding: 80px 60px; max-width: 1200px; margin: 0 auto;
+  }
+  .card {
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 16px; padding: 30px; backdrop-filter: blur(10px);
+    transition: .3s;
+  }
+  .card:hover { transform: translateY(-6px); border-color: rgba(124,92,255,0.5); }
+  .card .icon { font-size: 36px; margin-bottom: 16px; }
+  .card h3 { font-size: 20px; margin-bottom: 12px; }
+  .card p { color: #b8b8d0; line-height: 1.7; font-size: 15px; }
+  .cta { text-align: center; padding: 80px 20px; }
+  .cta h2 { font-size: 32px; margin-bottom: 30px; }
+  footer { text-align: center; padding: 30px; color: #666; font-size: 14px; border-top: 1px solid rgba(255,255,255,0.1); }
+</style>
+</head>
+<body>
+  <nav>
+    <div class="logo">SUPERCRZY <span>BOT</span></div>
+    <div>
+      <a href="#features">特性</a>
+      <a href="#cta">开始使用</a>
+    </div>
+  </nav>
+
+  <section class="hero">
+    <h1>会<em>思考</em>的智能中枢</h1>
+    <p>SUPERCRZY BOT 连接多渠道、共享统一大脑，用真工具落地执行，是你的全能 AI 助手。</p>
+    <button class="btn btn-primary" onclick="alert('感谢关注！立即体验 SUPERCRZY BOT 🚀')">立即体验</button>
+  </section>
+
+  <section class="features" id="features">
+    <div class="card">
+      <div class="icon">🧠</div>
+      <h3>统一大脑</h3>
+      <p>Web / 微信 / QQ 多通道共享同一记忆、会话与技能库。</p>
+    </div>
+    <div class="card">
+      <div class="icon">🛠️</div>
+      <h3>真工具落地</h3>
+      <p>文件、Shell、搜索、技能全真实执行，交付可验证结果。</p>
+    </div>
+    <div class="card">
+      <div class="icon">📚</div>
+      <h3>长期记忆</h3>
+      <p>主动沉淀经验，跨对话复用方法论，越用越懂你。</p>
+    </div>
+    <div class="card">
+      <div class="icon">⚡</div>
+      <h3>极速响应</h3>
+      <p>轻量高速推理，多任务并行，快而不失准确。</p>
+    </div>
+  </section>
+
+  <section class="cta" id="cta">
+    <h2>准备好体验了吗？</h2>
+    <button class="btn btn-primary" onclick="alert('开始使用 SUPERCRZY BOT 🎉')">立即开始</button>
+  </section>
+
+  <footer>© 2026 SUPERCRZY BOT · 会思考的智能中枢</footer>
+</body>
+</html>

@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#0b0f1a">
+<title>旗舰手机专题 · 2026</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  :root {
+    --bg: #0b0f1a;
+    --card: #141a2b;
+    --line: rgba(255,255,255,.08);
+    --text: #e8ecf4;
+    --sub: #8b93a7;
+    --accent: #38d9f5;
+    --accent2: #7a5cff;
+    --gold: #ffc857;
+  }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    max-width: 640px;
+    margin: 0 auto;
+    min-height: 100vh;
+  }
+
+  /* ===== 顶部横幅 ===== */
+  .hero {
+    position: relative;
+    padding: 56px 24px 44px;
+    text-align: center;
+    background:
+      radial-gradient(ellipse 120% 80% at 50% -20%, rgba(122,92,255,.35), transparent 60%),
+      radial-gradient(ellipse 100% 60% at 80% 110%, rgba(56,217,245,.18), transparent 60%),
+      linear-gradient(180deg, #0e1424, #0b0f1a);
+    border-bottom: 1px solid var(--line);
+    overflow: hidden;
+  }
+  .hero .tag {
+    display: inline-block;
+    font-size: 12px;
+    letter-spacing: 3px;
+    color: var(--accent);
+    border: 1px solid rgba(56,217,245,.35);
+    border-radius: 999px;
+    padding: 4px 14px;
+    margin-bottom: 16px;
+    background: rgba(56,217,245,.08);
+  }
+  .hero h1 {
+    font-size: 34px;
+    font-weight: 800;
+    letter-spacing: 2px;
+    background: linear-gradient(90deg, #38d9f5, #7a5cff, #38d9f5);
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: shine 4s linear infinite;
+  }
+  @keyframes shine { to { background-position: 200% 0; } }
+  .hero p {
+    margin-top: 10px;
+    font-size: 14px;
+    color: var(--sub);
+  }
+  .hero .date {
+    margin-top: 18px;
+    font-size: 12px;
+    color: var(--sub);
+    letter-spacing: 1px;
+  }
+
+  /* ===== 导航 Tab ===== */
+  .tabs {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    display: flex;
+    background: rgba(11,15,26,.92);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--line);
+  }
+  .tabs button {
+    flex: 1;
+    padding: 14px 0;
+    background: none;
+    border: none;
+    color: var(--sub);
+    font-size: 14px;
+    cursor: pointer;
+    position: relative;
+    transition: color .2s;
+  }
+  .tabs button.active { color: var(--accent); font-weight: 600; }
+  .tabs button.active::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    bottom: 0;
+    transform: translateX(-50%);
+    width: 28px;
+    height: 3px;
+    border-radius: 3px 3px 0 0;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+  }
+
+  /* ===== 内容卡片 ===== */
+  .list { padding: 20px 16px 40px; }
+  .card {
+    display: flex;
+    gap: 14px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 16px;
+    margin-bottom: 14px;
+    transition: transform .15s, border-color .2s;
+  }
+  .card:active { transform: scale(.98); }
+  .card .thumb {
+    flex-shrink: 0;
+    width: 76px;
+    height: 76px;
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 30px;
+    background: linear-gradient(135deg, rgba(56,217,245,.15), rgba(122,92,255,.15));
+    border: 1px solid var(--line);
+  }
+  .card .info { flex: 1; min-width: 0; }
+  .card .info h3 {
+    font-size: 16px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .card .badge {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--gold);
+    border: 1px solid rgba(255,200,87,.4);
+    background: rgba(255,200,87,.1);
+    border-radius: 6px;
+    padding: 1px 6px;
+    white-space: nowrap;
+  }
+  .card .info .desc {
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--sub);
+    line-height: 1.6;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .card .info .meta {
+    margin-top: 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .card .price { font-size: 15px; font-weight: 700; color: var(--accent); }
+  .card .btn {
+    font-size: 12px;
+    color: var(--accent2);
+    border: 1px solid rgba(122,92,255,.45);
+    border-radius: 999px;
+    padding: 4px 12px;
+    cursor: pointer;
+    background: rgba(122,92,255,.1);
+  }
+
+  /* ===== 底部 ===== */
+  .footer {
+    padding: 20px 16px 32px;
+    text-align: center;
+    font-size: 12px;
+    color: var(--sub);
+    border-top: 1px solid var(--line);
+  }
+  .footer a { color: var(--accent); text-decoration: none; }
+
+  .empty {
+    text-align: center;
+    padding: 60px 0;
+    color: var(--sub);
+    font-size: 14px;
+  }
+</style>
+</head>
+<body>
+
+  <!-- 顶部横幅 -->
+  <header class="hero">
+    <span class="tag">SPECIAL TOPIC</span>
+    <h1>旗舰手机专题</h1>
+    <p>2026 年新一代旗舰机型速览 · 影像 · 性能 · 续航</p>
+    <div class="date">更新于 2026年8月27日</div>
+  </header>
+
+  <!-- 分类 Tab -->
+  <nav class="tabs" id="tabs"></nav>
+
+  <!-- 机型列表 -->
+  <main class="list" id="list"></main>
+
+  <footer class="footer">
+    本页为专题模板示例，机型参数为占位内容，可自行替换<br>
+    数据源：示例数据 · <a href="#">返回顶部</a>
+  </footer>
+
+<script>
+// ========== 数据区：替换成你的真实内容即可 ==========
+var PHONES = [
+  {
+    name: "星耀 X1 Pro",
+    tag: "旗舰",
+    icon: "📱",
+    desc: "6.7 英寸 2K 曲面屏，新一代旗舰芯片，一英寸大底主摄，支持 120W 快充。",
+    price: "¥4999 起",
+    cat: "旗舰"
+  },
+  {
+    name: "星耀 X1",
+    tag: "次旗舰",
+    icon: "📲",
+    desc: "均衡之选：长续航大电池 + 旗舰级性能，适合日常与游戏兼顾的用户。",
+    price: "¥3499 起",
+    cat: "旗舰"
+  },
+  {
+    name: "星耀 Fold 3",
+    tag: "折叠屏",
+    icon: "📂",
+    desc: "轻薄折叠机身，展开 8.0 英寸大屏，悬停多角度拍摄，商务娱乐两不误。",
+    price: "¥8999 起",
+    cat: "折叠屏"
+  },
+  {
+    name: "星耀 Flip",
+    tag: "小折叠",
+    icon: "🪞",
+    desc: "掌心大小的小折叠，外屏即拍即看，自拍神器，多种潮流配色。",
+    price: "¥5999 起",
+    cat: "折叠屏"
+  },
+  {
+    name: "星耀 Pro Max",
+    tag: "影像",
+    icon: "📷",
+    desc: "专业影像旗舰：2 亿像素潜望长焦，夜景人像大师，电影级视频录制。",
+    price: "¥6999 起",
+    cat: "影像"
+  },
+  {
+    name: "星耀 Air",
+    tag: "轻旗舰",
+    icon: "🪶",
+    desc: "不到 170g 的轻薄机身，小屏爱好者的理想选择，握持手感极佳。",
+    price: "¥2999 起",
+    cat: "影像"
+  }
+];
+
+// 分类配置
+var CATS = [
+  { key: "all", label: "全部" },
+  { key: "旗舰", label: "旗舰" },
+  { key: "折叠屏", label: "折叠屏" },
+  { key: "影像", label: "影像" }
+];
+
+// ========== 渲染逻辑 ==========
+function renderTabs() {
+  var html = "";
+  CATS.forEach(function (c, i) {
+    html += '<button data-key="' + c.key + '" class="' + (i === 0 ? "active" : "") + '">' + c.label + "</button>";
+  });
+  document.getElementById("tabs").innerHTML = html;
+}
+
+function renderList(key) {
+  var list = document.getElementById("list");
+  var items = key === "all" ? PHONES : PHONES.filter(function (p) { return p.cat === key; });
+  if (!items.length) {
+    list.innerHTML = '<div class="empty">该分类暂无内容</div>';
+    return;
+  }
+  var html = "";
+  items.forEach(function (p) {
+    html +=
+      '<article class="card">' +
+        '<div class="thumb">' + p.icon + "</div>" +
+        '<div class="info">' +
+          "<h3>" + p.name + '<span class="badge">' + p.tag + "</span></h3>" +
+          '<p class="desc">' + p.desc + "</p>" +
+          '<div class="meta">' +
+            '<span class="price">' + p.price + "</span>" +
+            '<span class="btn">查看详情</span>' +
+          "</div>" +
+        "</div>" +
+      "</article>";
+  });
+  list.innerHTML = html;
+}
+
+// 绑定 Tab 切换
+document.getElementById("tabs").addEventListener("click", function (e) {
+  var btn = e.target.closest("button");
+  if (!btn) return;
+  document.querySelectorAll("#tabs button").forEach(function (b) { b.classList.remove("active"); });
+  btn.classList.add("active");
+  renderList(btn.dataset.key);
+});
+
+renderTabs();
+renderList("all");
+</script>
+</body>
+</html>

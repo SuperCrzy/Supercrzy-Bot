@@ -15,10 +15,10 @@ import { createServer } from 'http'
 import { config } from './config'
 import { initDatabase } from './services/database'
 import { createTerminalServer } from './services/terminal'
-// ── ECC-inspired enhancements ──
-import "./services/hooks"
+import { createGhostServer } from './services/ghost-ws'
 import { startTunnel, stopTunnel, renderPreviewPage, getTunnelUrl, createPreviewLink } from './services/tunnel'
 import { chatRouter } from './routes/chat'
+import { fsRouter } from './routes/filesystem'
 import { settingsRouter } from './routes/settings'
 import { sessionRouter } from './routes/session'
 import { historyRouter } from './routes/history'
@@ -38,11 +38,13 @@ import tasksRouter from './routes/tasks'
 import automationsRouter from './routes/automations'
 import { modelsRouter } from './routes/models'
 import { workspaceRouter } from './routes/workspace'
+import { ocrRouter } from './routes/ocr'
 import checkpointsRouter from './routes/checkpoints'
 import { playbookRouter } from './routes/playbook'
 import { rolesRouter } from './routes/roles'
 import { systemRouter } from './routes/system'
 import { ghostRouter } from './routes/ghost'
+import { terminalRouter } from './routes/terminal'
 import { startGhostWatcher } from './services/ghost-watch'
 import { startScheduler } from './services/scheduler'
 import { loadCredentials, sendMessage } from './services/wechat-ilink'
@@ -54,6 +56,10 @@ import { readFileSync, readdirSync, statSync, existsSync } from 'fs'
 import { join, relative, dirname, resolve, sep } from 'path'
 import { fileURLToPath } from 'url'
 import os from 'os'
+import { stopComputerUse } from './services/computer-use'
+import { mcpRouter } from './routes/mcp'
+import { routineRouter } from './routes/routines'
+import { stopAllMcp } from './services/mcp-manager'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -102,7 +108,6 @@ async function bootstrap() {
     glob: '查找文件', ask_followup_question: '提问',
     web_search: '网络搜索', web_fetch: '网页抓取',
     task_create: '创建任务', task_update: '更新任务',
-    notebook_edit: '笔记编辑',
     // Agent 工具名（来自 agent.ts / tools.ts）
     file_read: '读取文件', file_write: '写入文件', file_exists: '检查文件',
     shell_exec: '执行命令',
@@ -371,9 +376,14 @@ async function bootstrap() {
   }))
   app.use(bodyParser())
 
-  // API 鉴权：配置 API_TOKEN 后，非本地来源的 /api 请求需 Authorization: Bearer <token>
-  const API_TOKEN = process.env.API_TOKEN || ''
+  // API 鉴权：配置访问令牌后，非本地来源的 /api 请求需 Authorization: Bearer <token>
+  // 令牌来源：settings 表 accessToken（设置页生成，优先）|| 环境变量 API_TOKEN（兜底）
   app.use(async (ctx, next) => {
+    let API_TOKEN = process.env.API_TOKEN || ''
+    try {
+      const row = getDB().prepare("SELECT value FROM settings WHERE key = 'accessToken'").get() as { value: string } | undefined
+      if (row?.value) API_TOKEN = row.value
+    } catch { /* DB 未初始化时跳过 */ }
     if (!API_TOKEN || !ctx.path.startsWith('/api/') || ctx.path === '/api/health') return next()
     const origin = ctx.request.header.origin || ''
     const isLocal = !origin || origin.includes('localhost') || origin.includes('127.0.0.1')
@@ -386,15 +396,19 @@ async function bootstrap() {
     return next()
   })
 
-  // 托管前端构建产物（dist 目录）
-  const distPath = join(__dirname, '../../client/dist')
+  // 托管前端构建产物：dev 在 ../../client/dist；打包后（electron-builder extraResources）在 Resources/client-dist
+  const distCandidates = [
+    join(__dirname, '../../client/dist'),        // dev（monorepo：server/src → packages/client/dist）
+    join(__dirname, '../../../../client-dist'),  // 打包（Resources/backend/packages/server/src → Resources/client-dist）
+  ]
+  const distPath = distCandidates.find((p) => existsSync(join(p, 'index.html'))) || distCandidates[0]
   if (existsSync(distPath)) {
     app.use(serve(distPath))
     console.log(`[static] Serving frontend from ${distPath}`)
   }
 
   // API Routes
-  const routers = [uploadRouter, chatRouter, settingsRouter, sessionRouter, historyRouter, statsRouter, memoryRouter, gatewayRouter, skillsRouter, tasksRouter, automationsRouter, modelsRouter, workspaceRouter, checkpointsRouter, playbookRouter, rolesRouter, systemRouter, ghostRouter]
+  const routers = [uploadRouter, chatRouter, fsRouter, settingsRouter, sessionRouter, historyRouter, statsRouter, memoryRouter, gatewayRouter, skillsRouter, tasksRouter, automationsRouter, modelsRouter, workspaceRouter, ocrRouter, checkpointsRouter, playbookRouter, rolesRouter, systemRouter, ghostRouter, mcpRouter, routineRouter, terminalRouter]
   for (const r of routers) {
     app.use(r.routes())
     app.use(r.allowedMethods())
@@ -441,6 +455,10 @@ async function bootstrap() {
 
   const server = createServer(app.callback())
 
+  // 幽灵工作台 WebSocket（/ws/ghost，实时看板推送）——必须先于 terminal 注册：
+  // ws 库 {server,path} 实例对不匹配 path 的 upgrade 请求会直接 abort(400)，后注册者收不到
+  createGhostServer(server)
+
   // Terminal WebSocket
   createTerminalServer(server)
 
@@ -458,7 +476,6 @@ async function bootstrap() {
     console.log(`   Local:   http://localhost:${PORT}`)
     if (localIP) console.log(`   Network: http://${localIP}:${PORT}`)
     if (getTunnelUrl()) console.log(`   Tunnel:  ${getTunnelUrl()}`)
-    console.log(`   Socket.IO: port ${process.env.IO_PORT || '3002'}`)
     console.log(`   Workspace: ${WORKSPACE_ROOT}\n`)
 
     // 恢复已启用的各平台通道（常驻后台）
@@ -486,11 +503,15 @@ async function bootstrap() {
   process.on('SIGINT', async () => {
     console.log('\n[Shutdown] SIGINT received')
     await stopTunnel()
+    stopComputerUse()
+    stopAllMcp()
     process.exit(0)
   })
   process.on('SIGTERM', async () => {
     console.log('\n[Shutdown] SIGTERM received')
     await stopTunnel()
+    stopComputerUse()
+    stopAllMcp()
     process.exit(0)
   })
 }

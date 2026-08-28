@@ -29,28 +29,8 @@ const storage = multer.diskStorage({
 
 // File filter: allow images, PDF, Word, Excel, plain text, code files
 function fileFilter(_req: any, file: Express.Multer.File, cb: (error: Error | null, acceptFile: boolean) => void) {
-  const allowedTypes = [
-    // Images
-    'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml', 'image/bmp',
-    // Documents
-    'application/pdf',
-    'application/msword',
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    'application/vnd.ms-excel',
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    'application/vnd.ms-powerpoint',
-    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-    // Text/Code
-    'text/plain', 'text/csv', 'text/html', 'text/css', 'text/javascript', 'text/markdown',
-    'application/json', 'application/xml', 'application/yaml',
-    'application/zip', 'application/x-tar', 'application/gzip',
-  ]
-
-  if (allowedTypes.includes(file.mimetype)) {
-    cb(null, true)
-  } else {
-    cb(new Error(`不支持的文件类型: ${file.mimetype}`), false)
-  }
+  // 放宽为全类型可传（老板 2026-08-25：上传文件不限制类型；图片/文档/视频/音频/任意格式）
+  cb(null, true)
 }
 
 const upload = multer({
@@ -78,6 +58,8 @@ uploadRouter.post('/', upload.array('files', 5), async (ctx: Context) => {
   const results = files.map((file) => {
     const fileId = uuidv4()
     const fileUrl = `/api/upload/files/${basename(file.filename)}`
+    // multer 的 originalname 是 latin1 解码（中文文件名乱码）→ 转回 utf8（ASCII 无损）
+    const originalName = Buffer.from(file.originalname, 'latin1').toString('utf8')
 
     // Save to database
     db.prepare(
@@ -85,7 +67,7 @@ uploadRouter.post('/', upload.array('files', 5), async (ctx: Context) => {
     ).run(
       fileId,
       sessionId,
-      file.originalname,
+      originalName,
       file.filename,
       file.mimetype,
       file.size,
@@ -94,7 +76,7 @@ uploadRouter.post('/', upload.array('files', 5), async (ctx: Context) => {
 
     return {
       id: fileId,
-      name: file.originalname,
+      name: originalName,
       type: file.mimetype,
       size: file.size,
       url: fileUrl,

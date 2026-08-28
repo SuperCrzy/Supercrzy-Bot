@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SUPERCRZY BOT - 全能 AI 助手</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'PingFang SC','Microsoft YaHei',sans-serif;
+    background:#0f0f1a; color:#e8e8f0; line-height:1.7; overflow-x:hidden;
+  }
+  /* 背景光晕 */
+  .bg {
+    position:fixed; inset:0; z-index:-1;
+    background:
+      radial-gradient(600px 400px at 15% 20%, rgba(124,58,237,.25), transparent 60%),
+      radial-gradient(500px 350px at 85% 30%, rgba(34,211,238,.18), transparent 60%),
+      radial-gradient(700px 500px at 50% 90%, rgba(168,85,247,.15), transparent 60%);
+  }
+  /* 导航 */
+  nav {
+    position:sticky; top:0; z-index:100;
+    backdrop-filter:blur(12px); background:rgba(15,15,26,.7);
+    border-bottom:1px solid rgba(255,255,255,.08);
+  }
+  .nav-inner {
+    max-width:1100px; margin:0 auto; padding:14px 24px;
+    display:flex; align-items:center; justify-content:space-between;
+  }
+  .logo { font-weight:800; font-size:1.2rem; background:linear-gradient(90deg,#a78bfa,#22d3ee); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; }
+  .nav-links a { color:#b0b0c0; text-decoration:none; margin-left:24px; font-size:.9rem; transition:color .2s; }
+  .nav-links a:hover { color:#a78bfa; }
+  @media(max-width:720px){ .nav-links a{ margin-left:12px; font-size:.8rem; } }
+
+  .wrap { max-width:1100px; margin:0 auto; padding:0 24px; }
+
+  /* Hero */
+  .hero { padding:80px 0 50px; text-align:center; }
+  .hero h1 {
+    font-size:3rem; font-weight:900; line-height:1.2;
+    background:linear-gradient(90deg,#c4b5fd,#22d3ee,#a78bfa);
+    -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
+  }
+  .hero p { max-width:680px; margin:20px auto 0; color:#b0b0c0; font-size:1.1rem; }
+  .badges { display:flex; justify-content:center; gap:16px; flex-wrap:wrap; margin-top:30px; }
+  .badge {
+    background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.12);
+    padding:12px 24px; border-radius:12px; min-width:120px;
+  }
+  .badge b { font-size:1.6rem; color:#22d3ee; display:block; }
+  .badge span { font-size:.8rem; color:#8a8aa0; }
+
+  section { padding:50px 0; }
+  .sec-title { font-size:1.6rem; font-weight:800; margin-bottom:30px; text-align:center; }
+  .sec-title em { font-style:normal; color:#a78bfa; }
+
+  /* 能力卡片 */
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:20px; }
+  .card {
+    background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.1);
+    border-radius:16px; padding:24px; transition:transform .25s, border-color .25s;
+  }
+  .card:hover { transform:translateY(-4px); border-color:rgba(167,139,250,.5); }
+  .card .ico { font-size:1.8rem; }
+  .card h3 { margin:12px 0 8px; font-size:1.1rem; }
+  .card p { color:#a0a0b4; font-size:.9rem; }
+
+  /* 技术栈 */
+  .tags { display:flex; flex-wrap:wrap; gap:10px; justify-content:center; }
+  .tag {
+    background:rgba(34,211,238,.1); border:1px solid rgba(34,211,238,.3);
+    color:#7dd3fc; padding:8px 16px; border-radius:999px; font-size:.85rem;
+  }
+
+  /* 时间线 */
+  .timeline { max-width:700px; margin:0 auto; }
+  .tl-item { display:flex; gap:16px; padding:12px 0; }
+  .tl-dot { width:12px; height:12px; border-radius:50%; background:#a78bfa; margin-top:8px; flex-shrink:0; box-shadow:0 0 10px #a78bfa; }
+  .tl-item p { color:#b0b0c0; font-size:.95rem; }
+
+  /* 渠道 */
+  .channels { display:flex; flex-wrap:wrap; justify-content:center; gap:14px; }
+  .ch {
+    background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.12);
+    padding:10px 20px; border-radius:10px; font-size:.9rem; color:#d0d0e0;
+  }
+
+  /* 原则 */
+  .principles { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:18px; }
+  .principle { background:rgba(167,139,250,.08); border:1px solid rgba(167,139,250,.2); border-radius:14px; padding:20px; text-align:center; }
+  .principle b { color:#a78bfa; }
+
+  /* CTA */
+  .cta { text-align:center; padding:60px 0 80px; }
+  .cta-btn {
+    display:inline-block; padding:16px 40px; border-radius:999px;
+    background:linear-gradient(90deg,#7c3aed,#22d3ee); color:#fff;
+    font-size:1.1rem; font-weight:700; text-decoration:none;
+    box-shadow:0 8px 30px rgba(124,58,237,.4); transition:transform .2s;
+  }
+  .cta-btn:hover { transform:scale(1.05); }
+
+  footer { text-align:center; padding:30px; color:#666680; font-size:.85rem; border-top:1px solid rgba(255,255,255,.06); }
+</style>
+</head>
+<body>
+<div class="bg"></div>
+
+<nav>
+  <div class="nav-inner">
+    <div class="logo">⚡ SUPERCRZY BOT</div>
+    <div class="nav-links">
+      <a href="#capabilities">能力</a>
+      <a href="#stack">技术栈</a>
+      <a href="#growth">成长</a>
+      <a href="#channels">渠道</a>
+    </div>
+  </div>
+</nav>
+
+<div class="wrap">
+  <!-- Hero -->
+  <div class="hero">
+    <h1>SUPERCRZY BOT</h1>
+    <p>不止是聊天机器人，而是能真正动手做事、产出可验证结果的执行型智能体。你的全能 AI 助手。</p>
+    <div class="badges">
+      <div class="badge"><b>29+</b><span>已装技能</span></div>
+      <div class="badge"><b>14</b><span>长时记忆</span></div>
+      <div class="badge"><b>8+</b><span>接入渠道</span></div>
+      <div class="badge"><b>24/7</b><span>随时在线</span></div>
+    </div>
+  </div>
+
+  <!-- 六大能力 -->
+  <section id="capabilities">
+    <div class="sec-title">六大 <em>核心能力</em></div>
+    <div class="grid">
+      <div class="card"><div class="ico">💬</div><h3>智能问答</h3><p>回答问题、解释概念、头脑风暴、撰写文案，理解你的真实意图。</p></div>
+      <div class="card"><div class="ico">📄</div><h3>文件处理</h3><p>读写本地文件，生成 Word / Excel / PPT / PDF，转换与解析各种文档。</p></div>
+      <div class="card"><div class="ico">🧠</div><h3>长期记忆</h3><p>跨对话记住你的偏好、项目事实、经验教训，越用越懂你。</p></div>
+      <div class="card"><div class="ico">🔍</div><h3>实时搜索</h3><p>搜索互联网、抓取网页正文，最新资讯一跳命中，绝不编造。</p></div>
+      <div class="card"><div class="ico">🎨</div><h3>画图制表</h3><p>绘制架构图、流程图、数据可视化，让复杂概念一目了然。</p></div>
+      <div class="card"><div class="ico">💻</div><h3>开发执行</h3><p>写代码、跑命令、做项目检查、Git 提交，真正落地交付。</p></div>
+    </div>
+  </section>
+
+  <!-- 技术栈 -->
+  <section id="stack">
+    <div class="sec-title">核心 <em>技术栈</em></div>
+    <div class="tags">
+      <span class="tag">Python</span><span class="tag">Node.js</span><span class="tag">RapidOCR</span>
+      <span class="tag">Shell</span><span class="tag">SVG</span><span class="tag">Markdown</span>
+      <span class="tag">Puppeteer</span><span class="tag">FastAPI</span><span class="tag">Koa</span><span class="tag">SQLite</span>
+    </div>
+  </section>
+
+  <!-- 成长机制 -->
+  <section id="growth">
+    <div class="sec-title">自我 <em>成长机制</em></div>
+    <div class="timeline">
+      <div class="tl-item"><div class="tl-dot"></div><p><b>主动学习</b> —— 遇到有价值的经验自动固化，无需你每次询问。</p></div>
+      <div class="tl-item"><div class="tl-dot"></div><p><b>经验复盘</b> —— 从实战中沉淀方法论，落地成可复用的规则。</p></div>
+      <div class="tl-item"><div class="tl-dot"></div><p><b>技能扩展</b> —— 内置 29 个技能，还能从 GitHub 搜索安装新能力。</p></div>
+      <div class="tl-item"><div class="tl-dot"></div><p><b>能力边界</b> —— 报喜也报忧，做不到的事第一时间明说。</p></div>
+    </div>
+  </section>
+
+  <!-- 渠道 -->
+  <section id="channels">
+    <div class="sec-title">多渠道 <em>接入</em></div>
+    <div class="channels">
+      <span class="ch">🌐 Web</span><span class="ch">📨 Telegram</span><span class="ch">💬 QQ</span>
+      <span class="ch">📱 微信</span><span class="ch">📮 钉钉</span><span class="ch">✈️ 飞书</span>
+      <span class="ch">💼 Slack</span><span class="ch">🎮 Discord</span><span class="ch">🏢 企业微信</span>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <div class="cta">
+    <div class="sec-title">让 SUPERCRZY BOT <em>助你一臂之力</em></div>
+    <a class="cta-btn" href="#">立即体验 →</a>
+  </div>
+</div>
+
+<footer>SUPERCRZY BOT · 越用越懂你 · 经验越攒越值钱</footer>
+</body>
+</html>

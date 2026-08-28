@@ -87,20 +87,34 @@ router.get('/', (ctx) => {
 router.post('/', (ctx) => {
   const db = getDB()
   const body = ctx.request.body as any
+
+  // 必填校验：缺 name/prompt 返回 400（而不是落库 500）
+  if (!body.name || !String(body.name).trim()) {
+    ctx.status = 400
+    ctx.body = { error: 'name is required' }
+    return
+  }
+  if (!body.prompt || !String(body.prompt).trim()) {
+    ctx.status = 400
+    ctx.body = { error: 'prompt is required' }
+    return
+  }
+
   const id = body.id || randomUUID()
   const now = Math.floor(Date.now() / 1000)
 
   const rrule = body.rrule || ''
   const scheduledAt = body.scheduled_at || body.scheduledAt || null
   const notifyChannel = body.notify_channel || ''
+  const eventTrigger = body.event_trigger || ''
   const nextRunAt = scheduledAt
     ? Math.floor(new Date(scheduledAt).getTime() / 1000)
     : body.schedule_type !== 'once' ? Math.floor(calcNextRun(rrule) / 1000) : 0
 
   db.prepare(`
-    INSERT INTO automations (id, name, prompt, status, schedule_type, rrule, scheduled_at, next_run_at, model_id, notify_channel, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, body.name, body.prompt, body.status || 'active', body.schedule_type || 'recurring', rrule, scheduledAt, nextRunAt, body.model_id || null, notifyChannel, now, now)
+    INSERT INTO automations (id, name, prompt, status, schedule_type, rrule, scheduled_at, next_run_at, model_id, event_trigger, notify_channel, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, body.name, body.prompt, body.status || 'active', body.schedule_type || 'recurring', rrule, scheduledAt, nextRunAt, body.model_id || null, eventTrigger, notifyChannel, now, now)
 
   const created = db.prepare('SELECT * FROM automations WHERE id = ?').get(id)
   ctx.body = created
@@ -118,7 +132,7 @@ router.patch('/:id', (ctx) => {
 
   const fields: string[] = []
   const values: any[] = []
-  const simpleFields = ['name', 'prompt', 'status', 'schedule_type', 'rrule', 'scheduled_at', 'model_id', 'notify_channel']
+  const simpleFields = ['name', 'prompt', 'status', 'schedule_type', 'rrule', 'scheduled_at', 'model_id', 'notify_channel', 'event_trigger']
 
   for (const f of simpleFields) {
     if (body[f] !== undefined) { fields.push(`${f} = ?`); values.push(body[f]) }
@@ -164,6 +178,19 @@ router.post('/:id/trigger', (ctx) => {
   )
 
   ctx.body = { success: true, prompt: auto.prompt, id: auto.id }
+})
+
+// 事件触发：模拟事件（file-changed / message-received / manual），匹配的自动化立即执行
+router.post('/event', async (ctx) => {
+  const { event, context } = (ctx.request.body as any) || {}
+  if (!event || typeof event !== 'string') {
+    ctx.status = 400
+    ctx.body = { error: 'event is required (file-changed | message-received | manual)' }
+    return
+  }
+  const { fireAutomationForEvent } = await import('../services/scheduler')
+  const fired = await fireAutomationForEvent(event, typeof context === 'string' ? context : undefined)
+  ctx.body = { success: true, fired }
 })
 
 export { calcNextRun }

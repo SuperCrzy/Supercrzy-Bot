@@ -24,16 +24,7 @@ interface ChannelConfig {
 
 export function initChannelsTable() {
   const db = getDB()
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS channels (
-      id TEXT PRIMARY KEY, platform TEXT NOT NULL, name TEXT NOT NULL,
-      enabled INTEGER DEFAULT 0, config TEXT DEFAULT '{}',
-      status TEXT DEFAULT 'disconnected',
-      error_message TEXT DEFAULT '',
-      created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
-    )
-  `)
-  // Migration: add error_message column (older DBs)
+  // 建表已统一归位 database.ts（2026-08-25）；这里只保留旧库 migration：补 error_message 列
   try {
     db.exec("ALTER TABLE channels ADD COLUMN error_message TEXT DEFAULT ''")
   } catch { /* already exists */ }
@@ -537,7 +528,10 @@ gatewayRouter.get('/wechat/qrcode/status', async (ctx: Context) => {
   if (!qrcode) { ctx.status=400; ctx.body={error:'qrcode required'}; return }
 
   try {
-    const result = await pollQRCodeStatus(qrcode, 3)
+    // 单次查询（不内部长轮询）：扫码确认节奏由前端控制（每 3s 查一次），
+    // 避免"后端 6s 窗口内未确认就过期"导致扫码授权了却存不上凭据
+    const result = await pollQRCodeStatus(qrcode, 1)
+    console.log(`[WeChat] qrcode status=${result.status} hasToken=${!!result.token}`)
     if (result.status === 'confirmed' && result.token) {
       saveCredentials({
         token: result.token,
@@ -546,6 +540,7 @@ gatewayRouter.get('/wechat/qrcode/status', async (ctx: Context) => {
         userId: result.userId || '',
         savedAt: Date.now(),
       })
+      console.log(`[WeChat] ✅ 凭据已保存 accountId=${result.accountId || '(空)'}`)
       ctx.body = { status: 'confirmed' }
 
       startBot(async (userId, text) => {

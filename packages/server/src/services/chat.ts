@@ -2,6 +2,9 @@ import type { Context } from 'koa'
 import { getDB } from '../services/database'
 import { config } from '../config'
 import { runAgentLoop } from './agent'
+import { basename, join } from 'path'
+import { readFile } from 'fs/promises'
+import { existsSync } from 'fs'
 
 /** 标准化 base URL，确保不会出现双重 /v1 */
 function normalizeBaseUrl(url: string): string {
@@ -236,6 +239,51 @@ export async function handleChat(ctx: Context) {
 }
 
 /**
+ * 视觉多模态：读取上传图片 → base64 data URL（2026-08-23 接入）
+ * img.url 形如 /api/upload/files/xxx，磁盘文件在 <cwd>/uploads/xxx
+ */
+async function imageToBase64DataUrl(url: string): Promise<string | null> {
+  try {
+    const filename = basename(url.split('?')[0])
+    if (!filename) return null
+    const filePath = join(process.cwd(), 'uploads', filename)
+    if (!existsSync(filePath)) return null
+    const buf = await readFile(filePath)
+    const mime = filename.endsWith('.png') ? 'image/png' : filename.endsWith('.gif') ? 'image/gif' : filename.endsWith('.webp') ? 'image/webp' : 'image/jpeg'
+    return `data:${mime};base64,${buf.toString('base64')}`
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 视觉注入：把图片 blocks 塞进最后一条 user 消息（content → 数组：text + image_url）
+ * 图片只能在 user 消息（DeepSeek 硬约束）；返回是否有图注入成功
+ */
+async function injectVisionImages(messages: any[], images?: Array<{ name?: string; url?: string }>): Promise<boolean> {
+  if (!images || images.length === 0) return false
+  const dataUrls: string[] = []
+  for (const img of images) {
+    if (!img?.url) continue
+    const b64 = await imageToBase64DataUrl(img.url)
+    if (b64) dataUrls.push(b64)
+  }
+  if (dataUrls.length === 0) return false
+  // 找最后一条 user 消息注入（首轮带图；历史轮次不带，符合硬约束）
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]?.role === 'user') {
+      const text = typeof messages[i].content === 'string' ? messages[i].content : ''
+      messages[i].content = [
+        { type: 'text', text: text || '请分析这张图片' },
+        ...dataUrls.map((url) => ({ type: 'image_url', image_url: { url } })),
+      ]
+      return true
+    }
+  }
+  return false
+}
+
+/**
  * Agent 模式 — 完整的智能体循环
  * 支持工具调用、记忆注入、多轮思考
  */
@@ -266,7 +314,12 @@ export async function handleAgentChat(ctx: Context) {
   )
   const systemPrompt = (db.prepare('SELECT value FROM settings WHERE key = ?').get('systemPrompt') as any)?.value || ''
   const savedMaxTurns = (db.prepare('SELECT value FROM settings WHERE key = ?').get('maxTurns') as any)?.value
-  const maxTurns = body.maxTurns || (savedMaxTurns ? parseInt(savedMaxTurns) : 80)
+  const maxTurns = body.maxTurns || (savedMaxTurns ? parseInt(savedMaxTurns) : 300)
+
+  // 视觉多模态：有图片附件 → 注入最后一条 user 消息 blocks + 模型切 vision-exp（2026-08-23）
+  const images = (body as any).images as Array<{ name?: string; url?: string }> | undefined
+  const visionInjected = await injectVisionImages(body.messages, images)
+  const effectiveModel = visionInjected ? 'deepseek-v4-flash-vision-exp' : model
 
   // 用 Koa 标准 SSE 头 + 原生 write 写数据
   ctx.set({
@@ -297,7 +350,7 @@ export async function handleAgentChat(ctx: Context) {
       ctx,
       body.messages,
       {
-        model,
+        model: effectiveModel,
         apiKey,
         baseUrl,
         temperature,
@@ -306,10 +359,302 @@ export async function handleAgentChat(ctx: Context) {
         maxTurns,
       },
       resumePath,
+      (body as any).sessionId,  // 会话级工具授权
+      (() => {  // 会话级工作目录 + 默认权限：从 sessions 表读取
+        try {
+          const sid = (body as any).sessionId
+          if (!sid) return { workspaceDir: '', permissionLevel: 'sandbox' as const }
+          const row = db.prepare('SELECT workspace_dir, permission_level FROM sessions WHERE id = ?').get(sid) as any
+          const level = row?.permission_level
+          return {
+            workspaceDir: row?.workspace_dir || '',
+            permissionLevel: ['workspace-only', 'sandbox', 'full'].includes(level) ? level : 'sandbox',
+          }
+        } catch { return { workspaceDir: '', permissionLevel: 'sandbox' as const } }
+      })(),
+      (body as any).language as string | undefined,  // 前端界面语言 → AI 回复语言跟随
     )
     ctx.res.end()
   } catch (err: any) {
     ctx.res.write(`event: error\ndata: ${JSON.stringify({ message: err.message })}\n\n`)
     ctx.res.end()
   }
+}
+
+
+/**
+ * 多模型对比 — 所有已配置模型并行回答同一问题 + 推荐最佳（创新功能）
+ * body: { messages, models?: string[] } —— models 不传则用全部已配置模型（上限 5 个）
+ * 返回: { results: [{ id, model, label, content, error }], recommendation, recommendationModel }
+ */
+export async function handleCompareChat(ctx: Context) {
+  const body = ctx.request.body as ChatRequestBody & { models?: string[]; providerConfigs?: Array<{ model: string; label?: string; baseUrl: string; apiKey: string }> }
+  if (!body.messages || !Array.isArray(body.messages) || body.messages.length === 0) {
+    ctx.status = 400
+    ctx.body = { error: 'messages is required' }
+    return
+  }
+  const db = getDB()
+  const systemPrompt = (db.prepare('SELECT value FROM settings WHERE key = ?').get('systemPrompt') as any)?.value || ''
+  const msgs = systemPrompt ? [{ role: 'system', content: systemPrompt }, ...body.messages] : body.messages
+
+  // 1. 候选模型：优先用前端传入的完整配置（localStorage 是模型配置权威来源，
+  //    用户刚配置的模型可能尚未同步进 custom_models 表 → 只输出默认模型的问题根因）
+  const candidates: Array<{ id: string; model: string; label: string; baseUrl: string; apiKey: string }> = []
+  const seen = new Set<string>()
+  if (Array.isArray(body.providerConfigs)) {
+    for (const pc of body.providerConfigs) {
+      if (!pc.model || !pc.apiKey || seen.has(pc.model)) continue
+      seen.add(pc.model)
+      candidates.push({ id: 'ls-' + pc.model, model: pc.model, label: pc.label || pc.model, baseUrl: pc.baseUrl, apiKey: pc.apiKey })
+    }
+  }
+
+  // 2. 补充 DB 中已配置模型（custom_models + 有 key 的 provider）
+  const rows = db.prepare(`
+    SELECT cm.id, cm.model_id, cm.display_name, cp.base_url, cp.api_key
+    FROM custom_models cm JOIN custom_providers cp ON cm.provider_id = cp.id
+    WHERE cm.enabled = 1 AND cp.enabled = 1 AND cp.api_key != ''
+  `).all() as Array<{ id: string; model_id: string; display_name: string; base_url: string; api_key: string }>
+  for (const r of rows) {
+    if (seen.has(r.model_id)) continue
+    seen.add(r.model_id)
+    candidates.push({ id: r.id, model: r.model_id, label: r.display_name || r.model_id, baseUrl: r.base_url, apiKey: r.api_key })
+  }
+
+  // 3. 兜底：默认模型（settings.model / deepseek）
+  const defaultModel = resolveModel(undefined)
+  const defaultKey = (db.prepare('SELECT value FROM settings WHERE key = ?').get('apiKey') as any)?.value || config.deepseek.apiKey
+  if (!seen.has(defaultModel)) {
+    const dp = resolveProvider(defaultModel, config.deepseek.baseUrl, defaultKey)
+    candidates.push({ id: 'default', model: defaultModel, label: defaultModel, baseUrl: dp.baseUrl, apiKey: dp.apiKey })
+  }
+
+  let chosen = candidates
+  if (body.models && body.models.length > 0) {
+    chosen = candidates.filter((c) => body.models!.includes(c.model) || body.models!.includes(c.id))
+  }
+  if (chosen.length === 0) {
+    ctx.status = 400
+    ctx.body = { error: 'No configured models. Add models in Models page first.' }
+    return
+  }
+  chosen = chosen.slice(0, 5)
+
+  // 2. 并行调用所有模型
+  const call = async (c: (typeof candidates)[number]) => {
+    try {
+      const url = normalizeBaseUrl(c.baseUrl) + '/v1/chat/completions'
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(c.apiKey.startsWith('tp-') ? { 'api-key': c.apiKey } : { Authorization: 'Bearer ' + c.apiKey }),
+        },
+        body: JSON.stringify({ model: c.model, messages: msgs, temperature: 0.7, max_tokens: 4096 }),
+      })
+      if (!resp.ok) throw new Error('HTTP ' + resp.status)
+      const data = await resp.json()
+      const content = data?.choices?.[0]?.message?.content || ''
+      return { id: c.id, model: c.model, label: c.label, content, error: '' }
+    } catch (e: any) {
+      return { id: c.id, model: c.model, label: c.label, content: '', error: e.message || 'failed' }
+    }
+  }
+  const results = await Promise.all(chosen.map(call))
+
+  // 3. 推荐：用第一个成功模型当评委，点评哪个回答最好
+  let recommendation = ''
+  let recommendationModel = ''
+  const okResults = results.filter((r) => r.content && !r.error)
+  if (okResults.length >= 2) {
+    try {
+      const first = okResults[0]
+      // 评委配置从候选列表取（results 不含 baseUrl/apiKey/model）
+      const judge = chosen.find((c) => c.id === first.id) || {
+        id: first.id,
+        model: config.deepseek.defaultModel,
+        label: first.label,
+        baseUrl: config.deepseek.baseUrl,
+        apiKey: (db.prepare('SELECT value FROM settings WHERE key = ?').get('apiKey') as any)?.value || config.deepseek.apiKey,
+      }
+      const judgePrompt = [
+        { role: 'system', content: 'You are a fair judge. Compare the following answers from different AI models to the same question, pick the ONE best answer, and explain why in 2-3 sentences in the user\'s language. Always quote the model label like 【label】 when recommending.' },
+        ...msgs,
+        { role: 'user', content: okResults.map((r) => '【' + r.label + '】\n' + r.content).join('\n\n---\n\n') },
+      ]
+      const url = normalizeBaseUrl(judge.baseUrl) + '/v1/chat/completions'
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(judge.apiKey.startsWith('tp-') ? { 'api-key': judge.apiKey } : { Authorization: 'Bearer ' + judge.apiKey }),
+        },
+        body: JSON.stringify({ model: judge.model, messages: judgePrompt, temperature: 0.3, max_tokens: 1024 }),
+      })
+      if (resp.ok) {
+        const data = await resp.json()
+        recommendation = data?.choices?.[0]?.message?.content || ''
+        recommendationModel = judge.label
+      }
+    } catch { /* 推荐失败不影响主结果 */ }
+  }
+
+  ctx.body = {
+    results: results.map((r) => ({ id: r.id, model: r.model, label: r.label, content: r.content, error: r.error })),
+    recommendation,
+    recommendationModel,
+  }
+}
+
+
+/**
+ * 多模型对比 — 流式版：每个模型独立流式输出，前端多列同时打字机渲染（视觉冲击）
+ * body: { messages, models?, providerConfigs? }（与 handleCompareChat 同构）
+ * SSE 事件（data JSON）：
+ *   {"t":"d","id":"<modelId>","text":"增量"}        模型增量文本
+ *   {"t":"done","id":"<modelId>","label":"..."}     某模型完成
+ *   {"t":"reco","text":"推荐内容"}                   评委推荐（完成后）
+ *   {"t":"end"}                                     全部结束
+ */
+export async function handleCompareStreamChat(ctx: Context) {
+  const body = ctx.request.body as ChatRequestBody & { models?: string[]; providerConfigs?: Array<{ model: string; label?: string; baseUrl: string; apiKey: string }> }
+  if (!body.messages || !Array.isArray(body.messages) || body.messages.length === 0) {
+    ctx.status = 400
+    ctx.body = { error: 'messages is required' }
+    return
+  }
+  const db = getDB()
+  const systemPrompt = (db.prepare('SELECT value FROM settings WHERE key = ?').get('systemPrompt') as any)?.value || ''
+  const msgs = systemPrompt ? [{ role: 'system', content: systemPrompt }, ...body.messages] : body.messages
+
+  // ---- 候选模型（与 handleCompareChat 同逻辑）----
+  const candidates: Array<{ id: string; model: string; label: string; baseUrl: string; apiKey: string }> = []
+  const seen = new Set<string>()
+  if (Array.isArray(body.providerConfigs)) {
+    for (const pc of body.providerConfigs) {
+      if (!pc.model || !pc.apiKey || seen.has(pc.model)) continue
+      seen.add(pc.model)
+      candidates.push({ id: 'ls-' + pc.model, model: pc.model, label: pc.label || pc.model, baseUrl: pc.baseUrl, apiKey: pc.apiKey })
+    }
+  }
+  const rows = db.prepare(`
+    SELECT cm.id, cm.model_id, cm.display_name, cp.base_url, cp.api_key
+    FROM custom_models cm JOIN custom_providers cp ON cm.provider_id = cp.id
+    WHERE cm.enabled = 1 AND cp.enabled = 1 AND cp.api_key != ''
+  `).all() as Array<{ id: string; model_id: string; display_name: string; base_url: string; api_key: string }>
+  for (const r of rows) {
+    if (seen.has(r.model_id)) continue
+    seen.add(r.model_id)
+    candidates.push({ id: r.id, model: r.model_id, label: r.display_name || r.model_id, baseUrl: r.base_url, apiKey: r.api_key })
+  }
+  const defaultModel = resolveModel(undefined)
+  const defaultKey = (db.prepare('SELECT value FROM settings WHERE key = ?').get('apiKey') as any)?.value || config.deepseek.apiKey
+  if (!seen.has(defaultModel)) {
+    const dp = resolveProvider(defaultModel, config.deepseek.baseUrl, defaultKey)
+    candidates.push({ id: 'default', model: defaultModel, label: defaultModel, baseUrl: dp.baseUrl, apiKey: dp.apiKey })
+  }
+  let chosen = candidates
+  if (body.models && body.models.length > 0) {
+    chosen = candidates.filter((c) => body.models!.includes(c.model) || body.models!.includes(c.id))
+  }
+  if (chosen.length === 0) {
+    ctx.status = 400
+    ctx.body = { error: 'No configured models. Add models in Models page first.' }
+    return
+  }
+  chosen = chosen.slice(0, 5)
+
+  // ---- SSE 流式转发 ----
+  ctx.set({
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+  })
+  ctx.res.flushHeaders?.()
+  const send = (obj: unknown) => {
+    ctx.res.write(`data: ${JSON.stringify(obj)}\n\n`)
+  }
+
+  // 并发请求每个模型（stream），增量转发
+  const streamOne = async (c: (typeof chosen)[number]) => {
+    let content = ''
+    try {
+      const url = normalizeBaseUrl(c.baseUrl) + '/v1/chat/completions'
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(c.apiKey.startsWith('tp-') ? { 'api-key': c.apiKey } : { Authorization: 'Bearer ' + c.apiKey }),
+        },
+        body: JSON.stringify({ model: c.model, messages: msgs, temperature: 0.7, max_tokens: 4096, stream: true }),
+      })
+      if (!resp.ok || !resp.body) throw new Error('HTTP ' + resp.status)
+      const reader = resp.body.getReader()
+      const decoder = new TextDecoder()
+      let buf = ''
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buf += decoder.decode(value, { stream: true })
+        const lines = buf.split('\n')
+        buf = lines.pop() || ''
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          const payload = line.slice(6).trim()
+          if (payload === '[DONE]') continue
+          try {
+            const json = JSON.parse(payload)
+            const delta = json?.choices?.[0]?.delta?.content || ''
+            if (delta) {
+              content += delta
+              send({ t: 'd', id: c.id, text: delta })
+            }
+          } catch { /* 跳过坏 chunk */ }
+        }
+      }
+      return { id: c.id, label: c.label, content, error: '' }
+    } catch (e: any) {
+      return { id: c.id, label: c.label, content, error: e.message || 'failed' }
+    } finally {
+      send({ t: 'done', id: c.id, label: c.label })
+    }
+  }
+
+  const results = await Promise.all(chosen.map(streamOne))
+
+  // 评委推荐（第一个成功模型，一次性返回）
+  const okResults = results.filter((r) => r.content && !r.error)
+  if (okResults.length >= 2) {
+    try {
+      const first = okResults[0]
+      // 评委配置从候选列表取（results 不含 baseUrl/apiKey/model）
+      const judge = chosen.find((c) => c.id === first.id) || {
+        id: first.id,
+        model: config.deepseek.defaultModel,
+        label: first.label,
+        baseUrl: config.deepseek.baseUrl,
+        apiKey: (db.prepare('SELECT value FROM settings WHERE key = ?').get('apiKey') as any)?.value || config.deepseek.apiKey,
+      }
+      const judgePrompt = [
+        { role: 'system', content: 'You are a fair judge. Compare the following answers from different AI models to the same question, pick the ONE best answer, and explain why in 2-3 sentences in the user\'s language. Always quote the model label like 【label】 when recommending.' },
+        ...msgs,
+        { role: 'user', content: okResults.map((r) => '【' + r.label + '】\n' + r.content).join('\n\n---\n\n') },
+      ]
+      const url = normalizeBaseUrl(judge.baseUrl) + '/v1/chat/completions'
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(judge.apiKey.startsWith('tp-') ? { 'api-key': judge.apiKey } : { Authorization: 'Bearer ' + judge.apiKey }) },
+        body: JSON.stringify({ model: judge.model, messages: judgePrompt, temperature: 0.3, max_tokens: 1024 }),
+      })
+      if (resp.ok) {
+        const data = await resp.json()
+        const reco = data?.choices?.[0]?.message?.content || ''
+        if (reco) send({ t: 'reco', text: reco })
+      }
+    } catch { /* 推荐失败不影响 */ }
+  }
+
+  send({ t: 'end' })
+  ctx.res.end()
 }

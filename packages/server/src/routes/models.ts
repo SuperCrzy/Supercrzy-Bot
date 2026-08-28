@@ -144,10 +144,11 @@ modelsRouter.post('/custom', (ctx: Context) => {
     const realProviderId = provider.id
 
     const id = randomUUID()
+    const contextWindow = body.contextWindow ? Number(body.contextWindow) : 128000
     db.prepare(`
-      INSERT INTO custom_models (id, provider_id, model_id, display_name, enabled, is_default)
-      VALUES (?, ?, ?, ?, 1, 0)
-    `).run(id, realProviderId, body.modelId, body.displayName || body.modelId)
+      INSERT INTO custom_models (id, provider_id, model_id, display_name, enabled, is_default, context_window)
+      VALUES (?, ?, ?, ?, 1, 0, ?)
+    `).run(id, realProviderId, body.modelId, body.displayName || body.modelId, contextWindow)
 
     ctx.body = {
       success: true,

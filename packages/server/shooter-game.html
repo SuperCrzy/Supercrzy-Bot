@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>太空射击 - SUPERCRZY BOT</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0e1a;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    font-family: 'Segoe UI', 'PingFang SC', sans-serif;
+    color: #fff;
+    overflow: hidden;
+  }
+  #gameCanvas {
+    border: 2px solid #2a3550;
+    border-radius: 8px;
+    background: #0d1226;
+    box-shadow: 0 0 40px rgba(80, 120, 255, 0.15);
+    cursor: crosshair;
+  }
+  .info { margin-top: 12px; font-size: 13px; color: #8892b0; }
+  .info span { color: #ffd166; }
+</style>
+</head>
+<body>
+<canvas id="gameCanvas" width="640" height="480"></canvas>
+<div class="info">操作：<span>←→</span> 或 <span>AD</span> 移动 &nbsp;·&nbsp; <span>空格</span> 射击 &nbsp;·&nbsp; <span>R</span> 重新开始</div>
+
+<script>
+(function () {
+  'use strict';
+
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+
+  // ---------- 游戏状态 ----------
+  let state = 'menu'; // menu | playing | over
+  let score = 0;
+  let lives = 3;
+  let wave = 1;
+  let lastTime = 0;
+
+  // ---------- 玩家 ----------
+  const player = {
+    x: W / 2,
+    y: H - 50,
+    w: 40,
+    h: 32,
+    speed: 280,
+    cooldown: 0
+  };
+
+  // ---------- 实体 ----------
+  let bullets = [];
+  let enemies = [];
+  let particles = [];
+
+  // ---------- 输入 ----------
+  const keys = {};
+  document.addEventListener('keydown', function (e) {
+    keys[e.code] = true;
+    if (e.code === 'KeyR') {
+      if (state === 'over' || state === 'menu') resetGame();
+    }
+    if (e.code === 'Space' && state === 'menu') {
+      e.preventDefault();
+      resetGame();
+    }
+    if (e.code === 'Space') e.preventDefault();
+  });
+  document.addEventListener('keyup', function (e) {
+    keys[e.code] = false;
+  });
+
+  // ---------- 工具 ----------
+  function rand(min, max) { return Math.random() * (max - min) + min; }
+
+  function resetGame() {
+    score = 0;
+    lives = 3;
+    wave = 1;
+    bullets = [];
+    enemies = [];
+    particles = [];
+    player.x = W / 2;
+    player.cooldown = 0;
+    spawnWave();
+    state = 'playing';
+  }
+
+  function spawnWave() {
+    const count = Math.min(3 + wave * 2, 14);
+    for (let i = 0; i < count; i++) {
+      enemies.push({
+        x: rand(30, W - 30),
+        y: rand(-250, -30),
+        w: 30,
+        h: 24,
+        hp: 1 + Math.floor(wave / 4),
+        speed: rand(40, 70 + wave * 12),
+        dir: Math.random() < 0.5 ? -1 : 1,
+        drift: rand(0.3, 0.8),
+        color: '#' + ['f94144', 'f3722c', 'f8961e', 'f9c74f', '90be6d', '43aa8b'][Math.floor(Math.random() * 6)]
+      });
+    }
+  }
+
+  // ---------- 粒子特效 ----------
+  function explode(x, y, color, count) {
+    for (let i = 0; i < count; i++) {
+      const a = rand(0, Math.PI * 2);
+      const sp = rand(40, 220);
+      particles.push({
+        x: x, y: y,
+        vx: Math.cos(a) * sp,
+        vy: Math.sin(a) * sp,
+        life: rand(0.3, 0.8),
+        maxLife: 0.8,
+        size: rand(2, 4),
+        color: color
+      });
+    }
+  }
+
+  // ---------- 绘制 ----------
+  function drawBackground(time) {
+    // 星空
+    ctx.fillStyle = '#0d1226';
+    ctx.fillRect(0, 0, W, H);
+    for (let i = 0; i < 60; i++) {
+      const sx = (i * 97) % W;
+      const sy = ((i * 173 + time * 20) % H);
+      const tw = 0.4 + (i % 3) * 0.3;
+      ctx.fillStyle = 'rgba(255,255,255,' + tw + ')';
+      ctx.fillRect(sx, sy, 2, 2);
+    }
+  }
+
+  function drawPlayer(time) {
+    const x = player.x, y = player.y;
+    // 尾焰
+    ctx.fillStyle = '#ff9f1c';
+    ctx.beginPath();
+    ctx.moveTo(x - 6, y + 10);
+    ctx.lineTo(x, y + 22 + Math.sin(time * 20) * 4);
+    ctx.lineTo(x + 6, y + 10);
+    ctx.fill();
+    // 机身
+    ctx.fillStyle = '#4cc9f0';
+    ctx.beginPath();
+    ctx.moveTo(x, y - 16);
+    ctx.lineTo(x - 18, y + 12);
+    ctx.lineTo(x + 18, y + 12);
+    ctx.closePath();
+    ctx.fill();
+    // 机翼
+    ctx.fillStyle = '#3a86ff';
+    ctx.beginPath();
+    ctx.moveTo(x - 10, y - 2);
+    ctx.lineTo(x - 24, y + 12);
+    ctx.lineTo(x - 8, y + 12);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(x + 10, y - 2);
+    ctx.lineTo(x + 24, y + 12);
+    ctx.lineTo(x + 8, y + 12);
+    ctx.closePath();
+    ctx.fill();
+    // 驾驶舱
+    ctx.fillStyle = '#e0fbfc';
+    ctx.beginPath();
+    ctx.arc(x, y - 4, 4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  function drawEnemy(e, time) {
+    const x = e.x, y = e.y;
+    // 敌人（旋转的菱形 UFO）
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(Math.sin(time * 2 + e.x) * 0.15);
+    ctx.fillStyle = e.color;
+    ctx.beginPath();
+    ctx.moveTo(0, -e.h / 2);
+    ctx.lineTo(e.w / 2, 0);
+    ctx.lineTo(0, e.h / 2);
+    ctx.lineTo(-e.w / 2, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.beginPath();
+    ctx.arc(0, 0, 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawBullet(b) {
+    ctx.fillStyle = '#ffd166';
+    ctx.fillRect(b.x - 2, b.y - 8, 4, 14);
+  }
+
+  function drawParticles() {
+    for (const p of particles) {
+      const alpha = Math.max(0, p.life / p.maxLife);
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = p.color;
+      ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawHUD() {
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.font = 'bold 16px "Segoe UI", sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('分数: ' + score, 12, 26);
+    ctx.textAlign = 'center';
+    ctx.fillText('第 ' + wave + ' 波', W / 2, 26);
+    ctx.textAlign = 'right';
+    let heartStr = '';
+    for (let i = 0; i < lives; i++) heartStr += '❤️ ';
+    ctx.font = '14px sans-serif';
+    ctx.fillText(heartStr, W - 12, 26);
+  }
+
+  function drawMenu() {
+    ctx.fillStyle = 'rgba(10,14,26,0.82)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#4cc9f0';
+    ctx.font = 'bold 42px "Segoe UI", sans-serif';
+    ctx.fillText('太空射击', W / 2, H / 2 - 50);
+    ctx.fillStyle = '#8892b0';
+    ctx.font = '16px "Segoe UI", sans-serif';
+    ctx.fillText('击落来袭的 UFO，守住你的防线！', W / 2, H / 2);
+    ctx.fillStyle = '#ffd166';
+    ctx.font = 'bold 20px "Segoe UI", sans-serif';
+    ctx.fillText('按 空格键 开始游戏', W / 2, H / 2 + 50);
+  }
+
+  function drawGameOver() {
+    ctx.fillStyle = 'rgba(10,14,26,0.82)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#f94144';
+    ctx.font = 'bold 42px "Segoe UI", sans-serif';
+    ctx.fillText('游戏结束', W / 2, H / 2 - 40);
+    ctx.fillStyle = '#ffd166';
+    ctx.font = 'bold 24px "Segoe UI", sans-serif';
+    ctx.fillText('最终分数: ' + score, W / 2, H / 2 + 10);
+    ctx.fillStyle = '#8892b0';
+    ctx.font = '16px "Segoe UI", sans-serif';
+    ctx.fillText('按 R 键重新开始', W / 2, H / 2 + 50);
+  }
+
+  // ---------- 更新 ----------
+  function update(dt, time) {
+    // 玩家移动
+    if (keys['ArrowLeft'] || keys['KeyA']) player.x -= player.speed * dt;
+    if (keys['ArrowRight'] || keys['KeyD']) player.x += player.speed * dt;
+    player.x = Math.max(20, Math.min(W - 20, player.x));
+
+    // 射击
+    player.cooldown -= dt;
+    if (keys['Space'] && player.cooldown <= 0 && state === 'playing') {
+      bullets.push({ x: player.x, y: player.y - 18 });
+      player.cooldown = 0.22;
+    }
+
+    // 子弹
+    for (let i = bullets.length - 1; i >= 0; i--) {
+      bullets[i].y -= 420 * dt;
+      if (bullets[i].y < -20) bullets.splice(i, 1);
+    }
+
+    // 敌人
+    for (let i = enemies.length - 1; i >= 0; i--) {
+      const e = enemies[i];
+      e.y += e.speed * dt;
+      e.x += Math.sin(time * e.drift + i) * 40 * dt;
+      e.x = Math.max(20, Math.min(W - 20, e.x));
+
+      // 敌人到底部 → 扣命
+      if (e.y > H + 20) {
+        enemies.splice(i, 1);
+        lives--;
+        if (lives <= 0) { state = 'over'; return; }
+        continue;
+      }
+
+      // 敌人撞玩家
+      if (rectHit(e, player)) {
+        enemies.splice(i, 1);
+        lives--;
+        explode(player.x, player.y, '#f94144', 20);
+        if (lives <= 0) { state = 'over'; return; }
+        continue;
+      }
+
+      // 子弹打敌人
+      for (let j = bullets.length - 1; j >= 0; j--) {
+        if (rectHit(bullets[j], e)) {
+          bullets.splice(j, 1);
+          e.hp--;
+          explode(e.x, e.y, e.color, 8);
+          if (e.hp <= 0) {
+            enemies.splice(i, 1);
+            score += 10 * wave;
+            explode(e.x, e.y, e.color, 18);
+          }
+          break;
+        }
+      }
+    }
+
+    // 一波清空 → 下一波
+    if (enemies.length === 0) {
+      wave++;
+      spawnWave();
+    }
+
+    // 粒子
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.life -= dt;
+      if (p.life <= 0) particles.splice(i, 1);
+    }
+  }
+
+  function rectHit(a, b) {
+    return a.x < b.x + b.w / 2 &&
+           a.x > b.x - b.w / 2 &&
+           a.y < b.y + b.h / 2 &&
+           a.y > b.y - b.h / 2;
+  }
+
+  // ---------- 主循环 ----------
+  function loop(time) {
+    const dt = Math.min((time - lastTime) / 1000, 0.05);
+    lastTime = time;
+
+    drawBackground(time);
+
+    if (state === 'menu') {
+      drawPlayer(time);
+      drawMenu();
+    } else if (state === 'playing') {
+      update(dt, time);
+      drawPlayer(time);
+      for (const b of bullets) drawBullet(b);
+      for (const e of enemies) drawEnemy(e, time);
+      drawParticles();
+      drawHUD();
+      if (state === 'over') drawGameOver();
+    } else if (state === 'over') {
+      drawGameOver();
+    }
+
+    requestAnimationFrame(loop);
+  }
+
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

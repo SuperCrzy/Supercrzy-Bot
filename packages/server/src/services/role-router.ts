@@ -8,6 +8,7 @@ import { getDB } from './database'
 export interface RoleDef {
   id: string
   name: string
+  name_en: string
   task_keywords: string
   system_prompt: string
   enabled: number

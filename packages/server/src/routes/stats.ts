@@ -21,10 +21,23 @@ statsRouter.get('/usage', (ctx: Context) => {
     "SELECT date(created_at) as date, COUNT(*) as messages, SUM(token_count) as tokens FROM messages WHERE created_at >= ? GROUP BY date(created_at) ORDER BY date"
   ).all(weekStart.toISOString().slice(0, 10))
 
+  // 按模型分组统计：通过 sessions.model 关联（messages 表无 model 列）
+  // token 为前端估算值（字符×0.6），cost 仅在 message.cost 有值时统计
+  const byModel = db.prepare(`
+    SELECT s.model as model,
+           COUNT(m.id) as count,
+           COALESCE(SUM(m.token_count), 0) as tokens,
+           COALESCE(SUM(m.cost), 0) as cost,
+           MAX(m.created_at) as last_used
+    FROM messages m JOIN sessions s ON m.session_id = s.id
+    GROUP BY s.model ORDER BY count DESC
+  `).all()
+
   ctx.body = {
     total: { sessions: totalSessions, messages: totalMessages, tokens: totalTokens, cost: totalCost },
     today: { messages: todayMessages, tokens: todayTokens, cost: todayCost },
     weekly: weeklyUsage,
+    byModel,
   }
 })
 

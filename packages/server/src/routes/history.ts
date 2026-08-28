@@ -17,6 +17,23 @@ historyRouter.get('/', (ctx: Context) => {
   ctx.body = sessions
 })
 
+// 历史提问：所有 user 消息跨会话列表（DeepSeek 式"历史提问"弹层数据源——每条提问一条记录，按时间倒序，可搜索过滤）
+historyRouter.get('/questions', (ctx: Context) => {
+  const db = getDB()
+  const q = ((ctx.query.q as string) || '').trim()
+  const limit = Math.min(parseInt(ctx.query.limit as string, 10) || 100, 500)
+  const like = q ? `%${q}%` : null
+  const rows = db.prepare(`
+    SELECT m.id, m.session_id, m.role, m.content, m.created_at, s.title as session_title
+    FROM messages m LEFT JOIN sessions s ON m.session_id = s.id
+    WHERE m.role = 'user' AND m.content IS NOT NULL AND m.content != ''
+    ${like ? 'AND m.content LIKE ?' : ''}
+    ORDER BY m.created_at DESC
+    LIMIT ?
+  `).all(...(like ? [like, limit] : [limit]))
+  ctx.body = rows
+})
+
 // 全文检索消息（必须先于 /:id 注册，否则 'search' 会被当成 id）
 historyRouter.get('/search', (ctx: Context) => {
   const q = ((ctx.query.q as string) || '').trim()

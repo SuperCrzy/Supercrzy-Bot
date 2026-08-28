@@ -2,8 +2,13 @@ import Router from 'koa-router'
 import type { Context } from 'koa'
 import { getDB } from '../services/database'
 import { randomUUID } from 'crypto'
+import { config } from '../config'
 
 export const memoryRouter = new Router({ prefix: '/api/memory' })
+
+function normalizeBaseUrl(url: string): string {
+  return url.replace(/\/+$/, '')
+}
 
 // List all memories
 memoryRouter.get('/', (ctx: Context) => {
@@ -131,3 +136,93 @@ memoryRouter.post('/search', (ctx: Context) => {
 
   ctx.body = rows
 })
+
+// Import memory candidates from an AI conversation markdown (AI 梳理，用户确认后批量保存)
+memoryRouter.post('/import', async (ctx: Context) => {
+  const body = ctx.request.body as { text?: string }
+  const text = (body.text || '').trim()
+  if (!text) {
+    ctx.status = 400
+    ctx.body = { error: 'text is required' }
+    return
+  }
+
+  const db = getDB()
+  const apiKey = (db.prepare('SELECT value FROM settings WHERE key = ?').get('apiKey') as any)?.value || config.deepseek.apiKey
+  if (!apiKey) {
+    ctx.status = 400
+    ctx.body = { error: 'API Key not configured. Please set it in Settings.' }
+    return
+  }
+  const baseUrl = config.deepseek.baseUrl
+
+  const systemPrompt = `你是记忆梳理助手。从用户提供的 AI 对话记录中提取值得长期记忆的信息（用户偏好、项目事实、经验教训、决策结论、重要约定）。
+规则：
+1. 只提取跨对话仍有价值的信息；过滤寒暄、一次性内容、重复内容。
+2. key 是短标签（如"工作流偏好"），content 是具体内容（可含要点）。
+3. category 取值：preference(用户偏好) / fact(项目事实) / rule(经验教训或约定) / general(通用)。
+4. importance 为 1-5 整数，5 最重要。
+5. 最多返回 10 条。
+6. 只输出 JSON 数组，不要 markdown 代码块、不要多余解释。
+格式：[{"key":"...","content":"...","category":"preference","importance":3}]`
+
+  try {
+    const resp = await fetch(`${normalizeBaseUrl(baseUrl)}/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(apiKey.startsWith('tp-') ? { 'api-key': apiKey } : { Authorization: `Bearer ${apiKey}` }),
+      },
+      body: JSON.stringify({
+        model: config.deepseek.defaultModel,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: text.slice(0, 30000) },
+        ],
+        temperature: 0.3,
+        max_tokens: 2500,
+      }),
+    })
+
+    if (!resp.ok) {
+      ctx.status = 502
+      ctx.body = { error: `AI 梳理失败（HTTP ${resp.status}）` }
+      return
+    }
+    const data = await resp.json()
+    const raw = data?.choices?.[0]?.message?.content || ''
+    const candidates = parseMemoryCandidates(raw)
+    ctx.body = { candidates }
+  } catch (err: any) {
+    ctx.status = 500
+    ctx.body = { error: `AI 梳理失败: ${err.message}` }
+  }
+})
+
+/** 解析 LLM 返回的记忆候选 JSON（容错：剥 markdown 围栏、兼容对象包裹） */
+function parseMemoryCandidates(raw: string): Array<{ key: string; content: string; category: string; importance: number }> {
+  try {
+    let s = raw.trim()
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/\s*```$/, '')
+      .trim()
+    // 兼容 {"candidates":[...]} / {"memories":[...]} 包裹
+    if (!s.startsWith('[')) {
+      const obj = JSON.parse(s)
+      s = JSON.stringify(obj.candidates || obj.memories || obj.items || [])
+    }
+    const arr = JSON.parse(s)
+    if (!Array.isArray(arr)) return []
+    const CATEGORIES = ['general', 'preference', 'fact', 'rule']
+    return arr
+      .map((x: any) => ({
+        key: String(x.key || x.title || '').trim().slice(0, 100),
+        content: String(x.content || x.description || x.text || '').trim().slice(0, 2000),
+        category: CATEGORIES.includes(x.category) ? x.category : 'general',
+        importance: Math.min(5, Math.max(1, parseInt(String(x.importance ?? x.star ?? 3), 10) || 1)),
+      }))
+      .filter((x: any) => x.key && x.content)
+  } catch {
+    return []
+  }
+}

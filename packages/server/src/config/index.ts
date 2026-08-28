@@ -1,6 +1,7 @@
 import { config as loadEnv } from 'dotenv'
 import { existsSync } from 'fs'
-import { dirname, resolve } from 'path'
+import { dirname, resolve, join } from 'path'
+import { homedir } from 'os'
 import { fileURLToPath } from 'url'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -23,6 +24,20 @@ for (const envPath of envCandidates) {
   }
 }
 
+/**
+ * 统一用户数据目录 DB 路径（2026-08-26：让 Web 后端 与 Electron 内嵌后端 同机共享同一份 SQLite）：
+ * - 显式设置绝对 DB_PATH → 尊重（自定义场景）
+ * - 否则统一到 ~/.supercrzy/data/supercrzy.db（用户目录），App(内嵌) 与 Web(dev/生产) 都从此读写 → 数据互通
+ * - 绝对路径才当"用户指定"；相对路径(如 .env 的 ./data/...)会被提升到用户目录，避免 App/Web 因 cwd 不同分裂
+ */
+function resolveDbPath(): string {
+  const p = process.env.DB_PATH
+  if (p && (p.startsWith('/') || p.startsWith('~'))) {
+    return p.replace(/^~/, homedir())
+  }
+  return join(homedir(), '.supercrzy', 'data', 'supercrzy.db')
+}
+
 export const config = {
   port: parseInt(process.env.PORT || '3000', 10),
   deepseek: {
@@ -31,7 +46,7 @@ export const config = {
     defaultModel: process.env.DEEPSEEK_MODEL || 'deepseek-v4-pro',
   },
   db: {
-    path: process.env.DB_PATH || './data/supercrzy.db',
+    path: resolveDbPath(),
   },
   workspaceDir: process.env.WORKSPACE_DIR || process.cwd(),
   // 隧道默认关闭：纯本地运行，只有显式设置 TUNNEL_ENABLED=true 才开启公网穿透

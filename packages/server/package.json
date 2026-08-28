@@ -16,6 +16,7 @@
     "@koa/cors": "^5.0.0",
     "@koa/multer": "^4.0.0",
     "@larksuiteoapi/node-sdk": "1.73.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@tencent-weixin/openclaw-weixin": "^2.4.1",
     "@types/koa-static": "^4.0.4",
     "better-sqlite3": "^11.7.0",

@@ -172,8 +172,8 @@ class QQBotInstance {
     this.config = config
   }
 
-  async start() {
-    if (this.running) return
+  async start(): Promise<boolean> {
+    if (this.running) return true
     this.running = true
 
     try {
@@ -181,10 +181,12 @@ class QQBotInstance {
       this.token = await fetchAccessToken(this.config.config.appId, this.config.config.appSecret)
       console.log(`[QQ Bot] ✅ Token 获取成功`)
       await this.connect()
+      return true
     } catch (err: any) {
       console.error(`[QQ Bot] ❌ 启动失败: ${err.message}`)
       this.running = false
       this.updateDBStatus('error')
+      return false
     }
   }
 
@@ -369,7 +371,12 @@ export async function startQQChannel(channelId: string): Promise<boolean> {
 
   const bot = new QQBotInstance(parsedConfig)
   activeBots.set(channelId, bot)
-  await bot.start()
+  const started = await bot.start()
+  if (!started) {
+    // 启动失败：不保留在活动列表，返回 false（避免 test 端点误报成功）
+    activeBots.delete(channelId)
+    return false
+  }
   return true
 }
 

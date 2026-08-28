@@ -40,8 +40,22 @@ export const PROJECT_ROOT = findProjectRoot(WORKSPACE_ROOT)
 const HOME = process.env.HOME || ''
 
 /** 放行的前缀集合（软沙箱用）：项目仓库 + workspaceDir + 运行时只读 + 临时目录 */
-function allowedPrefixes(): string[] {
-  const list = [PROJECT_ROOT, WORKSPACE_ROOT, '/tmp', '/private/tmp']
+function allowedPrefixes(level: PermissionLevel = 'sandbox', workspaceDir?: string): string[] {
+  const list: string[] = ['/tmp', '/private/tmp']
+
+  if (level === 'workspace-only') {
+    // 最窄档：只放行会话工作目录 + 临时目录；未设工作目录时退化为 sandbox
+    const ws = workspaceDir ? resolve(workspaceDir) : ''
+    if (ws) {
+      list.unshift(ws)
+      return list
+    }
+    list.unshift(PROJECT_ROOT, WORKSPACE_ROOT)
+    return list
+  }
+
+  // sandbox / full 基础前缀
+  list.unshift(PROJECT_ROOT, WORKSPACE_ROOT)
   if (HOME) {
     list.push(
       join(HOME, '.workbuddy', 'binaries'),
@@ -49,6 +63,15 @@ function allowedPrefixes(): string[] {
       join(HOME, '.local', 'bin'),
     )
   }
+  if (workspaceDir) list.push(resolve(workspaceDir))
+
+  if (level === 'full' && HOME) {
+    // 完全访问：额外放行用户主目录下的常见内容目录（敏感点目录由 SENSITIVE_DIR 另拦）
+    for (const d of ['Documents', 'Downloads', 'Desktop', 'Pictures', 'Music', 'Movies', 'Projects', 'Work', 'dev', 'code']) {
+      list.push(join(HOME, d))
+    }
+  }
+
   return list.map((p) => resolve(p))
 }
 
@@ -166,6 +189,16 @@ const CREDENTIAL_FILE =
   /(?:^|[\s'";&|(])(?:[^\s'";&|()]*\/)?(\.env(?:\.[A-Za-z0-9_-]+)?|\.npmrc|\.netrc|\.pgpass|\.git-credentials|id_rsa|id_ed25519|id_dsa)(?=[\s'";&|)]|$)/
 
 /**
+ * 敏感配置目录（任何权限档位下都不可访问）：
+ * .ssh/.aws/.config/.gnupg/.kube/.docker/.npm/.pki/.gradle/.m2/.cache/.git 等
+ */
+const SENSITIVE_DIR =
+  /\/(?:\.ssh|\.aws|\.config|\.gnupg|\.kube|\.docker|\.npm|\.pki|\.gradle|\.m2|\.cache|\.git|\.svn|\.hg)(?:\/|$)/
+
+/** 默认权限三档：workspace-only（仅工作文件夹）/ sandbox（项目沙箱，默认）/ full（允许完全访问） */
+export type PermissionLevel = 'workspace-only' | 'sandbox' | 'full'
+
+/**
  * 扫描命令中的危险路径引用，返回拦截原因；无风险返回 null。
  * 规则：
  *   1. ~ 直接引用敏感配置目录（.ssh/.aws/.env 等）
@@ -173,7 +206,7 @@ const CREDENTIAL_FILE =
  *   3. 引用凭据文件（.env/.npmrc/id_rsa 等，任意位置）
  *   4. 绝对路径指向 home 下非白名单区域（项目仓库/运行时/临时目录之外）
  */
-export function scanDangerousPath(command: string): string | null {
+export function scanDangerousPath(command: string, opts: { level?: PermissionLevel; workspaceDir?: string } = {}): string | null {
   if (!command) return null
 
   // 1. ~ 敏感目录
@@ -188,15 +221,16 @@ export function scanDangerousPath(command: string): string | null {
   const c = CREDENTIAL_FILE.exec(command)
   if (c) return `引用凭据文件 ${c[1]}`
 
-  // 4. home 下绝对路径越权（含 ~/ 与 $HOME/ 展开形式）
+  // 4. home 下绝对路径越权（含 ~/ 与 $HOME/ 展开形式，按权限档位前缀）
   if (HOME) {
     const homeEsc = HOME.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     const re = new RegExp(`(?:${homeEsc}|~|\\$HOME)/[^\\s'"\`;&|<>()]*`, 'g')
-    const allowed = allowedPrefixes()
+    const allowed = allowedPrefixes(opts.level || 'sandbox', opts.workspaceDir)
     for (const m of command.matchAll(re)) {
       const raw = m[0]
       // 展开 ~ 与 $HOME
       const p = resolve(raw.startsWith('~/') ? join(HOME, raw.slice(2)) : raw.startsWith('$HOME/') ? join(HOME, raw.slice(6)) : raw)
+      if (SENSITIVE_DIR.test(p)) return `引用敏感配置目录: ${raw.slice(0, 80)}`
       if (allowed.some((a) => p === a || p.startsWith(a + '/'))) continue
       return `路径越权: ${raw.slice(0, 80)}`
     }
@@ -209,20 +243,30 @@ export function scanDangerousPath(command: string): string | null {
 // 文件工具白名单（file_read / file_write / file_exists 共用）
 // ============================
 
-/** 路径是否位于白名单内（项目仓库 / workspaceDir / 运行时 / 临时目录） */
-export function isPathAllowed(p: string): boolean {
+/** 路径是否位于白名单内（按权限档位：workspace-only / sandbox / full） */
+export function isPathAllowed(
+  p: string,
+  opts: { level?: PermissionLevel; workspaceDir?: string; extraAllowed?: string[] } | string[] = {},
+): boolean {
   if (!p) return false
+  const o = Array.isArray(opts) ? { extraAllowed: opts } : opts
   const resolved = resolve(p)
-  return allowedPrefixes().some((a) => resolved === a || resolved.startsWith(a + '/'))
+  const level = o.level || 'sandbox'
+  return allowedPrefixes(level, o.workspaceDir).concat(o.extraAllowed || []).some((a) => resolved === a || resolved.startsWith(a + '/'))
 }
 
 /**
  * 文件工具路径校验：返回错误原因，安全返回 null。
- * 规则：①凭据文件名一律禁止 ②必须位于项目仓库/工作区内（防越权读 ~/.ssh、~/Documents 等）
+ * 规则：①凭据文件/敏感目录一律禁止 ②必须位于对应权限档位的白名单内
  */
-export function assertSafeFilePath(p: string): string | null {
+export function assertSafeFilePath(
+  p: string,
+  opts: { level?: PermissionLevel; workspaceDir?: string; extraAllowed?: string[] } | string[] = {},
+): string | null {
   if (!p) return '路径为空'
+  const o = Array.isArray(opts) ? { extraAllowed: opts } : opts
   if (CREDENTIAL_FILE.test(p)) return `凭据文件不可访问: ${p.slice(0, 80)}`
-  if (!isPathAllowed(p)) return `路径越权（仅允许项目仓库内）: ${p.slice(0, 80)}`
+  if (SENSITIVE_DIR.test(p)) return `敏感目录不可访问: ${p.slice(0, 80)}`
+  if (!isPathAllowed(p, o)) return `路径越权（当前权限: ${o.level || 'sandbox'}）: ${p.slice(0, 80)}`
   return null
 }
