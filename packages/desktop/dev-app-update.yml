@@ -1,0 +1,9 @@
+# 开发/本地测试形态的更新源（electron-updater 在未打包时读取此文件，替代 app-update.yml）
+# 本地测试流程：
+#   1. pnpm desktop:dist 打包出新版产物
+#   2. 运行 scripts/serve-releases.sh（把产物复制到 releases/ 并起本地静态服务器 :8080，
+#      服务器根目录即 releases —— 所以 url 不带 /releases 前缀）
+#   3. 启动旧版本 App（dev 或已打包），启动 6 秒后会检测到 releases 里的新版本并弹窗询问
+provider: generic
+url: http://localhost:8080
+updaterCacheDirName: supercrzy-updater

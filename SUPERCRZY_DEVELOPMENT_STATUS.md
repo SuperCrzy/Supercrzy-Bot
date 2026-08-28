@@ -1,4 +1,4 @@
-# SuperCrzy Agent — 开发状态总览
+# SuperCrzy BOT — 开发状态总览
 
 > 基于 WorkBuddy v4.22.5 (54万行源码) 和 Hermes UI 逆向研究  
 > 最后更新：2026-05-08

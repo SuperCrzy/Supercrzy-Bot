@@ -1,0 +1,45 @@
+appId: com.supercrzy.bot
+productName: SUPERCRZY BOT
+# 更新源（App 自动更新）：generic 静态源，URL 由环境变量注入（打包时 UPDATE_URL=https://xxx 指定；
+# 不设则用默认示例。dev 形态本地测试读 dev-app-update.yml，不受此影响）
+publish:
+  provider: generic
+  url: ${env.UPDATE_URL}
+  channel: latest
+directories:
+  output: dist
+  buildResources: build
+files:
+  - main.cjs
+  - preload.cjs
+  - tray.cjs
+  - package.json
+extraResources:
+  # 后端（server 部署目录：依赖已展开为真实文件，规避 pnpm workspace 软链在打包时断链）
+  # 生成方式：packages/desktop 下执行 rsync -aL ../../packages/server/{src,package.json,tsconfig.json,data} + node_modules
+  - from: .deploy-server
+    to: backend/packages/server
+  # 前端构建产物
+  - from: ../../packages/client/dist
+    to: client-dist
+mac:
+  target:
+    - dmg
+    - zip
+  category: public.app-category.developer-tools
+  icon: build/icon.icns
+  # 深链接协议注册
+  protocols:
+    - name: SUPERCRZY BOT
+      schemes:
+        - supercrzy
+win:
+  target:
+    - nsis
+linux:
+  target:
+    - AppImage
+  category: Development
+npmRebuild: false
+electronDownload:
+  mirror: https://npmmirror.com/mirrors/electron/

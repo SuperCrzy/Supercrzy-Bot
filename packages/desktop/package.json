@@ -1,0 +1,22 @@
+{
+  "name": "@supercrzy/desktop",
+  "version": "1.0.1",
+  "private": true,
+  "description": "SUPERCRZY BOT desktop shell (Electron)",
+  "main": "main.cjs",
+  "type": "commonjs",
+  "scripts": {
+    "start": "env -u ELECTRON_RUN_AS_NODE electron .",
+    "dev": "env -u ELECTRON_RUN_AS_NODE electron . --dev",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "dependencies": {
+    "electron-store": "^8.2.0",
+    "electron-updater": "^6.8.9"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
+  }
+}
