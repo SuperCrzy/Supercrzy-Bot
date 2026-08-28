@@ -26,17 +26,18 @@ export interface SupercrzyNewsItem {
 /** feed 源 URL（可用 settings.supercrzyFeedUrl 覆盖） */
 const DEFAULT_FEED_URL = 'https://supercrzy.com/feed.xml'
 
-/** 分类关键词匹配（title + url 命中判断） */
+/** 分类关键词匹配（title + url 命中判断；对齐 supercrzy.com 官方 8 分类，2026-08-28） */
 const NEWS_CATEGORIES: Array<{ name: string; keywords: string[] }> = [
-  { name: 'Models', keywords: ['model', 'llm', 'gpt', 'claude', 'glm', 'kimi', 'deepseek', 'qwen', 'grok', 'hy4', 'gemini', 'weights', 'benchmark'] },
-  { name: 'Business', keywords: ['nvidia', 'funding', 'deal', 'ipo', 'revenue', 'acquisition', 'billion', 'launch', 'business', 'market'] },
-  { name: 'Hardware', keywords: ['chip', 'hardware', 'gpu', 'robots', 'humanoid', 'device', 'asics', 'tpu'] },
-  { name: 'Agents', keywords: ['agent', 'harness', 'openclaw', 'codex', 'coding', 'workflow', 'grok bot', 'plugin'] },
-  { name: 'Open Source', keywords: ['open source', 'open-source', 'weights', 'hugging face', 'license'] },
-  { name: 'Research', keywords: ['research', 'paper', 'arxiv', 'academic', 'preview', 'iteration'] },
+  { name: 'Models', keywords: ['model', 'llm', 'gpt', 'claude', 'glm', 'kimi', 'deepseek', 'qwen', 'grok', 'hy4', 'gemini', 'weights', 'benchmark', 'inference', 'param'] },
+  { name: 'Business', keywords: ['nvidia', 'funding', 'deal', 'ipo', 'revenue', 'acquisition', 'billion', 'market', 'business', 'startup', 'enterprise'] },
+  { name: 'Agents', keywords: ['agent', 'harness', 'openclaw', 'codex', 'coding agent', 'workflow', 'plugin', 'autonomous agent', 'grok bot', 'ai agent'] },
+  { name: 'Hardware', keywords: ['chip', 'gpu', 'robot', 'humanoid', 'device', 'asics', 'tpu', 'hardware', 'processor', 'ai pc', 'glasses', 'keyboard'] },
+  { name: 'Applications', keywords: ['app', 'application', 'product', 'tool', 'software', 'workspace', 'search', 'browser', 'studio', 'photoshop', 'office', 'clip'] },
+  { name: 'Autonomy', keywords: ['autonomy', 'self-driving', 'driving', 'agentic', 'autonomous', 'robotics control', 'household robot'] },
+  { name: 'Open Source', keywords: ['open source', 'open-source', 'open weights', 'weights drop', 'hugging face', 'license', 'mit'] },
 ]
 
-/** 从标题+URL 推断分类 */
+/** 从标题+URL 推断分类（未命中 → 综合 News） */
 function classifyNews(title: string, url: string): string {
   for (const c of NEWS_CATEGORIES) {
     const hit = c.keywords.some((k) => title.toLowerCase().includes(k) || url.toLowerCase().includes(k))

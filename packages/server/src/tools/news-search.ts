@@ -53,7 +53,7 @@ const newsSearchTool: ToolDef = {
     type: 'object',
     properties: {
       query: { type: 'string', description: '搜索关键词（可选，标题/摘要匹配；空 = 返回最新新闻）' },
-      category: { type: 'string', description: '分类过滤：Models / Business / Hardware / Agents / Open Source / Research / all/空 = 不限' },
+      category: { type: 'string', description: '分类过滤：Models / Agents / Hardware / Applications / Autonomy / Open Source / Business / 空 = 不限' },
       limit: { type: 'number', description: '返回条数（默认 5，最多 15）' },
     },
   },

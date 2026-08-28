@@ -67,7 +67,8 @@ const router = useRouter()
 interface NewsItem { title: string; url: string; summary: string; date: string; category: string; image?: string }
 
 const news = ref<NewsItem[]>([])
-const categories = ref<string[]>(['all', 'Models', 'Business', 'Hardware', 'Agents', 'Open Source', 'Research'])
+// 官方 8 分类（supercrzy.com News 板块导航，2026-08-28 对齐）
+const categories = ref<string[]>(['all', 'Models', 'Agents', 'Hardware', 'Applications', 'Autonomy', 'Open Source', 'Business'])
 const activeCat = ref('all')
 const query = ref('')
 const loading = ref(false)
