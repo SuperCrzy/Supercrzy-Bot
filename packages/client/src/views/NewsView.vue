@@ -126,6 +126,9 @@ onMounted(loadNews)
   margin: 0 auto;
   width: 100%;
   box-sizing: border-box;
+  height: 100%;
+  overflow-y: auto; /* main-content overflow:hidden，NewsView 自身作为滚动容器（2026-08-28 修不能上下滚） */
+  scrollbar-width: thin;
 }
 .nv-header { margin-bottom: 20px; }
 .nv-title-row { display: flex; align-items: baseline; gap: 12px; margin-bottom: 14px; }
@@ -153,8 +156,8 @@ onMounted(loadNews)
   background: var(--bg-secondary, rgba(128,128,128,0.03));
   display: flex; gap: 14px;
 }
-/* 封面图（2026-08-28 加） */
-.nv-thumb { flex-shrink: 0; width: 120px; height: 76px; border-radius: 8px; overflow: hidden; display: block; }
+/* 封面图（2026-08-28 加）：右侧，上下居中于卡片 */
+.nv-thumb { flex-shrink: 0; width: 120px; height: 76px; border-radius: 8px; overflow: hidden; display: block; align-self: center; }
 .nv-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .nv-item-body { flex: 1; min-width: 0; }
 .nv-item-top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
