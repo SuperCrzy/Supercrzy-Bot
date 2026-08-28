@@ -11,9 +11,10 @@ dist/
 *.db-journal
 *.db-shm
 *.db-wal
-data/
+/data/
 uploads/
-nul
+nul# 任务日志（2026-08-26 起写到用户目录 ~/.supercrzy/logs；此条兜底防误入库）
+logs/
 
 # ── 敏感文件：含服务器凭据，禁止入库 ──
 SUPERCRZY_AGENT_参考手册.md
@@ -32,3 +33,18 @@ articles/
 .git-rewrite/
 .git-rewrite/
 _tmp_*
+
+# ── 根目录杂项试验页/脚本（2026-08-28 加：非产品代码，保留文件但挡入库）──
+/pet.html
+/snake-game.html
+/login.html
+/phone-page.html
+/recess-prototype.html
+/*.command
+/*.bat
+/*.app
+/dist-bak-*/
+**/dist-bak-*/
+/start.bat
+/start.sh
+

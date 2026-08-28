@@ -1,124 +1,150 @@
 # SUPERCRZY BOT
 
-一个开箱即用的 **AI Agent 平台** —— 统一大脑 + Agent Loop + 多工具 + 多平台网关,原生对接 DeepSeek V4。
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[中文版](README.zh-CN.md)
 
-## ✨ 功能亮点
+A ready-to-run **AI Agent platform** — unified brain + Agent Loop + multi-tool + multi-platform gateway, natively wired to DeepSeek V4 with support for 200+ models via OpenAI-compatible providers.
 
-- **Agent Loop**:多轮思考 + 工具执行(文件操作、Shell、网络搜索、网页抓取、记忆、技能)
-- **Agent 执行时间线**:每一步思考/工具调用实时可视化,历史可回放、**可分支续跑**
-- **经验库(Playbook)**:任务结束自动复盘,同类任务自动注入历史经验,越用越聪明
-- **幽灵模式**:感知工作区文件变化,低打扰地给出代码介入建议
-- **技能系统**:内置技能 + 自动匹配 + 支持从 GitHub 安装第三方技能
-- **长期记忆**:自动提取并持久化重要信息,跨会话生效
-- **工作台**:文件浏览器 + 终端 + 代码编辑器一站式
-- **多平台网关**:Web / 微信 / QQ 共享同一记忆、会话、技能库
-- **完整模型库**:DeepSeek V1~V4 / R1 全系列 18+ 模型目录
-- **安全默认**:敏感工具"先确认后执行"、危险命令黑名单、CORS 白名单、可选 API 令牌
+## ✨ Highlights
 
-## 🌍 海外模型渠道
+- **Agent Loop**: multi-turn reasoning + tool execution (file ops, shell, web search, web fetch, memory, skills)
+- **Execution timeline**: every step of reasoning/tool calls visualized live, replayable, **branchable and resumable**
+- **Playbook (experience base)**: auto retrospective after each task; similar tasks reuse past experience — the agent gets smarter over time
+- **Ghost mode**: watches workspace file changes and proactively suggests low-intrusion code interventions
+- **Skill system**: built-in skills + automatic matching + install third-party skills from GitHub
+- **Long-term memory**: auto-extracts and persists important facts across sessions
+- **Workspace**: file browser + terminal + code editor in one place
+- **Multi-platform gateway**: Web / WeChat / QQ share the same memory, sessions and skill library
+- **Full model catalog**: DeepSeek V1~V4 / R1 series, 18+ models
+- **Secure by default**: sensitive tools require confirmation before execution, dangerous command blacklist, CORS whitelist, optional API token
 
-模型页 (/models) 内置 10 个 provider 预设,支持 OpenAI 兼容协议:
+## 🌍 Model Providers
 
-| 渠道 | 说明 |
+The Models page (`/models`) ships with 10 provider presets supporting the OpenAI-compatible protocol:
+
+| Provider | Notes |
 |------|------|
-| **OpenRouter**(推荐) | **一个 Key 聚合所有海外模型**——Claude、GPT、Gemini、Grok、Mistral 等 200+ 模型,OpenAI 兼容,`https://openrouter.ai/api/v1` |
-| **OpenAI** | GPT-4o 等,`https://api.openai.com/v1` |
-| **xAI Grok** | Grok 系列,`https://api.x.ai/v1` |
-| **Mistral** | Mistral 系列,`https://api.mistral.ai/v1` |
-| **Meta Llama** | Llama 系列,经 Groq 免费托管,`https://api.groq.com/openai/v1` |
-| **NVIDIA NIM** | NVIDIA 官方推理端点,`https://integrate.api.nvidia.com/v1` |
-| **阿里 Qwen** | 通义千问官方兼容端点,`https://dashscope.aliyuncs.com/compatible-mode/v1` |
-| Anthropic / Gemini | 原生 API 协议不同,建议经 OpenRouter 使用 Claude / Gemini 模型 |
+| **OpenRouter** (recommended) | **One key for 200+ models** — Claude, GPT, Gemini, Grok, Mistral and more. `https://openrouter.ai/api/v1` |
+| **OpenAI** | GPT-4o etc. `https://api.openai.com/v1` |
+| **xAI Grok** | Grok series. `https://api.x.ai/v1` |
+| **Mistral** | Mistral series. `https://api.mistral.ai/v1` |
+| **Meta Llama** | Llama series via Groq free tier. `https://api.groq.com/openai/v1` |
+| **NVIDIA NIM** | NVIDIA official inference endpoints. `https://integrate.api.nvidia.com/v1` |
+| **Alibaba Qwen** | Qwen official compatible endpoint. `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+| Anthropic / Gemini | Native APIs differ; use them through OpenRouter |
 
-用法:模型页点击渠道 → 填 API Key(可改 baseUrl)→ 点「识别可用模型」自动列出该 Key 可用模型 → 点选使用。API Key 支持多 provider 并存,随时切换。
+Usage: open the Models page → click a provider → paste your API key (baseUrl editable) → click "Discover models" to list models available for that key → pick one. Keys from multiple providers can coexist and you can switch anytime.
 
-### 本地模型(Ollama)
+### Local models (Ollama)
 
-内置 **Ollama (本地)** 渠道:安装 [Ollama](https://ollama.com) 并 `ollama pull llama3.1` 后,模型页选 Ollama → 点「识别可用模型」→ 自动列出本地已拉取的模型(`llama3.1:8b` 等),点选即用。API Key 留空即可(本地无需鉴权)。
+A built-in **Ollama (local)** provider is included: install [Ollama](https://ollama.com), `ollama pull llama3.1`, then on the Models page pick Ollama → "Discover models" → the locally pulled models (`llama3.1:8b` etc.) are listed automatically. Leave the API key empty (no auth needed locally).
 
-## 🚀 快速开始(3 分钟)
+## 🚀 Quick Start (3 minutes)
 
-### 方式一:一键脚本(推荐)
+### Option 1: double-click launcher (easiest)
+
+> **macOS**:
+> 1. Double-click **`scripts/install.command`** — a "SUPERCRZY BOT" icon appears on your Desktop
+> 2. Double-click the desktop icon → the UI opens in your browser
+> 3. Or double-click **`SUPERCRZY BOT.app`** (branded icon) or **`SUPERCRZY BOT.command`** inside the project
+> If blocked on first run: right-click → Open.
+> (Keep the app at the project root, next to start.sh; re-run the installer after moving the project)
+>
+> **Windows**: double-click **`start.bat`** — the UI opens in your browser.
+>
+> Linux/terminal: run `./start.sh`.
+
+### Option 2: one-liner script
 
 ```bash
-git clone <你的仓库地址>
+git clone <your-repo-url>
 cd supercrzy-agent
-./start.sh          # 自动检查环境 → 装依赖 → 生成 .env → 启动
+./start.sh          # checks env → installs deps → builds frontend → starts → opens browser
 ```
 
-### 方式二:手动
+### Option 3: manual (development)
 
 ```bash
-# 1. 安装依赖(需 Node >= 20 与 pnpm)
+# 1. Install dependencies (Node >= 20 and pnpm required)
 pnpm install
 
-# 2. 配置(二选一)
-cp .env.example .env        # 然后编辑 .env 填 DEEPSEEK_API_KEY=sk-...
-# 或跳过此步,启动后在 Web UI → 模型 (/models) 页配置 API Key(推荐,免重启)
+# 2. Configure (choose one)
+cp .env.example .env        # edit .env, fill DEEPSEEK_API_KEY=sk-...
+# or skip this — after startup, configure your key in Web UI → Models (/models) page (recommended, no restart)
 
-# 3. 启动
-pnpm dev
+# 3. Start (production single process: http://localhost:3000)
+pnpm --filter @supercrzy/server start
+# or dev mode (hot reload): pnpm dev → http://localhost:5173
 ```
 
-启动后打开 **http://localhost:5173**:
-- 首次使用,**首页会提示"配置 API Key"**,点击跳转到 **模型页 (/models)** 配置提供商与 Key,即可开聊
-- 数据库自动初始化,无需手动建表
+Open **http://localhost:3000** (one port serves both the page and the API — no extra frontend process):
+- On first launch, the home page prompts you to **configure an API key**; click through to the Models page (`/models`)
+- The database initializes automatically — no manual table setup
 
-### 其他命令
+### Other commands
 
-| 命令 | 说明 |
+| Command | Description |
 |------|------|
-| `./start.sh` | 一键启动(Web UI + API) |
-| `pnpm dev` | 启动 Web UI + API |
-| `pnpm cli` | 终端对话模式(CLI 优先!) |
-| `pnpm build` | 生产构建(输出到 client/dist,由后端静态托管) |
-| `pnpm test` | 运行测试(服务端 37 + 客户端 9) |
+| `SUPERCRZY BOT.app` | double-click launch (macOS desktop app, branded icon) |
+| `SUPERCRZY BOT.command` | double-click launch (macOS terminal entry) |
+| `start.bat` | double-click launch (Windows one-click script) |
+| `./start.sh` | one-click start (production mode, opens browser) |
+| `pnpm dev` | dev mode (hot reload, frontend 5173 + backend 3000) |
+| `pnpm cli` | terminal chat mode (CLI-first!) |
+| `pnpm build` | production build (outputs to client/dist, served statically by backend) |
+| `./scripts/install.command` | installer: creates a launch icon on the Desktop |
+| `./scripts/make-app.sh` | regenerate the macOS desktop app (run after updating the logo) |
+| `pnpm test` | run tests (server 37 + client 9) |
 
-## 🎮 CLI 模式
+## 🎮 CLI Mode
 
 ```bash
 pnpm cli
 ```
-直接在终端与 Agent 对话,支持流式输出与工具调用,适合服务器/SSH 环境。
+Chat with the agent directly in the terminal — streaming output and tool calls supported. Great for server/SSH environments.
 
-## ⚙️ 环境变量(.env)
+## ⚙️ Environment Variables (.env)
 
-| 变量 | 说明 | 默认 |
+| Variable | Description | Default |
 |------|------|------|
-| `PORT` | 后端端口 | `3000` |
-| `DEEPSEEK_API_KEY` | DeepSeek API Key(兜底;UI 模型页配置后优先) | - |
-| `DEEPSEEK_BASE_URL` | API 地址 | `https://api.deepseek.com` |
-| `DEEPSEEK_MODEL` | 默认模型 | `deepseek-v4-pro` |
-| `CORS_ORIGINS` | CORS 白名单(逗号分隔) | 仅 localhost |
-| `API_TOKEN` | 可选:非本地 API 请求的 Bearer 令牌 | 空(不启用) |
-| `TUNNEL_ENABLED` | 开启内网穿透(默认关闭,纯本地) | `false` |
+| `PORT` | backend port | `3000` |
+| `DEEPSEEK_API_KEY` | DeepSeek API key (fallback; takes precedence when configured in the UI Models page) | - |
+| `DEEPSEEK_BASE_URL` | API base URL | `https://api.deepseek.com` |
+| `DEEPSEEK_MODEL` | default model | `deepseek-v4-pro` |
+| `CORS_ORIGINS` | CORS whitelist (comma-separated) | localhost only |
+| `API_TOKEN` | optional Bearer token for non-local API requests | empty (disabled) |
+| `TUNNEL_ENABLED` | enable tunneling (default off, fully local) | `false` |
 
-## 🏗️ 架构
+## 🏗️ Architecture
 
 ```
 supercrzy-agent/
 ├── packages/
-│   ├── client/          # Vue3 + NaiveUI + Monaco 前端
-│   │   └── src/views/   # 聊天/工作台/技能/记忆/模型/用量等页面
-│   └── server/          # Koa + better-sqlite3 后端
+│   ├── client/          # Vue3 + NaiveUI + Monaco frontend
+│   │   └── src/views/   # chat / workspace / skills / memory / models / usage pages
+│   └── server/          # Koa + better-sqlite3 backend
 │       └── src/
-│           ├── routes/  # API 路由(chat/settings/session/memory/gateway...)
-│           ├── services/ # Agent 循环、工具、终端、网关
-│           └── gateway/  # 微信/QQ 平台适配
-└── start.sh             # 一键启动
+│           ├── routes/  # API routes (chat/settings/session/memory/gateway...)
+│           ├── services/ # agent loop, tools, terminal, gateway
+│           └── gateway/  # WeChat / QQ platform adapters
+└── start.sh             # one-click start
 ```
 
-- **聊天主通道**:SSE 流式(`POST /api/chat/agent`)
-- **终端**:WebSocket(`/ws/terminal`)
-- **存储**:SQLite(better-sqlite3,自动初始化)
+- **Chat channel**: SSE streaming (`POST /api/chat/agent`)
+- **Terminal**: WebSocket (`/ws/terminal`)
+- **Storage**: SQLite (better-sqlite3, auto-initialized)
 
-## 🔒 安全说明
+## 🔒 Security
 
-- 敏感工具(执行命令/写删文件)在 UI **先确认后执行**,120 秒未确认自动拒绝
-- Shell 危险命令(删根目录、sudo、dd、fork 炸弹、下载即执行等)**无条件拦截**
-- 文件预览仅限工作区白名单,凭据/数据库类文件禁止读取
-- CORS 默认仅本地;部署到公网请配置 `API_TOKEN` 与 `CORS_ORIGINS`
+- Sensitive tools (shell commands, file write/delete) require **confirmation before execution** in the UI; auto-denied after 120 seconds
+- Dangerous shell commands (rm -rf /, sudo, dd, fork bombs, download-and-execute, ...) are **blocked unconditionally**
+- File preview is limited to the workspace whitelist; credential/database files cannot be read
+- CORS is localhost-only by default; set `API_TOKEN` and `CORS_ORIGINS` when deploying publicly
+
+## 🤝 Contributing
+
+Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR.
 
 ## 📄 License
 
-MIT License
+MIT License — see [LICENSE](LICENSE).
