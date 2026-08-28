@@ -40,6 +40,29 @@ describe('error-classifier', () => {
     expect(c.retryable).toBe(true)
   })
 
+  it('tool_calls 无配对 → tool_sequence 可重试且不降级(需清洗重试)', () => {
+    const c = classifyApiError({
+      message: 'An assistant message with tool_calls must be followed by tool messages responding to each tool_call_id. (insufficient tool messages following tool_calls message)',
+    })
+    expect(c.reason).toBe('tool_sequence')
+    expect(c.retryable).toBe(true)
+    expect(c.shouldFallback).toBe(false)
+    expect(c.shouldCompress).toBe(false)
+  })
+
+  it('reasoning_content 未返回 → tool_sequence(深度思考模式)', () => {
+    const c = classifyApiError({
+      message: 'The reasoning_content in the thinking mode must be passed back to the API.',
+    })
+    expect(c.reason).toBe('tool_sequence')
+    expect(c.retryable).toBe(true)
+  })
+
+  it('普通 400 非工具序列错误 → unknown 不误判为 tool_sequence', () => {
+    const c = classifyApiError({ status: 400, message: 'invalid style parameter' })
+    expect(c.reason).toBe('unknown')
+  })
+
   it('jitteredBackoff 单调且不超过上限的 1.5 倍(jitter 加噪)', () => {
     const b1 = jitteredBackoff(1, 100, 5000)
     const b2 = jitteredBackoff(2, 100, 5000)

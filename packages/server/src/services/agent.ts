@@ -1535,6 +1535,20 @@ export async function runAgentLoop(
 
       // ---- 可重试：退避后继续 ----
       if (classified.retryable) {
+        // 工具/思考消息序列错误：重试前先清洗 messages（修 assistant.tool_calls 无配对 / reasoning 不一致），
+        // 否则重试用的还是坏序列，必败 3 次（此前落入 unknown 正是如此）。2026-08-28 系统性根治
+        if (classified.reason === 'tool_sequence') {
+          const before = messages.length
+          messages = sanitizeToolCallSequence(messages)
+          emitSSE(ctx, 'error', {
+            message: `检测到消息序列问题（tool_calls/思考内容失配），已清洗消息序列（${before}→${messages.length} 条）后重试...`,
+            retrying: true,
+            reason: 'tool_sequence',
+          })
+          consecutiveApiErrors++  // 只计一次，不无限刷
+          await new Promise(r => setTimeout(r, 500))
+          continue
+        }
         consecutiveApiErrors++
         if (consecutiveApiErrors > 3) {
           emitSSE(ctx, 'error', { message: `连续 ${consecutiveApiErrors} 次失败 (${classified.reason})，停止重试` })

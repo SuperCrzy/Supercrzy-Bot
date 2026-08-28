@@ -11,6 +11,7 @@ export type FailoverReason =
   | 'server_error'      // 500/502/503 服务端错误
   | 'timeout'           // 请求超时
   | 'connection'        // 网络连接失败
+  | 'tool_sequence'     // 工具调用/思考内容消息序列违反协议（assistant.tool_calls 无配对 / reasoning_content 未原样传回）
   | 'unknown'           // 未知错误
 
 export interface ClassifiedError {
@@ -58,6 +59,20 @@ const RATE_LIMIT_PATTERNS = [
   /throttl/i,
   /concurrent.*request/i,
   /tpm.*limit/i,
+]
+
+// 工具调用/思考内容消息序列违反协议（2026-08-28 加，需清洗 messages 而非压缩/直接放弃）：
+// - assistant.tool_calls 必须被对应 tool 消息逐个响应（"insufficient tool messages following tool_calls"）
+// - 深度思考模式下 assistant 的 reasoning_content 必须原样传回（"must be passed back"）
+const TOOL_SEQUENCE_PATTERNS = [
+  /tool_calls.*must be followed by tool messages/i,
+  /insufficient tool messages/i,
+  /following tool_calls message/i,
+  /responding to each tool_call_id/i,
+  /reasoning_content.*must be passed back/i,
+  /thinking mode.*must be passed back/i,
+  /both.*tool_use.*and.*text.*block/i,
+  /expected.*role.{0,5}tool/i,
 ]
 
 /**
@@ -184,6 +199,19 @@ export function classifyApiError(err: any): ClassifiedError {
   if (message.includes('timeout') || message.includes('ETIMEDOUT') || message.includes('abort')) {
     return {
       reason: 'timeout',
+      retryable: true,
+      shouldFallback: false,
+      shouldCompress: false,
+      shouldRotateCredential: false,
+      message,
+    }
+  }
+
+  // 工具调用/思考内容消息序列违反协议（2026-08-28 加：之前落入 unknown，重试用坏序列必败 3 次中断。
+  // 现识别为 tool_sequence，由 agent 在重试前先清洗 messages——对症修复而非盲目压缩/放弃）
+  if (TOOL_SEQUENCE_PATTERNS.some(p => p.test(message) || p.test(body))) {
+    return {
+      reason: 'tool_sequence',
       retryable: true,
       shouldFallback: false,
       shouldCompress: false,
