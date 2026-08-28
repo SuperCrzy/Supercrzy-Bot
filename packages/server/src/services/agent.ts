@@ -146,15 +146,12 @@ export function sanitizeToolCallSequence(msgs: AgentMessage[]): AgentMessage[] {
   }
   if (orphans.length === 0) return msgs  // 都配对了，原样返回（含 reasoning_content 补字段见下方）
 
-  // 第二遍：重建——孤立 assistant.tool_calls 降级为纯文本；其余保留并补 reasoning_content
+  // 第二遍：重建——仅把孤立 assistant.tool_calls 降级为纯文本；其余原样保留（reasoning_content 不动，
+  // 避免给本来无 thinking 的消息强塞空字符串干扰 DeepSeek 深度思考"必须原样传回"校验）
   return msgs.map((m, i) => {
     if (orphans.includes(i)) {
       const text = (m as any).content || '（该轮工具调用因中断/压缩未完成，任务已保存进度）'
       return { role: 'assistant' as const, content: text }
-    }
-    // 完整配对的 tool_calls：确保带 reasoning_content 字段（深度思考兼容，修 "must be passed back" 400）
-    if (m.role === 'assistant' && Array.isArray((m as any).tool_calls) && (m as any).tool_calls.length > 0 && !('reasoning_content' in m)) {
-      return { ...m, reasoning_content: (m as any).reasoning_content || '' }
     }
     return m
   })
@@ -938,15 +935,23 @@ export async function runAgentLoop(
     if (turn > 3 && turn % 3 === 0) {
       // 轻量裁剪：每 3 轮裁剪一次旧工具结果
       messages = pruneOldToolResults(messages, 5)
-      // 裁剪旧消息的 reasoning_content（保留最近 3 条）
+      // 裁剪旧消息的 reasoning_content（保留最近 3 条）。
+      // 注意：DeepSeek 深度思考要求带 tool_calls 的 assistant 消息，其 reasoning_content 必须原样传回，
+      // 若替换成占位文本会触发 "reasoning_content must be passed back" 400。故仅裁剪"无 tool_calls 的纯文本
+      // assistant 消息"，且直接删除字段而非替换成假内容。（2026-08-28 修真因）
       let reasoningCount = 0
       for (let i = messages.length - 1; i >= 0; i--) {
-        if (messages[i].reasoning_content) {
-          reasoningCount++
-          if (reasoningCount > 3) {
-            const oldLen = (messages[i].reasoning_content as string).length
-            messages[i].reasoning_content = `[reasoning 已裁剪，原长 ${oldLen} 字符]`
-          }
+        const mm = messages[i]
+        if (!mm.reasoning_content) continue
+        // 带 tool_calls 的 assistant：跳过，reasoning 必须原样保留（DeepSeek 深度思考硬性要求）
+        const isToolAssistant = mm.role === 'assistant' && Array.isArray((mm as any).tool_calls) && (mm as any).tool_calls.length > 0
+        if (isToolAssistant) continue
+        reasoningCount++
+        if (reasoningCount > 3) {
+          // 纯文本 assistant：直接删除 reasoning_content（比替换占位文本更安全）
+          const copy: any = { ...mm }
+          delete copy.reasoning_content
+          messages[i] = copy
         }
       }
     }
