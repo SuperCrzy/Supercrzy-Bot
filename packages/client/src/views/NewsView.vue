@@ -31,10 +31,14 @@
     <div v-if="loading" class="nv-state">{{ $t('news.loading') }}</div>
     <div v-else-if="news.length === 0" class="nv-state">{{ $t('news.empty') }}</div>
 
-    <!-- 新闻列表 -->
-    <div v-else class="nv-list">
-      <div v-for="it in news" :key="it.url" class="nv-item">
-        <div class="nv-item-body">
+    <!-- 新闻列表：双列卡片流（2026-08-28 改），每卡上图下文 -->
+    <div v-else class="nv-grid">
+      <div v-for="it in news" :key="it.url" class="nv-card">
+        <!-- 封面图（顶部整宽，点击进原文） -->
+        <a v-if="imgSrc(it.image)" class="nv-card-thumb" :href="it.url" target="_blank" rel="noopener">
+          <img :src="imgSrc(it.image)" :alt="it.title" loading="lazy" />
+        </a>
+        <div class="nv-card-body">
           <div class="nv-item-top">
             <span class="nv-cat-tag">{{ it.category }}</span>
             <span class="nv-date">{{ fmtDate(it.date) }}</span>
@@ -46,10 +50,6 @@
             <button class="nv-research" @click="deepResearch(it)">{{ $t('news.deepResearch') }}</button>
           </div>
         </div>
-        <!-- 封面图放在标题右边（卡片右侧，2026-08-28 改） -->
-        <a v-if="imgSrc(it.image)" class="nv-thumb" :href="it.url" target="_blank" rel="noopener">
-          <img :src="imgSrc(it.image)" :alt="it.title" loading="lazy" />
-        </a>
       </div>
     </div>
   </div>
@@ -149,24 +149,27 @@ onMounted(loadNews)
 }
 .nv-refresh { border: 1px solid var(--border-color); background: transparent; border-radius: 8px; padding: 4px 10px; cursor: pointer; color: var(--text-secondary); }
 .nv-state { padding: 40px; text-align: center; color: var(--text-secondary); font-size: 14px; }
-.nv-list { display: flex; flex-direction: column; gap: 12px; }
-.nv-item {
+/* 双列新闻卡片流（2026-08-28 改） */
+.nv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+.nv-card {
   border: 1px solid var(--border-color, rgba(128,128,128,0.25));
-  border-radius: 12px; padding: 14px 16px;
+  border-radius: 12px;
   background: var(--bg-secondary, rgba(128,128,128,0.03));
-  display: flex; gap: 14px;
+  display: flex; flex-direction: column;
+  overflow: hidden;
 }
-/* 封面图（2026-08-28 加）：右侧，上下居中于卡片 */
-.nv-thumb { flex-shrink: 0; width: 120px; height: 76px; border-radius: 8px; overflow: hidden; display: block; align-self: center; }
-.nv-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.nv-item-body { flex: 1; min-width: 0; }
-.nv-item-top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+/* 封面图：顶部整宽 16:9，点击进原文 */
+.nv-card-thumb { display: block; width: 100%; aspect-ratio: 16/9; overflow: hidden; }
+.nv-card-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform 0.2s ease; }
+.nv-card-thumb:hover img { transform: scale(1.03); }
+.nv-card-body { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
+.nv-item-top { display: flex; align-items: center; gap: 8px; }
 .nv-cat-tag { font-size: 11px; padding: 1px 8px; border-radius: 10px; background: rgba(99,102,241,0.12); color: var(--accent, #6366f1); }
 .nv-date { font-size: 11px; color: var(--text-tertiary, #68738d); margin-left: auto; }
 .nv-item-title { font-size: 15px; font-weight: 600; color: var(--text-primary); text-decoration: none; display: block; line-height: 1.4; }
 .nv-item-title:hover { color: var(--accent, #6366f1); }
-.nv-item-summary { font-size: 13px; color: var(--text-secondary); line-height: 1.6; margin: 6px 0 10px; }
-.nv-item-actions { display: flex; align-items: center; gap: 12px; }
+.nv-item-summary { font-size: 13px; color: var(--text-secondary); line-height: 1.6; margin: 0; flex: 1; }
+.nv-item-actions { display: flex; align-items: center; gap: 12px; margin-top: 4px; }
 .nv-open { font-size: 12px; color: var(--accent, #6366f1); text-decoration: none; }
 .nv-research {
   font-size: 12px; padding: 4px 12px; border-radius: 8px;
