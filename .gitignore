@@ -47,6 +47,8 @@ _tmp_*
 /*.app
 /dist-bak-*/
 **/dist-bak-*/
+# 2026-08-28：构建前手动移开的旧产物目录（dist-old-*），同样是编译备份
+**/dist-old-*/
 /start.bat
 /start.sh
 

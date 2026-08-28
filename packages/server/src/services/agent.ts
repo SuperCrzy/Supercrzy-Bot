@@ -717,7 +717,14 @@ async function saveCheckpoint(checkpoint: AgentCheckpoint): Promise<string> {
   const dir = join(config.workspaceDir, 'data', 'checkpoints')
   await mkdir(dir, { recursive: true })
   const path = join(dir, `${checkpoint.id}.json`)
-  await writeFile(path, JSON.stringify(checkpoint, null, 2), 'utf-8')
+  // 2026-08-28：落盘前先清洗消息序列——检查点常在"assistant 已发出 tool_calls、tool 结果还没回来"
+  // 的瞬间保存，此前原样写盘会把孤立 tool_calls 固化下来（实测 196 个检查点里 14 个带孤立项），
+  // 下次续跑一读回来首轮请求就 400。这里从源头掐断。
+  const safe: AgentCheckpoint = {
+    ...checkpoint,
+    messages: sanitizeToolCallSequence(checkpoint.messages || []),
+  }
+  await writeFile(path, JSON.stringify(safe, null, 2), 'utf-8')
   return path
 }
 
@@ -833,7 +840,13 @@ export async function runAgentLoop(
       const { readFile } = await import('fs/promises')
       const ckptData = await readFile(resumeCheckpoint, 'utf-8')
       const ckpt: AgentCheckpoint = JSON.parse(ckptData)
-      messages = ckpt.messages
+      // 2026-08-28：恢复时也清洗一次——磁盘上已有的旧检查点（实测 14 个）可能带着孤立 tool_calls，
+      // 直接读回来首轮就 400。与 saveCheckpoint 侧形成双保险。
+      const before = (ckpt.messages || []).length
+      messages = sanitizeToolCallSequence(ckpt.messages || [])
+      if (messages.length !== before || hasOrphanToolCalls(ckpt.messages || [])) {
+        console.warn(`[Checkpoint] 恢复时清洗了消息序列（${before} 条）`)
+      }
       resumedTurn = ckpt.turn || 0
       // 读取最近任务日志摘要，注入续跑上下文（2026-08-26：让 Agent 知道上次干到哪、避免重复）。
       const taskLogSummary = await readLatestTaskLog()
