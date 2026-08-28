@@ -178,38 +178,56 @@ export function humanizeApiError(c: { reason: string; message: string }): string
  * 策略：发请求前扫描，若 assistant.tool_calls 中某 id 未被后续 tool 消息响应 → 剔除该 tool_calls（防 400）。
  */
 export function sanitizeToolCallSequence(msgs: AgentMessage[]): AgentMessage[] {
-  // 加固（2026-08-28 修复 DeepSeek 400 "tool_calls must be followed by tool messages"）：
-  // 全量校验——对每条 assistant.tool_calls，若某 tool_call_id 未被任何后续 tool 消息响应，
-  // 则整体把该 assistant 的 tool_calls 移除、降级为纯文本（绝不留"半孤儿"tool_calls）。
-  // 根源：上下文压缩按 token 切分 head/tail 会把 assistant.tool_calls 与其 tool 响应拆开，
-  // 或检查点续跑/工具超时中断留下未配对的 tool_calls。
+  // 全量校验并降级两类"会导致 DeepSeek 400"的 assistant 消息：
+  //
+  // ① 孤立 tool_calls：某 tool_call_id 没有被任何 tool 消息响应
+  //    （"An assistant message with tool_calls must be followed by tool messages"）
+  //    来源：上下文压缩按 token 切分 head/tail 拆散配对、检查点续跑、工具超时中断。
+  //
+  // ② 已配对但缺 reasoning_content（2026-08-28 补，实测 199 个检查点里 55 个中招）
+  //    DeepSeek 深度思考硬性协议：带 tool_calls 的 assistant 消息必须**原样传回**
+  //    reasoning_content，缺失即 400 "reasoning_content must be passed back"。
+  //    根因在 agent.ts 构造 assistantMsg 时 `if (reasoningBuffer) ... = reasoningBuffer`
+  //    —— 模型某些轮次不输出思考内容时该字段根本不存在，落盘后恢复必然 400。
+  //    **不能补假 rc**（违反"原样传回"语义，仍会被拒），只能整轮降级。
+  //
+  // 安全闸门：② 只在"本序列确实处于推理模式"（存在任一 assistant 带 reasoning_content）
+  // 时才启用——否则非推理模型（GPT/Claude 等本就没有 rc）会被误删全部工具调用。
   const responded = new Set<string>()
-  const orphans: number[] = []  // 需要降级的 assistant 消息索引
-
-  // 第一遍：收集所有被 tool 消息响应的 tool_call_id
   for (const m of msgs) {
     if (m.role === 'tool' && m.tool_call_id) responded.add(m.tool_call_id)
   }
-  // 找出孤立的 assistant.tool_calls（部分或全部 id 未被响应）
+
+  const usesReasoning = msgs.some((m) => m.role === 'assistant' && hasReasoningContent(m))
+
+  const demoteIdx = new Set<number>()   // 需降级的 assistant 索引
+  const dropToolIds = new Set<string>() // 随之要移除的 tool 响应 id
+
   for (let i = 0; i < msgs.length; i++) {
     const m = msgs[i]
     if (m.role !== 'assistant' || !Array.isArray((m as any).tool_calls)) continue
     const calls = (m as any).tool_calls as Array<{ id?: string }>
     if (calls.length === 0) continue
-    const incomplete = !calls.every((tc) => tc?.id && responded.has(tc.id))
-    if (incomplete) orphans.push(i)
-  }
-  if (orphans.length === 0) return msgs  // 都配对了，原样返回（含 reasoning_content 补字段见下方）
 
-  // 第二遍：重建——仅把孤立 assistant.tool_calls 降级为纯文本；其余原样保留（reasoning_content 不动，
-  // 避免给本来无 thinking 的消息强塞空字符串干扰 DeepSeek 深度思考"必须原样传回"校验）
-  return msgs.map((m, i) => {
-    if (orphans.includes(i)) {
-      const text = (m as any).content || '（该轮工具调用因中断/压缩未完成，任务已保存进度）'
-      return { role: 'assistant' as const, content: text }
+    const orphan = !calls.every((tc) => tc?.id && responded.has(tc.id))
+    const missingRc = usesReasoning && !hasReasoningContent(m)
+    if (orphan || missingRc) {
+      demoteIdx.add(i)
+      for (const tc of calls) if (tc?.id) dropToolIds.add(tc.id)
     }
-    return m
-  })
+  }
+  if (demoteIdx.size === 0) return msgs // 全部合法，原样返回
+
+  // 降级 assistant 为纯文本，并移除其 tool 响应——否则 tool 消息变成孤儿，同样触发 400。
+  return msgs
+    .map((m, i) => {
+      if (demoteIdx.has(i)) {
+        const text = (m as any).content || '（该轮工具调用记录不完整，已省略）'
+        return { role: 'assistant' as const, content: text }
+      }
+      return m
+    })
+    .filter((m) => !(m.role === 'tool' && m.tool_call_id && dropToolIds.has(m.tool_call_id)))
 }
 
 /**
@@ -223,13 +241,23 @@ export function hasOrphanToolCalls(msgs: AgentMessage[]): boolean {
   for (const m of msgs) {
     if (m.role === 'tool' && m.tool_call_id) responded.add(m.tool_call_id)
   }
+  // 与 sanitizeToolCallSequence 保持同一判据：孤立 tool_calls，
+  // 或（推理模式下）带 tool_calls 却缺 reasoning_content —— 两者都会导致 400。
+  const usesReasoning = msgs.some((m) => m.role === 'assistant' && hasReasoningContent(m))
   for (const m of msgs) {
     if (m.role !== 'assistant' || !Array.isArray((m as any).tool_calls)) continue
     const calls = (m as any).tool_calls as Array<{ id?: string }>
     if (calls.length === 0) continue
     if (!calls.every((tc) => tc?.id && responded.has(tc.id))) return true
+    if (usesReasoning && !hasReasoningContent(m)) return true
   }
   return false
+}
+
+/** 该消息是否带有实质性的 reasoning_content（空白字符串不算） */
+function hasReasoningContent(m: AgentMessage): boolean {
+  const rc = (m as any).reasoning_content
+  return typeof rc === 'string' && rc.trim() !== ''
 }
 
 /** 读取 settings 配置（工具授权模式等） */
@@ -375,6 +403,92 @@ function detectToolLoop(calls: Array<{ function?: { name?: string; arguments?: s
   }
   while (TOOL_CALL_HISTORY.length > LOOP_HISTORY_MAX) TOOL_CALL_HISTORY.shift()
   return null
+}
+
+/**
+ * ---- 调查饱和检测（2026-08-28 新增，补 ToolCallLoopDetector 的盲区）----
+ *
+ * 背景（实测失控案例）：模型被要求"自检为什么任务总失败"后，连续 56 次 shell_exec
+ * 全是 grep/sed/cat 自己的源码，一路跑到 40+ 轮、上下文膨胀到 285KB，
+ * **全程只吐 tool_calls、content 恒为空**——用户看到的就是"一直在深度思考，不出结果"。
+ *
+ * detectToolLoop 为什么没拦住：它用 `hash(参数)` 精确比对，只认"参数完全相同"的重复。
+ * 而模型每次 grep 的文件名/行号都不同 → hash 不同 → 永远命中不了。
+ *
+ * 策略：不看参数是否相同，只看**连续只读探测操作的次数**。做实质动作（写文件/执行/搜索新源）
+ * 就重置计数；连续只看不改达到阈值 → 判定"调查饱和"，强制要求收尾。
+ */
+const PROBE_SATURATION_THRESHOLD = 10
+let probeStreak = 0 // 连续只读探测计数（模块级，跨轮累计；命中后重置给模型一次改过机会）
+
+/** 只读探测类 shell 命令：只看不改，反复调用说明模型还在"找线索"而非推进 */
+const READONLY_PROBE_RE = /^\s*(grep|egrep|fgrep|cat|sed|awk|head|tail|less|more|find|ls|ll|git\s+(log|show|diff|status|branch|blame)|wc|file|stat|strings|od|xxd|rg)\b/i
+
+/** 只统计这两类：shell 只读探测 + 文件读取。web_search/web_fetch 是正当的多源检索，不计入。 */
+function isProbeCall(name: string, args: string): boolean {
+  if (name === 'file_read') return true
+  if (name !== 'shell_exec') return false
+  let cmd = ''
+  try {
+    const parsed = JSON.parse(args)
+    if (typeof parsed?.command === 'string') cmd = parsed.command
+  } catch { /* 非 JSON 参数，用原文兜底 */ }
+  if (!cmd) cmd = args
+  return READONLY_PROBE_RE.test(cmd.trim())
+}
+
+function detectInvestigationSaturation(
+  calls: Array<{ function?: { name?: string; arguments?: string } }>
+): { tool: string; count: number } | null {
+  for (const tc of calls) {
+    const name = tc.function?.name || 'unknown'
+    const args = tc.function?.arguments || ''
+    if (isProbeCall(name, args)) {
+      probeStreak++
+      if (probeStreak >= PROBE_SATURATION_THRESHOLD) {
+        probeStreak = 0 // 触发后清零，避免连续误报；若仍不收敛会再次累计命中
+        return { tool: name, count: PROBE_SATURATION_THRESHOLD }
+      }
+    } else {
+      probeStreak = 0 // 做了实质动作（写文件/执行/搜索）→ 视为有进展，重置
+    }
+  }
+  return null
+}
+
+// ==================== 停止机制（2026-08-28 新增） ====================
+// 此前 Agent 一旦进入长循环就完全无法中断：前端"停止"只是断开 SSE，后端循环照跑到
+// maxTurns（复杂任务 200 轮）。用户只能干等或杀掉整个后端进程。
+const STOP_REQUESTED = new Set<string>()
+
+/** 请求停止某个运行中的 Agent（按 sessionId / checkpointId 匹配） */
+export function requestStop(runKey: string): boolean {
+  if (!runKey) return false
+  STOP_REQUESTED.add(runKey)
+  return true
+}
+
+/** 查询是否已被请求停止 */
+export function isStopRequested(runKey: string): boolean {
+  return STOP_REQUESTED.has(runKey)
+}
+
+/** 清除停止标记（新任务开始时调用，避免上一次的停止状态残留） */
+export function clearStop(runKey: string): void {
+  STOP_REQUESTED.delete(runKey)
+}
+
+/**
+ * 监听 SSE 连接断开——用户关掉页面/刷新/断开网络时，等同于按下停止。
+ * 这样失控任务不会在后台继续烧 token。
+ */
+function registerStopSignal(ctx: any, runKey: string): void {
+  if (!runKey) return
+  const req = ctx?.req
+  if (!req || typeof req.on !== 'function') return
+  const onClose = () => { STOP_REQUESTED.add(runKey) }
+  req.on('close', onClose)
+  req.on('aborted', onClose)
 }
 
 /** 估计任务复杂度，返回建议 maxTurns */function estimateComplexity(userMessages: Array<{ role: string; content: string }>): number {
@@ -1001,7 +1115,20 @@ export async function runAgentLoop(
     }
   }
 
+  // 停止开关：前端点"停止"或 SSE 断开时置位，让失控的长任务能真正被掐断
+  // （2026-08-28 加：此前完全没有停止机制，用户只能干等到跑满 200 轮或杀掉整个后端）
+  const runKey = sessionId || checkpointId
+  if (runKey) clearStop(runKey)
+  registerStopSignal(ctx, runKey)
+
   while (turn < effectiveMaxTurns && !finished) {
+    // 用户按下停止 → 保存进度并收尾，而不是继续烧 token
+    if (runKey && isStopRequested(runKey)) {
+      emitSSE(ctx, 'error', { message: '已收到停止指令，正在保存进度...', stopped: true })
+      interrupted = 'user_stopped'
+      finished = true
+      break
+    }
     turn++
     const roundDuration = turn > 1 ? Date.now() - roundStartMs : 0
     if (roundDuration > 0) roundDurationsMs.push(roundDuration)
@@ -1065,11 +1192,25 @@ export async function runAgentLoop(
       ...sanitizedMessages,
     ]
 
-    // P0: 在接近上限时提示模型压缩输出
-    if (turn > effectiveMaxTurns - 5 && turn < effectiveMaxTurns) {
+    // P0: 分阶段收敛提示（2026-08-28 改）
+    // 原实现只在 `turn > maxTurns - 5` 时提示，而 COMPLEX_TASK_TURNS=200 —— 模型能一路
+    // 调查到 195 轮才收到第一句警告，用户早就等疯了（实测 40 轮无输出就是这么来的）。
+    // 现在按"轮次占比"分级递进，并设绝对下限 turn>=15 避免小任务被过早打扰。
+    const turnRatio = turn / effectiveMaxTurns
+    if (turnRatio >= 0.9 && turn < effectiveMaxTurns) {
       apiMessages.push({
         role: 'system',
-        content: `⚠️ 只剩 ${effectiveMaxTurns - turn} 轮思考机会。请尽快给出结论，避免调用非必要工具。完成后不要继续调工具。`,
+        content: `🛑 只剩 ${effectiveMaxTurns - turn} 轮。**禁止再调用任何工具**，立即基于已有信息输出最终结论（可说明哪些点未能完全确认）。`,
+      })
+    } else if (turnRatio >= 0.75) {
+      apiMessages.push({
+        role: 'system',
+        content: `⚠️ 已用 ${turn}/${effectiveMaxTurns} 轮（75%）。**请立即收敛**：停止调用新的调查类工具，基于已有信息给出结论。若确实只差一两个关键信息，最多再调用 1-2 次工具，然后必须输出结论。`,
+      })
+    } else if (turnRatio >= 0.5 && turn >= 15) {
+      apiMessages.push({
+        role: 'system',
+        content: `⚠️ 已用 ${turn}/${effectiveMaxTurns} 轮（50%）。请确认自己是在**推进任务**而非反复调查同一件事。若信息已足够，现在就给出阶段性结论。`,
       })
     }
 
@@ -1264,6 +1405,27 @@ export async function runAgentLoop(
           messages.push({
             role: 'system',
             content: `警告：你已连续 ${loopHit.count} 次调用 ${loopHit.name} 且参数几乎相同，说明当前方法无效。请立即换一种完全不同的方法完成任务（换工具、换思路、或换参数策略）；如果确实无法完成，直接向用户说明原因并停止，绝不要重复尝试相同操作。`,
+          })
+        }
+
+        // ---- 调查饱和检测（2026-08-28 加）：补 detectToolLoop 的盲区。
+        // 模型反复 grep/cat 源码但参数各异时，上面那个"参数完全相同"检测是拦不住的。
+        // 命中后强制要求收尾输出——用户看到的是"一直深度思考不出结果"，本质是模型不收敛。
+        const satHit = detectInvestigationSaturation(toolCalls)
+        if (satHit) {
+          emitSSE(ctx, 'error', {
+            message: `检测到连续 ${satHit.count} 次只读调查操作（${satHit.tool}）而无实质产出，已干预：要求模型立即总结。`,
+          })
+          messages.push({
+            role: 'system',
+            content: [
+              `⚠️ 你已连续 ${satHit.count} 次执行只读调查操作（grep/cat/sed/find 等）而没有产出任何结论或交付物。`,
+              `继续翻看更多代码/文件很可能不会带来新信息。请**立即停止调查**，基于目前已掌握的信息：`,
+              `1. 给出明确结论（哪怕是"未找到确切原因，最可能是 X"）；`,
+              `2. 列出已确认的证据；`,
+              `3. 如需继续深挖，先告诉用户你的发现和下一步打算，**不要**自作主张继续调用工具。`,
+              `本轮请直接输出文字结论，不要再调用任何工具。`,
+            ].join('\n'),
           })
         }
 
@@ -1719,7 +1881,9 @@ export async function runAgentLoop(
         checkpointPath: ckptPath,
         createdFiles: createdFiles.map(f => ({ name: f.name, path: f.path, mime: f.mime })),
         toolCallCount: totalToolCalls.length,
-        message: `任务因 ${interrupted || 'API 异常'} 中断，已保存进度。可切换模型后继续（${turn} 轮进程已保留）。`,
+        message: interrupted === 'user_stopped'
+          ? `已按你的要求停止，${turn} 轮进度已保存。可随时继续。`
+          : `任务因 ${interrupted || 'API 异常'} 中断，已保存进度。可切换模型后继续（${turn} 轮进程已保留）。`,
       })
     } else {
       // 超限：原有 turn_limit_reached 提示

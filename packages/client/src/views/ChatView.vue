@@ -1990,6 +1990,19 @@ function stopGeneration() {
   for (const m of msgs) {
     if (m.pendingQuestion) m.pendingQuestion = undefined
   }
+  // 2026-08-28：通知后端真正终止 Agent 循环。
+  // 此前只 abort 前端 fetch —— 后端 while 循环完全收不到信号，会一路跑到 maxTurns
+  //（复杂任务 200 轮），用户点了"停止"却看到任务仍在后台烧 token。
+  // 注意：这里**不能**紧接着调 /api/chat/stop/clear —— 会在后端循环读到标记前就清掉，
+  // 停止指令直接失效。停止标记的清除由后端 runAgentLoop 入口统一处理（clearStop）。
+  const sid = chatStore.currentSessionId
+  if (sid) {
+    fetch('/api/chat/stop', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: sid }),
+    }).catch(() => { /* 停止指令尽力而为，失败也不影响前端 UI 收尾 */ })
+  }
   abortController.value?.abort()
 }
 
