@@ -15,6 +15,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'routines', name: 'Routines', component: () => import('@/views/RoutinesView.vue'), meta: { title: 'nav.routines' } },
       { path: 'workspace', name: 'Workspace', component: () => import('@/views/WorkspaceView.vue'), meta: { title: 'nav.workspace' } },
       { path: 'skills', name: 'Skills', component: () => import('@/views/SkillsView.vue'), meta: { title: 'nav.skills' } },
+      { path: 'news', name: 'News', component: () => import('@/views/NewsView.vue'), meta: { title: 'nav.news' } },
       { path: 'memory', name: 'Memory', component: () => import('@/views/MemoryView.vue'), meta: { title: 'nav.memory' } },
       { path: 'models', name: 'Models', component: () => import('@/views/ModelsView.vue'), meta: { title: 'nav.models' } },
       { path: 'logs', name: 'Logs', component: () => import('@/views/LogsView.vue'), meta: { title: 'nav.logs' } },

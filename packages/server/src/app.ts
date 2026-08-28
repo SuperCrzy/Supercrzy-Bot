@@ -44,6 +44,7 @@ import { playbookRouter } from './routes/playbook'
 import { rolesRouter } from './routes/roles'
 import { systemRouter } from './routes/system'
 import { ghostRouter } from './routes/ghost'
+import { newsRouter } from './routes/news'
 import { terminalRouter } from './routes/terminal'
 import { startGhostWatcher } from './services/ghost-watch'
 import { startScheduler } from './services/scheduler'
@@ -408,7 +409,7 @@ async function bootstrap() {
   }
 
   // API Routes
-  const routers = [uploadRouter, chatRouter, fsRouter, settingsRouter, sessionRouter, historyRouter, statsRouter, memoryRouter, gatewayRouter, skillsRouter, tasksRouter, automationsRouter, modelsRouter, workspaceRouter, ocrRouter, checkpointsRouter, playbookRouter, rolesRouter, systemRouter, ghostRouter, mcpRouter, routineRouter, terminalRouter]
+  const routers = [uploadRouter, chatRouter, fsRouter, settingsRouter, sessionRouter, historyRouter, statsRouter, memoryRouter, gatewayRouter, skillsRouter, tasksRouter, automationsRouter, modelsRouter, workspaceRouter, ocrRouter, checkpointsRouter, playbookRouter, rolesRouter, systemRouter, ghostRouter, newsRouter, mcpRouter, routineRouter, terminalRouter]
   for (const r of routers) {
     app.use(r.routes())
     app.use(r.allowedMethods())

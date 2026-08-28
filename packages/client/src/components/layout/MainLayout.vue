@@ -160,6 +160,11 @@
             <SvgIcon name="star" :size="16" />
             <span>{{ $t('nav.skills') }}</span>
           </router-link>
+          <!-- AI 资讯（新闻生态看板，2026-08-28 加）：supercrzy.com 实时 AI 新闻 -->
+          <router-link to="/news" class="nav-item" :class="{ active: route.name === 'News' }">
+            <SvgIcon name="globe" :size="16" />
+            <span>{{ $t('nav.news') }}</span>
+          </router-link>
         </div>
 
         <!-- Advanced Group — mobile only, collapsed by default -->

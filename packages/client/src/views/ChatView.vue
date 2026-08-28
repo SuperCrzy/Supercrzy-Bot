@@ -1243,6 +1243,21 @@ function onExternalSendPrompt(e: Event) {
   inputText.value = text
   handleSend()
 }
+
+// ---- 新闻"深入研究"入口（2026-08-28 加，阶段二）：从 NewsView 带 ?research= 跳到对话，自动预填并发送 deep_research ----
+onMounted(() => {
+  const research = router.currentRoute.value.query.research
+  if (typeof research === 'string' && research.trim() && !chatStore.isLoading) {
+    // 确保会话已就绪后再发送（等待首条消息可发送）
+    setTimeout(() => {
+      if (typeof research === 'string' && research.trim() && !chatStore.isLoading) {
+        inputText.value = research.trim()
+        handleSend()
+        router.replace({ query: {} }) // 清掉 query，避免刷新重复触发
+      }
+    }, 400)
+  }
+})
 onMounted(() => window.addEventListener('supercrzy:send-prompt', onExternalSendPrompt))
 onUnmounted(() => window.removeEventListener('supercrzy:send-prompt', onExternalSendPrompt))
 
