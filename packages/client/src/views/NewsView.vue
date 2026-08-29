@@ -36,7 +36,7 @@
       <div v-for="it in news" :key="it.url" class="nv-card">
         <!-- 封面图（顶部整宽，点击进原文） -->
         <a v-if="imgSrc(it.image)" class="nv-card-thumb" :href="it.url" target="_blank" rel="noopener">
-          <img :src="imgSrc(it.image)" :alt="it.title" loading="lazy" />
+          <img :src="imgSrc(it.image, 640)" :alt="it.title" loading="lazy" />
         </a>
         <div class="nv-card-body">
           <div class="nv-item-top">
@@ -87,9 +87,11 @@ function fmtDate(d: string): string {
 function locale(): string { return (localStorage.getItem('supercrzy:lang') || 'zh-CN') }
 
 /** 封面图走后端代理加载（规避浏览器直连 supercrzy.com 的跨域/网络问题，2026-08-28 加） */
-function imgSrc(url: string | undefined): string {
+function imgSrc(url: string | undefined, width?: number): string {
   if (!url) return ''
-  return `/api/news/image?url=${encodeURIComponent(url)}`
+  // 缩略图（列表卡片）走代理 + 压缩（w 参数 → WebP 小图），详情大图用 full=1 高清
+  const q = width ? `&w=${width}` : '&full=1'
+  return `/api/news/image?url=${encodeURIComponent(url)}${q}`
 }
 
 async function loadNews() {

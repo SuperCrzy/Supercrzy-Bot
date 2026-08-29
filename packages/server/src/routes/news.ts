@@ -38,8 +38,13 @@ newsRouter.get('/categories', async (ctx: Context) => {
 })
 
 /**
- * 图片代理（2026-08-28 加：用户浏览器/网络直连 supercrzy.com/uploads 加载图可能被代理拉慢/失败）。
- * 前端用 /api/news/image?url= 走后端拿图，规避跨域/直连网络问题（后端能访问源，已验证可达）。
+ * 图片代理（2026-08-28 加：规避跨域/直连失败；2026-08-29 加压缩）。
+ * 前端 /api/news/image?url= 走后端拿图。
+ * 参数：
+ *   ?w=400         按宽度缩放并转 WebP（列表缩略图场景，压缩 70-85%）
+ *   ?full=1        跳过压缩，返回高清原图（详情页大图用）
+ *   无参数         默认压到 800px 宽 + WebP（防超巨大图拖慢）
+ * 只允许 supercrzy.com 域名（防 SSRF）。
  */
 newsRouter.get('/image', async (ctx: Context) => {
   const url = String(ctx.query.url || '')
@@ -51,14 +56,51 @@ newsRouter.get('/image', async (ctx: Context) => {
     ctx.body = { error: '仅允许 supercrzy.com 图片' }
     return
   }
+  const isFull = ctx.query.full === '1' || ctx.query.full === 'true'
+  // 目标宽度：显式 w 参数优先，否则默认 800（本地上传图常见 1280+ 宽，压到 800 足够列表/卡片）
+  const wRaw = Number(ctx.query.w || 0)
+  const targetWidth = Number.isFinite(wRaw) && wRaw >= 32 ? Math.round(wRaw) : (isFull ? 0 : 800)
   try {
     const resp = await fetch(url, { signal: AbortSignal.timeout(12000) })
     if (!resp.ok) { ctx.status = resp.status; ctx.body = Buffer.alloc(0); return }
     const type = resp.headers.get('content-type') || 'image/jpeg'
-    const buf = await resp.arrayBuffer()
-    ctx.set('Content-Type', type)
-    ctx.set('Cache-Control', 'public, max-age=300')
-    ctx.body = Buffer.from(buf)
+    const buf = Buffer.from(await resp.arrayBuffer())
+
+    // 不改尺寸时原样返回（full=1 或目标宽度 >= 原图宽，不放大）
+    if (isFull || targetWidth === 0) {
+      ctx.set('Content-Type', type)
+      ctx.set('Cache-Control', 'public, max-age=300')
+      ctx.body = buf
+      return
+    }
+
+    // 压缩路径：sharp 按宽度缩放 + 转 WebP（对 width>targetWidth 的图有收益；小图不改）
+    try {
+      const sharp = (await import('sharp')).default
+      const img = sharp(buf)
+      const meta = await img.metadata()
+      const srcW = meta.width || 0
+      // 原图已经比目标窄 → 直接原样返回（避免无谓重编码，且长度也小）
+      if (srcW > 0 && srcW <= targetWidth) {
+        ctx.set('Content-Type', type)
+        ctx.set('Cache-Control', 'public, max-age=300')
+        ctx.body = buf
+        return
+      }
+      const compressed = await img
+        .resize({ width: targetWidth, withoutEnlargement: true })
+        .webp({ quality: 80 })
+        .toBuffer()
+      ctx.set('Content-Type', 'image/webp')
+      ctx.set('Cache-Control', 'public, max-age=300')
+      ctx.body = compressed
+    } catch (sharperr: any) {
+      // sharp 处理失败（非图片/特殊格式）→ 回退原图
+      console.warn(`[NewsImage] sharp 压缩失败，回退原图: ${sharperr?.message || sharperr}`)
+      ctx.set('Content-Type', type)
+      ctx.set('Cache-Control', 'public, max-age=300')
+      ctx.body = buf
+    }
   } catch (e: any) {
     ctx.status = 502
     ctx.body = { error: `图片代理失败: ${e?.message || e}` }
