@@ -187,6 +187,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import MarkdownIt from 'markdown-it'
+import { useChatStore } from '@/stores/chat'
 
 // ---- 复用幽灵引擎的任务类型 ----
 interface GhostGhost {
@@ -212,6 +213,9 @@ const md = new MarkdownIt({ html: false, linkify: true })
 function renderMarkdown(c: string) { return c ? md.render(c) : '' }
 
 const { t } = useI18n({ useScope: 'global' })
+const chatStore = useChatStore()
+/** 任务 → 协作会话 ID 映射（发布任务时创建带"超级"标的会话，点侧边栏条目可回到该任务） */
+const taskSession = new Map<string, string>()
 
 const mode = ref<'semi' | 'senate'>('semi')
 const authSeconds = ref(5)
@@ -310,6 +314,12 @@ async function startGoal(goal: string) {
     tasks.value.unshift(mk)
     selectedTask.value = mk
     customGoal.value = ''
+    // 超级协作平台：为该任务创建一条"超级"协作会话（侧边栏会话列表带 超级 徽标，
+    // 与任务绑定，点开即可回到这条任务的协作视图）
+    try {
+      const s = await chatStore.createSession(g, '', mode.value)
+      taskSession.set(d.taskId, s.id)
+    } catch (e) { /* 会话创建失败不阻塞任务 */ }
   } catch (e: any) { console.error('发布失败', e) }
   starting.value = false
 }

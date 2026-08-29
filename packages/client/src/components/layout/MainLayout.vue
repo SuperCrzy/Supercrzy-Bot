@@ -180,7 +180,10 @@
               >
                 <SvgIcon name="message" :size="13" class="chat-item-icon" />
                 <div class="chat-item-info">
-                  <div class="chat-item-title">{{ s.title }}</div>
+                  <div class="chat-item-title">
+                    <span v-if="s.collabMode" class="chat-item-collab" :title="s.collabMode === 'senate' ? '全自动 · 议院' : '半自动'">超级</span>
+                    {{ s.title }}
+                  </div>
                   <div class="chat-item-meta">{{ formatRelativeTime(s.updatedAt) }}</div>
                 </div>
                 <n-dropdown
@@ -217,7 +220,10 @@
               >
                 <SvgIcon name="message" :size="13" class="chat-item-icon" />
                 <div class="chat-item-info">
-                  <div class="chat-item-title">{{ s.title }}</div>
+                  <div class="chat-item-title">
+                    <span v-if="s.collabMode" class="chat-item-collab" :title="s.collabMode === 'senate' ? '全自动 · 议院' : '半自动'">超级</span>
+                    {{ s.title }}
+                  </div>
                   <div class="chat-item-meta">{{ formatRelativeTime(s.updatedAt) }}</div>
                 </div>
                 <n-dropdown
@@ -992,6 +998,21 @@ onMounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
   line-height: 1.3;
+}
+
+/* 2026-08-29 超级协作平台：会话列表里的"超级"徽标（协作任务会话） */
+.chat-item-collab {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 500;
+  background: #f5f3ff;
+  color: #534AB7;
+  border-radius: 4px;
+  padding: 0 4px;
+  margin-right: 5px;
+  vertical-align: 1px;
+  flex-shrink: 0;
 }
 
 .chat-item-meta {

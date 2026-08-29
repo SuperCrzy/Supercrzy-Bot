@@ -157,6 +157,8 @@ export const useChatStore = defineStore('chat', () => {
           model: s.model || 'deepseek-v4-pro',
           workspaceDir: s.workspace_dir || '',
           permissionLevel: ['workspace-only', 'sandbox', 'full'].includes(s.permission_level) ? s.permission_level : 'sandbox',
+          // 超级协作平台：协作会话标记（后端 collab_mode）
+          collabMode: s.collab_mode === 'semi' || s.collab_mode === 'senate' ? s.collab_mode : undefined,
         }))
         // 恢复上次会话：localStorage 里的 id 若已被删除则回退到最新会话
         if (currentSessionId.value && !data.some((s: any) => s.id === currentSessionId.value)) {
@@ -257,8 +259,11 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  // ---- 创建新会话（持久化到后端） ----
-  async function createSession(title?: string, workspaceDir?: string): Promise<ChatSession> {
+  /**
+   * 创建新会话（持久化到后端）
+   * @param collabMode 2026-08-29 超级协作平台：传 'semi'/'senate' 则创建协作任务会话（侧边栏显示"超级"标）
+   */
+  async function createSession(title?: string, workspaceDir?: string, collabMode?: 'semi' | 'senate'): Promise<ChatSession> {
     const session: ChatSession = {
       id: crypto.randomUUID(),
       title: title || defaultSessionTitle(),
@@ -266,6 +271,7 @@ export const useChatStore = defineStore('chat', () => {
       updatedAt: new Date().toISOString(),
       model: 'deepseek-v4-pro',
       workspaceDir: workspaceDir || '',
+      collabMode,
     }
     sessions.value.unshift(session)
     messages.value.set(session.id, [])
@@ -278,7 +284,7 @@ export const useChatStore = defineStore('chat', () => {
       await fetch('/api/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: session.title, model: session.model, id: session.id, workspace_dir: session.workspaceDir }),
+        body: JSON.stringify({ title: session.title, model: session.model, id: session.id, workspace_dir: session.workspaceDir, collab_mode: collabMode || null }),
       })
     } catch (err) {
       console.error('Failed to persist session:', err)

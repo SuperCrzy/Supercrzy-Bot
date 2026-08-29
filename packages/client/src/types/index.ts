@@ -10,6 +10,8 @@ export interface ChatSession {
   permissionLevel?: 'workspace-only' | 'sandbox' | 'full'
   /** 归档标记（归档会话移出主列表，可恢复） */
   archived?: boolean
+  /** 2026-08-29 超级协作平台：协作模式（semi=半自动 / senate=全自动议院）；undefined=普通对话 */
+  collabMode?: 'semi' | 'senate'
 }
 
 export interface Attachment {

@@ -339,6 +339,10 @@ export function initDatabase() {
   try {
     db.exec("ALTER TABLE sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
   } catch { /* already exists */ }
+  // Migration: 超级协作平台——会话标记协作模式（NULL=普通对话，'semi'|'senate'=超级协作任务）
+  try {
+    db.exec("ALTER TABLE sessions ADD COLUMN collab_mode TEXT")
+  } catch { /* already exists */ }
 
   // Migration: add started_at column to tasks
   try {
