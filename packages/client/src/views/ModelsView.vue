@@ -505,6 +505,14 @@ function setBillingMode(plan: boolean) {
 /** 用当前填写的 API Key 拉取该渠道可用模型列表 */
 async function discoverModels() {
   if (!editingProvider.apiKey || discovering.value) return
+  // 防：值里混入界面掩码"•"(U+2022, >255) 导致 fetch 抛 ByteString 编码错误。
+  // 真实 API key 只应含 ASCII 打印字符（字母/数字/_-= 等），含圆点多为误填了掩码占位。
+  const KEY_INVALID = /[^\x20-\x7e]/
+  if (KEY_INVALID.test(editingProvider.apiKey)) {
+    discoverError.value = 'API Key 包含非法字符（检测到不可见/掩码字符），请粘贴真实的密钥（如 sk-xxx）'
+    discoveredModels.value = []
+    return
+  }
   discovering.value = true
   discoverError.value = ''
   try {
@@ -563,9 +571,17 @@ function editCustomModel(model: CustomModel) {
 }
 
 async function saveProvider() {
+  const pid = editingProvider.id
+  // 防保存掩码"•"到后端/本地（同 discover 校验）
+  const KEY_INVALID = /[^\x20-\x7e]/
+  if (editingProvider.apiKey && KEY_INVALID.test(editingProvider.apiKey)) {
+    savingProvider.value = false
+    // 用消息提示用户，不写入掩码
+    window.alert('API Key 包含非法字符（检测到掩码/不可见字符），已取消保存。请粘贴真实密钥（如 sk-xxx）')
+    return
+  }
   savingProvider.value = true
   try {
-    const pid = editingProvider.id
     const cfg: ProviderConfig = {
       apiKey: editingProvider.apiKey,
       baseUrl: editingProvider.baseUrl,
