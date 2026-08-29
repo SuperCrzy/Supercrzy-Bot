@@ -119,17 +119,17 @@
 
       <!-- Navigation Groups -->
       <nav class="nav-groups" v-show="!sidebarCollapsed">
-        <!-- 导航平铺（无分组标题）：新建任务 + 功能入口 -->
+        <!-- 导航平铺（无分组标题）：新建任务(常规用多,第1) + 超级协作平台(第2) -->
         <div class="nav-items" style="padding: 2px 8px;">
-          <!-- 超级协作平台：置顶主入口（多 AI 协作工作台，取代幽灵工作台） -->
-          <router-link to="/collab" class="nav-item collab-nav" :class="{ active: route.name === 'Collab' }">
-            <SvgIcon name="messages" :size="16" />
-            <span>{{ $t('nav.collab') }}</span>
-          </router-link>
           <!-- 新建任务：点击创建新会话并进入欢迎页；已有对话从下方会话列表进入 -->
           <router-link to="/" class="nav-item" :class="{ active: route.name === 'Chat' }" @click="handleNewChat">
             <SvgIcon name="message" :size="16" />
             <span>{{ $t('nav.newTask') }}</span>
+          </router-link>
+          <!-- 超级协作平台：多 AI 协作工作台（取代幽灵工作台） -->
+          <router-link to="/collab" class="nav-item collab-nav" :class="{ active: route.name === 'Collab' }">
+            <SvgIcon name="messages" :size="16" />
+            <span>{{ $t('nav.collab') }}</span>
           </router-link>
           <router-link v-if="!isMobile" to="/automations" class="nav-item" :class="{ active: route.name === 'Automations' || route.name === 'Routines' }">
             <SvgIcon name="clock" :size="16" />
