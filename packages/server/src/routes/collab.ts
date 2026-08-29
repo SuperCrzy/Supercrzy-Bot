@@ -8,8 +8,12 @@ import type { Context } from 'koa'
 import { randomUUID } from 'crypto'
 import { runGhostTask, stopGhostTask, listGhostTasks, getGhostTask } from '../services/ghost-engine'
 import { runQualityReview, type QualityReport } from '../services/collab-quality'
+import { runSenateReview, type SenateReport } from '../services/collab-senate'
 
 export const collabRouter = new Router({ prefix: '/api/collab' })
+
+// 任务模式注册表（taskId → senate/semi），供 quality/senate 端点分流
+const taskMode = new Map<string, string>()
 
 /**
  * POST /api/collab/tasks — 发布协作任务
@@ -24,6 +28,7 @@ collabRouter.post('/tasks', async (ctx: Context) => {
 
   const taskId = `ct_${Date.now()}_${randomUUID().slice(0, 6)}`
   const mode = body.mode === 'senate' ? 'senate' : 'semi'
+  taskMode.set(taskId, mode)  // 记录模式（供 quality/senate 端点分流）
   const concurrency = mode === 'senate' ? 4 : 2  // 议院更多把关 AI，半自动 2 个
   ctx.status = 202
   ctx.body = { taskId, status: 'decomposing', mode, authSeconds: body.authSeconds ?? (mode === 'senate' ? 10 : 5) }
@@ -84,5 +89,27 @@ function mergedQuality(id: string, r: QualityReport) {
     },
   }
 }
+
+// ---- P4 议院审查 ----
+const senateCache = new Map<string, SenateReport>()
+
+/**
+ * GET /api/collab/tasks/:id/senate — 议院审查（多名议员独立审+投票）
+ * 议员一票 == pass/reject，失败==abstain（容错不阻塞）；过半数 pass 且无 high → pass。
+ * 多议员 Parallel 跑，任一失败不影响整体（Promise.all 中 runSenator 内部已 catch 归 abstain）。
+ */
+collabRouter.get('/tasks/:id/senate', async (ctx: Context) => {
+  const id = ctx.params.id as string
+  const cached = senateCache.get(id)
+  if (cached) { ctx.body = { ...cached, taskStatus: getGhostTask(id)?.status || 'unknown' }; return }
+
+  const t = getGhostTask(id)
+  if (!t) { ctx.status = 404; ctx.body = { error: 'task not found' }; return }
+  if (t.status !== 'done') { ctx.body = { taskId: id, status: 'pending' as const }; return }
+
+  const report = await runSenateReview(t.goal, t.summary || '', id)
+  senateCache.set(id, report)
+  ctx.body = { ...report, taskStatus: t.status }
+})
 
 export default collabRouter

@@ -119,6 +119,32 @@
                 </div>
               </div>
             </div>
+            <!-- P4 议院审查 -->
+            <div v-if="senateReport && senateReport.status !== 'pending'" class="chat-line">
+              <span class="chat-avatar" style="background:#f5f3ff;color:#6d28d9">院</span>
+              <div class="chat-bubble-meta">
+                <span class="chat-actor" style="color:#6d28d9">议院审查</span>
+                <div class="chat-bubble senate">
+                  <div class="quality-head">
+                    <span class="quality-score" :class="senateReport.status">{{ senateReport.status === 'pass' ? '✓' : '需修订' }}</span>
+                    <div>
+                      <span>通过 {{ senateReport.passCount }} / {{ senateReport.totalSenators }} · 打回 {{ senateReport.rejectCount }}</span>
+                    </div>
+                  </div>
+                  <div v-for="(v, idx) in senateReport.votes" :key="idx" class="senator-vote">
+                    <div class="senator-head">
+                      <b>{{ v.senator }}</b>
+                      <span class="senator-verdict" :class="v.verdict">{{ v.verdict === 'pass' ? '通过' : (v.verdict === 'reject' ? '打回' : '弃权') }}</span>
+                      <span class="senator-score">{{ v.score }}</span>
+                    </div>
+                    <div class="senator-summary">{{ v.summary }}</div>
+                    <div v-for="(i, j) in v.issues.slice(0,3)" :key="j" class="quality-issue" :class="i.severity">
+                      <span class="qi-title">{{ i.title }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </template>
         </div>
 
@@ -194,6 +220,7 @@ const apiOk = ref(true)
 const tasks = ref<GhostTask[]>([])
 const selectedTask = ref<GhostTask | null>(null)
 const qualityReport = ref<any>(null)
+const senateReport = ref<any>(null)
 const customGoal = ref('')
 const starting = ref(false)
 const chatFlowRef = ref<HTMLElement | null>(null)
@@ -242,7 +269,11 @@ async function loadTasks() {
 function selectTask(t: GhostTask) {
   selectedTask.value = t
   qualityReport.value = null
-  if (t.status === 'done') fetchQuality(t.taskId)
+  senateReport.value = null
+  if (t.status === 'done') {
+    fetchQuality(t.taskId)
+    fetchSenate(t.taskId)
+  }
 }
 
 async function fetchQuality(taskId: string) {
@@ -251,6 +282,14 @@ async function fetchQuality(taskId: string) {
     const r = await fetch(`/api/collab/tasks/${taskId}/quality`)
     if (r.ok) qualityReport.value = await r.json()
   } catch { qualityReport.value = { status: 'failed' } }
+}
+
+async function fetchSenate(taskId: string) {
+  senateReport.value = { status: 'pending' }
+  try {
+    const r = await fetch(`/api/collab/tasks/${taskId}/senate`)
+    if (r.ok) senateReport.value = await r.json()
+  } catch { senateReport.value = { status: 'failed' } }
 }
 
 async function startGoal(goal: string) {
@@ -350,6 +389,15 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 .quality-issue.low { border-left-color: #94a3b8; background: #f8fafc; }
 .qi-title { font-weight: 500; display: block; }
 .qi-evidence { color: var(--text-tertiary); font-size: 11px; }
+.senator-vote { border-top: 1px dashed var(--border-color); padding: 8px 0; font-size: 12px; }
+.senator-vote:first-of-type { border-top: none; padding-top: 0; }
+.senator-head { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
+.senator-verdict { font-size: 11px; border-radius: 10px; padding: 0 8px; }
+.senator-verdict.pass { background: #f0fdf4; color: #15803d; }
+.senator-verdict.reject { background: #fef2f2; color: #dc2626; }
+.senator-verdict.abstain { background: #f8fafc; color: #64748b; }
+.senator-score { margin-left: auto; font-weight: 500; }
+.senator-summary { color: var(--text-secondary); margin-bottom: 4px; }
 .chat-line-top { display: flex; align-items: center; gap: 8px; }
 .chat-title { font-weight: 500; }
 .chat-status { font-size: 10px; }
