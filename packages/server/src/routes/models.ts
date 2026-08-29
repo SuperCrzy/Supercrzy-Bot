@@ -254,51 +254,93 @@ modelsRouter.post('/discover', async (ctx: Context) => {
   let headers: Record<string, string> = { 'Content-Type': 'application/json' }
   let parseModels: (json: any) => string[] = (json) =>
     (json?.data || []).map((m: any) => m.id).filter(Boolean)
+  // 候选 URL 列表：部分 OpenAI 兼容服务（如 Kimi/Moonshot）的 /models 必须在 /v1 下，
+  // 剥掉 /v1 会得到 url.not_found（404）。这里按 baseUrl 生成候选依次探测，取首个成功者。
+  let candidateUrls: string[] = []
 
   if (providerId === 'ollama') {
     // Ollama 本地模型:GET /api/tags → { models: [{ name: 'llama3.1:8b' }] }
     url = `${normalize(baseUrl)}/api/tags`
     parseModels = (json) =>
       (json?.models || []).map((m: any) => m.name).filter(Boolean)
+    candidateUrls = [url]
   } else if (providerId === 'anthropic') {
     // Anthropic 原生：x-api-key 头 + anthropic-version
     url = `${normalize(baseUrl)}/models`
     headers['x-api-key'] = apiKey
     headers['anthropic-version'] = '2023-06-01'
+    candidateUrls = [url]
   } else if (providerId === 'gemini') {
     // Gemini：x-goog-api-key 头，models[].name 带 'models/' 前缀
     url = `${baseUrl}/models`
     headers['x-goog-api-key'] = apiKey
     parseModels = (json) =>
       (json?.models || []).map((m: any) => String(m.name || '').replace(/^models\//, '')).filter(Boolean)
+    candidateUrls = [url]
   } else {
-    // OpenAI 兼容：Bearer + /models
-    url = `${normalize(baseUrl)}/models`
+    // OpenAI 兼容：Bearer + /models。Kimi/Moonshot 需保留 /v1，DeepSeek 需不带 /v1 ——
+    // 两种都试：先试 baseUrl 原样 + /models（保留 /v1），再试剥 /v1 后 + /models。
     headers['Authorization'] = `Bearer ${apiKey}`
+    const baseTrimmed = normalize(baseUrl)
+    candidateUrls = [
+      `${baseUrl.replace(/\/+$/, '')}/models`,      // 保留原样（Kimi 正确）
+      `${baseTrimmed}/models`,                       // 剥 /v1（DeepSeek 正确）
+    ]
+    // 去重（两者可能相同）
+    candidateUrls = [...new Set(candidateUrls)]
+    url = candidateUrls[0]
   }
 
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 8000)
   try {
-    const resp = await fetch(url, { headers, signal: controller.signal })
-    if (resp.status === 401 || resp.status === 403) {
-      ctx.status = 401
-      ctx.body = { error: 'API Key 无效或无权限' }
+    let resp: Response | null = null
+    let lastErrText = ''
+    for (const cand of candidateUrls) {
+      controller.abort() // 复用：每次新建
+      const c2 = new AbortController()
+      const t2 = setTimeout(() => c2.abort(), 8000)
+      try {
+        const r = await fetch(cand, { headers, signal: c2.signal })
+        clearTimeout(t2)
+        // 找到 200 且有可解析模型的候选即采用
+        if (r.ok) {
+          const text = await r.text().catch(() => '')
+          try {
+            const j = JSON.parse(text)
+            if (parseModels(j).length > 0) { resp = r; url = cand; lastErrText = text; break }
+            lastErrText = text
+          } catch { lastErrText = text }
+        } else {
+          lastErrText = await r.text().catch(() => '')
+          if (r.status === 401 || r.status === 403) { resp = r; url = cand; break }
+        }
+      } catch (e: any) {
+        clearTimeout(t2)
+        lastErrText = e?.message || String(e)
+      }
+    }
+    if (resp) {
+      const r = resp
+      if (r.status === 401 || r.status === 403) {
+        ctx.status = 401
+        ctx.body = { error: 'API Key 无效或无权限' }
+        return
+      }
+      const text = lastErrText || await r.text().catch(() => '')
+      let json: any = { data: [] }
+      try { json = JSON.parse(text) } catch { /* ignore */ }
+      const models = parseModels(json)
+      if (models.length === 0) {
+        ctx.body = { models: [], error: '未识别到可用模型' }
+        return
+      }
+      ctx.body = { models }
       return
     }
-    if (!resp.ok) {
-      const text = await resp.text().catch(() => '')
-      ctx.status = resp.status
-      ctx.body = { error: text.slice(0, 200) || `请求失败 (${resp.status})` }
-      return
-    }
-    const json = await resp.json().catch(() => ({}))
-    const models = parseModels(json)
-    if (models.length === 0) {
-      ctx.body = { models: [], error: '未识别到可用模型' }
-      return
-    }
-    ctx.body = { models }
+    // 所有候选都失败
+    ctx.status = 404
+    ctx.body = { error: lastErrText.slice(0, 200) || `请求失败，请检查 Base URL` }
   } catch (err: any) {
     ctx.status = 502
     ctx.body = { error: err.name === 'AbortError' ? '请求超时' : `请求失败: ${err.message}` }
