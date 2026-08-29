@@ -174,6 +174,8 @@ export type MessageStatus = 'pending' | 'streaming' | 'complete' | 'error'
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant' | 'system'
+  /** 2026-08-29 超级协作平台：发言人标识（执行AI/质检AI/议院/模型名），undefined=单AI */
+  actor?: string
   /** 兼容两种形态：流式过程中的字符串，历史消息的 ContentBlock[] */
   content: ContentBlock[] | string
   createdAt: string

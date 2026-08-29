@@ -352,6 +352,8 @@ interface AgentMessage {
   tool_calls?: ToolCall[]
   tool_call_id?: string
   reasoning_content?: string
+  /** 2026-08-29 超级协作平台：发言人标识。默认 undefined=单AI(SUPERCRZY)；多AI时 = '执行AI'|'质检AI'|'议院'|具体模型名 */
+  actor?: string
 }
 
 interface AgentConfig {
@@ -362,6 +364,8 @@ interface AgentConfig {
   maxTokens: number
   systemPrompt: string
   maxTurns: number
+  /** 2026-08-29 发言人标识：多AI协作时传入，SSE content 带此 actor */
+  actor?: string
 }
 
 interface AgentCheckpoint {
@@ -954,6 +958,7 @@ export async function runAgentLoop(
     resumed: !!resumeCheckpoint,
     contextWindow,
     model: agentConfig.model,
+    actor: agentConfig.actor,  // 2026-08-29 超级协作平台：发言人标识（执行AI/质检AI/议院/模型名）
   })
 
   // ---- 消息初始化（支持续跑） ----

@@ -316,12 +316,16 @@
             <!-- TurnFoldAvatar（WorkBuddy 同款）：耗时独立显示在头像下方，点击头像切换整轮折叠（耗时已由消息总计时徽标承担，不再重复） -->
             <div class="avatar-wrap">
               <div class="message-avatar" :class="{ 'turn-foldable': msg.role !== 'user' && hasProcess(msg) }" :title="msg.role !== 'user' && hasProcess(msg) ? $t('chat.toggleProcess') : ''" @click="msg.role !== 'user' && hasProcess(msg) && toggleMsgFold(msg)">
-                <img v-if="msg.role !== 'user'" src="/logo.png" alt="SUPERCRZY" class="avatar-logo" />
+                <!-- 2026-08-29 超级协作平台：有 actor 的多 AI 用图标头像，单 AI（无 actor）保留原 logo -->
+                <template v-if="msg.role !== 'user' && actorMeta(msg.actor)">
+                  <span class="actor-avatar" :style="{ background: actorMeta(msg.actor)!.bg, color: actorMeta(msg.actor)!.color }">{{ actorMeta(msg.actor)!.icon }}</span>
+                </template>
+                <img v-else-if="msg.role !== 'user'" src="/logo.png" alt="SUPERCRZY" class="avatar-logo" />
                 <ProfileAvatar v-else :avatar="appStore.userAvatar" :name="appStore.userName || 'U'" :size="28" :radius="7" />
               </div>
             </div>
             <div class="message-meta">
-              <span class="message-role">{{ msg.role === 'user' ? $t('chat.roleUser') : $t('chat.roleAssistant') }}</span>
+              <span class="message-role">{{ messageRoleLabel(msg) }}</span>
               <span class="message-time">{{ formatTime(msg.createdAt, msg.id) }}</span>
             </div>
             <!-- 引用按钮：hover 显示，一键把该消息引用进输入框（AI 优先针对引用回答） -->
@@ -2015,6 +2019,8 @@ import { createChatStream, type ChatStream } from '@/stores/chat-stream'
 import { DEFAULT_TYPING_CONFIG, advanceReveal, createTypewriterState } from '@/utils/typewriter'
 let stream: ChatStream | null = null
 let streamTarget: ChatMessage | null = null
+/** 2026-08-29 超级协作平台：config 事件下发的发言人标识，等待应用到当前 assistant 消息 */
+let pendingActor: string | undefined
 
 function lastFlowNodeOf<T extends ChatFlowNode['kind']>(
   msg: ChatMessage,
@@ -2600,6 +2606,25 @@ function resolveRealTime(dateStr: string, id?: string): Date | null {
 }
 
 /** 消息时间显示（对齐 WorkBuddy message-time）：今天 HH:MM / 昨天 / 今年 M月D日 / 往年带年 */
+/**
+ * 2026-08-29 超级协作平台：发言人元数据（名字/图标/颜色）。单 AI（无 actor）= SUPERCRZY 原样。
+ * 多 AI 场景按 actor 区分身份，渲染不同头像与名字。
+ */
+const ACTOR_META: Record<string, { label: string; icon: string; color: string; bg: string }> = {
+  '执行AI':   { label: '执行 AI',   icon: '执', color: '#374151', bg: '#e5e7eb' },
+  '质检AI':   { label: '质检 AI',   icon: '检', color: '#b45309', bg: '#fffbeb' },
+  '议院':     { label: '议院',     icon: '院', color: '#6d28d9', bg: '#f5f3ff' },
+  '你':       { label: '你',       icon: '你', color: '#1d4ed8', bg: '#eff6ff' },
+}
+function actorMeta(actor?: string) {
+  return actor ? (ACTOR_META[actor] || { label: actor, icon: (actor || '').slice(0, 1), color: '#374151', bg: '#e5e7eb' }) : null
+}
+function messageRoleLabel(msg: { role: string; actor?: string }): string {
+  if (msg.role === 'user') return t('chat.roleUser')
+  const m = actorMeta(msg.actor)
+  return m ? m.label : t('chat.roleAssistant')
+}
+
 function formatTime(dateStr: string, id?: string) {
   const d = resolveRealTime(dateStr, id)
   if (!d) return ''
@@ -3597,6 +3622,11 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage, sessionId?
       const text = data.text || ''
       if (!text) break
       aiStatus.value = 'chat.statusGenerating'
+      // 2026-08-29 超级协作平台：把待应用的 actor 落到这条 assistant 消息
+      if (pendingActor && msg && msg.role === 'assistant') {
+        msg.actor = pendingActor
+        pendingActor = undefined
+      }
       // 注意：执行中（含工具间简短说明）全程平铺，不折叠——折叠只在 done（轮次完成）时触发（WorkBuddy turnFold 逻辑）
       // 2026-08-25：不再 markAllThinkingDone——正文开始时思考可能还在前端打字机播（模型 reasoning 一次性到达），
       // 强制收起会让"思考没看完就被收掉"；思考保持展开，用户可滚动看完整推理，done 时统一标记完成。
@@ -3686,6 +3716,11 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage, sessionId?
       // 上下文窗口大小（后端按模型动态下发）→ 圆环分母
       if (typeof data.contextWindow === 'number') {
         appStore.setCtxWindow(data.contextWindow)
+      }
+      // 2026-08-29 超级协作平台：发言人标识，应用到当前 assistant 消息
+      if (typeof data.actor === 'string' && data.actor) {
+        pendingActor = data.actor
+        if (msg && msg.role === 'assistant') msg.actor = data.actor
       }
       break
     }
@@ -5192,6 +5227,19 @@ onMounted(async () => {
 .message.user .message-avatar {
   background: linear-gradient(135deg, #4F46E5, #6366F1);
   color: white;
+}
+
+/* 2026-08-29 超级协作平台：多 AI 角色的图标头像（执行/质检/议院等） */
+.actor-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  flex-shrink: 0;
 }
 
 /* assistant 头像由 LOGO 图片自带主题背景（纯白/纯黑），无需渐变底色 */

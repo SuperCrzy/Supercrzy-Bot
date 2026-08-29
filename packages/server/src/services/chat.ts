@@ -357,6 +357,7 @@ export async function handleAgentChat(ctx: Context) {
         maxTokens: body.max_tokens || 16384,
         systemPrompt,
         maxTurns,
+        actor: (body as any).actor as string | undefined,  // 2026-08-29 超级协作平台：发言人标识
       },
       resumePath,
       (body as any).sessionId,  // 会话级工具授权
