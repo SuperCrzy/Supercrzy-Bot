@@ -22,6 +22,10 @@
         {{ authSeconds > 0 ? `已授权 ${authSeconds}s` : '手动确认' }}
       </span>
       <span class="collab-api" v-if="apiOk">API 正常</span>
+      <button class="collab-browser-toggle" @click="toggleAiBrowser">
+        <SvgIcon name="super" :size="13" />
+        <span>AI 浏览器</span>
+      </button>
     </header>
 
     <div class="collab-body">
@@ -157,6 +161,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import MarkdownIt from 'markdown-it'
 import { useChatStore } from '@/stores/chat'
+import { useAppStore } from '@/stores/app'
 import SvgIcon from '@/components/ui/SvgIcon.vue'
 
 // ---- 复用幽灵引擎的任务类型 ----
@@ -186,6 +191,13 @@ const { t } = useI18n({ useScope: 'global' })
 const chatStore = useChatStore()
 /** 任务 → 协作会话 ID 映射（发布任务时创建带"超级"标的会话，点侧边栏条目可回到该任务） */
 const taskSession = new Map<string, string>()
+
+/** 展开/收起右侧"AI 浏览器"可收缩栏（DetailPanel browser tab） */
+function toggleAiBrowser() {
+  const appStore = useAppStore()
+  appStore.setDetailPanelTab('browser')
+  if (!appStore.detailPanelVisible) appStore.toggleDetailPanel()
+}
 
 const mode = ref<'semi' | 'senate'>('semi')
 const authSeconds = ref(5)
@@ -327,6 +339,8 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 .collab-auth { font-size: 11px; background: #f0fdf4; color: #0f766e; border-radius: 6px; padding: 2px 10px; }
 .collab-auth.on { background: #f0fdf4; color: #0f766e; }
 .collab-api { font-size: 11px; color: var(--text-tertiary); margin-left: auto; }
+.collab-browser-toggle { margin-left: 8px; display: flex; align-items: center; gap: 5px; font-size: 12px; color: #534AB7; background: #f5f3ff; border: 1px solid #e4dcf5; border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+.collab-browser-toggle:hover { background: #eeedfe; }
 .collab-body { flex: 1; min-height: 0; display: flex; }
 .collab-left { overflow-y: auto; border-right: 1px solid var(--border-color); padding: 14px; background: var(--bg-tertiary); min-height: 0; }
 .collab-main { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg-tertiary); overflow: hidden; }
