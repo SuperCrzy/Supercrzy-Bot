@@ -746,6 +746,22 @@ export const toolExecutors: Record<string, ToolExecutor> = {
     return '未找到可视化指南文件（README.md / .agents/skills/README.md）。可先用 file_search 查找项目文档。'
   },
 
+  // ---- 工具发现（2026-08-29 两级加载：重型工具按需暴露 schema） ----
+  async tool_search(args) {
+    const query = String(args.query || '').trim().toLowerCase()
+    const DEFERRED_NAMES = [...DEFERRED_TOOLS]
+    const matched = DEFERRED_NAMES.filter(n => !query || n.includes(query))
+
+    if (matched.length === 0) {
+      return '未找到匹配的按需工具。核心工具（file_read/file_write/shell_exec/web_search/web_fetch/deep_research 等）已常驻，无需搜索。可按需搜索：' + DEFERRED_NAMES.join(', ')
+    }
+    const lines = matched.map(n => {
+      const def = toolDefinitions.find(t => t.name === n)
+      return `- ${n}: ${def?.description || '无描述'}` + (def ? '' : '')
+    })
+    return `按需工具（已加载，可直接调用）：\n${lines.join('\n')}`
+  },
+
   // ---- Shell 工具（三层沙箱防护） ----
   async shell_exec(args, ctx) {
     // L1 危险命令黑名单：无条件拦截（即使已确认也禁止）
@@ -1412,6 +1428,18 @@ function chunkSvgByTag(svg: string, targetChars = 140): string[] {
 
 export const toolDefinitions: ToolDefinition[] = [
   {
+    name: 'tool_search',
+    description: '发现按需加载的工具。核心工具已常驻无需搜索；当需要一个不在当前可用列表里的工具（如生成图片 generate_image、视频剪辑 video_edit、终端控制 terminal_*、桌面控制 computer_use、技能详情 skill_view 等）时，先用本工具搜索并加载其定义，随后即可正常调用。支持模糊匹配。',
+    category: 'system',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: '工具名或关键词，如 "image"、"terminal"、"git"；空则列出所有按需工具' },
+      },
+      required: ['query'],
+    },
+  },
+  {
     name: 'memory_store',
     description: '存储一条长期记忆。当你学到关于用户的重要信息时使用。',
     category: 'memory',
@@ -1998,6 +2026,30 @@ export function getToolMeta(name: string): ToolMeta | undefined {
     dangerous: def.dangerous || false,
   }
 }
+
+// ============================================================
+// 工具两级加载（2026-08-29 对齐 WorkBuddy deferLoading）
+// ------------------------------------------------------------
+// 思想：不用把全部工具 schema 塞进每轮请求的 tools 数组。核心调查工具常驻；
+// 重型/少用工具（生图/视频/终端/绘图/MCP 资源等）默认不暴露完整 schema，
+// 模型需要时先调用 tool_search(名称) 按需加载其定义，随后即可像普通工具一样调用。
+// 这样显著压缩每轮 prompt 体积（我们 37 个工具，其中多数带很长 parameters）。
+// ------------------------------------------------------------
+export const DEFERRED_TOOLS = new Set<string>([
+  'generate_image',   // 重型：图片生成参数多、少用
+  'video_edit',       // 视频剪辑
+  'computer_use',     // 桌面/浏览器控制（重）
+  'draw_diagram',
+  'terminal_open', 'terminal_send', 'terminal_read', 'terminal_signal', 'terminal_close', 'terminal_list',
+  'skill_view', 'skill_install',  // 技能内容详情/安装（需要时才看）
+  'git_commit',        // 带风险的操作，按需暴露
+  'memory_store',      // 写入型，非核心
+])
+
+/** 常驻 tools 数组 = 全部去掉 DEFERRED */
+export const alwaysOnToolDefs = (): ToolDefinition[] =>
+  toolDefinitions.filter(t => !DEFERRED_TOOLS.has(t.name))
+
 
 export function getToolsByCategory(category: string): ToolDefinition[] {
   return toolDefinitions.filter(t => t.category === category)

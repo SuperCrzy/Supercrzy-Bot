@@ -17,7 +17,7 @@ import { config } from '../config'
 import { rankMemories, memoryRankedSearch } from './memory-search'
 import { requestChat, chatCompletion, normalizeBaseUrl, buildApiError } from './model-client'
 import { getDB } from '../services/database'
-import { toolDefinitions, executeToolCalls, type ToolCall, type ToolResultWithMeta, getToolMeta, type ToolExecCtx } from './tools'
+import { toolDefinitions, executeToolCalls, type ToolCall, type ToolResultWithMeta, getToolMeta, type ToolExecCtx, DEFERRED_TOOLS } from './tools'
 import { pushMemorySync, pushReflection } from './memory-worker'
 
 // ---- 敏感工具确认机制（先确认后执行）----
@@ -177,6 +177,15 @@ export function humanizeApiError(c: { reason: string; message: string }): string
  * 孤立 tool_calls 来源：①检查点恢复残缺 ②上下文压缩丢弃 tool 响应 ③工具超时/中断（assistantMsg 已 push 但 tool 结果不全）。
  * 策略：发请求前扫描，若 assistant.tool_calls 中某 id 未被后续 tool 消息响应 → 剔除该 tool_calls（防 400）。
  */
+/**
+ * 该工具是否属于"按需加载"类型（2026-08-29 两级加载对齐 WorkBuddy deferLoading）。
+ * 重型/少用工具默认不暴露在每轮请求的 tools 数组，模型先 tool_search 发现再调用。
+ * 注意：tool_search 本身必须常驻（否则模型无从发现按需工具）。
+ */
+function isDeferredTool(name: string): boolean {
+  return DEFERRED_TOOLS.has(name)
+}
+
 export function sanitizeToolCallSequence(msgs: AgentMessage[]): AgentMessage[] {
   // 全量校验并降级两类"会导致 DeepSeek 400"的 assistant 消息：
   //
@@ -740,12 +749,15 @@ function buildSystemPrompt(basePrompt: string, userMessage: string, model?: stri
     }
   } catch {}
 
-  // 基础白名单 = 全部 28 个内置工具（2026-08-24 修复：原 18 个缺 file_read/file_write/multi_edit/shell_exec 等核心文件工具，
-  // 用户一旦自定义 allowedTools 就会过滤丢核心能力 → 补齐为全量，自定义仅作"追加技能工具"而非缩减）
+  // 基础白名单 = 全部内置工具（2026-08-29：补 tool_search——两级加载的发现工具必须常驻）。
+  // 注意：DEFERRED_TOOLS（generate_image/video_edit/terminal_*/computer_use 等）仍会在
+  // 注入 tools 数组时被过滤为"按需"，模型先用 tool_search 发现再到 DeferExecuteTool；
+  // 但 allowedTools 白名单必须包含它们，否则按需加载后也无法调用。故这里保留全量名单。
   const baseTools = [
     'memory_store', 'memory_recall', 'memory_list',
     'file_read', 'file_write', 'file_exists', 'multi_edit', 'lint_file', 'read_me',
     'shell_exec', 'web_search', 'web_fetch', 'deep_research', 'news_search',
+    'tool_search',
     'draw_diagram', 'generate_image', 'video_edit', 'ask_question', 'ask_user',
     'task_create', 'task_update', 'task_list', 'create_plan', 'get_goal',
     'git_status', 'git_diff', 'git_commit',
@@ -1037,9 +1049,12 @@ export async function runAgentLoop(
     } catch { /* 计数失败不影响主流程 */ }
   }
 
+  // 工具两级加载（2026-08-29 对齐 WorkBuddy deferLoading）：
+  // 默认只暴露核心常驻工具，重型/少用工具（生图/视频/终端/绘图等）按需 tool_search 发现，
+  // 压缩每轮 prompt 体积。allowedTools 白名单仍可精确裁剪。
   let activeToolDefs = systemPrompt.allowedTools.length > 3
-    ? toolDefinitions.filter(t => systemPrompt.allowedTools.includes(t.name))
-    : toolDefinitions
+    ? toolDefinitions.filter(t => systemPrompt.allowedTools.includes(t.name) && !isDeferredTool(t.name))
+    : toolDefinitions.filter(t => !isDeferredTool(t.name))
 
   // ---- MCP 连接器工具注入（用户自定义 MCP server 的工具动态合并） ----
   try {
