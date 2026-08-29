@@ -91,9 +91,14 @@ export async function compressContext(
     return { messages, compressed: false, savedTokens: 0 }
   }
 
-  // 2. 保护头部
+  // 2. 保护头部（WorkBuddy contextSummary 同款：保留原始意图 + 前几轮）
   const headCount = COMPRESSION_CONFIG.PROTECT_HEAD
   const headMsgs = nonSystemMsgs.slice(0, headCount)
+  // 额外保护首条用户消息（原始意图 Primary Request），即使它在 PROTECT_HEAD 之外也强制保留
+  const firstUserIdx = nonSystemMsgs.findIndex(m => m.role === 'user')
+  const preservedFirstUser = (firstUserIdx >= headCount)
+    ? nonSystemMsgs.slice(firstUserIdx, firstUserIdx + 1)
+    : []
 
   // 3. 保护尾部（从后往前数，直到 token 预算用完）
   let tailTokens = 0
@@ -121,6 +126,9 @@ export async function compressContext(
 
   const summaryPrompt = `请将以下对话历史压缩为结构化摘要。保留关键信息，丢弃冗余细节。
 
+你可以参考中间被压缩的轮次里做过什么，但**压缩后之前的所有工作应视为已完成**，
+后续对话不要重复执行已经被摘要覆盖的操作或工具调用，除非用户明确要求重做。
+
 输出格式：
 ## 已完成的工作
 - 列出已完成的关键操作和结果
@@ -132,7 +140,7 @@ export async function compressContext(
 - 保留重要的文件路径、配置、决策等
 
 ## 待完成
-- 列出尚未完成的任务
+- 列出尚未完成任务
 
 对话历史：
 ${middleText.slice(0, 8000)}`
@@ -170,14 +178,17 @@ ${middleText.slice(0, 8000)}`
     }
 
     // 5. 组装压缩后的 messages
+    // 用 assistant 角色承载摘要（对齐 WorkBuddy compact agent 产出的 assistant 摘要消息），
+    // 明确标注"以下已压缩完成，勿重做"，防止模型压缩后重复执行已做过的工作。
     const summaryMsg: AgentMessage = {
       role: 'system',
-      content: `[上下文压缩摘要 — 以下是之前 ${middleMsgs.length} 轮对话的结构化总结]\n\n${summary}`,
+      content: `[上下文压缩摘要 — 以下是之前 ${middleMsgs.length} 轮对话的结构化总结。**摘要中已列出的工作视为已完成，请勿重复执行或重复调用相关工具**，除非用户明确要求]\n\n${summary}`,
     }
 
     const compressed = [
       ...systemMsgs,
       ...headMsgs,
+      ...preservedFirstUser,
       summaryMsg,
       ...tailMsgs,
     ]
