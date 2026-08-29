@@ -109,9 +109,6 @@
         <router-link to="/ghost" class="rail-btn" :class="{ active: route.name === 'Ghost' }" :title="$t('nav.ghost')">
           <SvgIcon name="ghost" :size="17" />
         </router-link>
-        <router-link to="/tasks" class="rail-btn" :class="{ active: route.name === 'Tasks' }" :title="$t('nav.tasks')">
-          <SvgIcon name="layers" :size="17" />
-        </router-link>
           <router-link to="/automations" class="rail-btn" :class="{ active: route.name === 'Automations' || route.name === 'Routines' }" :title="$t('nav.autoExec')">
             <SvgIcon name="clock" :size="17" />
           </router-link>
@@ -134,10 +131,6 @@
             <SvgIcon name="ghost" :size="16" />
             <span>{{ $t('nav.ghost') }}</span>
           </router-link>
-          <router-link v-if="!isMobile" to="/tasks" class="nav-item" :class="{ active: route.name === 'Tasks' }">
-            <SvgIcon name="layers" :size="16" />
-            <span>{{ $t('nav.tasks') }}</span>
-          </router-link>
           <router-link v-if="!isMobile" to="/automations" class="nav-item" :class="{ active: route.name === 'Automations' || route.name === 'Routines' }">
             <SvgIcon name="clock" :size="16" />
             <span>{{ $t('nav.autoExec') }}</span>
@@ -151,19 +144,6 @@
             <SvgIcon name="globe" :size="16" />
             <span>{{ $t('nav.news') }}</span>
           </router-link>
-        </div>
-
-        <!-- Advanced Group — mobile only, collapsed by default -->
-        <div class="nav-group" v-if="isMobile">
-          <div class="nav-group-title" @click="advancedOpen = !advancedOpen">
-            <span>{{ $t('nav.agentGroup') }}</span>
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :class="{ rotated: advancedOpen }"><path d="M6 9l6 6 6-6"/></svg>
-          </div>
-          <div class="nav-items" v-show="advancedOpen">
-            <router-link to="/tasks" class="nav-item" :class="{ active: route.name === 'Tasks' }">
-              <SvgIcon name="layers" :size="14" /><span>{{ $t('nav.tasks') }}</span>
-            </router-link>
-          </div>
         </div>
       </nav>
 
@@ -359,7 +339,6 @@ const sidebarWidth = ref(220)
 
 const mobileMenuOpen = ref(false)
 const isMobile = ref(false)
-const advancedOpen = ref(false)
 const chatsCollapsed = ref(false)
 
 // ---- 桌面 App 沉浸式顶栏：isDesktop（Electron 环境，setup 同步判断避免首帧延迟）+ 后端状态 ----
