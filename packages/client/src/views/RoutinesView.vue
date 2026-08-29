@@ -1,7 +1,7 @@
 <template>
   <div class="page-container">
     <header class="page-header">
-      <h2>例程（Routine）</h2>
+      <h2>例程</h2>
       <p class="page-desc">把跑通的任务保存为可复用流程，一键重放 —— 像教同事一样教 AI，教一次就会</p>
       <div class="header-actions">
         <n-select
