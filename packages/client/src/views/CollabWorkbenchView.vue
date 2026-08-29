@@ -92,6 +92,33 @@
                 <div class="chat-bubble senate" v-html="renderMarkdown(selectedTask.summary)" />
               </div>
             </div>
+            <!-- P2 质检报告 -->
+            <div v-if="qualityReport && qualityReport.status !== 'pending'" class="chat-line">
+              <span class="chat-avatar" style="background:#fffbeb;color:#b45309">检</span>
+              <div class="chat-bubble-meta">
+                <span class="chat-actor" style="color:#b45309">质检 AI</span>
+                <div class="chat-bubble quality">
+                  <div class="quality-head">
+                    <span class="quality-score" :class="qualityReport.status">{{ qualityReport.score }}</span>
+                    <div>
+                      <span class="quality-badge" :class="qualityReport.status">{{ qualityReport.status === 'pass' ? '通过' : '需复核' }}</span>
+                      <span class="quality-summary">{{ qualityReport.summary }}</span>
+                    </div>
+                  </div>
+                  <div class="quality-dims">
+                    <span v-for="(v, k) in qualityReport.dimensions" :key="k" class="quality-dim">
+                      {{ k }} <b>{{ v }}</b>
+                    </span>
+                  </div>
+                  <div v-if="qualityReport.issues.length" class="quality-issues">
+                    <div v-for="(i, idx) in qualityReport.issues" :key="idx" class="quality-issue" :class="i.severity">
+                      <span class="qi-title">{{ i.title }}</span>
+                      <span class="qi-evidence">{{ i.evidence }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </template>
         </div>
 
@@ -166,6 +193,7 @@ const authEnabled = ref(true)
 const apiOk = ref(true)
 const tasks = ref<GhostTask[]>([])
 const selectedTask = ref<GhostTask | null>(null)
+const qualityReport = ref<any>(null)
 const customGoal = ref('')
 const starting = ref(false)
 const chatFlowRef = ref<HTMLElement | null>(null)
@@ -211,7 +239,19 @@ async function loadTasks() {
   } catch { apiOk.value = false }
 }
 
-function selectTask(t: GhostTask) { selectedTask.value = t }
+function selectTask(t: GhostTask) {
+  selectedTask.value = t
+  qualityReport.value = null
+  if (t.status === 'done') fetchQuality(t.taskId)
+}
+
+async function fetchQuality(taskId: string) {
+  qualityReport.value = { status: 'pending' }
+  try {
+    const r = await fetch(`/api/collab/tasks/${taskId}/quality`)
+    if (r.ok) qualityReport.value = await r.json()
+  } catch { qualityReport.value = { status: 'failed' } }
+}
 
 async function startGoal(goal: string) {
   const g = String(goal || '').trim()
@@ -291,6 +331,25 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 .chat-bubble { background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 2px 10px 10px 10px; padding: 9px 12px; font-size: 13px; }
 .chat-line.user-line .chat-bubble { background: #eff6ff; border-color: #dbeafe; border-radius: 10px 2px 10px 10px; }
 .chat-bubble.senate { border-color: #e4dcf5; background: #faf8ff; }
+.chat-bubble.quality { border-color: #f0dcab; background: #fffbeb; }
+.quality-head { display: flex; gap: 12px; align-items: center; margin-bottom: 8px; }
+.quality-score { font-size: 24px; font-weight: 600; line-height: 1; }
+.quality-score.pass { color: #15803d; }
+.quality-score.review { color: #b45309; }
+.quality-badge { font-size: 11px; border-radius: 10px; padding: 1px 8px; margin-right: 8px; }
+.quality-badge.pass { background: #f0fdf4; color: #15803d; }
+.quality-badge.review { background: #fffbeb; color: #b45309; }
+.quality-summary { font-size: 12px; color: var(--text-secondary); }
+.quality-dims { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.quality-dim { font-size: 11px; background: var(--bg-tertiary); border-radius: 6px; padding: 2px 8px; }
+.quality-dim b { font-weight: 500; }
+.quality-issues { display: flex; flex-direction: column; gap: 4px; }
+.quality-issue { font-size: 12px; padding: 6px 10px; border-radius: 6px; border-left: 3px solid #eab308; }
+.quality-issue.high { border-left-color: #ef4444; background: #fef2f2; }
+.quality-issue.medium { border-left-color: #f59e0b; background: #fffbeb; }
+.quality-issue.low { border-left-color: #94a3b8; background: #f8fafc; }
+.qi-title { font-weight: 500; display: block; }
+.qi-evidence { color: var(--text-tertiary); font-size: 11px; }
 .chat-line-top { display: flex; align-items: center; gap: 8px; }
 .chat-title { font-weight: 500; }
 .chat-status { font-size: 10px; }

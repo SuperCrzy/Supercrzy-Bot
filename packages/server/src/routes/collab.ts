@@ -7,6 +7,7 @@ import Router from 'koa-router'
 import type { Context } from 'koa'
 import { randomUUID } from 'crypto'
 import { runGhostTask, stopGhostTask, listGhostTasks, getGhostTask } from '../services/ghost-engine'
+import { runQualityReview, type QualityReport } from '../services/collab-quality'
 
 export const collabRouter = new Router({ prefix: '/api/collab' })
 
@@ -48,5 +49,40 @@ collabRouter.get('/tasks/:id', (ctx: Context) => {
 
 // 停止任务
 collabRouter.post('/tasks/:id/stop', (ctx: Context) => { ctx.body = { stopped: stopGhostTask(ctx.params.id) } })
+
+// ---- P2 分层质检 ----
+// 内存态质检报告缓存（与 collab 任务同生命周期）
+const qualityCache = new Map<string, QualityReport>()
+
+/**
+ * GET /api/collab/tasks/:id/quality — 获取/触发质检报告
+ * 任务 done 后首次请求生成（L2 质检 Agent），缓存；非 done 返回待质检。
+ */
+collabRouter.get('/tasks/:id/quality', async (ctx: Context) => {
+  const id = ctx.params.id as string
+  const cached = qualityCache.get(id)
+  if (cached) { ctx.body = mergedQuality(id, cached); return }
+
+  const t = getGhostTask(id)
+  if (!t) { ctx.status = 404; ctx.body = { error: 'task not found' }; return }
+  if (t.status !== 'done') { ctx.body = { taskId: id, status: 'pending' as const }; return }
+
+  // 触发生成质检（一次性；并发请求用 in-flight 防重复）
+  const report = await runQualityReview(t.goal, t.summary || '', id)
+  qualityCache.set(id, report)
+  ctx.body = mergedQuality(id, report)
+})
+
+function mergedQuality(id: string, r: QualityReport) {
+  const t = getGhostTask(id)
+  return {
+    ...r,
+    taskStatus: t?.status || 'unknown',
+    sources: {
+      ghosts: t?.ghosts?.length || 0,
+      summaryChars: (t?.summary || '').length || 0,
+    },
+  }
+}
 
 export default collabRouter

@@ -79,11 +79,11 @@ export function getGhostTask(taskId: string) { return tasks.get(taskId) }
 export function listGhostTasks() { return Array.from(tasks.values()) }
 
 // ---- 工具：读 LLM 配置（settings → custom_providers(deepseek) → .env 回退链，与主聊天同源）----
-function normalizeBaseUrl(url: string): string {
+export function normalizeBaseUrl(url: string): string {
   // 去掉尾部斜杠和重复的 /v1（DB 中 base_url 可能已含 /v1）
   return (url || '').replace(/\/+$/, '').replace(/\/v1$/, '')
 }
-function getLLMConfig() {
+export function getLLMConfig() {
   const db = getDB()
   const modelRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('model') as any
   const keyRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('apiKey') as any
