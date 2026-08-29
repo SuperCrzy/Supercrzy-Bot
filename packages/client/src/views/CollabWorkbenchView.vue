@@ -329,8 +329,8 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 </script>
 
 <style scoped>
-.collab-workbench { height: 100%; display: flex; flex-direction: column; background: var(--bg-primary); }
-.collab-topbar { display: flex; align-items: center; gap: 14px; padding: 12px 20px; border-bottom: 1px solid var(--border-color); }
+.collab-workbench { height: 100%; display: flex; flex-direction: column; background: var(--bg-primary); overflow: hidden; }
+.collab-topbar { flex-shrink: 0; display: flex; align-items: center; gap: 14px; padding: 12px 20px; border-bottom: 1px solid var(--border-color); }
 .collab-brand { display: flex; align-items: center; gap: 8px; }
 .collab-logo { width: 26px; height: 26px; border-radius: 7px; background: #534AB7; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 13px; }
 .collab-name { font-weight: 600; font-size: 14px; }
@@ -340,10 +340,10 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 .collab-auth { font-size: 11px; background: #f0fdf4; color: #0f766e; border-radius: 6px; padding: 2px 10px; }
 .collab-auth.on { background: #f0fdf4; color: #0f766e; }
 .collab-api { font-size: 11px; color: var(--text-tertiary); margin-left: auto; }
-.collab-body { flex: 1; display: grid; grid-template-columns: 230px 1fr 240px; min-height: 0; }
-.collab-left { border-right: 1px solid var(--border-color); padding: 14px; overflow-y: auto; background: var(--bg-tertiary); }
-.collab-main { display: flex; flex-direction: column; min-width: 0; background: var(--bg-tertiary); }
-.collab-right { border-left: 1px solid var(--border-color); padding: 14px; background: var(--bg-tertiary); }
+.collab-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 230px 1fr 240px; }
+.collab-left { overflow-y: auto; border-right: 1px solid var(--border-color); padding: 14px; background: var(--bg-tertiary); min-height: 0; }
+.collab-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg-tertiary); overflow: hidden; }
+.collab-right { border-left: 1px solid var(--border-color); padding: 14px; background: var(--bg-tertiary); overflow-y: auto; min-height: 0; }
 .panel-title { font-size: 12px; font-weight: 600; margin: 0 0 10px; }
 .panel-empty { font-size: 12px; color: var(--text-tertiary); padding: 20px 0; text-align: center; }
 .pipeline-card { border: 1px solid var(--border-color); border-radius: 8px; padding: 9px 11px; margin-bottom: 8px; cursor: pointer; background: var(--bg-primary); }
@@ -407,7 +407,7 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 .chat-bar-fill { height: 100%; background: #f59e0b; border-radius: 3px; }
 .chat-log { font-size: 11px; color: var(--text-tertiary); margin-top: 4px; }
 .chat-log div { margin: 2px 0; }
-.chat-input-bar { border-top: 1px solid var(--border-color); padding: 10px 16px; background: var(--bg-primary); }
+.chat-input-bar { border-top: 1px solid var(--border-color); padding: 10px 16px; background: var(--bg-primary); flex-shrink: 0; }
 .chat-input-row { display: flex; gap: 10px; }
 .chat-input { flex: 1; border: 1px solid var(--border-color); border-radius: 8px; padding: 9px 12px; font-size: 13px; background: var(--bg-tertiary); }
 .chat-send { border: none; background: #534AB7; color: #fff; border-radius: 8px; padding: 0 18px; font-size: 13px; cursor: pointer; }
