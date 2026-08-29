@@ -3,7 +3,7 @@
     <!-- 顶栏：平台名 + 半自动/议院切换 + 授权状态 -->
     <header class="collab-topbar">
       <div class="collab-brand">
-        <span class="collab-logo">协</span>
+        <span class="collab-logo"><SvgIcon name="super" :size="15" /></span>
         <span class="collab-name">超级协作平台</span>
       </div>
       <div class="collab-mode-switch">
@@ -158,6 +158,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import MarkdownIt from 'markdown-it'
 import { useChatStore } from '@/stores/chat'
+import SvgIcon from '@/components/ui/SvgIcon.vue'
 
 // ---- 复用幽灵引擎的任务类型 ----
 interface GhostGhost {
@@ -319,7 +320,7 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 .collab-workbench { height: 100%; display: flex; flex-direction: column; background: var(--bg-primary); overflow: hidden; }
 .collab-topbar { flex-shrink: 0; display: flex; align-items: center; gap: 14px; padding: 12px 20px; border-bottom: 1px solid var(--border-color); }
 .collab-brand { display: flex; align-items: center; gap: 8px; }
-.collab-logo { width: 26px; height: 26px; border-radius: 7px; background: #534AB7; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 13px; }
+.collab-logo { width: 26px; height: 26px; border-radius: 7px; background: #f5f3ff; color: #534AB7; display: flex; align-items: center; justify-content: center; }
 .collab-name { font-weight: 600; font-size: 14px; }
 .collab-mode-switch { display: flex; background: var(--bg-tertiary); border-radius: 8px; padding: 3px; gap: 2px; }
 .mode-btn { border: none; background: transparent; font-size: 12px; padding: 5px 16px; border-radius: 6px; color: var(--text-muted); cursor: pointer; }
