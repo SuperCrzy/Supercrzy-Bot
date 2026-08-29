@@ -548,14 +548,18 @@ async function discoverModels() {
 }
 
 function openProviderConfig(p: typeof presetProviders.value[0]) {
+  const cfg = providerConfigs[p.id]
   Object.assign(editingProvider, {
     id: p.id, label: p.label,
-    apiKey: providerConfigs[p.id]?.apiKey || '',
-    baseUrl: providerConfigs[p.id]?.baseUrl || p.baseUrl,
+    apiKey: cfg?.apiKey || '',
+    // URL 优先级：服务器已配 key 的 provider，URL 以预设默认值为准（本地 localStorage 的
+    // baseUrl 可能被历史残留污染——如 deepseek 曾误存成 ollama 的 localhost:11434）。
+    // 仅当本地有用户显式填写的自定义 URL 且非"服务器key"时才用本地值。
+    baseUrl: cfg?.hasServerKey ? p.baseUrl : (cfg?.baseUrl || p.baseUrl),
     defaultBaseUrl: p.baseUrl,
-    defaultModel: providerConfigs[p.id]?.defaultModel || p.defaultModel,
+    defaultModel: cfg?.defaultModel || p.defaultModel,
   })
-  discoveredModels.value = providerConfigs[p.id]?.models || []
+  discoveredModels.value = cfg?.models || []
   discoverError.value = ''
   showProviderModal.value = true
 }
