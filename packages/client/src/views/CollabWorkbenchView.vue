@@ -28,10 +28,9 @@
       <!-- 侧边栏"超级任务"列表承担任务导航；此处为聚焦当前任务的协作视图 -->
       <!-- 多 AI 对话流 -->
       <main class="collab-main">
-        <p class="panel-title">多 AI 协作</p>
         <div class="chat-flow" ref="chatFlowRef">
           <div v-if="!selectedTask" class="chat-empty">
-            <p>在左栏选择一个超级任务查看各 AI 的分工与进展</p>
+            <p>在左侧选择一个超级任务查看各 AI 的分工与进展</p>
             <p class="chat-empty-hint">执行 AI 负责实现，质检 AI / 议院负责把关，你可在底部 @ 协商</p>
           </div>
           <template v-else>
