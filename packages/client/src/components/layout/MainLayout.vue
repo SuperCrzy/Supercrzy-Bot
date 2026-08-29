@@ -118,9 +118,6 @@
           <router-link to="/routines" class="rail-btn" :class="{ active: route.name === 'Routines' }" :title="$t('nav.routines')">
             <SvgIcon name="zap" :size="17" />
           </router-link>
-        <router-link to="/workspace" class="rail-btn" :class="{ active: route.name === 'Workspace' }" :title="$t('nav.workspace')">
-          <SvgIcon name="terminal" :size="17" />
-        </router-link>
           <router-link to="/skills" class="rail-btn" :class="{ active: route.name === 'Skills' }" :title="$t('nav.skills')">
             <SvgIcon name="star" :size="17" />
           </router-link>
@@ -152,10 +149,6 @@
             <SvgIcon name="zap" :size="16" />
             <span>{{ $t('nav.routines') }}</span>
           </router-link>
-          <router-link v-if="!isMobile" to="/workspace" class="nav-item" :class="{ active: route.name === 'Workspace' }">
-            <SvgIcon name="terminal" :size="16" />
-            <span>{{ $t('nav.workspace') }}</span>
-          </router-link>
           <router-link to="/skills" class="nav-item" :class="{ active: route.name === 'Skills' }">
             <SvgIcon name="star" :size="16" />
             <span>{{ $t('nav.skills') }}</span>
@@ -176,9 +169,6 @@
           <div class="nav-items" v-show="advancedOpen">
             <router-link to="/tasks" class="nav-item" :class="{ active: route.name === 'Tasks' }">
               <SvgIcon name="layers" :size="14" /><span>{{ $t('nav.tasks') }}</span>
-            </router-link>
-            <router-link to="/workspace" class="nav-item" :class="{ active: route.name === 'Workspace' }">
-              <SvgIcon name="terminal" :size="14" /><span>{{ $t('nav.workspace') }}</span>
             </router-link>
             <router-link to="/automations" class="nav-item" :class="{ active: route.name === 'Automations' }">
               <SvgIcon name="clock" :size="14" /><span>{{ $t('nav.automations') }}</span>

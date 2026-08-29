@@ -13,7 +13,6 @@ const routes: RouteRecordRaw[] = [
       { path: 'tasks', name: 'Tasks', component: () => import('@/views/TasksView.vue'), meta: { title: 'nav.tasks' } },
       { path: 'automations', name: 'Automations', component: () => import('@/views/AutomationsView.vue'), meta: { title: 'nav.automations' } },
       { path: 'routines', name: 'Routines', component: () => import('@/views/RoutinesView.vue'), meta: { title: 'nav.routines' } },
-      { path: 'workspace', name: 'Workspace', component: () => import('@/views/WorkspaceView.vue'), meta: { title: 'nav.workspace' } },
       { path: 'skills', name: 'Skills', component: () => import('@/views/SkillsView.vue'), meta: { title: 'nav.skills' } },
       { path: 'news', name: 'News', component: () => import('@/views/NewsView.vue'), meta: { title: 'nav.news' } },
       { path: 'memory', name: 'Memory', component: () => import('@/views/MemoryView.vue'), meta: { title: 'nav.memory' } },
