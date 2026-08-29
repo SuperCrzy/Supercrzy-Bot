@@ -179,7 +179,7 @@
                 :class="{ active: s.id === chatStore.currentSessionId }"
                 @click="selectSession(s.id)"
               >
-                <SvgIcon name="message" :size="13" class="chat-item-icon" />
+                <SvgIcon :name="s.collabMode ? 'messages' : 'message'" :size="13" class="chat-item-icon" :class="{ 'super-item-icon': s.collabMode }" />
                 <div class="chat-item-info">
                   <div class="chat-item-title">
                     <span v-if="s.collabMode" class="chat-item-collab" :title="s.collabMode === 'senate' ? '全自动 · 议院' : '半自动'">超级</span>
@@ -219,7 +219,7 @@
                 :class="{ active: s.id === chatStore.currentSessionId }"
                 @click="selectSession(s.id)"
               >
-                <SvgIcon name="message" :size="13" class="chat-item-icon" />
+                <SvgIcon :name="s.collabMode ? 'messages' : 'message'" :size="13" class="chat-item-icon" :class="{ 'super-item-icon': s.collabMode }" />
                 <div class="chat-item-info">
                   <div class="chat-item-title">
                     <span v-if="s.collabMode" class="chat-item-collab" :title="s.collabMode === 'senate' ? '全自动 · 议院' : '半自动'">超级</span>
@@ -451,8 +451,13 @@ function displayPath(p: string) {
 
 function selectSession(id: string) {
   chatStore.selectSession(id)
-  // 从任务/工作台等页面点会话 → 跳回聊天页（否则只切了状态、页面没反应）
-  if (route.name !== 'Chat') router.push({ name: 'Chat' })
+  // 2026-08-29 超级协作平台：超级任务会话 → 跳超级协作平台；普通会话 → 聊天页
+  const s = chatStore.sessions.find((x) => x.id === id)
+  if (s?.collabMode) {
+    if (route.name !== 'Collab') router.push({ name: 'Collab' })
+  } else if (route.name !== 'Chat') {
+    router.push({ name: 'Chat' })
+  }
 }
 async function delSession(id: string) {
   try {
@@ -1017,6 +1022,7 @@ onMounted(() => {
   vertical-align: 1px;
   flex-shrink: 0;
 }
+.super-item-icon { color: #534AB7; }  /* 2026-08-29 超级任务条目专属紫色图标 */
 
 .chat-item-meta {
   font-size: 10px;
