@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SUPERCRZY · AI 自治质检 + 多 AI 协作 + 内置浏览器 整体实施方案</title>
+<style>
+  :root {
+    --bg:#f6f7f9; --card:#ffffff; --ink:#1a1d21; --muted:#6b7280;
+    --line:#e5e7eb; --teal:#0f766e; --teal-bg:#ecfdf5; --blue:#1d4ed8; --blue-bg:#eff6ff;
+    --amber:#b45309; --amber-bg:#fffbeb; --purple:#6d28d9; --purple-bg:#f5f3ff;
+    --red:#b91c1c; --red-bg:#fef2f2; --green:#15803d; --green-bg:#f0fdf4;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:-apple-system,"PingFang SC",'Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--ink); line-height:1.7; padding:32px 20px; font-size:15px; }
+  .wrap { max-width:980px; margin:0 auto; }
+  h1 { font-size:26px; font-weight:700; margin-bottom:6px; }
+  h2 { font-size:20px; font-weight:700; margin:34px 0 14px; padding-left:12px; border-left:4px solid var(--teal); }
+  h3 { font-size:16px; font-weight:600; margin:20px 0 8px; }
+  p { margin:8px 0; color:#374151; }
+  .sub { color:var(--muted); font-size:14px; margin-bottom:22px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:20px 24px; margin:14px 0; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:14px; margin:14px 0; }
+  .stat { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px 18px; }
+  .stat b { font-size:24px; display:block; margin-top:4px; }
+  .tag { display:inline-block; font-size:12px; padding:2px 10px; border-radius:20px; margin-right:6px; }
+  .t-teal{background:var(--teal-bg);color:var(--teal);} .t-blue{background:var(--blue-bg);color:var(--blue);}
+  .t-amber{background:var(--amber-bg);color:var(--amber);} .t-purple{background:var(--purple-bg);color:var(--purple);}
+  .t-red{background:var(--red-bg);color:var(--red);} .t-green{background:var(--green-bg);color:var(--green);}
+  table { width:100%; border-collapse:collapse; margin:12px 0; font-size:14px; }
+  th,td { border:1px solid var(--line); padding:9px 12px; text-align:left; vertical-align:top; }
+  th { background:#fafafa; font-weight:600; }
+  code { background:#f3f4f6; padding:1px 6px; border-radius:4px; font-size:13px; }
+  .flow { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:18px; margin:12px 0; display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  .flow .step { background:var(--blue-bg); color:var(--blue); border-radius:8px; padding:6px 14px; font-size:13px; font-weight:500; }
+  .flow .arrow { color:var(--muted); }
+  pre { background:#111827; color:#e5e7eb; border-radius:8px; padding:14px 16px; font-size:13px; overflow-x:auto; margin:10px 0; }
+  .num { display:inline-flex; align-items:center; justify-content:center; width:22px;height:22px;border-radius:50%;background:var(--teal);color:#fff;font-size:12px;margin-right:8px;font-weight:600; }
+  .mokup { border:2px solid var(--line); border-radius:12px; overflow:hidden; font-size:13px; }
+  .mokup .bar { background:#0f172a; color:#cbd5e1; padding:8px 14px; display:flex; align-items:center; gap:8px; }
+  .mokup .body { display:grid; grid-template-columns:220px 1fr 300px; min-height:400px; }
+  @media(max-width:800px){ .mokup .body{grid-template-columns:1fr;} }
+  .mokup .panel { border-right:1px solid var(--line); padding:12px; }
+  .mokup .console-dark { background:#0f172a; color:#6ee7a0; font-family:monospace; font-size:12px; padding:8px; border-radius:6px; }
+  .mokup .chat-line { display:flex; gap:8px; margin:8px 0; align-items:flex-start; }
+  .av { width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;flex-shrink:0; }
+  .qa{display:block;line-height:1.5;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>SUPERCRZY · AI 自治质检 + 多 AI 协作 + 内置浏览器</h1>
+  <p class="sub">整体实施方案（初稿）— 目标：用户只给想法 + 最终验收，中间由"执行 AI → 质检 AI → 多 AI 群聊"分层把关，交付"最完美结果"。本方案整合：多 AI 对话界面、内置浏览器实时画面、分层质检闭环、收敛机制、分阶段施工。</p>
+
+  <div class="grid">
+    <div class="stat">当前进度<span class="tag t-green">核心引擎已就绪</span><b>runAgentLoop / SSE / 记忆</b></div>
+    <div class="stat">浏览器<span class="tag t-red">待引入</span><b>Playwright</b></div>
+    <div class="stat">实时画面通道<span class="tag t-teal">已有 WebSocket</span><b>/ws/ghost 复用</b></div>
+    <div class="stat">多模型<span class="tag t-amber">DeepSeek 就绪</span><b>Kimi 待配 key</b></div>
+  </div>
+
+  <h2>一、整体界面编排</h2>
+  <p>核心原则：<b>主对话流 = 唯一协作战场</b>，执行 AI / 质检 AI / 多 AI 群聊都以"带身份的消息"进入同一时间线；AI 正在浏览的网页以"浏览器小窗"固定浮在对话右侧，实时展示 AI 在看什么。</p>
+
+  <div class="mokup">
+    <div class="bar"><b>SUPERCRZY BOT</b> &nbsp;·&nbsp; AI 协作工作台</div>
+    <div class="body">
+      <div class="panel" style="border-right:1px solid var(--line);">
+        <div style="font-size:12px;color:var(--muted);font-weight:600;margin-bottom:8px;">会话 / 任务</div>
+        <div style="font-size:13px;padding:6px 8px;background:#f3f4f6;border-radius:6px;margin:4px 0;">● AI 新闻网站（进行中）</div>
+        <div style="font-size:13px;padding:6px 8px;border-radius:6px;margin:4px 0;color:var(--muted);">○ 修日期 bug</div>
+        <div style="font-size:13px;padding:6px 8px;border-radius:6px;margin:4px 0;color:var(--muted);">○ 资讯图片压缩</div>
+        <div style="margin-top:12px;font-size:12px;color:var(--muted);">质检流水线</div>
+        <div style="font-size:12px;padding:6px 8px;margin:3px 0;border-radius:6px;background:#f0fdf4;color:#15803d;">✓ 执行 AI 交付 v1</div>
+        <div style="font-size:12px;padding:6px 8px;margin:3px 0;border-radius:6px;background:#fffbeb;color:#b45309;">● 质检中 · L1+L2</div>
+        <div style="font-size:12px;padding:6px 8px;margin:3px 0;border-radius:6px;color:#9ca3af;">○ 商议修复</div>
+        <div style="font-size:12px;padding:6px 8px;margin:3px 0;border-radius:6px;color:#9ca3af;">○ 待你验收</div>
+      </div>
+      <div class="panel">
+        <div style="font-size:12px;color:var(--muted);font-weight:600;margin-bottom:8px;">多 AI 对话流</div>
+        <div class="chat-line">
+          <div class="av" style="background:var(--blue-bg);color:var(--blue);">你</div>
+          <div style="background:var(--blue-bg);border-radius:8px;padding:7px 10px;color:var(--blue);">帮我做个 AI 新闻页，科技感</div>
+        </div>
+        <div class="chat-line">
+          <div class="av" style="background:#e5e7eb;color:#374151;">执</div>
+          <div><div style="font-size:11px;color:#6b7280;margin-bottom:2px;">执行 AI</div>
+          <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:7px 10px;">搭好 v1，含接口与卡片流。</div></div>
+        </div>
+        <div class="chat-line">
+          <div class="av" style="background:var(--amber-bg);color:var(--amber);">检</div>
+          <div><div style="font-size:11px;color:#b45309;margin-bottom:2px;">质检 AI</div>
+          <div style="background:var(--amber-bg);border:1px solid #fbbf24;border-radius:8px;padding:7px 10px;font-size:13px;">
+            接口 /api/news 无错误处理 → 白屏。<span style="color:#b45309;font-size:12px;">NewsView:88，复现：停后端刷新。</span></div></div>
+        </div>
+        <div class="chat-line">
+          <div class="av" style="background:#e5e7eb;color:#374151;">执</div>
+          <div><div style="font-size:11px;color:#6b7280;margin-bottom:2px;">执行 AI</div>
+          <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:7px 10px;font-size:13px;">认同，已补 try-catch 兜底。</div></div>
+        </div>
+        <div style="margin-top:8px;font-size:12px;color:#6b7280;">还能 @执行AI / @质检AI / @AI群聊</div>
+      </div>
+      <div class="panel" style="border-left:1px solid var(--line);border-right:none;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <div style="font-size:12px;color:var(--muted);font-weight:600;">AI 浏览器</div>
+          <span style="font-size:11px;background:#f0fdf4;color:#15803d;border-radius:12px;padding:1px 8px;">实时</span>
+        </div>
+        <div style="border:1px solid var(--line);border-radius:8px;overflow:hidden;">
+          <div style="background:#0f172a;height:22px;display:flex;align-items:center;padding:0 8px;gap:4px;">
+            <span style="width:8px;height:8px;border-radius:50%;background:#ef4444;"></span>
+            <span style="width:8px;height:8px;border-radius:50%;background:#f59e0b;"></span>
+            <span style="width:8px;height:8px;border-radius:50%;background:#22c55e;"></span>
+            <span style="margin-left:auto;color:#64748b;font-size:9px;">supercrzy.com/news</span>
+          </div>
+          <div style="background:#e2e8f0;height:180px;display:flex;align-items:center;justify-content:center;color:#64748b;font-size:12px;">
+            网页渲染画面（实时帧推送）
+          </div>
+        </div>
+        <div style="font-size:11px;color:#6b7280;margin-top:6px;">AI 正在打开的页面 · 你全程可见</div>
+        <div class="console-dark" style="margin-top:8px;font-size:11px;">
+          &gt; navigate supercrzy.com/news<br>
+          &gt; screenshot 1280px<br>
+          &gt; audit 排版/重叠
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2>二、AI 浏览器画面（技术达成）</h2>
+  <p>要实现 Grok/GPT 那种"小窗实时显示 AI 在开的网页"，需要引入 <b>Playwright 隐形式浏览器</b>（后台 Chromium），替换当前"控制整个真桌面"的 computer-use 场景，提供可控、可展示的隔离浏览器。</p>
+  <h3>三种画面流的实现原则</h3>
+  <table>
+    <tr><th>方案</th><th>原理</th><th>延迟</th><th>成本</th><th>选型</th></tr>
+    <tr><td><b>周期截图 + WebSocket 推送</b></td><td>每 ~1s 对浏览器截图 base64 → 前端替换 img</td><td>~1s</td><td>低</td><td><b>✅ 首选（实现快、够用）</b></td></tr>
+    <tr><td>CDP 帧流 / WebRTC</td><td>实时像素流</td><td>&lt;200ms</td><td>高、复杂</td><td>阶段 3 再考虑</td></tr>
+  </table>
+  <h3>后端新增模块</h3>
+  <pre>services/ai-browser.ts
+  - 启动 Playwright Chromium（headless）
+  - open(url) / screenshot() / click(x,y) / type() / scroll()
+  - setInterval → 截图 →  emit /ws/ai-browser (base64)
+  - 供 AI 工具: ai_browser_navigate / ai_browser_screenshot / ai_browser_click
+  - 供质检: screenshot({widths:[375,768,1280]}) 各尺寸界面审查</pre>
+  <p>前端：对话右侧固定 <b>&lt;AI-Browser 组件&gt;</b>，订阅 WebSocket 收帧；AI 操作时右上角显示当前 URL + 操作命令日志（上图 console-dark 那块），用户看着 AI 一步步操作。</p>
+
+  <h2>三、分层审查（质检体系）达成</h2>
+  <div class="flow">
+    <span class="step">执行 AI 交付</span><span class="arrow">→</span>
+    <span class="step" style="background:var(--green-bg);color:var(--green);">L1 机器：跑 lint/test/curl/截图</span><span class="arrow">→</span>
+    <span class="step">L2 质检 Agent（拿证据核对需求）</span><span class="arrow">→</span>
+    <span class="step">执行 AI 商议修复</span><span class="arrow">→</span>
+    <span class="step">复检全绿</span><span class="arrow">→</span>
+    <span class="step" style="background:var(--purple-bg);color:var(--purple);">（主观争议才）L3 多 AI 群聊</span><span class="arrow">→</span>
+    <span class="step" style="background:var(--teal-bg);color:var(--teal);">交付验收</span>
+  </div>
+  <ul>
+    <li><b>L1</b>：现有 <code>shell_exec</code> 跑固定命令（<code>npm run lint</code> / <code>vitest</code> / <code>curl</code> / 截图），产出结构化"机器报告"——确定性、零 AI 发散。</li>
+    <li><b>L2</b>：一个带质检人设的 Agent（复用 <code>runAgentLoop</code>），消费 L1 报告 + 需求清单，输出<b>带证据</b>问题清单。</li>
+    <li><b>L3</b>：仅当"机器判不了 + 单 AI 拿不准"的主观争议，才开多 AI 群聊民主评议（复用群聊共识引擎）。</li>
+  </ul>
+  <h3>收敛机制（防发散四件套）</h3>
+  <table>
+    <tr><th>机制</th><th>规则</th></tr>
+    <tr><td>证据门禁</td><td>质检意见必须带证据（文件行号/复现/curl输出），无凭证不采纳</td></tr>
+    <tr><td>最大轮数</td><td>执行↔质检碰撞最多 3 轮，超限强制收敛（取当前最优）</td></tr>
+    <tr><td>分歧升级</td><td>僵持交仲裁（关键问题才用多 AI / 或问人类）</td></tr>
+    <tr><td>达标线</td><td>全维度 ≥85 且无 P0 即交付，不死磕 100</td></tr>
+  </table>
+
+  <h2>四、多 AI 对话（消息模型 + 前端渲染）</h2>
+  <pre>// 消息模型加 actor
+{ role: 'user'|'assistant', actor: '你'|'执行AI'|'质检AI'|'Kimi'|'GPT'|..., content, evidence? }
+
+// 前端按 actor 渲染
+头像 / 名字 / 气泡色 / 专属图标 各不同
+@执行AI / @质检AI / @AI群聊 → 指定发言人</pre>
+
+  <h2>五、分阶段施工计划</h2>
+  <table>
+    <tr><th>阶段</th><th>内容</th><th>验收标准</th><th>依赖</th></tr>
+    <tr><td><b>P0 地基</b><br>(已部分有)</td><td>消息 actor 字段 + 前端多角色渲染；多 AI 对话流转</td><td>对话流里能出现不同身份的多条消息</td><td>—</td></tr>
+    <tr><td><b>P1 质检 MVP</b></td><td>L1 机器检查（lint/test/curl）+ L2 质检 Agent + 收敛四件套</td><td>真实 bug 被抓住 → 修复 → 复检通过</td><td>P0</td></tr>
+    <tr><td><b>P2 内置浏览器</b></td><td>Playwright 隐式浏览器 + 前端 AI-Browser 小窗 + WebSocket 推帧 + 截图审查工具</td><td>用户实时看到 AI 在开的网页；质检能截各尺寸审界面</td><td>已装 playwright；复用 /ws</td></tr>
+    <tr><td><b>P3 视觉质检</b></td><td>质检 AI 用截图做排版/重叠/美观审查</td><td>能报告"文字与边框重叠/对比度不足"并触发修复</td><td>P2</td></tr>
+    <tr><td><b>P4 多 AI 群聊 + 全自动</b></td><td>主观争议开群聊；质量达标自动交付</td><td>全自动跑通"执行→质检→商议→修复→交付"</td><td>P1 + Kimi key</td></tr>
+  </table>
+
+  <h2>六、当前最该先做的两件事</h2>
+  <div class="grid">
+    <div class="card" style="border-left:4px solid var(--blue);">
+      <h3 style="margin-top:0;"><span class="num">1</span>P0 对话地基</h3>
+      <p>消息加 <code>actor</code> + 前端渲染多身份。这是所有后续的交互基础，改动小、风险低、立刻可见"多 AI 同流对话"。</p>
+    </div>
+    <div class="card" style="border-left:4px solid var(--teal);">
+      <h3 style="margin-top:0;"><span class="num">2</span>引入 Playwright</h3>
+      <p>装 playwright，起一个隐形式浏览器，打通"AI 打开网页 → 截图 → 前端小窗展示"的最小链路。这是"AI 浏览器画面"的关键开关。</p>
+    </div>
+  </div>
+  <p class="sub" style="margin-top:16px;">落地顺序建议：P0 → P1 质检 MVP → P2 浏览器 → P3 视觉 → P4 全自动。每一步都可单独验收、不影响现有功能。</p>
+</div>
+</body>
+</html>
