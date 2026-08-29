@@ -17,7 +17,7 @@ import { config } from '../config'
 import { rankMemories, memoryRankedSearch } from './memory-search'
 import { requestChat, chatCompletion, normalizeBaseUrl, buildApiError } from './model-client'
 import { getDB } from '../services/database'
-import { toolDefinitions, executeToolCalls, type ToolCall, type ToolResultWithMeta, getToolMeta, type ToolExecCtx, DEFERRED_TOOLS } from './tools'
+import { toolDefinitions, executeToolCalls, type ToolCall, type ToolResultWithMeta, getToolMeta, type ToolExecCtx, DEFERRED_TOOLS, classifySensitiveTool } from './tools'
 import { pushMemorySync, pushReflection } from './memory-worker'
 
 // ---- 敏感工具确认机制（先确认后执行）----
@@ -1474,10 +1474,20 @@ export async function runAgentLoop(
         const regularCalls = toolCalls.filter((tc: any) => !SENSITIVE_TOOLS.has(tc.function.name))
         let allowSensitive: ('allow' | 'deny')[] = []
         if (sensitiveCalls.length > 0) {
-          // 授权模式（settings.toolApprovalMode）：auto=始终允许 / deny=一律拒绝 / prompt=每次询问 / accept-edits=自动批编辑拦命令
+          // 授权模式（settings.toolApprovalMode）：auto=分类器自动授权 / deny=一律拒绝 / prompt=每次询问 / accept-edits=自动批编辑拦命令
           const approvalMode = readSetting('toolApprovalMode') || 'prompt'
           if (approvalMode === 'auto') {
-            allowSensitive = sensitiveCalls.map(() => 'allow')
+            // 2026-08-29 对齐 WorkBuddy PermissionMode.auto：不再是"始终允许一切"，
+            // 而是用 classifySensitiveTool 分类——显然安全的命令自动放行，危险/未知的操作弹窗确认。
+            allowSensitive = await Promise.all(
+              sensitiveCalls.map(async (tc: any) => {
+                const args = tc.function?.arguments || ''
+                const decision = classifySensitiveTool(tc.function.name, args)
+                if (decision === 'allow') return 'allow' as const
+                // 危险或未知 → 走 waitForToolConfirmation 弹窗（或超时自动拒绝）
+                return waitForToolConfirmation(tc.id)
+              }),
+            )
           } else if (approvalMode === 'deny') {
             allowSensitive = sensitiveCalls.map(() => 'deny')
           } else if (approvalMode === 'accept-edits') {

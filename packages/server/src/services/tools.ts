@@ -2028,8 +2028,80 @@ export function getToolMeta(name: string): ToolMeta | undefined {
 }
 
 // ============================================================
-// 工具两级加载（2026-08-29 对齐 WorkBuddy deferLoading）
+// 敏感工具 Auto 授权分类器（2026-08-29 对齐 WorkBuddy PermissionMode.auto）
 // ------------------------------------------------------------
+// WorkBuddy 的 auto 模式 = AI 分类器：显然安全的安全自动放行，危险动作拒绝，
+// 分类器不可用时回退询问。我们这里用**确定性规则分类**（比黑盒分类器更可预测）：
+//   - 显然安全的只读命令 / 已知无害操作 → auto allow
+//   - 命中危险模式（删除/写系统/高危参数）→ 需要确认（prompt）
+//   - 其余未知 → 询问
+// 返回 'allow' | 'ask'。
+// ------------------------------------------------------------
+
+/** 明显安全的命令前缀（auto 模式直接放行，不弹窗） */
+const AUTO_SAFE_PREFIX = [
+  'ls', 'pwd', 'echo', 'cat', 'head', 'tail', 'grep', 'find', 'which', 'whoami', 'date',
+  'wc', 'stat', 'file', 'printenv', 'env', 'getconf', 'uname', 'true', 'false',
+  'git status', 'git log', 'git diff', 'git branch', 'git remote -v', 'git diff --stat',
+]
+
+/** 触达危险命令的黑名单（对应 shell_exec 的 BLOCKED + 更高危敏感操作） */
+const AUTO_DANGEROUS_PATTERNS: RegExp[] = [
+  /\brm\s+(-[a-z]*r[a-z]*f|-f|-rf)\b/,       // rm -rf / 强删
+  /rm\s+-rf\s+(\/|~|\$HOME)/,
+  /\bmkfs\b/, /\bdd\s+if=/, /\bshutdown\b/, /\breboot\b/, /\bsudo\b/,
+  /\bchmod\s+-R\s+777\s+\//, /\bcron\b/, /\bchown\b/,
+  /:[\(\|][:\|]\{/,                           // fork 炸弹
+  /\b(curl|wget)\b.*\|\s*(ba)?sh\b/,         // 下载即执行
+  /\bmysql\b.*\b(drop|delete from)\b/, /\.ssh\b/, /\.aws\b/, /\.env\b/,
+]
+
+/**
+ * 分类敏感工具在 auto 模式下的授权决定。
+ * @param toolName 工具名（shell_exec / file_delete 等）
+ * @param argText 参数字符串（命令内容 / 路径）
+ */
+export function classifySensitiveTool(toolName: string, argText: string): 'allow' | 'ask' {
+  if (!toolName) return 'ask'
+  if (toolName === 'file_write') {
+    // 写文件在当前工作区通常安全；写敏感系统路径需确认。参数是 JSON（{"path": ...}）
+    let path = ''
+    try {
+      const parsed = JSON.parse(argText)
+      if (typeof parsed?.path === 'string') path = parsed.path
+    } catch {
+      const m = argText.match(/path["']?\s*:\s*["']([^"']+)["']/)
+      if (m) path = m[1]
+    }
+    if (!path) return 'ask'
+    // 允许：用户目录（Downloads/Documents/Desktop/工作区）/ /tmp / private/tmp
+    if (path.startsWith('/tmp') || path.startsWith('/private/tmp')) return 'allow'
+    if (/^\/Users\/\w+\/(Downloads|Documents|Desktop|sandbox|projects|dev|code|workspace)/.test(path)) return 'allow'
+    if (path.startsWith('/etc/') || path.startsWith('/System') || path.startsWith('/usr/') || path.startsWith('/bin/')) return 'ask'
+    return 'allow' // 其余（如相对路径/工作区内）视为可写
+  }
+  if (toolName === 'file_delete') return 'ask' // 删除永久敏感，永远确认（对齐老板"删文件才再授权"）
+
+  // shell_exec：先查危险黑名单，再查安全白名单
+  const cmd = argText.trim()
+  for (const p of AUTO_DANGEROUS_PATTERNS) {
+    if (p.test(cmd)) return 'ask'
+  }
+  // 多行/含管道/含重定向/含后台 → 保守询问
+  if (/[\n;|&><]/.test(cmd.replace(/^\s*echo\s+/, ''))) {
+    // 允许简单的命令链（&&/;）如果首命令安全，但保守起见含 grep/echo 管道允许
+    if (/\|.*(grep|head|tail|wc|sort|aws|jq|sed|find|ls|cat)/.test(cmd)) return 'allow'
+    return 'ask'
+  }
+  // 单命令：安全前缀直接放行
+  for (const p of AUTO_SAFE_PREFIX) {
+    if (cmd === p || cmd.startsWith(p + ' ')) return 'allow'
+  }
+  // 纯只读命令（无写参数）
+  if (/^(ls|cat|head|tail|grep|find|pwd|date|echo|wc|stat|file|which|git status|git log|git diff)\b/.test(cmd)) return 'allow'
+  return 'ask' // 未知命令，询问
+}
+
 // 思想：不用把全部工具 schema 塞进每轮请求的 tools 数组。核心调查工具常驻；
 // 重型/少用工具（生图/视频/终端/绘图/MCP 资源等）默认不暴露完整 schema，
 // 模型需要时先调用 tool_search(名称) 按需加载其定义，随后即可像普通工具一样调用。
