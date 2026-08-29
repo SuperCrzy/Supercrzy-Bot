@@ -25,36 +25,13 @@
     </header>
 
     <div class="collab-body">
-      <!-- 左栏：任务流水线看板 -->
-      <aside class="collab-left">
-        <p class="panel-title">任务流水线</p>
-        <div class="task-list">
-          <div v-if="tasks.length === 0" class="panel-empty">发布任务后在此实时跟踪</div>
-          <div
-            v-for="t in sortedTasks"
-            :key="t.taskId"
-            class="pipeline-card"
-            :class="`pc--${t.status}`"
-            @click="selectTask(t)"
-          >
-            <div class="pc-head">
-              <span class="pc-name">{{ t.goal }}</span>
-              <span class="pc-status" :class="`st--${t.status}`">{{ statusText(t.status) }}</span>
-            </div>
-            <div class="pc-sub">
-              <span v-if="t.ghosts.length" class="pc-count">{{ t.ghosts.length }} 个 AI</span>
-              <button v-if="t.status === 'running' || t.status === 'decomposing'" class="pc-stop" @click.stop="stopTask(t)">停止</button>
-            </div>
-          </div>
-        </div>
-      </aside>
-
-      <!-- 中栏：多 AI 对话流 -->
+      <!-- 侧边栏"超级任务"列表承担任务导航；此处为聚焦当前任务的协作视图 -->
+      <!-- 多 AI 对话流 -->
       <main class="collab-main">
         <p class="panel-title">多 AI 协作</p>
         <div class="chat-flow" ref="chatFlowRef">
           <div v-if="!selectedTask" class="chat-empty">
-            <p>选择左侧任务查看各 AI 的分工与进展</p>
+            <p>在左栏选择一个超级任务查看各 AI 的分工与进展</p>
             <p class="chat-empty-hint">执行 AI 负责实现，质检 AI / 议院负责把关，你可在底部 @ 协商</p>
           </div>
           <template v-else>
@@ -258,6 +235,13 @@ async function loadTasks() {
       if (selectedTask.value) {
         const cur = tasks.value.find(x => x.taskId === selectedTask.value!.taskId)
         if (cur) selectedTask.value = cur
+      } else if (tasks.value.length > 0) {
+        // 无选中时：优先匹配当前打开的超级任务会话标题（goal===session title），否则选最新
+        const curSession = chatStore.sessions.find(s => s.collabMode && s.id === chatStore.currentSessionId)
+        const match = curSession
+          ? tasks.value.find(x => x.goal === curSession.title)
+          : undefined
+        selectTask(match || tasks.value[0])
       }
     }
   } catch { apiOk.value = false }
@@ -343,9 +327,9 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 .collab-auth { font-size: 11px; background: #f0fdf4; color: #0f766e; border-radius: 6px; padding: 2px 10px; }
 .collab-auth.on { background: #f0fdf4; color: #0f766e; }
 .collab-api { font-size: 11px; color: var(--text-tertiary); margin-left: auto; }
-.collab-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 230px 1fr; }
+.collab-body { flex: 1; min-height: 0; display: flex; }
 .collab-left { overflow-y: auto; border-right: 1px solid var(--border-color); padding: 14px; background: var(--bg-tertiary); min-height: 0; }
-.collab-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg-tertiary); overflow: hidden; }
+.collab-main { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg-tertiary); overflow: hidden; }
 .panel-title { font-size: 12px; font-weight: 600; margin: 0 0 10px; }
 .panel-empty { font-size: 12px; color: var(--text-tertiary); padding: 20px 0; text-align: center; }
 .pipeline-card { border: 1px solid var(--border-color); border-radius: 8px; padding: 9px 11px; margin-bottom: 8px; cursor: pointer; background: var(--bg-primary); }
