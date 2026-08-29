@@ -171,14 +171,7 @@
         </div>
       </main>
 
-      <!-- 右栏：AI 浏览器（P3 占位） -->
-      <aside class="collab-right">
-        <p class="panel-title">AI 浏览器 <span class="pill-live">实时</span></p>
-        <div class="browser-empty">
-          <p>（P3 接入 Playwright）</p>
-          <p class="browser-hint">AI 打开的网页画面将在此实时显示</p>
-        </div>
-      </aside>
+      <!-- AI 浏览器已并入可收缩的右侧 DetailPanel（browser tab），here 只留任务 + 对话流 -->
     </div>
   </div>
 </template>
@@ -350,10 +343,9 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 .collab-auth { font-size: 11px; background: #f0fdf4; color: #0f766e; border-radius: 6px; padding: 2px 10px; }
 .collab-auth.on { background: #f0fdf4; color: #0f766e; }
 .collab-api { font-size: 11px; color: var(--text-tertiary); margin-left: auto; }
-.collab-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 230px 1fr 240px; }
+.collab-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 230px 1fr; }
 .collab-left { overflow-y: auto; border-right: 1px solid var(--border-color); padding: 14px; background: var(--bg-tertiary); min-height: 0; }
 .collab-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg-tertiary); overflow: hidden; }
-.collab-right { border-left: 1px solid var(--border-color); padding: 14px; background: var(--bg-tertiary); overflow-y: auto; min-height: 0; }
 .panel-title { font-size: 12px; font-weight: 600; margin: 0 0 10px; }
 .panel-empty { font-size: 12px; color: var(--text-tertiary); padding: 20px 0; text-align: center; }
 .pipeline-card { border: 1px solid var(--border-color); border-radius: 8px; padding: 9px 11px; margin-bottom: 8px; cursor: pointer; background: var(--bg-primary); }
@@ -425,7 +417,4 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 .chat-input-meta { display: flex; justify-content: space-between; align-items: center; margin-top: 7px; }
 .auth-opt { font-size: 11px; color: var(--text-tertiary); display: flex; align-items: center; gap: 4px; }
 .chat-hint { font-size: 11px; color: var(--text-tertiary); }
-.collab-right .pill-live { font-size: 10px; background: #f0fdf4; color: #0f766e; border-radius: 10px; padding: 1px 7px; }
-.browser-empty { border: 1px dashed var(--border-color); border-radius: 10px; padding: 40px 14px; text-align: center; color: var(--text-tertiary); font-size: 12px; }
-.browser-hint { margin-top: 6px; font-size: 11px; }
 </style>

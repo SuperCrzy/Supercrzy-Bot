@@ -165,9 +165,10 @@
           <div v-for="g in chatStore.groupedSessions" :key="g.key" class="chat-group">
             <div class="chat-group-header" @click="toggleGroup(g.key)">
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="chat-group-caret" :class="{ rotated: !collapsedGroups.has(g.key) }"><polyline points="6 9 12 15 18 9"/></svg>
-              <SvgIcon v-if="g.key !== '__temp__'" name="folder" :size="12" class="chat-group-icon" />
+              <SvgIcon v-if="g.key === '__super__'" name="messages" :size="12" class="chat-group-icon super-icon" />
+              <SvgIcon v-else-if="g.key !== '__temp__'" name="folder" :size="12" class="chat-group-icon" />
               <SvgIcon v-else name="message" :size="12" class="chat-group-icon" />
-              <span class="chat-group-title">{{ g.key === '__temp__' ? $t('nav.tempGroup') : displayPath(g.title) }}</span>
+              <span class="chat-group-title" :class="{ 'super-group-title': g.key === '__super__' }">{{ g.key === '__super__' ? $t('nav.superGroup') : (g.key === '__temp__' ? $t('nav.tempGroup') : displayPath(g.title)) }}</span>
               <span class="chat-group-count">{{ g.sessions.length }}</span>
             </div>
             <div v-show="!collapsedGroups.has(g.key)" class="chat-group-items">
@@ -947,6 +948,8 @@ onMounted(() => {
 }
 .chat-group-caret.rotated { transform: rotate(90deg); }
 .chat-group-icon { color: var(--text-tertiary); flex-shrink: 0; }
+.chat-group-icon.super-icon { color: #534AB7; }  /* 2026-08-29 超级任务组专属色 */
+.super-group-title { color: #534AB7 !important; } /* 超级任务组标题高亮 */
 .chat-group-title {
   font-size: 11px;
   font-weight: 500;

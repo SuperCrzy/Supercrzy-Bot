@@ -14,7 +14,7 @@ export const useAppStore = defineStore('app', () => {
   const currentModel = ref('')
   const currentAgent = ref('default')
   const detailPanelVisible = ref(false)
-  const detailPanelTab = ref<'deliverables' | 'files' | 'changes' | 'preview' | 'timeline' | 'ghost'>('deliverables')
+  const detailPanelTab = ref<'deliverables' | 'files' | 'changes' | 'preview' | 'timeline' | 'browser'>('deliverables')
 
   // 上下文用量（圆环数据源：ChatView 的 SSE usage/config/compressed 事件写入，顶部会话栏圆环读取）
   const ctxUsed = ref(0)                 // 已用上下文 tokens（usage 事件 prompt_tokens）
@@ -284,8 +284,8 @@ export const useAppStore = defineStore('app', () => {
   }
 
   // 历史残留守卫：localStorage/旧代码可能传入已删除的 'terminal'，非法值回退 deliverables
-  function setDetailPanelTab(tab: 'deliverables' | 'files' | 'changes' | 'preview' | 'timeline' | 'ghost') {
-    const valid = ['deliverables', 'files', 'changes', 'preview', 'timeline', 'ghost']
+  function setDetailPanelTab(tab: 'deliverables' | 'files' | 'changes' | 'preview' | 'timeline' | 'browser') {
+    const valid = ['deliverables', 'files', 'changes', 'preview', 'timeline', 'browser']
     detailPanelTab.value = (valid.includes(tab) ? tab : 'deliverables') as typeof detailPanelTab.value
   }
 

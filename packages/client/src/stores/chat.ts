@@ -98,8 +98,11 @@ export const useChatStore = defineStore('chat', () => {
     void workspaceVersion.value // 依赖信号，工作区变化后重算
     const groups = new Map<string, { key: string; title: string; sessions: ChatSession[] }>()
     const temp: ChatSession[] = []
+    const superTasks: ChatSession[] = []  // 2026-08-29 超级协作平台：独立"超级任务"分类组
     for (const s of sessions.value) {
       if (s.archived) continue // 归档会话不显示在主列表（进归档区 archivedSessions）
+      // 超级协作任务：无论有无 workspace，都收敛到"超级任务"分类，与普通对话天然区分
+      if (s.collabMode) { superTasks.push(s); continue }
       if (s.workspaceDir) {
         let g = groups.get(s.workspaceDir)
         if (!g) {
@@ -112,16 +115,25 @@ export const useChatStore = defineStore('chat', () => {
       }
     }
     const result: Array<{ key: string; title: string; sessions: ChatSession[] }> = []
+    // 超级任务组置顶（最新优先）
+    if (superTasks.length > 0) {
+      superTasks.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+      result.push({ key: '__super__', title: '__super__', sessions: superTasks })
+    }
     for (const g of groups.values()) {
       g.sessions.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
       result.push(g)
     }
-    result.sort((a, b) => new Date(b.sessions[0].updatedAt).getTime() - new Date(a.sessions[0].updatedAt).getTime())
+    // 超级任务组固定置顶；其余普通会话按最新排序（__super__ 已 push 在最前，不参与全局 sort）
+    const superIdx = result.findIndex((g) => g.key === '__super__')
+    const nonSuper = result.filter((g, i) => g.key !== '__super__')
+    nonSuper.sort((a, b) => new Date(b.sessions[0].updatedAt).getTime() - new Date(a.sessions[0].updatedAt).getTime())
+    const finalGroups = superIdx >= 0 ? [result[superIdx], ...nonSuper] : nonSuper
     if (temp.length > 0) {
       temp.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-      result.push({ key: '__temp__', title: '', sessions: temp })
+      finalGroups.push({ key: '__temp__', title: '', sessions: temp })
     }
-    return result
+    return finalGroups
   })
 
   /** 归档会话列表（按归档时间倒序；与 groupedSessions 互斥） */

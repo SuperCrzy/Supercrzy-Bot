@@ -191,8 +191,25 @@
       </div>
 
       <!-- 幽灵 Tab -->
-      <div v-if="activeTab === 'ghost'" class="tab-content">
-        <GhostPanel />
+      <!-- AI 浏览器 Tab（超级协作平台：可收缩右侧栏，AI 操作网页画面在此显示） -->
+      <div v-if="activeTab === 'browser'" class="tab-content browser-tab">
+        <div class="browser-live">
+          <span class="browser-live-dot" />
+          <span class="browser-live-text">{{ browserStatus }}</span>
+        </div>
+        <div class="browser-view">
+          <div class="browser-chrome-bar">
+            <span class="bc-dot" style="background:#ef4444" /><span class="bc-dot" style="background:#f59e0b" /><span class="bc-dot" style="background:#22c55e" />
+            <span class="bc-url">{{ browserUrl || 'about:blank' }}</span>
+          </div>
+          <div class="browser-canvas">
+            <span v-if="!browserUrl" class="browser-placeholder">AI 浏览器待接入（P3 Playwright）</span>
+          </div>
+        </div>
+        <div class="browser-console">
+          <div v-for="(l, i) in browserLog" :key="i" class="browser-log-line">&gt; {{ l }}</div>
+          <div v-if="browserLog.length === 0" class="browser-log-line muted">无操作记录</div>
+        </div>
       </div>
     </div>
   </aside>
@@ -207,7 +224,6 @@ import { useI18n } from 'vue-i18n'
 import { extractFiles } from '@/types'
 import type { ChatFlowNode } from '@/types'
 import TimelinePanel from '@/components/chat/TimelinePanel.vue'
-import GhostPanel from '@/components/chat/GhostPanel.vue'
 import HtmlPreview from '@/components/chat/HtmlPreview.vue'
 import type { FileBlock } from '@/types'
 import * as monaco from 'monaco-editor'
@@ -221,12 +237,12 @@ interface FileEntry {
 
 const props = defineProps<{
   visible: boolean
-  activeTab: 'deliverables' | 'files' | 'changes' | 'preview' | 'timeline' | 'ghost'
+  activeTab: 'deliverables' | 'files' | 'changes' | 'preview' | 'timeline' | 'browser'
 }>()
 
 const emit = defineEmits<{
   (e: 'toggle'): void
-  (e: 'update:tab', tab: 'deliverables' | 'files' | 'changes' | 'preview' | 'timeline' | 'ghost'): void
+  (e: 'update:tab', tab: 'deliverables' | 'files' | 'changes' | 'preview' | 'timeline' | 'browser'): void
 }>()
 
 const appStore = useAppStore()
@@ -580,7 +596,7 @@ watch(() => appStore.previewFilePath, (path) => {
   }
 })
 
-function switchTab(tab: 'deliverables' | 'files' | 'changes' | 'preview' | 'timeline' | 'ghost') {
+function switchTab(tab: 'deliverables' | 'files' | 'changes' | 'preview' | 'timeline' | 'browser') {
   emit('update:tab', tab)
   if (tab === 'files' && fileTree.value.length === 0) {
     loadFiles()
@@ -593,13 +609,18 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+// ---- AI 浏览器（超级协作平台 P3：可收缩右侧栏内显示 AI 操作网页画面）----
+const browserStatus = ref('待机')
+const browserUrl = ref('')
+const browserLog = ref<string[]>([])
+
 const tabs = [
   { key: 'deliverables' as const, label: t('detail.tabArtifacts'), icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>' },
   { key: 'files' as const, label: t('detail.tabFiles'), icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>' },
   { key: 'changes' as const, label: t('detail.tabChanges'), icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>' },
   { key: 'preview' as const, label: t('detail.tabPreview'), icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>' },
   { key: 'timeline' as const, label: t('detail.tabTimeline'), icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17h18M3 12h18M3 7h18"/><circle cx="12" cy="17" r="1.5" fill="currentColor"/><circle cx="7" cy="12" r="1.5" fill="currentColor"/><circle cx="16" cy="7" r="1.5" fill="currentColor"/></svg>' },
-  { key: 'ghost' as const, label: t('detail.tabGhost'), icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a7 7 0 0 0-7 7v7h14v-7a7 7 0 0 0-7-7z"/><path d="M8 14h.01M16 14h.01M8 18v3M16 18v3"/></svg>' },
+  { key: 'browser' as const, label: t('detail.tabBrowser'), icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/><circle cx="7" cy="7" r="1" fill="currentColor"/><circle cx="11" cy="7" r="1" fill="currentColor"/></svg>' },
 ]
 </script>
 
@@ -846,6 +867,19 @@ const tabs = [
 .tab-content { display: flex; flex-direction: column; gap: 8px; }
 .tab-hint { font-size: 11px; color: var(--text-muted); line-height: 1.4; }
 .tab-empty { margin-top: 24px; }
+
+/* ---- AI 浏览器 Tab（超级协作平台）---- */
+.browser-live { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted); }
+.browser-live-dot { width: 6px; height: 6px; border-radius: 50%; background: #22c55e; }
+.browser-view { border: 1px solid var(--border-color); border-radius: var(--radius-sm); overflow: hidden; }
+.browser-chrome-bar { display: flex; align-items: center; gap: 4px; padding: 4px 8px; background: #0f172a; }
+.bc-dot { width: 7px; height: 7px; border-radius: 50%; }
+.bc-url { margin-left: auto; font-size: 10px; color: #64748b; }
+.browser-canvas { height: 180px; display: flex; align-items: center; justify-content: center; background: var(--bg-tertiary); }
+.browser-placeholder { font-size: 11px; color: var(--text-muted); }
+.browser-console { background: #0f172a; border-radius: var(--radius-sm); padding: 6px 8px; font-family: var(--font-mono, monospace); font-size: 10px; color: #6ee7a0; max-height: 90px; overflow-y: auto; }
+.browser-log-line { margin: 2px 0; }
+.browser-log-line.muted { color: #64748b; }
 
 /* File list */
 .file-list { display: flex; flex-direction: column; gap: 2px; }

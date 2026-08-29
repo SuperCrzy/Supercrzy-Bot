@@ -193,6 +193,7 @@ const messages = {
       restoreSession: '恢复',
       archiveGroup: '已归档',
       tempGroup: '临时任务',
+      superGroup: '超级任务',
     },
     news: {
       title: 'AI 资讯',
@@ -1100,7 +1101,8 @@ const messages = {
       tabChanges: '变更',
       tabPreview: '预览',
       tabTimeline: '时间线',
-      tabGhost: '幽灵',
+      tabGhost: 'AI 浏览器',
+      tabBrowser: 'AI 浏览器',
       noDeliverables: '暂无产物',
       turn: '第 {n} 轮',
       done: '完成',
@@ -1328,6 +1330,7 @@ const messages = {
       restoreSession: 'Restore',
       archiveGroup: 'Archived',
       tempGroup: 'Temporary tasks',
+      superGroup: 'Super tasks',
     },
     news: {
       title: 'AI News',
@@ -2236,6 +2239,7 @@ const messages = {
       tabPreview: 'Preview',
       tabTimeline: 'Timeline',
       tabGhost: 'Ghost',
+      tabBrowser: 'AI Browser',
       noDeliverables: 'No artifacts yet',
       turn: 'Turn {n}',
       done: 'Done',
