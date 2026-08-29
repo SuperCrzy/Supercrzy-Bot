@@ -107,7 +107,7 @@
           <SvgIcon name="message" :size="17" />
         </button>
         <router-link to="/collab" class="rail-btn" :class="{ active: route.name === 'Collab' }" :title="$t('nav.collab')">
-          <SvgIcon name="messages" :size="17" />
+          <SvgIcon name="super" :size="17" />
         </router-link>
           <router-link to="/automations" class="rail-btn" :class="{ active: route.name === 'Automations' || route.name === 'Routines' }" :title="$t('nav.autoExec')">
             <SvgIcon name="clock" :size="17" />
@@ -128,7 +128,7 @@
           </router-link>
           <!-- 超级协作平台：多 AI 协作工作台（取代幽灵工作台） -->
           <router-link to="/collab" class="nav-item collab-nav" :class="{ active: route.name === 'Collab' }">
-            <SvgIcon name="messages" :size="16" />
+            <SvgIcon name="super" :size="16" />
             <span>{{ $t('nav.collab') }}</span>
           </router-link>
           <router-link v-if="!isMobile" to="/automations" class="nav-item" :class="{ active: route.name === 'Automations' || route.name === 'Routines' }">
@@ -165,7 +165,7 @@
           <div v-for="g in chatStore.groupedSessions" :key="g.key" class="chat-group">
             <div class="chat-group-header" @click="toggleGroup(g.key)">
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="chat-group-caret" :class="{ rotated: !collapsedGroups.has(g.key) }"><polyline points="6 9 12 15 18 9"/></svg>
-              <SvgIcon v-if="g.key === '__super__'" name="messages" :size="12" class="chat-group-icon super-icon" />
+              <SvgIcon v-if="g.key === '__super__'" name="super" :size="12" class="chat-group-icon super-icon" />
               <SvgIcon v-else-if="g.key !== '__temp__'" name="folder" :size="12" class="chat-group-icon" />
               <SvgIcon v-else name="message" :size="12" class="chat-group-icon" />
               <span class="chat-group-title" :class="{ 'super-group-title': g.key === '__super__' }">{{ g.key === '__super__' ? $t('nav.superGroup') : (g.key === '__temp__' ? $t('nav.tempGroup') : displayPath(g.title)) }}</span>
@@ -179,7 +179,7 @@
                 :class="{ active: s.id === chatStore.currentSessionId }"
                 @click="selectSession(s.id)"
               >
-                <SvgIcon :name="s.collabMode ? 'messages' : 'message'" :size="13" class="chat-item-icon" :class="{ 'super-item-icon': s.collabMode }" />
+                <SvgIcon :name="s.collabMode ? 'super' : 'message'" :size="13" class="chat-item-icon" :class="{ 'super-item-icon': s.collabMode }" />
                 <div class="chat-item-info">
                   <div class="chat-item-title">
                     <span v-if="s.collabMode" class="chat-item-collab" :title="s.collabMode === 'senate' ? '全自动 · 议院' : '半自动'">超级</span>
@@ -219,7 +219,7 @@
                 :class="{ active: s.id === chatStore.currentSessionId }"
                 @click="selectSession(s.id)"
               >
-                <SvgIcon :name="s.collabMode ? 'messages' : 'message'" :size="13" class="chat-item-icon" :class="{ 'super-item-icon': s.collabMode }" />
+                <SvgIcon :name="s.collabMode ? 'super' : 'message'" :size="13" class="chat-item-icon" :class="{ 'super-item-icon': s.collabMode }" />
                 <div class="chat-item-info">
                   <div class="chat-item-title">
                     <span v-if="s.collabMode" class="chat-item-collab" :title="s.collabMode === 'senate' ? '全自动 · 议院' : '半自动'">超级</span>
