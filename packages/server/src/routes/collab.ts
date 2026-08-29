@@ -1,0 +1,52 @@
+/**
+ * 超级协作平台 API — 复用幽灵引擎（多 agent 并行分解执行），
+ * 按协作平台语义暴露：半自动/议院模式、发言人 actor、授权秒数。
+ * 前端通过 /api/collab/* 与 /ws/collab 调用（ghost 的 /ws/ghost 看板通道可复用）。
+ */
+import Router from 'koa-router'
+import type { Context } from 'koa'
+import { randomUUID } from 'crypto'
+import { runGhostTask, stopGhostTask, listGhostTasks, getGhostTask } from '../services/ghost-engine'
+
+export const collabRouter = new Router({ prefix: '/api/collab' })
+
+/**
+ * POST /api/collab/tasks — 发布协作任务
+ * body: { goal, mode?: 'semi'|'senate', actors?: string[], authSeconds?: number }
+ *   mode: semi=半自动(1-2 AI) / senate=议院(多 AI 审查) —— 半自动=执行+质检，议院=执行+多把关
+ *   authSeconds: 授权超时秒数（0=手动确认），默认 5（半自动）或 10（议院）
+ */
+collabRouter.post('/tasks', async (ctx: Context) => {
+  const body = ctx.request.body as { goal?: string; mode?: string; authSeconds?: number; workspace?: string }
+  const goal = String(body.goal || '').trim()
+  if (!goal) { ctx.status = 400; ctx.body = { error: 'goal is required' }; return }
+
+  const taskId = `ct_${Date.now()}_${randomUUID().slice(0, 6)}`
+  const mode = body.mode === 'senate' ? 'senate' : 'semi'
+  const concurrency = mode === 'senate' ? 4 : 2  // 议院更多把关 AI，半自动 2 个
+  ctx.status = 202
+  ctx.body = { taskId, status: 'decomposing', mode, authSeconds: body.authSeconds ?? (mode === 'senate' ? 10 : 5) }
+
+  runGhostTask({
+    taskId,
+    goal,
+    workspace: body.workspace || process.env.WORKSPACE_ROOT || process.cwd(),
+    concurrency,
+    permissionLevel: 'sandbox',
+  }).catch((e: any) => console.error('[Collab] run task failed:', e?.message))
+})
+
+// 任务列表（运行中 + 已完成，内存态；注意：与幽灵共用内存 Map，重启丢失）
+collabRouter.get('/tasks', (ctx: Context) => { ctx.body = listGhostTasks() })
+
+// 单任务详情
+collabRouter.get('/tasks/:id', (ctx: Context) => {
+  const t = getGhostTask(ctx.params.id)
+  if (!t) { ctx.status = 404; ctx.body = { error: 'task not found' }; return }
+  ctx.body = t
+})
+
+// 停止任务
+collabRouter.post('/tasks/:id/stop', (ctx: Context) => { ctx.body = { stopped: stopGhostTask(ctx.params.id) } })
+
+export default collabRouter

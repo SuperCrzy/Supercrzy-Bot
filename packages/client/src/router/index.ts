@@ -8,7 +8,7 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/components/layout/MainLayout.vue'),
     children: [
       { path: '', name: 'Chat', component: () => import('@/views/ChatView.vue'), meta: { title: 'nav.chat' } },
-      { path: 'ghost', name: 'Ghost', component: () => import('@/views/GhostWorkbenchView.vue'), meta: { title: 'nav.ghost' } },
+      { path: 'collab', name: 'Collab', component: () => import('@/views/CollabWorkbenchView.vue'), meta: { title: 'nav.collab' } },
       { path: 'search', name: 'Search', component: () => import('@/views/SearchView.vue'), meta: { title: 'nav.search' } },
       { path: 'automations', name: 'Automations', component: () => import('@/views/AutomationHubView.vue'), meta: { title: 'nav.automations' } },
       { path: 'routines', name: 'Routines', component: () => import('@/views/RoutinesView.vue'), meta: { title: 'nav.routines' } },

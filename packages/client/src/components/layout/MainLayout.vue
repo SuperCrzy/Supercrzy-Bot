@@ -106,8 +106,8 @@
         <button class="rail-btn" :class="{ active: route.name === 'Chat' }" @click="handleNewChat" :title="$t('nav.newTask')">
           <SvgIcon name="message" :size="17" />
         </button>
-        <router-link to="/ghost" class="rail-btn" :class="{ active: route.name === 'Ghost' }" :title="$t('nav.ghost')">
-          <SvgIcon name="ghost" :size="17" />
+        <router-link to="/collab" class="rail-btn" :class="{ active: route.name === 'Collab' }" :title="$t('nav.collab')">
+          <SvgIcon name="messages" :size="17" />
         </router-link>
           <router-link to="/automations" class="rail-btn" :class="{ active: route.name === 'Automations' || route.name === 'Routines' }" :title="$t('nav.autoExec')">
             <SvgIcon name="clock" :size="17" />
@@ -121,15 +121,15 @@
       <nav class="nav-groups" v-show="!sidebarCollapsed">
         <!-- 导航平铺（无分组标题）：新建任务 + 功能入口 -->
         <div class="nav-items" style="padding: 2px 8px;">
+          <!-- 超级协作平台：置顶主入口（多 AI 协作工作台，取代幽灵工作台） -->
+          <router-link to="/collab" class="nav-item collab-nav" :class="{ active: route.name === 'Collab' }">
+            <SvgIcon name="messages" :size="16" />
+            <span>{{ $t('nav.collab') }}</span>
+          </router-link>
           <!-- 新建任务：点击创建新会话并进入欢迎页；已有对话从下方会话列表进入 -->
           <router-link to="/" class="nav-item" :class="{ active: route.name === 'Chat' }" @click="handleNewChat">
             <SvgIcon name="message" :size="16" />
             <span>{{ $t('nav.newTask') }}</span>
-          </router-link>
-
-          <router-link to="/ghost" class="nav-item" :class="{ active: route.name === 'Ghost' }">
-            <SvgIcon name="ghost" :size="16" />
-            <span>{{ $t('nav.ghost') }}</span>
           </router-link>
           <router-link v-if="!isMobile" to="/automations" class="nav-item" :class="{ active: route.name === 'Automations' || route.name === 'Routines' }">
             <SvgIcon name="clock" :size="16" />
@@ -838,6 +838,18 @@ onMounted(() => {
   cursor: pointer;
   transition: background var(--duration-fast) var(--ease-out),
               color var(--duration-fast) var(--ease-out);
+}
+
+/* 2026-08-29 超级协作平台：置顶主入口高亮（取代幽灵工作台） */
+.nav-item.collab-nav {
+  color: #534AB7;
+  background: #f5f3ff;
+  margin-bottom: 2px;
+}
+.nav-item.collab-nav.active {
+  background: #eeedfe;
+  color: #3c3489;
+  font-weight: 500;
 }
 
 .nav-item:hover {
