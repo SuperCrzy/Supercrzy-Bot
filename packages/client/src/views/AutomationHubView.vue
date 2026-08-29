@@ -1,13 +1,7 @@
 <template>
   <div class="auto-hub">
-    <div class="hub-header">
-      <div>
-        <h2 class="hub-title">自动执行</h2>
-        <p class="hub-desc">定时任务 + 可复用流程，组合出"到了点自动跑固定流程"</p>
-      </div>
-    </div>
-    <n-card size="small" class="hub-tabs" content-style="padding:0">
-      <n-tabs v-model:value="activeTab" type="line" animated>
+    <div class="hub-tabs">
+      <n-tabs v-model:value="activeTab" type="line" animated size="large">
         <n-tab-pane name="automations" tab="定时任务">
           <AutomationsView />
         </n-tab-pane>
@@ -15,7 +9,7 @@
           <RoutinesView />
         </n-tab-pane>
       </n-tabs>
-    </n-card>
+    </div>
   </div>
 </template>
 
@@ -29,21 +23,31 @@ const activeTab = ref('automations')
 
 <style scoped>
 .auto-hub {
-  padding: 16px 20px;
   height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.hub-tabs {
+  flex: 1;
+  min-height: 0;
+  padding: 12px 0 0;
+  display: flex;
+  flex-direction: column;
+}
+.hub-tabs :deep(.n-tabs) {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  --n-tab-gap: 24px;
+}
+.hub-tabs :deep(.n-tabs-nav) {
+  padding: 0 20px;
+  margin-bottom: 4px;
+}
+.hub-tabs :deep(.n-tab-pane) {
+  padding-top: 0;
   overflow-y: auto;
-}
-.hub-header {
-  margin-bottom: 16px;
-}
-.hub-title {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 500;
-}
-.hub-desc {
-  margin: 6px 0 0;
-  color: var(--color-text-tertiary, #888);
-  font-size: 13px;
+  height: 100%;
+  flex: 1;
 }
 </style>
