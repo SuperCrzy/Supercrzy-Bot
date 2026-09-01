@@ -46,52 +46,52 @@
                 <div class="chat-bubble user">{{ selectedTask.goal }}</div>
               </div>
             </div>
-            <!-- 各 AI 分工（执行/质检/议院 带身份） -->
-            <div v-for="g in selectedTask.ghosts" :key="g.id" class="chat-line">
-              <span class="chat-avatar" :style="{ background: actorBg(actorFor(g)), color: actorColor(actorFor(g)) }">{{ actorIcon(actorFor(g)) }}</span>
+            <!-- 串行流水线推进（history：执行→质检→议院） -->
+            <div v-for="(h, hi) in (selectedTask.history || [])" :key="hi" class="chat-line">
+              <span class="chat-avatar" :style="{ background: actorBg(h.actor), color: actorColor(h.actor) }">{{ actorIcon(h.actor) }}</span>
               <div class="chat-bubble-meta">
-                <span class="chat-actor" :style="{ color: actorColor(actorFor(g)) }">{{ actorName(actorFor(g)) }}</span>
+                <span class="chat-actor" :style="{ color: actorColor(h.actor) }">{{ h.actor }}</span>
                 <div class="chat-bubble">
-                  <div class="chat-line-top">
-                    <span class="chat-title">{{ g.title }}</span>
-                    <span class="chat-status" :class="`cs--${g.status}`">{{ ghostStatusText(g.status) }}</span>
-                    <span v-if="g.status === 'running'" class="chat-progress">{{ g.progress }}%</span>
-                  </div>
-                  <div v-if="g.status === 'running'" class="chat-bar"><div class="chat-bar-fill" :style="{ width: g.progress + '%' }" /></div>
-                  <div v-if="g.log && g.log.length" class="chat-log">
-                    <div v-for="(l,i) in g.log.slice(-2)" :key="i">{{ l }}</div>
-                  </div>
+                  <span>{{ h.summary }}</span>
                 </div>
               </div>
             </div>
-            <!-- 议院汇总 -->
-            <div v-if="selectedTask.summary" class="chat-line">
-              <span class="chat-avatar" style="background:#f5f3ff;color:#6d28d9">院</span>
+            <!-- 当前运行状态 -->
+            <div v-if="['executing','reviewing','senate','delivering','init'].includes(selectedTask.state)" class="chat-line">
+              <span class="chat-avatar" style="background:#eef2ff;color:#4338ca">步</span>
               <div class="chat-bubble-meta">
-                <span class="chat-actor" style="color:#6d28d9">议院</span>
-                <div class="chat-bubble senate" v-html="renderMarkdown(selectedTask.summary)" />
+                <span class="chat-actor" style="color:#4338ca">平台</span>
+                <div class="chat-bubble"><span class="run-dot" /> 正在{{ stateText(selectedTask.state) }}…</div>
               </div>
             </div>
-            <!-- P2 质检报告 -->
-            <div v-if="qualityReport && qualityReport.status !== 'pending'" class="chat-line">
+            <!-- 最终交付物（done） -->
+            <div v-if="selectedTask.summary" class="chat-line">
+              <span class="chat-avatar" style="background:#e5e7eb;color:#374151">执</span>
+              <div class="chat-bubble-meta">
+                <span class="chat-actor" style="color:#374151">交付物</span>
+                <div class="chat-bubble" v-html="renderMarkdown(selectedTask.summary)" />
+              </div>
+            </div>
+            <!-- 质检报告（引擎自动产出） -->
+            <div v-if="selectedTask.quality && selectedTask.quality.status !== 'pending'" class="chat-line">
               <span class="chat-avatar" style="background:#fffbeb;color:#b45309">检</span>
               <div class="chat-bubble-meta">
                 <span class="chat-actor" style="color:#b45309">质检 AI</span>
                 <div class="chat-bubble quality">
                   <div class="quality-head">
-                    <span class="quality-score" :class="qualityReport.status">{{ qualityReport.score }}</span>
+                    <span class="quality-score" :class="selectedTask.quality.status">{{ selectedTask.quality.score }}</span>
                     <div>
-                      <span class="quality-badge" :class="qualityReport.status">{{ qualityReport.status === 'pass' ? '通过' : '需复核' }}</span>
-                      <span class="quality-summary">{{ qualityReport.summary }}</span>
+                      <span class="quality-badge" :class="selectedTask.quality.status">{{ selectedTask.quality.status === 'pass' ? '通过' : '需复核' }}</span>
+                      <span class="quality-summary">{{ selectedTask.quality.summary }}</span>
                     </div>
                   </div>
                   <div class="quality-dims">
-                    <span v-for="(v, k) in qualityReport.dimensions" :key="k" class="quality-dim">
+                    <span v-for="(v, k) in selectedTask.quality.dimensions" :key="k" class="quality-dim">
                       {{ k }} <b>{{ v }}</b>
                     </span>
                   </div>
-                  <div v-if="qualityReport.issues.length" class="quality-issues">
-                    <div v-for="(i, idx) in qualityReport.issues" :key="idx" class="quality-issue" :class="i.severity">
+                  <div v-if="selectedTask.quality.issues.length" class="quality-issues">
+                    <div v-for="(i, idx) in selectedTask.quality.issues" :key="idx" class="quality-issue" :class="i.severity">
                       <span class="qi-title">{{ i.title }}</span>
                       <span class="qi-evidence">{{ i.evidence }}</span>
                     </div>
@@ -99,19 +99,19 @@
                 </div>
               </div>
             </div>
-            <!-- P4 议院审查 -->
-            <div v-if="senateReport && senateReport.status !== 'pending'" class="chat-line">
+            <!-- 议院审查（senate 模式） -->
+            <div v-if="selectedTask.senate && selectedTask.senate.status !== 'pending'" class="chat-line">
               <span class="chat-avatar" style="background:#f5f3ff;color:#6d28d9">院</span>
               <div class="chat-bubble-meta">
                 <span class="chat-actor" style="color:#6d28d9">议院审查</span>
                 <div class="chat-bubble senate">
                   <div class="quality-head">
-                    <span class="quality-score" :class="senateReport.status">{{ senateReport.status === 'pass' ? '✓' : '需修订' }}</span>
+                    <span class="quality-score" :class="selectedTask.senate.status">{{ selectedTask.senate.status === 'pass' ? '✓' : '需修订' }}</span>
                     <div>
-                      <span>通过 {{ senateReport.passCount }} / {{ senateReport.totalSenators }} · 打回 {{ senateReport.rejectCount }}</span>
+                      <span>通过 {{ selectedTask.senate.passCount }} / {{ selectedTask.senate.totalSenators }} · 打回 {{ selectedTask.senate.rejectCount }}</span>
                     </div>
                   </div>
-                  <div v-for="(v, idx) in senateReport.votes" :key="idx" class="senator-vote">
+                  <div v-for="(v, idx) in selectedTask.senate.votes" :key="idx" class="senator-vote">
                     <div class="senator-head">
                       <b>{{ v.senator }}</b>
                       <span class="senator-verdict" :class="v.verdict">{{ v.verdict === 'pass' ? '通过' : (v.verdict === 'reject' ? '打回' : '弃权') }}</span>
@@ -123,6 +123,14 @@
                     </div>
                   </div>
                 </div>
+              </div>
+            </div>
+            <!-- 失败/中断提示 -->
+            <div v-if="selectedTask.state === 'failed'" class="chat-line">
+              <span class="chat-avatar" style="background:#fef2f2;color:#dc2626">!</span>
+              <div class="chat-bubble-meta">
+                <span class="chat-actor" style="color:#dc2626">平台</span>
+                <div class="chat-bubble fail-box">{{ selectedTask.error || '任务失败' }}</div>
               </div>
             </div>
           </template>
@@ -164,23 +172,23 @@ import { useChatStore } from '@/stores/chat'
 import { useAppStore } from '@/stores/app'
 import SvgIcon from '@/components/ui/SvgIcon.vue'
 
-// ---- 复用幽灵引擎的任务类型 ----
-interface GhostGhost {
-  id: string
-  title: string
-  status: 'running' | 'done' | 'failed' | 'stopped'
-  progress: number
-  log: string[]
-  output: string
-  error?: string
+// ---- 串行引擎任务类型（对齐后端 collab-engine，2026-09-01）----
+interface CollabHistory {
+  stage: string; at: number; actor: string; summary: string
 }
-interface GhostTask {
+interface CollabTask {
   taskId: string
   goal: string
-  status: 'decomposing' | 'running' | 'summarizing' | 'done' | 'failed' | 'stopped'
+  state: string          // init/executing/reviewing/senate/delivering/done/failed
+  stage: string
+  mode: 'semi' | 'senate'
+  round: number
   createdAt: number
-  ghosts: GhostGhost[]
-  summary: string
+  summary: string        // done 时=交付物
+  delivery?: string
+  quality?: any
+  senate?: any
+  history?: CollabHistory[]
   error?: string
 }
 
@@ -189,8 +197,6 @@ function renderMarkdown(c: string) { return c ? md.render(c) : '' }
 
 const { t } = useI18n({ useScope: 'global' })
 const chatStore = useChatStore()
-/** 任务 → 协作会话 ID 映射（发布任务时创建带"超级"标的会话，点侧边栏条目可回到该任务） */
-const taskSession = new Map<string, string>()
 
 /** 展开/收起右侧"AI 浏览器"可收缩栏（DetailPanel browser tab） */
 function toggleAiBrowser() {
@@ -203,10 +209,8 @@ const mode = ref<'semi' | 'senate'>('semi')
 const authSeconds = ref(5)
 const authEnabled = ref(true)
 const apiOk = ref(true)
-const tasks = ref<GhostTask[]>([])
-const selectedTask = ref<GhostTask | null>(null)
-const qualityReport = ref<any>(null)
-const senateReport = ref<any>(null)
+const tasks = ref<CollabTask[]>([])
+const selectedTask = ref<CollabTask | null>(null)
 const customGoal = ref('')
 const starting = ref(false)
 const chatFlowRef = ref<HTMLElement | null>(null)
@@ -216,73 +220,44 @@ function switchMode(m: 'semi' | 'senate') {
   authSeconds.value = m === 'senate' ? 10 : 5
 }
 
-// 多 AI 角色映射（配合 P0 actor）
-const ACTOR_BY_GHOST = ['执行AI', '质检AI', '议院']
-function actorFor(g: GhostGhost): string {
-  const i = parseInt(g.id.split('_').pop() || '0', 10) || 0
-  return mode.value === 'senate' ? (i > 0 ? ACTOR_BY_GHOST[Math.min(i - 1, 2)] : '执行AI') : (i > 0 ? '质检AI' : '执行AI')
-}
-function actorIcon(a: string) { return ({ '执行AI': '执', '质检AI': '检', '议院': '院' } as Record<string,string>)[a] || 'AI' }
-function actorName(a: string) { return ({ '执行AI': '执行AI', '质检AI': '质检AI', '议院': '议院' } as Record<string,string>)[a] || a }
-function actorColor(a: string) { return ({ '执行AI': '#374151', '质检AI': '#b45309', '议院': '#6d28d9' } as Record<string,string>)[a] || '#374151' }
-function actorBg(a: string) { return ({ '执行AI': '#e5e7eb', '质检AI': '#fffbeb', '议院': '#f5f3ff' } as Record<string,string>)[a] || '#e5e7eb' }
-
 const sortedTasks = computed(() => {
-  const order = { decomposing: 0, running: 1, summarizing: 2, done: 3, failed: 4, stopped: 5 } as Record<string, number>
-  return [...tasks.value].sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9) || b.createdAt - a.createdAt)
+  const order = { init: 0, executing: 1, reviewing: 2, senate: 3, delivering: 4, done: 5, failed: 6 } as Record<string, number>
+  return [...tasks.value].sort((a, b) => (order[a.state] ?? 9) - (order[b.state] ?? 9) || b.createdAt - a.createdAt)
 })
 
-function statusText(s: string) {
-  return ({ decomposing: t('ghost.statusDecomposing'), running: t('ghost.statusRunning'), summarizing: t('ghost.statusSummarizing'), done: t('ghost.statusDone'), failed: t('ghost.statusFailed'), stopped: t('ghost.statusStopped') } as Record<string,string>)[s] || s
+const STATE_TEXT: Record<string, string> = {
+  init: '发起', executing: '执行中', reviewing: '质检中', senate: '议院评审', delivering: '交付中', done: '完成', failed: '失败',
 }
-function ghostStatusText(s: string) {
-  return ({ running: t('ghost.gStatusRunning'), done: t('ghost.gStatusDone'), failed: t('ghost.gStatusFailed'), stopped: t('ghost.gStatusStopped') } as Record<string,string>)[s] || s
-}
+function stateText(s: string) { return STATE_TEXT[s] || s }
+
+// 发言人身份映射（执行/质检/议院）
+function actorIcon(a: string) { return ({ '执行AI': '执', '质检AI': '检', '议院': '院', '平台': '平' } as Record<string,string>)[a] || 'AI' }
+function actorColor(a: string) { return ({ '执行AI': '#374151', '质检AI': '#b45309', '议院': '#6d28d9', '平台': '#4338ca' } as Record<string,string>)[a] || '#374151' }
+function actorBg(a: string) { return ({ '执行AI': '#e5e7eb', '质检AI': '#fffbeb', '议院': '#f5f3ff', '平台': '#eef2ff' } as Record<string,string>)[a] || '#e5e7eb' }
+// 议院 provider→品牌 LOGO 名（后续接真多品牌时按 provider 返回）
+function providerName(): string { return '议院' }
 
 async function loadTasks() {
   try {
     const r = await fetch('/api/collab/tasks')
     if (r.ok) {
-      tasks.value = await r.json()
+      const list: any[] = await r.json()
+      tasks.value = list
       if (selectedTask.value) {
-        const cur = tasks.value.find(x => x.taskId === selectedTask.value!.taskId)
+        const cur = tasks.value.find((x: any) => x.taskId === selectedTask.value!.taskId)
         if (cur) selectedTask.value = cur
       } else if (tasks.value.length > 0) {
         // 无选中时：优先匹配当前打开的超级任务会话标题（goal===session title），否则选最新
         const curSession = chatStore.sessions.find(s => s.collabMode && s.id === chatStore.currentSessionId)
-        const match = curSession
-          ? tasks.value.find(x => x.goal === curSession.title)
-          : undefined
+        const match = curSession ? tasks.value.find((x: any) => x.goal === curSession.title) : undefined
         selectTask(match || tasks.value[0])
       }
     }
   } catch { apiOk.value = false }
 }
 
-function selectTask(t: GhostTask) {
+function selectTask(t: CollabTask) {
   selectedTask.value = t
-  qualityReport.value = null
-  senateReport.value = null
-  if (t.status === 'done') {
-    fetchQuality(t.taskId)
-    fetchSenate(t.taskId)
-  }
-}
-
-async function fetchQuality(taskId: string) {
-  qualityReport.value = { status: 'pending' }
-  try {
-    const r = await fetch(`/api/collab/tasks/${taskId}/quality`)
-    if (r.ok) qualityReport.value = await r.json()
-  } catch { qualityReport.value = { status: 'failed' } }
-}
-
-async function fetchSenate(taskId: string) {
-  senateReport.value = { status: 'pending' }
-  try {
-    const r = await fetch(`/api/collab/tasks/${taskId}/senate`)
-    if (r.ok) senateReport.value = await r.json()
-  } catch { senateReport.value = { status: 'failed' } }
 }
 
 async function startGoal(goal: string) {
@@ -293,29 +268,27 @@ async function startGoal(goal: string) {
     const r = await fetch('/api/collab/tasks', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        goal: g, mode: mode.value, authSeconds: authEnabled.value ? authSeconds.value : 0,
-      }),
+      body: JSON.stringify({ goal: g, mode: mode.value, sessionId: chatStore.currentSessionId || undefined }),
     })
     if (!r.ok) throw new Error(`HTTP ${r.status}`)
     const d = await r.json()
-    const mk: GhostTask = { taskId: d.taskId, goal: g, status: 'decomposing', createdAt: Date.now(), ghosts: [], summary: '' }
+    const mk: CollabTask = { taskId: d.taskId, goal: g, state: 'init', stage: 'init', mode: mode.value, round: 0, createdAt: Date.now(), summary: '' }
     tasks.value.unshift(mk)
     selectedTask.value = mk
     customGoal.value = ''
-    // 超级协作平台：为该任务创建一条"超级"协作会话（侧边栏会话列表带 超级 徽标，
-    // 与任务绑定，点开即可回到这条任务的协作视图）
+    // 为该任务创建一条"超级"协作会话（侧边栏会话列表带 超级 徽标）
     try {
       const s = await chatStore.createSession(g, '', mode.value)
-      taskSession.set(d.taskId, s.id)
+      // 任务会话绑定（可选）见 taskSession
     } catch (e) { /* 会话创建失败不阻塞任务 */ }
   } catch (e: any) { console.error('发布失败', e) }
   starting.value = false
 }
 
-async function stopTask(t: GhostTask) {
+async function stopTask(t: CollabTask) {
   await fetch(`/api/collab/tasks/${t.taskId}/stop`, { method: 'POST' }).catch(() => {})
-  t.status = 'stopped'
+  const cur = selectedTask.value
+  if (cur) cur.state = 'failed'
 }
 
 // ---- 实时轮询（WS /ws/ghost 可复用，MVP 先用短轮询保证即时）----
@@ -415,4 +388,7 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 .chat-input-meta { display: flex; justify-content: space-between; align-items: center; margin-top: 7px; }
 .auth-opt { font-size: 11px; color: var(--text-tertiary); display: flex; align-items: center; gap: 4px; }
 .chat-hint { font-size: 11px; color: var(--text-tertiary); }
+.run-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #4338ca; margin-right: 6px; animation: runpulse 1s ease-in-out infinite; vertical-align: 1px; }
+@keyframes runpulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+.fail-box { color: #dc2626; font-size: 12px; }
 </style>

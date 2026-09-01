@@ -357,6 +357,27 @@ export function initDatabase() {
     db.exec("CREATE INDEX IF NOT EXISTS idx_custom_providers_key ON custom_providers(provider_key)")
   } catch { /* already exists */ }
 
+  // 2026-09-01 超级协作平台：串行任务持久化表（进程/重启不丢）
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS collab_tasks (
+      id TEXT PRIMARY KEY,
+      session_id TEXT,
+      goal TEXT NOT NULL,
+      mode TEXT NOT NULL DEFAULT 'semi',
+      state TEXT NOT NULL DEFAULT 'init',
+      stage TEXT DEFAULT '',
+      delivery TEXT DEFAULT '',
+      quality TEXT DEFAULT '{}',
+      senate TEXT DEFAULT '{}',
+      round INTEGER NOT NULL DEFAULT 0,
+      history TEXT DEFAULT '[]',
+      error TEXT DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`)
+    db.exec("CREATE INDEX IF NOT EXISTS idx_collab_tasks_session ON collab_tasks(session_id)")
+  } catch { /* already exists */ }
+
   // Migration: add notify_channel column to automations
   try {
     db.exec("ALTER TABLE automations ADD COLUMN notify_channel TEXT NOT NULL DEFAULT ''")

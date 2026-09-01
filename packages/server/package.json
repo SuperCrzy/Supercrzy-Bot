@@ -30,6 +30,7 @@
     "mammoth": "^1.12.0",
     "multer": "^2.1.1",
     "pdf-parse": "^2.4.5",
+    "playwright-core": "1.50.0",
     "qrcode": "^1.5.4",
     "sharp": "^0.35.4",
     "uuid": "^11.0.0",

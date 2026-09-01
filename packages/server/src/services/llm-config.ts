@@ -32,12 +32,24 @@ export function getLLMConfig() {
 /** 读取指定 provider 的配置（多品牌议院用：deepseek/kimi/…） */
 export function getProviderConfig(providerKey: string) {
   const db = getDB()
-  const p = db.prepare("SELECT base_url, api_key, model FROM custom_providers WHERE provider_key = ? AND enabled = 1").get(providerKey) as any
+  // custom_providers 的 model 在 models(JSON数组)，无独立 model 列；主模型兜底
+  const p = db.prepare("SELECT base_url, api_key, models FROM custom_providers WHERE provider_key = ? AND enabled = 1").get(providerKey) as any
   if (!p || !p.api_key) return null
+  let model = ''
+  try {
+    const list = JSON.parse(p.models || '[]')
+    const def = list.find((m: any) => m?.is_default) || list[0]
+    model = def?.model_id || def?.id || ''
+  } catch { /* ignore */ }
+  if (!model) {
+    // 回退主模型
+    const main = getLLMConfig()
+    model = main.model
+  }
   return {
     baseUrl: normalizeBaseUrl(p.base_url || config.deepseek.baseUrl),
     apiKey: p.api_key,
-    model: p.model || config.deepseek.defaultModel,
+    model,
   }
 }
 

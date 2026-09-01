@@ -15,7 +15,6 @@ import { createServer } from 'http'
 import { config } from './config'
 import { initDatabase } from './services/database'
 import { createTerminalServer } from './services/terminal'
-import { createGhostServer } from './services/ghost-ws'
 import { startTunnel, stopTunnel, renderPreviewPage, getTunnelUrl, createPreviewLink } from './services/tunnel'
 import { chatRouter } from './routes/chat'
 import { fsRouter } from './routes/filesystem'
@@ -43,11 +42,10 @@ import checkpointsRouter from './routes/checkpoints'
 import { playbookRouter } from './routes/playbook'
 import { rolesRouter } from './routes/roles'
 import { systemRouter } from './routes/system'
-import { ghostRouter } from './routes/ghost'
 import { collabRouter } from './routes/collab'
+import { recoverInterruptedTasks } from './services/collab-engine'
 import { newsRouter } from './routes/news'
 import { terminalRouter } from './routes/terminal'
-import { startGhostWatcher } from './services/ghost-watch'
 import { startScheduler } from './services/scheduler'
 import { loadCredentials, sendMessage } from './services/wechat-ilink'
 import { startBot, setMessageHandlerFull } from './services/wechat-bot-runner'
@@ -86,7 +84,6 @@ async function bootstrap() {
   initSkillsDirectory(process.cwd())
   syncFileSkills(process.cwd())
   startScheduler()
-  startGhostWatcher()
 
   const app = new Koa()
   const PORT = config.port
@@ -410,7 +407,7 @@ async function bootstrap() {
   }
 
   // API Routes
-  const routers = [uploadRouter, chatRouter, fsRouter, settingsRouter, sessionRouter, historyRouter, statsRouter, memoryRouter, gatewayRouter, skillsRouter, tasksRouter, automationsRouter, modelsRouter, workspaceRouter, ocrRouter, checkpointsRouter, playbookRouter, rolesRouter, systemRouter, ghostRouter, collabRouter, newsRouter, mcpRouter, routineRouter, terminalRouter]
+  const routers = [uploadRouter, chatRouter, fsRouter, settingsRouter, sessionRouter, historyRouter, statsRouter, memoryRouter, gatewayRouter, skillsRouter, tasksRouter, automationsRouter, modelsRouter, workspaceRouter, ocrRouter, checkpointsRouter, playbookRouter, rolesRouter, systemRouter, collabRouter, newsRouter, mcpRouter, routineRouter, terminalRouter]
   for (const r of routers) {
     app.use(r.routes())
     app.use(r.allowedMethods())
@@ -457,9 +454,8 @@ async function bootstrap() {
 
   const server = createServer(app.callback())
 
-  // 幽灵工作台 WebSocket（/ws/ghost，实时看板推送）——必须先于 terminal 注册：
-  // ws 库 {server,path} 实例对不匹配 path 的 upgrade 请求会直接 abort(400)，后注册者收不到
-  createGhostServer(server)
+  // 2026-09-01 超级协作平台：重启时把未完成串行任务标记为"进程中断"（可恢复提示）
+  // （collab-engine 导入）
 
   // Terminal WebSocket
   createTerminalServer(server)
@@ -479,6 +475,9 @@ async function bootstrap() {
     if (localIP) console.log(`   Network: http://${localIP}:${PORT}`)
     if (getTunnelUrl()) console.log(`   Tunnel:  ${getTunnelUrl()}`)
     console.log(`   Workspace: ${WORKSPACE_ROOT}\n`)
+
+    // 超级协作平台：重启后标记上次未完成任务为"进程中断"（可恢复提示）
+    recoverInterruptedTasks()
 
     // 恢复已启用的各平台通道（常驻后台）
     startAllTelegramChannels().catch((err: any) => {
