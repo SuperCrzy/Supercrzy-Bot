@@ -18,7 +18,7 @@ import { runQualityReview } from './collab-quality'
 import { runSenateReview } from './collab-senate'
 
 // ---- 类型 ----
-export type CollabState = 'init' | 'executing' | 'reviewing' | 'senate' | 'delivering' | 'done' | 'failed'
+export type CollabState = 'init' | 'executing' | 'reviewing' | 'senate' | 'optimizing' | 'delivering' | 'done' | 'failed'
 export type CollabMode = 'semi' | 'senate'
 
 export interface CollabTask {
@@ -46,6 +46,9 @@ const SENATE_PROVIDERS = ['deepseek', 'kimi']
 
 // ---- 持久化 ----
 const STAGE_TIMEOUT_MS = 90000   // 阶段超时熔断
+// 收敛闭环（2026-09-01）：质检/议院打回 → 执行重做，最多 MAX_CONVERGE_ROUNDS 轮
+const MAX_CONVERGE_ROUNDS = 2
+const QUALITY_PASS_THRESHOLD = 70   // 质检分低于此则触发打回重做
 
 function rowToTask(r: any): CollabTask {
   return {
@@ -133,13 +136,17 @@ async function runReviewing(t: CollabTask) {
   if (!r.ok) { t.state = 'failed'; t.error = r.reason === 'timeout' ? '质检超时' : r.error; t.stage = 'reviewing'; persist(t); return }
   t.quality = r.value
   pushStage(t, '质检AI', `质检评分 ${t.quality.score ?? '?'}，问题 ${(t.quality.issues || []).length} 条`)
-  // 议院模式才进 senate
+  // 收敛闭环：质检分低于阈值且未超轮次 → 打回执行重做（半自动=人控前自动收敛；议院交给 senate 综合）
+  if (t.round < MAX_CONVERGE_ROUNDS && (t.quality.score ?? 100) < QUALITY_PASS_THRESHOLD) {
+    await runOptimizing(t, '质检')
+    return
+  }
+  // 议院模式才进 senate，否则交付
   if (t.mode === 'senate') { await runSenate(t) } else { await runDelivering(t) }
 }
 
 async function runSenate(t: CollabTask) {
   t.state = 'senate'; t.stage = 'senate'; persist(t)
-  // 议院：多品牌投票（复用 collab-senate 的双层 LLM；这里用真多 provider 视角）
   const r = await withTimeout(
     runSenateReview(t.goal, t.delivery, t.id),
     STAGE_TIMEOUT_MS,
@@ -147,8 +154,40 @@ async function runSenate(t: CollabTask) {
   if (!r.ok) { t.state = 'failed'; t.error = r.reason === 'timeout' ? '议院评审超时' : r.error; t.stage = 'senate'; persist(t); return }
   t.senate = r.value
   const pass = (t.senate as any).passCount ?? 0, total = (t.senate as any).totalSenators ?? 0
-  pushStage(t, '议院', `通过 ${pass}/${total}${((t.senate as any).rejectCount ?? 0) > 0 ? '，有打回建议' : ''}`)
+  const reject = (t.senate as any).rejectCount ?? 0
+  pushStage(t, '议院', `通过 ${pass}/${total}${reject > 0 ? '，有打回建议' : ''}`)
+  // 收敛闭环：议院有打回建议且未超轮次 → 打回执行重做
+  if (t.round < MAX_CONVERGE_ROUNDS && reject > 0) {
+    await runOptimizing(t, '议院')
+    return
+  }
   await runDelivering(t)
+}
+
+/** 收敛：把质检/议院问题反馈给执行AI重做，重新质检 */
+async function runOptimizing(t: CollabTask, by: string) {
+  t.state = 'optimizing'; t.stage = 'optimizing'; t.round++  // 收敛轮次递增
+  persist(t)
+  // 组织反馈问题（来自质检/议院 issues）
+  const src = by === '议院' ? t.senate : t.quality
+  const issues = (src?.issues || []).slice(0, 5).map((i: any) => `- [${i.severity}] ${i.dimension}: ${i.title}`).join('\n') || '（无具体问题，请自查完善）'
+  const prompt = `你上次的交付如下：\n\n${t.delivery}\n\n${by}AI 提出以下问题需你修改优化（第 ${t.round} 轮）：\n${issues}\n\n请基于这些问题重新产出完善后的交付物正文（只输出最终结果）。`
+  const r = await withTimeout(
+    chatWithProvider(EXECUTOR_PROVIDER, [
+      { role: 'system', content: EXECUTOR_SYSTEM },
+      { role: 'user', content: prompt },
+    ], { maxTokens: 3000, temperature: 0.3 }),
+    STAGE_TIMEOUT_MS,
+  )
+  if (!r.ok || !r.value) {
+    // 重做失败推进交付（保底，不无限循环）
+    pushStage(t, '执行AI', `${by}建议打回但重做失败，保留原交付`)
+    await runDelivering(t); return
+  }
+  t.delivery = r.value
+  pushStage(t, '执行AI', `${by}建议已采纳，已完成第 ${t.round} 轮优化`)
+  // 重做后再质检（进入新一轮收敛）
+  await runReviewing(t)
 }
 
 async function runDelivering(t: CollabTask) {

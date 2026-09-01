@@ -57,7 +57,7 @@
               </div>
             </div>
             <!-- 当前运行状态 -->
-            <div v-if="['executing','reviewing','senate','delivering','init'].includes(selectedTask.state)" class="chat-line">
+            <div v-if="RUNNING_STATES.includes(selectedTask.state)" class="chat-line">
               <span class="chat-avatar" style="background:#eef2ff;color:#4338ca">步</span>
               <div class="chat-bubble-meta">
                 <span class="chat-actor" style="color:#4338ca">平台</span>
@@ -231,9 +231,11 @@ const sortedTasks = computed(() => {
 })
 
 const STATE_TEXT: Record<string, string> = {
-  init: '发起', executing: '执行中', reviewing: '质检中', senate: '议院评审', delivering: '交付中', done: '完成', failed: '失败',
+  init: '发起', executing: '执行中', reviewing: '质检中', senate: '议院评审', optimizing: '优化中', delivering: '交付中', done: '完成', failed: '失败',
 }
 function stateText(s: string) { return STATE_TEXT[s] || s }
+// 需展示"运行中"状态点的阶段
+const RUNNING_STATES = ['init', 'executing', 'reviewing', 'senate', 'optimizing', 'delivering']
 
 // 发言人身份映射（执行/质检/议院）
 function actorIcon(a: string) { return ({ '执行AI': '执', '质检AI': '检', '议院': '院', '平台': '平' } as Record<string,string>)[a] || 'AI' }
