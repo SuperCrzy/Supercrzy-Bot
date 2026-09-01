@@ -18,7 +18,7 @@ import { runQualityReview } from './collab-quality'
 import { runSenateReview } from './collab-senate'
 
 // ---- 类型 ----
-export type CollabState = 'init' | 'executing' | 'reviewing' | 'senate' | 'optimizing' | 'delivering' | 'done' | 'failed'
+export type CollabState = 'init' | 'executing' | 'reviewing' | 'senate' | 'optimizing' | 'awaiting_decision' | 'delivering' | 'done' | 'failed'
 export type CollabMode = 'semi' | 'senate'
 
 export interface CollabTask {
@@ -136,13 +136,45 @@ async function runReviewing(t: CollabTask) {
   if (!r.ok) { t.state = 'failed'; t.error = r.reason === 'timeout' ? '质检超时' : r.error; t.stage = 'reviewing'; persist(t); return }
   t.quality = r.value
   pushStage(t, '质检AI', `质检评分 ${t.quality.score ?? '?'}，问题 ${(t.quality.issues || []).length} 条`)
-  // 收敛闭环：质检分低于阈值且未超轮次 → 打回执行重做（半自动=人控前自动收敛；议院交给 senate 综合）
+  // 半自动 = 人机协作：质检后停在此处，把问题交给你裁定（通过/打回）
+  if (t.mode === 'semi') {
+    await runAwaitingDecision(t)
+    return
+  }
+  // 议院（全自动 = AI自治）：低分自动打回收敛，否则进议院
   if (t.round < MAX_CONVERGE_ROUNDS && (t.quality.score ?? 100) < QUALITY_PASS_THRESHOLD) {
     await runOptimizing(t, '质检')
     return
   }
-  // 议院模式才进 senate，否则交付
-  if (t.mode === 'senate') { await runSenate(t) } else { await runDelivering(t) }
+  await runSenate(t)
+}
+
+/** 半自动人控：质检后停下，等你决定 通过/打回；不自动推进 */
+async function runAwaitingDecision(t: CollabTask) {
+  t.state = 'awaiting_decision'; t.stage = 'awaiting_decision'; persist(t)
+  pushStage(t, '你要裁定', `质检已完成（评分 ${t.quality?.score ?? '?'}），请裁定：通过 or 打回`)
+}
+
+/** 用户裁定：通过→交付；打回→(带意见) runOptimizing 重做后回到质检再让你裁定；放弃→failed */
+export async function decideCollabTask(id: string, decision: 'accept' | 'revise' | 'discard', feedback?: string): Promise<CollabTask | null> {
+  const t = getCollabTask(id)
+  if (!t || t.state !== 'awaiting_decision') return t || null
+  if (decision === 'accept') {
+    await runDelivering(t)
+  } else if (decision === 'revise') {
+    // 把用户反馈并入 issues 反馈给执行重做
+    pushStage(t, '你', feedback ? `打回：${feedback}` : '打回重做')
+    if (feedback) {
+      const issues = Array.isArray(t.quality?.issues) ? t.quality.issues : []
+      issues.push({ severity: 'medium', dimension: '用户反馈', title: feedback, evidence: feedback })
+      t.quality.issues = issues
+      persist(t)
+    }
+    await runOptimizing(t, '你')
+  } else {
+    t.state = 'failed'; t.stage = 'discarded'; t.error = 'user_discarded'; persist(t)
+  }
+  return getCollabTask(id)
 }
 
 async function runSenate(t: CollabTask) {
@@ -225,7 +257,7 @@ export function stopCollabTask(id: string): boolean {
   const t = getCollabTask(id)
   if (!t) return false
   // 无运行中取消句柄，标记状态用失败包裹（前端据此显示"已停止"）
-  if (t.state === 'init' || t.state === 'executing' || t.state === 'reviewing' || t.state === 'senate') {
+  if (['init', 'executing', 'reviewing', 'senate', 'optimizing', 'awaiting_decision'].includes(t.state)) {
     t.state = 'failed'; t.stage = 'stopped'; t.error = 'user_stopped'; persist(t)
   }
   return true

@@ -138,6 +138,22 @@
                 <div class="chat-bubble fail-box">{{ selectedTask.error || '任务失败' }}</div>
               </div>
             </div>
+            <!-- 半自动人控裁定（质检后停下等你） -->
+            <div v-if="selectedTask.state === 'awaiting_decision'" class="chat-line">
+              <span class="chat-avatar" style="background:#eff6ff;color:#1d4ed8">你</span>
+              <div class="chat-bubble-meta">
+                <span class="chat-actor" style="color:#1d4ed8">请裁定这份交付</span>
+                <div class="chat-bubble decision-box">
+                  <div class="decision-hint">质检已完成，这份结果你认为满意吗？</div>
+                  <div class="decision-actions">
+                    <button class="dec-btn pass" @click="sendDecision('accept')">通过验收</button>
+                    <button class="dec-btn revise" @click="sendDecision('revise', feedback)">打回重做</button>
+                    <button class="dec-btn discard" @click="sendDecision('discard')">放弃</button>
+                  </div>
+                  <input v-model="feedback" class="dec-feedback" placeholder="（打回时可选）说明你想让它改哪里…" @keyup.enter="sendDecision('revise', feedback)" />
+                </div>
+              </div>
+            </div>
           </template>
         </div>
 
@@ -217,8 +233,23 @@ const apiOk = ref(true)
 const tasks = ref<CollabTask[]>([])
 const selectedTask = ref<CollabTask | null>(null)
 const customGoal = ref('')
+const feedback = ref('')
 const starting = ref(false)
 const chatFlowRef = ref<HTMLElement | null>(null)
+
+/** 半自动人控裁定：awaiting_decision 时通过/打回/放弃 */
+async function sendDecision(decision: 'accept' | 'revise' | 'discard', fb?: string) {
+  const t = selectedTask.value
+  if (!t) return
+  try {
+    await fetch(`/api/collab/tasks/${t.taskId}/decision`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ decision, feedback: fb || undefined }),
+    })
+    feedback.value = ''
+  } catch (e) { /* 后台失败忽略 */ }
+}
 
 function switchMode(m: 'semi' | 'senate') {
   mode.value = m
@@ -231,10 +262,10 @@ const sortedTasks = computed(() => {
 })
 
 const STATE_TEXT: Record<string, string> = {
-  init: '发起', executing: '执行中', reviewing: '质检中', senate: '议院评审', optimizing: '优化中', delivering: '交付中', done: '完成', failed: '失败',
+  init: '发起', executing: '执行中', reviewing: '质检中', senate: '议院评审', optimizing: '优化中', awaiting_decision: '待你裁定', delivering: '交付中', done: '完成', failed: '失败',
 }
 function stateText(s: string) { return STATE_TEXT[s] || s }
-// 需展示"运行中"状态点的阶段
+// 需展示"运行中"状态点的阶段（awaiting_decision 是停下等你，不算运行）
 const RUNNING_STATES = ['init', 'executing', 'reviewing', 'senate', 'optimizing', 'delivering']
 
 // 发言人身份映射（执行/质检/议院）
@@ -413,4 +444,13 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 .run-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #4338ca; margin-right: 6px; animation: runpulse 1s ease-in-out infinite; vertical-align: 1px; }
 @keyframes runpulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
 .fail-box { color: #dc2626; font-size: 12px; }
+.decision-box { display: flex; flex-direction: column; gap: 8px; }
+.decision-hint { font-size: 12px; color: var(--text-secondary); }
+.decision-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.dec-btn { border: 1px solid var(--border-color); border-radius: 6px; padding: 5px 12px; font-size: 12px; cursor: pointer; }
+.dec-btn.pass { background: #f0fdf4; color: #15803d; border-color: #bbf7d0; }
+.dec-btn.revise { background: #fffbeb; color: #b45309; border-color: #fde68a; }
+.dec-btn.discard { background: #fef2f2; color: #dc2626; border-color: #fecaca; }
+.dec-btn:hover { opacity: .85; }
+.dec-feedback { border: 1px solid var(--border-color); border-radius: 6px; padding: 5px 9px; font-size: 12px; background: var(--bg-tertiary); }
 </style>

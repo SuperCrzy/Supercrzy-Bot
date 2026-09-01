@@ -5,7 +5,7 @@
  */
 import Router from 'koa-router'
 import type { Context } from 'koa'
-import { createCollabTask, getCollabTask, listCollabTasks, stopCollabTask } from '../services/collab-engine'
+import { createCollabTask, getCollabTask, listCollabTasks, stopCollabTask, decideCollabTask } from '../services/collab-engine'
 import { browserNavigate, browserRefresh, browserScreenshot, closeBrowser } from '../services/ai-browser'
 
 export const collabRouter = new Router({ prefix: '/api/collab' })
@@ -54,6 +54,17 @@ collabRouter.get('/tasks/:id', (ctx: Context) => {
 
 // 停止任务
 collabRouter.post('/tasks/:id/stop', (ctx: Context) => { ctx.body = { stopped: stopCollabTask(ctx.params.id) } })
+
+// 半自动人控裁定：awaiting_decision 时用户 通过/打回/放弃
+collabRouter.post('/tasks/:id/decision', async (ctx: Context) => {
+  const { decision, feedback } = ctx.request.body as { decision?: string; feedback?: string }
+  if (!decision || !['accept', 'revise', 'discard'].includes(decision)) {
+    ctx.status = 400; ctx.body = { error: 'decision must be accept|revise|discard' }; return
+  }
+  const t = await decideCollabTask(ctx.params.id, decision as any, feedback)
+  if (!t) { ctx.status = 404; ctx.body = { error: 'task not found or not awaiting decision' }; return }
+  ctx.body = { taskId: t.id, state: t.state, stage: t.stage, round: t.round }
+})
 
 // ---- AI 浏览器（Playwright 实接，2026-09-01）----
 // POST /api/collab/browser/navigate { url } → 导航并返回截图(base64)
