@@ -29,6 +29,11 @@ export function getLLMConfig() {
   }
 }
 
+/** 品牌偏好模型（按可用性人工校正，优先于 prefix 猜测；别选函数模型/失效旧模型） */
+const PROVIDER_PREFERRED_MODEL: Record<string, string> = {
+  kimi: 'kimi-k2.6',   // moonshot-v1-*/kimi-k2.5 失效；k2.6 实测可用
+}
+
 /** 读取指定 provider 的配置（多品牌议院用：deepseek/kimi/…） */
 export function getProviderConfig(providerKey: string) {
   const db = getDB()
@@ -38,11 +43,16 @@ export function getProviderConfig(providerKey: string) {
   let model = ''
   try {
     const list = JSON.parse(p.models || '[]')
-    const def = list.find((m: any) => m?.is_default) || list[0]
-    model = def?.model_id || def?.id || ''
+    const models = list.map((m: any) => m?.model_id || m?.id || m).filter(Boolean) as string[]
+    // 优先：品牌偏好模型，其次 is_default，再回退 models[0]
+    const pref = PROVIDER_PREFERRED_MODEL[providerKey]
+    model = (pref && models.includes(pref))
+      ? pref
+      : models.find((m) => list.find((x: any) => (x?.model_id || x?.id) === m)?.is_default)
+        || models[0]
+        || ''
   } catch { /* ignore */ }
   if (!model) {
-    // 回退主模型
     const main = getLLMConfig()
     model = main.model
   }
@@ -61,15 +71,21 @@ export async function chatWithProvider(
 ): Promise<string> {
   const p = getProviderConfig(providerKey)
   if (!p) throw new Error(`provider ${providerKey} 未配置可用 key`)
+  const body: Record<string, unknown> = {
+    model: p.model,
+    messages,
+    max_tokens: opts.maxTokens ?? 2000,
+  }
+  // 兼容各品牌 temperature 限制（如 Kimi k2.x 只允许 temperature=1，传 0.3 会 400）
+  // 仅显式指定时传；Kimi 一律用其默认（省略）或显式 1
+  if (opts.temperature !== undefined) {
+    if (providerKey === 'kimi') body.temperature = 1
+    else body.temperature = opts.temperature
+  }
   const resp = await fetch(`${p.baseUrl}/v1/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${p.apiKey}` },
-    body: JSON.stringify({
-      model: p.model,
-      messages,
-      max_tokens: opts.maxTokens ?? 2000,
-      temperature: opts.temperature ?? 0.3,
-    }),
+    body: JSON.stringify(body),
   })
   if (!resp.ok) throw new Error(`LLM HTTP ${resp.status}`)
   const data = (await resp.json()) as any

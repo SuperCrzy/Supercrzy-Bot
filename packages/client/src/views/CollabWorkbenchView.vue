@@ -113,7 +113,12 @@
                   </div>
                   <div v-for="(v, idx) in selectedTask.senate.votes" :key="idx" class="senator-vote">
                     <div class="senator-head">
-                      <b>{{ v.senator }}</b>
+                      <!-- 品牌 LOGO 头像（按 provider：DeepSeek/Kimi 品牌色首字母） -->
+                      <span class="senator-brand-avatar" :style="{ background: brandColor(v.brand), color: '#fff' }">{{ (v.brand || v.senator).slice(0,1).toUpperCase() }}</span>
+                      <div class="senator-brand-wrap">
+                        <b>{{ v.senator }}</b>
+                        <span class="senator-brand-name">{{ v.brand || '' }}</span>
+                      </div>
                       <span class="senator-verdict" :class="v.verdict">{{ v.verdict === 'pass' ? '通过' : (v.verdict === 'reject' ? '打回' : '弃权') }}</span>
                       <span class="senator-score">{{ v.score }}</span>
                     </div>
@@ -236,6 +241,18 @@ function actorColor(a: string) { return ({ '执行AI': '#374151', '质检AI': '#
 function actorBg(a: string) { return ({ '执行AI': '#e5e7eb', '质检AI': '#fffbeb', '议院': '#f5f3ff', '平台': '#eef2ff' } as Record<string,string>)[a] || '#e5e7eb' }
 // 议院 provider→品牌 LOGO 名（后续接真多品牌时按 provider 返回）
 function providerName(): string { return '议院' }
+
+// 品牌 LOGO 头像色（议院各厂商）；无品牌用议院紫
+function brandColor(brand?: string): string {
+  const b = (brand || '').toLowerCase()
+  if (b.includes('kimi')) return '#111111';      // Kimi（月之暗面，黑）
+  if (b.includes('deepseek')) return '#4D6BFE';  // DeepSeek 蓝
+  if (b.includes('gpt') || b.includes('openai')) return '#10A37F'
+  if (b.includes('claude') || b.includes('anthropic')) return '#C15F3C'
+  if (b.includes('qwen') || b.includes('通义')) return '#615CED'
+  if (b.includes('gemini') || b.includes('google')) return '#4285F4'
+  return '#6d28d9'
+}
 
 async function loadTasks() {
   try {
@@ -365,6 +382,9 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 .senator-vote { border-top: 1px dashed var(--border-color); padding: 8px 0; font-size: 12px; }
 .senator-vote:first-of-type { border-top: none; padding-top: 0; }
 .senator-head { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
+.senator-brand-avatar { width: 18px; height: 18px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 600; flex-shrink: 0; }
+.senator-brand-wrap { display: flex; flex-direction: column; line-height: 1.1; }
+.senator-brand-name { font-size: 9px; color: var(--text-tertiary); }
 .senator-verdict { font-size: 11px; border-radius: 10px; padding: 0 8px; }
 .senator-verdict.pass { background: #f0fdf4; color: #15803d; }
 .senator-verdict.reject { background: #fef2f2; color: #dc2626; }
