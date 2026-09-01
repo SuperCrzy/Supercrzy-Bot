@@ -338,6 +338,13 @@ async function loadTasks() {
 
 function selectTask(t: CollabTask) {
   selectedTask.value = t
+  // 2026-09-01 AI 浏览器"需要时自动浮层"：任务执行/质检/议院时自动在右侧弹出浏览器画面
+  // （避免手动点开关；需要时自动出现）
+  if (RUNNING_STATES.includes(t.state) || t.state === 'awaiting_decision') {
+    const appStore = useAppStore()
+    appStore.setDetailPanelTab('browser')
+    if (!appStore.detailPanelVisible) appStore.toggleDetailPanel()
+  }
 }
 
 async function startGoal(goal: string) {
