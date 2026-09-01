@@ -190,12 +190,21 @@
         />
       </div>
 
-      <!-- 幽灵 Tab -->
-      <!-- AI 浏览器 Tab（超级协作平台：可收缩右侧栏，AI 操作网页画面在此显示） -->
+      <!-- AI 浏览器 Tab（Playwright 实接，实时显示 AI 操作画面） -->
       <div v-if="activeTab === 'browser'" class="tab-content browser-tab">
         <div class="browser-live">
-          <span class="browser-live-dot" />
+          <span class="browser-live-dot" :class="{ active: browserStatus === '导航中' }" />
           <span class="browser-live-text">{{ browserStatus }}</span>
+        </div>
+        <div class="browser-url-row">
+          <input
+            v-model="browserUrlInput"
+            class="browser-url-input"
+            placeholder="输入网址，AI 浏览器打开…"
+            @keyup.enter="goToUrl"
+          />
+          <button class="browser-go" @click="goToUrl">打开</button>
+          <button class="browser-refresh" @click="refreshPage" title="刷新">刷新</button>
         </div>
         <div class="browser-view">
           <div class="browser-chrome-bar">
@@ -203,7 +212,12 @@
             <span class="bc-url">{{ browserUrl || 'about:blank' }}</span>
           </div>
           <div class="browser-canvas">
-            <span v-if="!browserUrl" class="browser-placeholder">AI 浏览器待接入（P3 Playwright）</span>
+            <div v-if="browserScreenshotBase64" class="browser-shot-wrap">
+              <img :src="'data:image/jpeg;base64,' + browserScreenshotBase64" class="browser-shot" alt="浏览器画面" />
+            </div>
+            <span v-else class="browser-placeholder" :class="{ loading: browserLoading }">
+              {{ browserLoading ? 'AI 浏览器导航中…' : 'AI 浏览器就绪，输入网址打开（或等 AI 操作）' }}
+            </span>
           </div>
         </div>
         <div class="browser-console">
@@ -609,10 +623,50 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-// ---- AI 浏览器（超级协作平台 P3：可收缩右侧栏内显示 AI 操作网页画面）----
+// ---- AI 浏览器（Playwright 实接，2026-09-01）----
 const browserStatus = ref('待机')
 const browserUrl = ref('')
+const browserUrlInput = ref('')
+const browserScreenshotBase64 = ref('')
+const browserLoading = ref(false)
 const browserLog = ref<string[]>([])
+
+async function goToUrl() {
+  const url = browserUrlInput.value.trim()
+  if (!url) return
+  browserLoading.value = true
+  browserStatus.value = '导航中'
+  browserLog.value.push('导航 ' + url)
+  try {
+    const r = await fetch('/api/collab/browser/navigate', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }),
+    })
+    if (r.ok) {
+      const d = await r.json()
+      browserUrl.value = d.url || url
+      browserScreenshotBase64.value = d.screenshot || ''
+      browserStatus.value = '实时'
+    } else { browserStatus.value = '失败' }
+  } catch { browserStatus.value = '断开' }
+  browserLoading.value = false
+  // 自动滑动到最新
+  await nextTick()
+}
+
+async function refreshPage() {
+  browserLoading.value = true
+  browserStatus.value = '刷新中'
+  try {
+    const r = await fetch('/api/collab/browser/refresh', { method: 'POST' })
+    if (r.ok) {
+      const d = await r.json()
+      browserUrl.value = d.url || browserUrl.value
+      browserScreenshotBase64.value = d.screenshot || ''
+      browserStatus.value = '实时'
+    } else { browserStatus.value = '失败' }
+  } catch { browserStatus.value = '断开' }
+  browserLoading.value = false
+}
 
 const tabs = [
   { key: 'deliverables' as const, label: t('detail.tabArtifacts'), icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>' },
@@ -868,15 +922,24 @@ const tabs = [
 .tab-hint { font-size: 11px; color: var(--text-muted); line-height: 1.4; }
 .tab-empty { margin-top: 24px; }
 
-/* ---- AI 浏览器 Tab（超级协作平台）---- */
+/* ---- AI 浏览器 Tab（Playwright 实接）---- */
 .browser-live { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted); }
-.browser-live-dot { width: 6px; height: 6px; border-radius: 50%; background: #22c55e; }
+.browser-live-dot { width: 6px; height: 6px; border-radius: 50%; background: #cbd5e1; }
+.browser-live-dot.active { background: #22c55e; animation: bdot 1s infinite; }
+@keyframes bdot { 0%,100%{opacity:1} 50%{opacity:.35} }
+.browser-url-row { display: flex; gap: 4px; }
+.browser-url-input { flex: 1; min-width: 0; border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 4px 8px; font-size: 11px; background: var(--bg-tertiary); }
+.browser-go, .browser-refresh { border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-primary); font-size: 11px; padding: 3px 8px; cursor: pointer; color: var(--text-secondary); }
+.browser-go:hover, .browser-refresh:hover { border-color: var(--border-strong); }
 .browser-view { border: 1px solid var(--border-color); border-radius: var(--radius-sm); overflow: hidden; }
 .browser-chrome-bar { display: flex; align-items: center; gap: 4px; padding: 4px 8px; background: #0f172a; }
 .bc-dot { width: 7px; height: 7px; border-radius: 50%; }
-.bc-url { margin-left: auto; font-size: 10px; color: #64748b; }
-.browser-canvas { height: 180px; display: flex; align-items: center; justify-content: center; background: var(--bg-tertiary); }
-.browser-placeholder { font-size: 11px; color: var(--text-muted); }
+.bc-url { margin-left: auto; font-size: 10px; color: #64748b; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.browser-canvas { min-height: 140px; display: flex; align-items: center; justify-content: center; background: var(--bg-tertiary); }
+.browser-shot-wrap { width: 100%; overflow-x: auto; }
+.browser-shot { display: block; width: 100%; height: auto; }
+.browser-placeholder { font-size: 11px; color: var(--text-muted); padding: 10px; text-align: center; line-height: 1.5; }
+.browser-placeholder.loading { color: var(--text-secondary); }
 .browser-console { background: #0f172a; border-radius: var(--radius-sm); padding: 6px 8px; font-family: var(--font-mono, monospace); font-size: 10px; color: #6ee7a0; max-height: 90px; overflow-y: auto; }
 .browser-log-line { margin: 2px 0; }
 .browser-log-line.muted { color: #64748b; }

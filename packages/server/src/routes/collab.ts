@@ -6,6 +6,7 @@
 import Router from 'koa-router'
 import type { Context } from 'koa'
 import { createCollabTask, getCollabTask, listCollabTasks, stopCollabTask } from '../services/collab-engine'
+import { browserNavigate, browserRefresh, browserScreenshot, closeBrowser } from '../services/ai-browser'
 
 export const collabRouter = new Router({ prefix: '/api/collab' })
 
@@ -53,5 +54,32 @@ collabRouter.get('/tasks/:id', (ctx: Context) => {
 
 // 停止任务
 collabRouter.post('/tasks/:id/stop', (ctx: Context) => { ctx.body = { stopped: stopCollabTask(ctx.params.id) } })
+
+// ---- AI 浏览器（Playwright 实接，2026-09-01）----
+// POST /api/collab/browser/navigate { url } → 导航并返回截图(base64)
+collabRouter.post('/browser/navigate', async (ctx: Context) => {
+  const url = String((ctx.request.body as { url?: string })?.url || '').trim()
+  if (!url) { ctx.status = 400; ctx.body = { error: 'url is required' }; return }
+  try {
+    ctx.body = await browserNavigate(url)
+  } catch (e: any) {
+    ctx.status = 500; ctx.body = { error: e?.message || String(e) }
+  }
+})
+
+// POST /api/collab/browser/refresh → 刷新当前页并截图
+collabRouter.post('/browser/refresh', async (ctx: Context) => {
+  try { ctx.body = await browserRefresh() } catch (e: any) { ctx.status = 500; ctx.body = { error: e?.message || String(e) } }
+})
+
+// GET /api/collab/browser/snapshot → 当前页截图（无导航）
+collabRouter.get('/browser/snapshot', async (ctx: Context) => {
+  try { ctx.body = await browserScreenshot() } catch (e: any) { ctx.status = 500; ctx.body = { error: e?.message || String(e) } }
+})
+
+// POST /api/collab/browser/close → 关闭浏览器实例
+collabRouter.post('/browser/close', async (ctx: Context) => {
+  await closeBrowser(); ctx.body = { closed: true }
+})
 
 export default collabRouter
