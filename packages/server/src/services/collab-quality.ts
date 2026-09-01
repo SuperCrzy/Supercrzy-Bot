@@ -4,7 +4,7 @@
  * L1 机器检查：可选，检测产出中是否有代码文件则跑未接（P3 浏览器/代码检查接入）。
  * 质检结果附加到 collab 任务（内存态，与 collab 同生命周期），前端展示。
  */
-import { getLLMConfig, normalizeBaseUrl } from './ghost-engine'
+import { getLLMConfig, normalizeBaseUrl } from './llm-config'
 
 export interface QualityIssue {
   severity: 'high' | 'medium' | 'low'

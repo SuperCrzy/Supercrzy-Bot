@@ -4,7 +4,7 @@
  * 过半数通过 pass；有 high 问题或多数打回 → review（需修订）。
  * 第一版用同一模型 DeepSeek 以不同角色 prompt 分饰议员（多模型 key 齐全后可换不同模型族）。
  */
-import { getLLMConfig, normalizeBaseUrl } from './ghost-engine'
+import { getLLMConfig, normalizeBaseUrl } from './llm-config'
 
 export interface SenateVote {
   senator: string        // 议员名/视角

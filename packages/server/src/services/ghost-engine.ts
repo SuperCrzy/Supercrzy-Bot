@@ -16,6 +16,7 @@ import { basename, join, normalize } from 'path'
 import { getDB } from './database'
 import { config } from '../config'
 import { runAgentLoop } from './agent'
+import { getLLMConfig, normalizeBaseUrl } from './llm-config'
 
 // ---- 常量 ----
 export const GHOST_MAX_CONCURRENCY = 3          // 默认并行幽灵数（设置页可调 1-5）
@@ -79,28 +80,7 @@ export function getGhostTask(taskId: string) { return tasks.get(taskId) }
 export function listGhostTasks() { return Array.from(tasks.values()) }
 
 // ---- 工具：读 LLM 配置（settings → custom_providers(deepseek) → .env 回退链，与主聊天同源）----
-export function normalizeBaseUrl(url: string): string {
-  // 去掉尾部斜杠和重复的 /v1（DB 中 base_url 可能已含 /v1）
-  return (url || '').replace(/\/+$/, '').replace(/\/v1$/, '')
-}
-export function getLLMConfig() {
-  const db = getDB()
-  const modelRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('model') as any
-  const keyRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('apiKey') as any
-  let apiKey = keyRow?.value || ''
-  let baseUrl = config.deepseek.baseUrl
-  if (!apiKey) {
-    const cp = db.prepare("SELECT base_url, api_key FROM custom_providers WHERE provider_key='deepseek'").get() as any
-    apiKey = cp?.api_key || ''
-    if (cp?.base_url) baseUrl = cp.base_url
-  }
-  if (!apiKey) apiKey = config.deepseek.apiKey
-  return {
-    model: modelRow?.value || config.deepseek.defaultModel,
-    apiKey,
-    baseUrl,
-  }
-}
+// 2026-09-01 抽到 llm-config.ts，供 collab/质检/议院/新引擎复用
 
 async function llmJson(prompt: string, maxTokens = 8000, retries = 2): Promise<any> {
   const { model, apiKey, baseUrl } = getLLMConfig()
