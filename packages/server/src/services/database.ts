@@ -377,6 +377,10 @@ export function initDatabase() {
     )`)
     db.exec("CREATE INDEX IF NOT EXISTS idx_collab_tasks_session ON collab_tasks(session_id)")
   } catch { /* already exists */ }
+  // Migration: 联动升议院——done 后若建议上议院评审则标 true
+  try {
+    db.exec("ALTER TABLE collab_tasks ADD COLUMN suggest_senate INTEGER NOT NULL DEFAULT 0")
+  } catch { /* already exists */ }
 
   // Migration: add notify_channel column to automations
   try {

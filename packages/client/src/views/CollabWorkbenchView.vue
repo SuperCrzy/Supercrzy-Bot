@@ -72,6 +72,20 @@
                 <div class="chat-bubble" v-html="renderMarkdown(selectedTask.summary)" />
               </div>
             </div>
+            <!-- 机制C：半自动 done 后建议上议院评审 -->
+            <div v-if="selectedTask.state === 'done' && selectedTask.suggestSenate" class="chat-line">
+              <span class="chat-avatar" style="background:#f5f3ff;color:#6d28d9">议</span>
+              <div class="chat-bubble-meta">
+                <span class="chat-actor" style="color:#6d28d9">系统建议</span>
+                <div class="chat-bubble senate suggest-box">
+                  <div class="suggest-text">这是一份重要交付，建议升级到<b>议院评审</b>（DeepSeek + Kimi 多品牌复核），进一步把关？</div>
+                  <div class="suggest-actions">
+                    <button class="sug-btn yes" @click="promoteToSenate">进行议院评审</button>
+                    <button class="sug-btn no" @click="dismissSuggest">跳过</button>
+                  </div>
+                </div>
+              </div>
+            </div>
             <!-- 质检报告（引擎自动产出） -->
             <div v-if="selectedTask.quality && selectedTask.quality.status !== 'pending'" class="chat-line">
               <span class="chat-avatar" style="background:#fffbeb;color:#b45309">检</span>
@@ -210,6 +224,7 @@ interface CollabTask {
   quality?: any
   senate?: any
   history?: CollabHistory[]
+  suggestSenate?: number
   error?: string
 }
 
@@ -249,6 +264,21 @@ async function sendDecision(decision: 'accept' | 'revise' | 'discard', fb?: stri
     })
     feedback.value = ''
   } catch (e) { /* 后台失败忽略 */ }
+}
+
+/** 机制C：同意升议院评审（升级为议院模式再审一轮） */
+async function promoteToSenate() {
+  const t = selectedTask.value
+  if (!t) return
+  try {
+    await fetch(`/api/collab/tasks/${t.taskId}/promote`, { method: 'POST' })
+  } catch (e) { /* 忽略 */ }
+}
+
+/** 机制C：跳过建议（本地隐藏，不再打扰） */
+function dismissSuggest() {
+  const t = selectedTask.value
+  if (t) t.suggestSenate = 0
 }
 
 function switchMode(m: 'semi' | 'senate') {
@@ -453,4 +483,12 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 .dec-btn.discard { background: #fef2f2; color: #dc2626; border-color: #fecaca; }
 .dec-btn:hover { opacity: .85; }
 .dec-feedback { border: 1px solid var(--border-color); border-radius: 6px; padding: 5px 9px; font-size: 12px; background: var(--bg-tertiary); }
+.suggest-box { display: flex; flex-direction: column; gap: 8px; }
+.suggest-text { font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
+.suggest-text b { color: #534AB7; }
+.suggest-actions { display: flex; gap: 6px; }
+.sug-btn { border: none; border-radius: 6px; padding: 5px 12px; font-size: 12px; cursor: pointer; }
+.sug-btn.yes { background: #534AB7; color: #fff; }
+.sug-btn.no { background: transparent; color: var(--text-tertiary); border: 1px solid var(--border-color); }
+.sug-btn:hover { opacity: .85; }
 </style>

@@ -5,7 +5,7 @@
  */
 import Router from 'koa-router'
 import type { Context } from 'koa'
-import { createCollabTask, getCollabTask, listCollabTasks, stopCollabTask, decideCollabTask } from '../services/collab-engine'
+import { createCollabTask, getCollabTask, listCollabTasks, stopCollabTask, decideCollabTask, promoteCollabTask } from '../services/collab-engine'
 import { browserNavigate, browserRefresh, browserScreenshot, closeBrowser } from '../services/ai-browser'
 
 export const collabRouter = new Router({ prefix: '/api/collab' })
@@ -34,6 +34,7 @@ collabRouter.get('/tasks', (ctx: Context) => {
     createdAt: Date.parse(t.createdAt), ghosts: [],
     summary: t.state === 'done' ? t.delivery : '',
     delivery: t.delivery, quality: t.quality, senate: t.senate, history: t.history,
+    suggestSenate: t.suggestSenate || 0,
     error: t.error || undefined,
   }))
 })
@@ -48,8 +49,16 @@ collabRouter.get('/tasks/:id', (ctx: Context) => {
     createdAt: Date.parse(t.createdAt),
     summary: t.state === 'done' ? t.delivery : '',
     quality: t.quality, senate: t.senate, history: t.history,
+    suggestSenate: t.suggestSenate || 0,
     error: t.error || undefined,
   }
+})
+
+// 机制C：半自动 done 后用户同意升议院评审
+collabRouter.post('/tasks/:id/promote', async (ctx: Context) => {
+  const t = await promoteCollabTask(ctx.params.id)
+  if (!t) { ctx.status = 404; ctx.body = { error: 'task not found or not deliverable' }; return }
+  ctx.body = { taskId: t.id, state: t.state, stage: t.stage }
 })
 
 // 停止任务

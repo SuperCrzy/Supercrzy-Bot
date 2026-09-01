@@ -33,6 +33,7 @@ export interface CollabTask {
   senate?: any
   round: number          // 收敛轮次
   history: Array<{ stage: string; at: number; actor: string; summary: string }>
+  suggestSenate: number  // 联动升议院（机制C）：半自动 done 后建议上议院评审
   error?: string
   createdAt: string
   updatedAt: string
@@ -55,16 +56,16 @@ function rowToTask(r: any): CollabTask {
     id: r.id, sessionId: r.session_id, goal: r.goal, mode: r.mode,
     state: r.state, stage: r.stage, delivery: r.delivery,
     quality: JSON.parse(r.quality || '{}'), senate: JSON.parse(r.senate || '{}'),
-    round: r.round, history: JSON.parse(r.history || '[]'), error: r.error,
+    round: r.round, history: JSON.parse(r.history || '[]'), suggestSenate: r.suggest_senate || 0, error: r.error,
     createdAt: r.created_at, updatedAt: r.updated_at,
   }
 }
 
 function persist(t: CollabTask) {
   const db = getDB()
-  db.prepare(`UPDATE collab_tasks SET state=?, stage=?, delivery=?, quality=?, senate=?, round=?, history=?, error=?, updated_at=datetime('now') WHERE id=?`).run(
+  db.prepare(`UPDATE collab_tasks SET state=?, stage=?, delivery=?, quality=?, senate=?, round=?, history=?, suggest_senate=?, error=?, updated_at=datetime('now') WHERE id=?`).run(
     t.state, t.stage, t.delivery, JSON.stringify(t.quality || {}), JSON.stringify(t.senate || {}),
-    t.round, JSON.stringify(t.history), t.error || '', t.id,
+    t.round, JSON.stringify(t.history), t.suggestSenate || 0, t.error || '', t.id,
   )
 }
 
@@ -225,7 +226,24 @@ async function runOptimizing(t: CollabTask, by: string) {
 async function runDelivering(t: CollabTask) {
   t.state = 'delivering'; t.stage = 'delivering'; persist(t)
   pushStage(t, '平台', '已收敛交付')
+  // 机制C 联动升议院：半自动任务交付后建议"上议院评审"（给用户进一步把关的选择权）
+  if (t.mode === 'semi') { t.suggestSenate = 1; persist(t) }
   t.state = 'done'; t.stage = 'done'; persist(t)
+}
+
+/** 机制C 联动升议院：用户确认后把已完成的半自动任务升级为议院模式，再审一轮投票 */
+export async function promoteCollabTask(id: string): Promise<CollabTask | null> {
+  const t = getCollabTask(id)
+  if (!t || t.state !== 'done') return t || null
+  t.mode = 'senate'; t.suggestSenate = 0
+  persist(t)
+  pushStage(t, '你', '已同意上议院评审')
+  t.state = 'senate'; t.stage = 'senate'
+  // 异步跑议院评审（复用 runSenate → 若有打回会收敛）
+  void (async () => {
+    await runSenate(t).catch((e: any) => { t.state = 'failed'; t.error = e?.message || String(e); persist(t) })
+  })()
+  return getCollabTask(id)
 }
 
 /** 启动一条串行任务流水线（异步跑，不阻塞发布接口） */
@@ -242,7 +260,7 @@ export async function createCollabTask(goal: string, mode: CollabMode, sessionId
     id: `ct_${Date.now()}_${randomUUID().slice(0, 6)}`,
     sessionId, goal, mode,
     state: 'init', stage: 'init', delivery: '',
-    round: 0, history: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    round: 0, history: [], suggestSenate: 0, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
   }
   getDB().prepare('INSERT INTO collab_tasks (id, session_id, goal, mode, state, stage) VALUES (?, ?, ?, ?, ?, ?)').run(
     t.id, sessionId || null, goal, mode, 'init', 'init',
