@@ -124,13 +124,19 @@ export async function browserEvalJS<A>(bodySrc: string, arg?: A): Promise<unknow
 
 async function snapshot(p: Page): Promise<BrowserSnapshot> {
   const shot = await p.screenshot({ type: 'jpeg', quality: 60, fullPage: false }).catch(() => Buffer.alloc(0))
-  return {
+  const s: BrowserSnapshot = {
     url: p.url() || 'about:blank',
     title: (await p.title().catch(() => '')) || '',
     screenshot: shot.length ? shot.toString('base64') : '',
     ts: Date.now(),
   }
+  lastFrame = s // 记录最新帧，供 D2 画面自动同步(右栏轮询 /browser/latest)
+  return s
 }
+// 最新浏览器画面帧(AI/AI 驾驶的共同单例局最后截图)
+let lastFrame: BrowserSnapshot | null = null
+export function getLastBrowserFrame(): BrowserSnapshot | null { return lastFrame }
+export function resetLastBrowserFrame(): void { lastFrame = null }
 
 /** 关闭浏览器实例 */
 export async function closeBrowser(): Promise<void> {

@@ -120,6 +120,15 @@ collabRouter.get('/browser/snapshot', async (ctx: Context) => {
   try { ctx.body = await browserScreenshot() } catch (e: any) { ctx.status = 500; ctx.body = { error: e?.message || String(e) } }
 })
 
+// GET /api/collab/browser/latest → 最近一次动作后的画面帧(AI 驾驶时右栏自动轮询看实时)
+collabRouter.get('/browser/latest', async (ctx: Context) => {
+  try {
+    const { getLastBrowserFrame } = await import('../services/ai-browser')
+    const f = getLastBrowserFrame()
+    ctx.body = f || { ts: 0, screenshot: '', url: '' }
+  } catch (e: any) { ctx.status = 500; ctx.body = { error: e?.message || String(e) } }
+})
+
 // POST /api/collab/browser/close → 关闭浏览器实例
 collabRouter.post('/browser/close', async (ctx: Context) => {
   await closeBrowser(); ctx.body = { closed: true }

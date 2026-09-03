@@ -232,7 +232,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed, nextTick } from 'vue'
+import { ref, watch, computed, nextTick, onUnmounted, onMounted } from 'vue'
 import { NEmpty } from 'naive-ui'
 import { useAppStore } from '@/stores/app'
 import { useChatStore } from '@/stores/chat'
@@ -686,6 +686,29 @@ async function clickPage(e: MouseEvent) {
   browserLog.value.push(`点击 ${Math.round(X)},${Math.round(Y)}`)
 }
 async function browserGoBack() { await doAct({ action: 'back' }); browserLog.value.push('后退') }
+let lastFrameTs = 0
+let liveTimer: ReturnType<typeof setInterval> | null = null
+// D2 画面自动同步: 当右栏在浏览器 tab，每~1.6s 取后端最近动作帧(含 AI 自主驾驶时的画面)，有更新即刷
+async function pollLiveFrame() {
+  if (!props.visible || props.activeTab !== 'browser') return
+  try {
+    const r = await fetch('/api/collab/browser/latest')
+    if (!r.ok) return
+    const f = await r.json()
+    if (f?.screenshot && f?.ts && f.ts !== lastFrameTs) {
+      lastFrameTs = f.ts
+      browserScreenshotBase64.value = f.screenshot
+      if (f.url) browserUrl.value = f.url
+    }
+  } catch { /* 静默:保留现画面 */ }
+}
+onMounted(() => {
+  lastFrameTs = 0
+  liveTimer = setInterval(pollLiveFrame, 1600)
+  // 切到 browser tab / 或一开始就停这里时立即取一帧
+  pollLiveFrame()
+})
+onUnmounted(() => { if (liveTimer) { clearInterval(liveTimer); liveTimer = null } })
 async function doAct(body: Record<string, unknown>) {
   browserLoading.value = true
   try {
