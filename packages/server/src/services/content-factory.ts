@@ -47,28 +47,49 @@ export async function makeArticle(input: ContentFactoryInput, onStage?: (p: Cont
   const prog = (stage: ContentFactoryProgress['stage'], msg: string) => { if (onStage) onStage({ stage, msg }); }
 
   try {
-    // ① 抓取
-    prog('fetch', '正在打开页面抓取内容…')
-    const nav = await browserNavigate(input.url)
-    const read = await browserReadText(20000)
-    const body = (read.text || '').slice(0, 16000)
+    // ① 抓取（内容源判定：显式 video 或 auto 且命中视频域名 → 字幕优先，否则网页正文）
+    const isVideo = input.kind === 'video' || (input.kind !== 'webpage' && /youtube\.com|youtu\.be|bilibili\.com|vimeo\.com|twitter\.com\/.*\/status|x\.com\/.*\/status/i.test(input.url))
+    let body = ''
+    let title = ''
+    if (isVideo) {
+      prog('fetch', '视频链接，正在拉取字幕…')
+      const { fetchYouTubeTranscript } = await import('./video-transcript')
+      const tt = await fetchYouTubeTranscript(input.url)
+      if (tt.ok) {
+        body = `【视频字幕(${tt.lang === 'zh' ? '中文' : '英文'})】\n${tt.text}`.slice(0, 40000)
+        title = tt.lang === 'zh' ? '视频转写稿' : 'video transcript'
+      } else {
+        prog('fetch', '未取到字幕轨，改抓页面文本兜底…')
+        await browserNavigate(input.url).catch(() => {})
+        const read = await browserReadText(30000)
+        body = (read.text || '').slice(0, 32000)
+        title = read.title || ''
+      }
+    } else {
+      prog('fetch', '正在打开页面抓取内容…')
+      const nav = await browserNavigate(input.url)
+      const read = await browserReadText(20000)
+      body = (read.text || '').slice(0, 16000)
+      title = read.title || ''
+    }
     if (body.length < 40) {
-      return { ok: false, md: '', title: '', sourceUrl: input.url, stage: { stage: 'fetch', msg: '未能抓到正文(可能需要弹窗/JS慢)' }, error: 'empty_body' }
+      return { ok: false, md: '', title: '', sourceUrl: input.url, stage: { stage: 'fetch', msg: '未能抓到正文/字幕(可能需要JS/弹窗/视频无字幕轨)' }, error: 'empty_body' }
     }
 
     // ③ LLM 提炼成中文稿
     prog('digest', '正在提炼转写为中文稿…')
     const focusHint = input.focus ? `\n老板特别关注点：${input.focus}` : ''
     const digest = await llm(
-      `下面是从一个网页/视频提取的内容。请把它加工成一篇可发布的、结构化的中文文章。
+      `下面是${isVideo ? '一段视频的转写稿/字幕' : '一个网页的内容'}。请把它加工成一篇可发布的、结构化的中文文章。
 要求：加一个吸引人的标题；分小节(##小标题)；保留关键数据/厂商/观点；语言通顺面向大众；约600-1000字。
-不要编造原文没有的信息。
+不要编造原文没有的信息。${isVideo ? '(如字幕为英文，请准确翻译成中文再成稿。)' : ''}
 ${focusHint}
 
 正文：
 ${body}`,
     ).catch(() => '')
-    const title = (digest.match(/^#(.+)$/m) || [])[1]?.trim() || read.title || '内容工厂出品'
+    const mDigestTitle = (digest.match(/^#(.+)$/m) || [])[1]?.trim()
+    const outTitle = mDigestTitle || title || '内容工厂出品'
 
     // ④ 配图：尝试源页首图，否则 AI 生成一张封面（此步轻量、不阻塞；失败自动跳生图）
     prog('illustrate', '正在配封面图…')
@@ -77,7 +98,7 @@ ${body}`,
 
     prog('render', '正在排版交付…')
     const final: ContentFactoryOutput = {
-      ok: true, md, title, sourceUrl: input.url,
+      ok: true, md, title: outTitle, sourceUrl: input.url,
       stage: { stage: 'done', msg: '完成' },
     }
     return final
