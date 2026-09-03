@@ -138,3 +138,93 @@ export async function closeBrowser(): Promise<void> {
   browser = null
   page = null
 }
+
+// ===================== 动作层 L2（点击/输入/滚/后退 等） 2026-09-03 =====================
+
+export interface BrowserActionResult {
+  ok: boolean
+  msg?: string
+  error?: string
+  url?: string
+  title?: string
+}
+
+/** 镜像坐标点击(人/坐标系用): x,y 为 viewport 像素(相对截图尺寸) */
+export async function browserClickAt(x: number, y: number): Promise<BrowserActionResult> {
+  try {
+    const p = await getPage()
+    await p.mouse.click(x, y)
+    return { ok: true, url: p.url(), title: (await p.title()) || '' }
+  } catch (e: any) { return { ok: false, error: e.message } }
+}
+
+/** 按文本/占位点: 点页面中含 text 的可点元素; 优先级 button/a/label/含该文本节点, 再点可点祖先 */
+export async function browserClickText(text: string): Promise<BrowserActionResult> {
+  try {
+    const p = await getPage()
+    const loc = p.getByText(text, { exact: false }).first()
+    const el = await loc.evaluate((n) => {
+      let node: HTMLElement | null = n as HTMLElement
+      // 向上找可点祖先
+      for (let i = 0; node && i < 4; i++) {
+        if (node.closest && node.closest('a,button,input,select,textarea,[role=button],[onclick]')) {
+          const t = node.closest('a,button,input,select,textarea,[role=button],[onclick]') as HTMLElement
+          return { tag: t.tagName, clickable: true }
+        }
+        node = node.parentElement
+      }
+      return { clickable: false, tag: (n as HTMLElement)?.tagName || '' }
+    }).catch(() => null)
+    if (el?.clickable) { await loc.click(); return { ok: true, url: p.url(), title: (await p.title()) || '' } }
+    // 兜底: 坐标点
+    const box = await loc.boundingBox()
+    if (box) { await p.mouse.click(box.x + box.width / 2, box.y + box.height / 2); return { ok: true } }
+    return { ok: false, error: `未能定位可点元素: "${text}"` }
+  } catch (e: any) { return { ok: false, error: e.message } }
+}
+
+/** 聚焦并输入到"当前活动/指定 text 对应输入框"。selector 空则填当前聚焦框。 */
+export async function browserTypeText(text: string, into?: string): Promise<BrowserActionResult> {
+  try {
+    const p = await getPage()
+    if (into) {
+      const loc = p.getByPlaceholder(into).first()
+      if (await loc.count()) { await loc.fill(text); return { ok: true } }
+      const byRole = p.getByRole('textbox', { name: into }).first()
+      if (await byRole.count()) { await byRole.fill(text); return { ok: true } }
+      const txt = p.locator(`input[type=text],input:not([type]),textarea`).first()
+      await txt.fill(text); return { ok: true }
+    }
+    await p.keyboard.press('Escape') // 若该处可清焦
+    await p.keyboard.type(text)
+    return { ok: true }
+  } catch (e: any) { return { ok: false, error: e.message } }
+}
+
+/** 按 key 或 Enter/Backspace 等 */
+export async function browserPressKey(key: string): Promise<BrowserActionResult> {
+  try { const p = await getPage(); await p.keyboard.press(key); return { ok: true } }
+  catch (e: any) { return { ok: false, error: e.message } }
+}
+
+/** 滚动 */
+export async function browserScroll(deltaY: number): Promise<BrowserActionResult> {
+  try { const p = await getPage(); await p.mouse.wheel(0, deltaY); return { ok: true } }
+  catch (e: any) { return { ok: false, error: e.message } }
+}
+
+/** 后退 */
+export async function browserBack(): Promise<BrowserActionResult> {
+  try { const p = await getPage(); if (p.url().startsWith('http')) await p.goBack({ timeout: 15000 }).catch(() => {}); return { ok: true, url: p.url() } }
+  catch (e: any) { return { ok: false, error: e.message } }
+}
+
+/** 列出当前页可交互元素清单(LLM决策用,截断≤40条)*/
+export async function browserListInteractive(): Promise<string[]> {
+  try {
+    const p = await getPage()
+    const fn = new Function(`var se=[];var qs='button,a,input[type=text],input[type=search],input:not([type]),textarea,select,[role=button],[role=link]';var n=document.querySelectorAll(qs);for(var i=0;i<n.length&&se.length<40;i++){var el=n[i];if(!el.offsetParent)continue;var tag=el.tagName.toLowerCase();var t=(el.innerText||el.value||el.getAttribute('placeholder')||el.getAttribute('aria-label')||'').trim().slice(0,30);if(!t)continue;var r=el.getBoundingClientRect();se.push(tag+' | '+(el.textContent&&tag==='a'?el.href:'')+' | '+t+' | '+Math.round(r.x)+','+Math.round(r.y));}return se;`) // eslint-disable-line
+    return ((await p.evaluate(fn as any)) || []) as string[]
+  } catch { return [] }
+}
+

@@ -205,6 +205,7 @@
           />
           <button class="browser-go" @click="goToUrl">打开</button>
           <button class="browser-refresh" @click="refreshPage" title="刷新">刷新</button>
+          <button class="browser-refresh" @click="browserGoBack" title="后退">后退</button>
         </div>
         <div class="browser-view">
           <div class="browser-chrome-bar">
@@ -213,7 +214,8 @@
           </div>
           <div class="browser-canvas">
             <div v-if="browserScreenshotBase64" class="browser-shot-wrap">
-              <img :src="'data:image/jpeg;base64,' + browserScreenshotBase64" class="browser-shot" alt="浏览器画面" />
+              <img :src="'data:image/jpeg;base64,' + browserScreenshotBase64" class="browser-shot clickable" @click="clickPage" alt="浏览器画面 (点击可操作)" />
+              <div class="browser-hit-hint" v-if="browserScreenshotBase64">点击画面 = AI 浏览器替你点击</div>
             </div>
             <span v-else class="browser-placeholder" :class="{ loading: browserLoading }">
               {{ browserLoading ? 'AI 浏览器导航中…' : 'AI 浏览器就绪，输入网址打开（或等 AI 操作）' }}
@@ -668,6 +670,35 @@ async function refreshPage() {
   browserLoading.value = false
 }
 
+// AI 浏览器 L2：双击镜像发送坐标点击 / 滚轮 / 停止
+const browserClickMode = ref<'auto' | 'off'>('auto')
+async function clickPage(e: MouseEvent) {
+  const t = e.target as HTMLElement
+  const img = t.closest('img')
+  if (!img) return
+  const r = img.getBoundingClientRect()
+  const native = (img.naturalWidth || img.width)
+  // 镜像宽可能 > 实浏览器宽，但坐标应相对截图实际像素：click 用相对图位置*viewport比例
+  const X = ((e.clientX - r.left) / r.width) * img.naturalWidth
+  const Y = ((e.clientY - r.top) / r.height) * img.naturalHeight
+  // 后端 viewport(1000x700)相对图上自然像素比例，统一按 viewport 给
+  await doAct({ action: 'click_at', x: Math.round(X * 1000 / img.naturalWidth), y: Math.round(Y * 1000 / img.naturalHeight) })
+  browserLog.value.push(`点击 ${Math.round(X)},${Math.round(Y)}`)
+}
+async function browserGoBack() { await doAct({ action: 'back' }); browserLog.value.push('后退') }
+async function doAct(body: Record<string, unknown>) {
+  browserLoading.value = true
+  try {
+    const r = await fetch('/api/collab/browser/act', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    if (r.ok) {
+      const d = await r.json()
+      if (d?.snapshot?.screenshot) { browserScreenshotBase64.value = d.snapshot.screenshot; browserUrl.value = d.snapshot.url || browserUrl.value }
+      if (d?.result?.error) { browserStatus.value = '动作失败' }
+    } else { browserStatus.value = '失败' }
+  } catch { browserStatus.value = '断开' }
+  browserLoading.value = false
+}
+
 const tabs = [
   { key: 'deliverables' as const, label: t('detail.tabArtifacts'), icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>' },
   { key: 'files' as const, label: t('detail.tabFiles'), icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>' },
@@ -938,6 +969,8 @@ const tabs = [
 .browser-canvas { min-height: 140px; display: flex; align-items: center; justify-content: center; background: var(--bg-tertiary); }
 .browser-shot-wrap { width: 100%; overflow-x: auto; }
 .browser-shot { display: block; width: 100%; height: auto; }
+.browser-shot.clickable { cursor: crosshair; }
+.browser-hit-hint { font-size: 10px; color: var(--text-tertiary); text-align: center; padding: 2px 0; }
 .browser-placeholder { font-size: 11px; color: var(--text-muted); padding: 10px; text-align: center; line-height: 1.5; }
 .browser-placeholder.loading { color: var(--text-secondary); }
 .browser-console { background: #0f172a; border-radius: var(--radius-sm); padding: 6px 8px; font-family: var(--font-mono, monospace); font-size: 10px; color: #6ee7a0; max-height: 90px; overflow-y: auto; }

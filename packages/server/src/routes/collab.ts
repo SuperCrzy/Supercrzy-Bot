@@ -6,7 +6,9 @@
 import Router from 'koa-router'
 import type { Context } from 'koa'
 import { createCollabTask, getCollabTask, listCollabTasks, stopCollabTask, decideCollabTask, promoteCollabTask } from '../services/collab-engine'
-import { browserNavigate, browserRefresh, browserScreenshot, closeBrowser } from '../services/ai-browser'
+import { browserNavigate, browserRefresh, browserScreenshot, closeBrowser,
+  browserClickAt, browserClickText, browserTypeText, browserPressKey, browserScroll, browserBack, browserListInteractive } from '../services/ai-browser'
+import { createAuditTask, getAuditTask, listAuditTasks } from '../services/collab-audit'
 
 export const collabRouter = new Router({ prefix: '/api/collab' })
 
@@ -75,6 +77,27 @@ collabRouter.post('/tasks/:id/decision', async (ctx: Context) => {
   ctx.body = { taskId: t.id, state: t.state, stage: t.stage, round: t.round }
 })
 
+// ---- 全自动众议院 · 项目会诊（2026-09-01 异步任务版，避免同步超时）----
+// POST /api/collab/audit { path, instruction? } → 发布会诊，立即返回 taskId，后台跑
+collabRouter.post('/audit', async (ctx: Context) => {
+  const body = ctx.request.body as { path?: string; instruction?: string }
+  const projectPath = String(body.path || '').trim()
+  if (!projectPath) { ctx.status = 400; ctx.body = { error: 'path is required' }; return }
+  const task = createAuditTask(projectPath, body.instruction)
+  ctx.status = 202
+  ctx.body = { taskId: task.id, status: task.status, project: task.project }
+})
+
+// GET /api/collab/audit → 会诊任务列表
+collabRouter.get('/audit', (ctx: Context) => { ctx.body = listAuditTasks() })
+
+// GET /api/collab/audit/:id → 会诊任务详情（含进度/结果）
+collabRouter.get('/audit/:id', (ctx: Context) => {
+  const t = getAuditTask(ctx.params.id)
+  if (!t) { ctx.status = 404; ctx.body = { error: 'audit not found' }; return }
+  ctx.body = t
+})
+
 // ---- AI 浏览器（Playwright 实接，2026-09-01）----
 // POST /api/collab/browser/navigate { url } → 导航并返回截图(base64)
 collabRouter.post('/browser/navigate', async (ctx: Context) => {
@@ -100,6 +123,32 @@ collabRouter.get('/browser/snapshot', async (ctx: Context) => {
 // POST /api/collab/browser/close → 关闭浏览器实例
 collabRouter.post('/browser/close', async (ctx: Context) => {
   await closeBrowser(); ctx.body = { closed: true }
+})
+
+// ---- AI 浏览器动作层 L2（2026-09-03 双向操作：人点画面/AI动同一页）----
+// POST /api/collab/browser/act { action, x?, y?, text?, into?, key?, deltaY? }
+collabRouter.post('/browser/act', async (ctx: Context) => {
+  const b = ctx.request.body as { action?: string; x?: number; y?: number; text?: string; into?: string; key?: string; deltaY?: number }
+  const a = b.action || ''
+  try {
+    let out: any
+    if (a === 'click_at' && typeof b.x === 'number' && typeof b.y === 'number') out = await browserClickAt(b.x, b.y)
+    else if (a === 'click_text') out = await browserClickText(String(b.text || ''))
+    else if (a === 'type') out = await browserTypeText(String(b.text || ''), b.into ? String(b.into) : undefined)
+    else if (a === 'key') out = await browserPressKey(String(b.key || ''))
+    else if (a === 'scroll') out = await browserScroll(Number(b.deltaY) || 300)
+    else if (a === 'back') out = await browserBack()
+    else return ctx.status = 400, ctx.body = { error: `未知 action: ${a}` }
+    const snap = out?.url ? await browserScreenshot().catch(() => null) : null
+    ctx.body = { result: out, snapshot: snap }
+  } catch (e: any) {
+    ctx.status = 500; ctx.body = { error: e?.message || String(e) }
+  }
+})
+
+// GET /api/collab/browser/interactive → 当前页可交互元素清单(LLM/人参考)
+collabRouter.get('/browser/interactive', async (ctx: Context) => {
+  try { ctx.body = { items: await browserListInteractive() } } catch (e: any) { ctx.status = 500; ctx.body = { error: e?.message || String(e) } }
 })
 
 export default collabRouter
