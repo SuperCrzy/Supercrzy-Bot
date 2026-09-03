@@ -3,7 +3,7 @@
  * 每个工具包含 OpenAI Function Calling 格式的 schema 和执行函数
  */
 import { getDB } from './database'
-import { runSearchChain, SEARCH_PROVIDERS } from './search-providers'
+import { runSearchChain, runExhaustiveSearch, SEARCH_PROVIDERS } from './search-providers'
 import { memoryRankedSearch, memoryRankedSearchHybrid } from './memory-search'
 import { randomUUID } from 'crypto'
 import { readFile, writeFile, access, appendFile, stat, readdir, rm, rmdir } from 'fs/promises'
@@ -1131,7 +1131,14 @@ export const toolExecutors: Record<string, ToolExecutor> = {
       const NEWS_HINTS = /新闻|今日|今天|最新|快讯|报道|发布|速递|资讯|简报|News|Breaking|Today|Latest|Headline/i
       const effectiveSource = args.source === 'news' || (NEWS_HINTS.test(query) && timeRange) ? 'news' : (args.source || '')
       const maxAgeDays = timeRange ? ({ day: 1, week: 7, month: 31, year: 365 } as Record<string, number>)[timeRange] : 0
-      // 遍历 provider 链：取第一个产出非空结果的引擎（runSearchChain 内部已探测→降级→后处理）
+      // 时效/news 类请求走"并行全源"更全面（DeepSeek当日+自建SearXNG+Bing 同时并行合并去重）；
+      // 普通搜索走快通道（首个非空即返，省时省费）
+      const wantFresh = effectiveSource === 'news' || timeRange === 'day' || timeRange === 'week'
+      if (wantFresh) {
+        const r = await runExhaustiveSearch({ query, count, timeRange, depth: args.depth || 'basic', source: effectiveSource, maxAgeDays })
+        if (r.results.length === 0) return JSON.stringify({ results: [], query, engine: r.engine, message: '未找到关于 "' + query + '" 的搜索结果。' })
+        return JSON.stringify({ engine: r.engine, engines: r.engines, results: r.results, query })
+      }
       const { engine, results } = await runSearchChain({ query, count, timeRange, depth: args.depth || 'basic', source: effectiveSource, maxAgeDays })
       if (results.length === 0) return JSON.stringify({ results: [], query, message: '未找到关于 "' + query + '" 的搜索结果。' })
       return JSON.stringify({ engine, results, query })

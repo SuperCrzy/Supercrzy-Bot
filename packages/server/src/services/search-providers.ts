@@ -233,9 +233,13 @@ const bingProvider: SearchProvider = {
   },
 }
 
-/** 启用顺序 = 数组顺序（优先级：Tavily → Serper → SearXNG → DeepSeek → Bing） */
+/**
+ * 启用顺序（fast 串行首个非空即返）。
+ * 对 news/当日请求，DeepSeek 官方搜索能给出当日结果且自带日期，故提到最前；
+ * SearXNG(自建,聚合Google,免费)紧跟，Bing 纯兜底。Tavily/Serper 需付费 key 缺失即 disabled。
+ */
 export const SEARCH_PROVIDERS: SearchProvider[] = [
-  tavilyProvider, serperProvider, searxngProvider, deepseekProvider, bingProvider,
+  deepseekProvider, searxngProvider, bingProvider, tavilyProvider, serperProvider,
 ]
 
 /**
@@ -256,4 +260,63 @@ export async function runSearchChain(
     }
   }
   return { engine: 'none', results: [] }
+}
+
+/**
+ * 并行全源搜索（news/当日/深度调研用，2026-09-03 加）。
+ * Promise.all 同时跑全部 enabled 免费源(DeepSeek官方/SearXNG自建/Bing)，各自失败自动降级为空，
+ * 合并全部 → 去重 → 按"有日期最新优先"排序 → 前 count 条。
+ * engine 记为一个"多源合并"聚合标识，前端可展示来源分布。
+ */
+export async function runExhaustiveSearch(
+  ctx: SearchContext & { maxAgeDays?: number },
+): Promise<{ engine: string; results: SearchResultItem[]; engines: string[] }> {
+  const count = ctx.count || 8
+  const maxAge = ctx.maxAgeDays || (ctx.timeRange ? ({ day: 1, week: 7, month: 31, year: 365 } as Record<string, number>)[ctx.timeRange] : 0) || 0
+  const enabled: SearchProvider[] = []
+  for (const p of SEARCH_PROVIDERS) {
+    let on = false
+    try { on = await p.enabled(ctx) } catch { on = false }
+    if (on) enabled.push(p)
+  }
+  if (enabled.length === 0) return { engine: 'none', results: [], engines: [] }
+
+  // 并行调用全部 enabled 源；每源给 15s 上限，慢源自动判空不等，快的先回合并
+  function withTimeout<T>(pr: Promise<T>, ms: number): Promise<T> {
+    return new Promise<T>((res, rej) => {
+      const t = setTimeout(() => rej(new Error('search-timeout')), ms)
+      pr.then((v) => { clearTimeout(t); res(v) }, (e) => { clearTimeout(t); rej(e) })
+    })
+  }
+  const settled = await Promise.all(enabled.map(async (p) => {
+    try { const raw = await withTimeout(safeSearch(p, ctx), 15000); return { name: p.name, raw } }
+    catch { return { name: p.name, raw: [] } }
+  }))
+  const all: SearchResultItem[] = settled.flatMap((s) => s.raw)
+
+  // 标题/域名去重 + 全部分页后处理时不过度约束同源(放宽 host 上限，仅去重重复URL)
+  const byUrl = new Map<string, SearchResultItem>()
+  for (const r of all) {
+    if (!r?.url || !r?.title) continue
+    const key = `${(r.url).replace(/^https?:\/\/(www\.)?/, '').split('/')[0]}:${(r.title || '').slice(0, 40)}`
+    if (!byUrl.has(key)) byUrl.set(key, r)
+  }
+  // 有日期的按日期新→旧排最前；无日期排后；同源最多 3 条
+  const seenHost = new Map<string, number>()
+  const merged = [...byUrl.values()]
+    .sort((a, b) => {
+      const da = a.date ? Date.parse(a.date) : 0, db = b.date ? Date.parse(b.date) : 0
+      if (a.date && !isNaN(da) && b.date && !isNaN(db)) return db - da
+      return (a.date ? 1 : 0) - (b.date ? 1 : 0) // 有日期优先
+    })
+    .filter((r) => {
+      const host = (r.url).replace(/^https?:\/\/(www\.)?/, '').split('/')[0]
+      const hc = (seenHost.get(host) ?? 0) + 1
+      seenHost.set(host, hc)
+      return hc <= 3
+    })
+    .slice(0, count)
+
+  if (merged.length === 0) return { engine: 'none', results: [], engines: [] }
+  return { engine: `multi(${settled.filter((s) => s.raw.length).map((s) => s.name).join('+')})`, results: merged, engines: settled.filter((s) => s.raw.length).map((s) => s.name) }
 }
