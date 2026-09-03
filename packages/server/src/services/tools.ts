@@ -1043,6 +1043,22 @@ export const toolExecutors: Record<string, ToolExecutor> = {
     }
   },
 
+  // ---- 内容工厂：一次跑完(抓取→提炼→配图文) ----
+  async make_article(args, ctx) {
+    const url = String(args.url || '').trim()
+    if (!url) return '❌ make_article 需要 url 参数'
+    try {
+      const { makeArticle } = await import('./content-factory')
+      const stream = (m: string) => { if (ctx?.onOutput) ctx.onOutput('', `[内容工厂] ${m}\n`) }
+      const r = await makeArticle({ url, focus: args.focus }, (p) => stream(`（${p.msg}）`))
+      if (!r.ok) return `❌ 内容工厂未能完成: ${r.stage?.msg || r.error}`
+      // 产物返回 markdown；若前端支持大文本将走 onOutput 已流式
+      return `${r.title}\n\n${r.md}`
+    } catch (e: any) {
+      return `❌ 内容工厂调用失败: ${e.message}`
+    }
+  },
+
   // ---- 网页工具 ----
   async web_fetch(args) {
     // 抓取分层（对齐 WorkBuddy WebFetch 能力）：
@@ -1725,6 +1741,19 @@ export const toolDefinitions: ToolDefinition[] = [
     },
   },
   {
+    name: 'make_article',
+    description: '内容工厂：给定一个 URL（网页/文章/视频页），自动 抓正文→提炼成结构化中文文稿→输出图文成品，一次跑完，无需你分步操作。适合"把这个链接整理成文章/转成中文稿/做摘要长文"。',
+    category: 'system',
+    parameters: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: '要加工的网页/文章/视频的完整 URL' },
+        focus: { type: 'string', description: '（可选）你特别关注的要点/角度' },
+      },
+      required: ['url'],
+    },
+  },
+  {
     name: 'web_fetch',
     description: '获取网页内容。返回网页的文本内容。',
     category: 'network',
@@ -2116,6 +2145,7 @@ export function classifySensitiveTool(toolName: string, argText: string): 'allow
 // ------------------------------------------------------------
 export const DEFERRED_TOOLS = new Set<string>([
   'generate_image',   // 重型：图片生成参数多、少用
+  'make_article',     // 内容工厂：一次跑完型编辑，重/耗时
   'video_edit',       // 视频剪辑
   'computer_use',     // 桌面/浏览器控制（重）
   'draw_diagram',

@@ -48,6 +48,20 @@ export async function browserScreenshot(): Promise<BrowserSnapshot> {
   return snapshot(await getPage())
 }
 
+/** 读取当前页可读文本（内容工厂抓正文用）：优先正文容器，回退 body innerText，截前 maxChars */
+export async function browserReadText(maxChars = 20000): Promise<{ url: string; title: string; text: string }> {
+  const p = await getPage()
+  // 传源码字符串经 new Function 构造纯函数，避免传会被 tsx 用浏览器缺失的 __name 包装的函数
+  const bodySrc = `var sels=['article','main','#content','.article-content','.post-content','.article','.content'];
+    var t='',el,i,s;
+    for(i=0;i<sels.length;i++){ el=document.querySelector(sels[i]); if(el){ s=(el.innerText||'').trim(); if(s.length>80){ t=s; break; } } }
+    if(!t && document.body) t=(document.body.innerText||'').trim();
+    return { text:t.slice(0,limit), title:document.title||'' };`
+  const fn = new Function('limit', bodySrc) // eslint-disable-line no-new-func
+  const info = await p.evaluate(fn as any, maxChars)
+  return { url: p.url(), title: (info as any)?.title || '', text: (info as any)?.text || '' }
+}
+
 async function snapshot(p: Page): Promise<BrowserSnapshot> {
   const shot = await p.screenshot({ type: 'jpeg', quality: 60, fullPage: false }).catch(() => Buffer.alloc(0))
   return {
