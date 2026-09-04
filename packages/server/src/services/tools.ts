@@ -1093,6 +1093,10 @@ export const toolExecutors: Record<string, ToolExecutor> = {
       } else return '❌ browser 未知 action: ' + a
       // 动作后带回一屏缩略文本，便于 AI 自读是不是要到目标
       try { const t = await browserReadText(2000); if (t.text) out += `\n[现页可见] ${t.text.slice(0, 200)}` } catch {}
+      // 页面已变化动作后补一帧截图 → 更新 lastFrame，右栏 /browser/latest 轮询即见跳转(2026-09-04)
+      if (a === 'navigate' || a === 'click' || a === 'back' || a === 'scroll' || a === 'press' || a === 'type') {
+        try { await browserScreenshot() } catch { /* 忽略，read 类已自带 */ }
+      }
       return String(out)
     } catch (e: any) {
       return '❌ browser 失败: ' + (e?.message || e)
