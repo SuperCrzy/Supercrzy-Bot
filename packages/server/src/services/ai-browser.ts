@@ -46,6 +46,18 @@ function sess(key: string): Session {
   if (!s) { s = { b: null, p: null, last: null, waiters: [], idle: Date.now() }; SESSIONS.set(k, s) }
   return s
 }
+// ---- 闲置实例回收(防每会话 Chrome 常驻吃内存, 2026-09-04) ----
+// 仅回收非 default(&非刚创建) 且 idle>IDLE_MAX_ms 的会话；default 保留兼容调用；每 90s 扫一次。
+const IDLE_MAX_MS = 10 * 60 * 1000
+function auditIdle() {
+  for (const [k, s] of SESSIONS) {
+    if (k === 'default') continue
+    if (!s.b && !s.p) continue // 从未真正起浏览器的 key 无需动作
+    if (Date.now() - s.idle < IDLE_MAX_MS) continue
+    void (async () => { try { await s.b?.close() } catch {} SESSIONS.delete(k) })()
+  }
+}
+if (typeof setInterval === 'function') setInterval(auditIdle, 90 * 1000)
 function notify(s: Session, f: BrowserSnapshot) {
   const ws = s.waiters; s.waiters = []
   ws.forEach((w) => { if ((f.ts || 0) > (w.afterTs || 0)) w.resolve(f); else s.waiters.push(w) })
