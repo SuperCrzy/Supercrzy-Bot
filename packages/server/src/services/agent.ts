@@ -1673,6 +1673,24 @@ export async function runAgentLoop(
           }
           messages.push(result)
 
+          // ---- 关键修复(2026-09-04): tool_search 发现 DEFERRED 工具后，真正把它并入后续每轮的 tools 声明 ----
+          // 此前 tool_search 只回一段"已加载可直接调用"文字，却没有把该工具加进下轮 request 的 tools，
+          // 模型下轮调 browser/生图 时 tools 里并不存在 → DeepSeek 拒执行 → "能搜到调不到"鬼打墙。
+          if (toolName === 'tool_search') {
+            const txt = String(result.content || '')
+            if (txt.includes('已加载，可直接调用')) {
+              const re = /-\s+([a-z][a-z0-9_]*)\s*:/gi
+              let m: RegExpExecArray | null
+              while ((m = re.exec(txt)) !== null) {
+                const nm = m[1]
+                if (!nm || !isDeferredTool(nm)) continue
+                if (activeToolDefs.some((d) => d.name === nm)) continue
+                const def = toolDefinitions.find((t: any) => t.name === nm)
+                if (def) { activeToolDefs.push(def as any); console.log(`[agent] tool_search 激活 DEFERRED 工具: ${nm}（下轮起可真实调用）`) }
+              }
+            }
+          }
+
           // ---- 工具循环防护：签名级追踪 ----
           const toolArgs = tc?.function?.arguments || ''
           const guardResult = guardrail.recordResult(toolName, toolArgs, result.content)
