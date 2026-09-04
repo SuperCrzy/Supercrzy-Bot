@@ -1628,8 +1628,8 @@ export async function runAgentLoop(
           // 既不让序列变坏，也让模型知道哪些调用没跑完。
           // deep_research 单独给更长时限（结构上需多轮搜索），其余工具 60s。
           new Promise<any[]>((resolve) => {
-            const hasSlowTool = executeList.some((tc: any) => tc.function?.name === 'deep_research')
-            const toolTimeoutMs = hasSlowTool ? 360000 : 60000  // deep_research 6 分钟
+            const hasSlowTool = executeList.some((tc: any) => tc.function?.name === 'deep_research' || tc.function?.name === 'browser')
+            const toolTimeoutMs = hasSlowTool ? 360000 : 60000  // deep_research/browser(浏览器冷启+导航可达更长) 6 分钟，避免被 60s 误杀→空白/重试(2026-09-04)
             setTimeout(() => {
               console.warn(`[Tool] 工具执行超时（${toolTimeoutMs / 1000}s），为 ${executeList.length} 个未完成调用补占位结果`)
               resolve(

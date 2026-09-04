@@ -83,7 +83,7 @@ async function snap(s: Session, p: Page): Promise<BrowserSnapshot> {
 }
 
 // ---------- 每种动作默认走 'default'（兼容旧调用点，AI/browser单实例仍工作）----------
-async function navigate(k: string, url: string) { const s = sess(k); const p = await getPage(s); await p.goto(url, { timeout: 20000, waitUntil: 'domcontentloaded' }).catch(() => {}); return snap(s, p) }
+async function navigate(k: string, url: string) { const s = sess(k); const p = await getPage(s); await p.goto(url, { timeout: 45000, waitUntil: 'commit' }).catch(() => {}); await new Promise((r) => setTimeout(r, 600)); return snap(s, p) }
 async function shot(k: string) { const s = sess(k); return snap(s, await getPage(s)) }
 async function refresh(k: string) { const s = sess(k); const p = await getPage(s); await p.reload({ timeout: 20000, waitUntil: 'domcontentloaded' }).catch(() => {}); return snap(s, p) }
 async function readText(k: string, maxChars = 20000) {
