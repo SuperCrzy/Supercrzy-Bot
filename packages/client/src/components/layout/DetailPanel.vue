@@ -33,12 +33,6 @@
       </button>
     </div>
 
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polyline points="15 18 9 12 15 6" />
-        </svg>
-      </button>
-    </div>
-
     <!-- Tab 内容区 -->
     <div class="panel-body">
       <!-- 产物 Tab — AI 产出卡片流（对齐 Harness turn-deliverables：按轮分组、类型 icon、状态角标） -->
@@ -500,11 +494,13 @@ function toggleTurn(turn: number) {
 }
 const expandedDiagramSvg = ref<string | null>(null)
 function onDeliverableClick(item: DeliverableItem) {
+  // C 2026-09-04 WorkBuddy: 点产物 → 右栏自动放大到近全屏看细节(而非仅缩略切换)
+  maximized.value = true
   if (item.kind === 'diagram' && item.svg) {
     expandedDiagramSvg.value = expandedDiagramSvg.value === item.svg ? null : item.svg
     return
   }
-  if (item.path) loadAndPreviewFile(item.path)
+  if (item.path) { loadAndPreviewFile(item.path); return }
 }
 
 // ----- Artifacts -----
