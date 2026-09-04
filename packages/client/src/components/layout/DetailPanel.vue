@@ -3,21 +3,36 @@
     <!-- Tab 头部 -->
     <div class="panel-tabs">
       <button
-        v-for="tab in tabs"
+        v-for="tab in rowTabs"
         :key="tab.key"
         class="panel-tab"
         :class="{ active: activeTab === tab.key }"
-        @click="switchTab(tab.key)"
+        @click="switchMainOrMore(tab.key)"
       >
         <div class="tab-icon" v-html="tab.icon"></div>
         <span class="tab-label">{{ tab.label }}</span>
       </button>
 
-      <button class="panel-max-btn" @click="maximized = !maximized" :title="maximized ? '还原侧栏' : '放大侧栏'">
-        <svg v-if="!maximized" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
-        <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/></svg>
-      </button>
+      <!-- 更多(变更/时间线) 收进折叠，不常占顶行 -->
+      <div class="more-wrap">
+        <button class="panel-tab more-tab" :class="{ active: inMoreTab || tabMoreOpen }" @click="tabMoreOpen = !tabMoreOpen" title="更多">
+          <div class="tab-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></div>
+          <span class="tab-label">{{ inMoreTab ? (moreTabs.find(x => x.key === activeTab)?.label || '更多') : '更多' }}</span>
+        </button>
+        <div v-if="tabMoreOpen" class="tab-more-drop">
+          <button v-for="tb in moreTabs" :key="tb.key" class="more-item" :class="{ active: activeTab === tb.key }" @click="switchMainOrMore(tb.key)">
+            <div class="tab-icon" v-html="tb.icon"></div><span>{{ tb.label }}</span>
+          </button>
+        </div>
+      </div>
+
       <button class="panel-close-btn" @click="emit('toggle')" :title="$t('detail.collapse')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="15 18 9 12 15 6" />
+        </svg>
+      </button>
+    </div>
+
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <polyline points="15 18 9 12 15 6" />
         </svg>
@@ -210,6 +225,9 @@
           <button class="browser-go" @click="goToUrl">打开</button>
           <button class="browser-refresh" @click="refreshPage" title="刷新">刷新</button>
           <button class="browser-refresh" @click="browserGoBack" title="后退">后退</button>
+          <button class="browser-maxbtn" @click="maximized = !maximized" :title="maximized ? '还原侧栏' : '放大看浏览器画面'">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+          </button>
         </div>
         <div class="browser-view">
           <div class="browser-chrome-bar">
@@ -273,7 +291,7 @@ const chatStore = useChatStore()
 // ===== L1/L2 实时预览：store 数据 + 800ms 防抖 + 配套 css/js 内联 =====
 const maximized = ref(false)
 /** 宽内容 Tab（预览/浏览器画面/变更 diff/图）：自动加宽至 58%（可被手动 maximized 覆盖的 default-wide） */
-const isWideTab = computed(() => !maximized.value && (props.activeTab === 'preview' || props.activeTab === 'changes' || props.activeTab === 'browser'))
+const isWideTab = computed(() => !maximized.value && (props.activeTab === "preview" || props.activeTab === "changes" || props.activeTab === "browser"))
 const livePreviewPath = ref('')
 
 // ===== SVG 预览操作：下载 / 复制代码 =====
@@ -623,6 +641,14 @@ function switchTab(tab: 'deliverables' | 'files' | 'changes' | 'preview' | 'time
     loadFiles()
   }
 }
+// WorkBuddy 融合:顶行收敛——主频 产物/文件/预览/浏览器，变更+时间线收进「更多」(2026-09-04)
+const tabMoreOpen = ref(false)
+const MAIN_KEYS = ['deliverables', 'files', 'preview', 'browser'] as const
+const MORE_KEYS = ['changes', 'timeline'] as const
+const rowTabs = (tabs as { key: string }[]).filter((x) => (MAIN_KEYS as readonly string[]).includes(x.key))
+const moreTabs = (tabs as { key: string }[]).filter((x) => (MORE_KEYS as readonly string[]).includes(x.key))
+const inMoreTab = computed(() => (MORE_KEYS as readonly string[]).includes(props.activeTab))
+function switchMainOrMore(k: string) { emit('update:tab', k as any); if ((MORE_KEYS as readonly string[]).includes(k)) tabMoreOpen.value = false }
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -700,7 +726,7 @@ let lastFrameTs = 0
 let liveTimer: ReturnType<typeof setInterval> | null = null
 // D2 画面自动同步: 当右栏在浏览器 tab，每~1.6s 取后端最近动作帧(含 AI 自主驾驶时的画面)，有更新即刷
 async function pollLiveFrame() {
-  if (!props.visible || props.activeTab !== 'browser') return
+  if (!props.visible || props.activeTab !== "browser") return
   try {
     const r = await fetch('/api/collab/browser/latest')
     if (!r.ok) return
@@ -980,6 +1006,12 @@ const tabs = [
   border: none; background: transparent; cursor: pointer; color: var(--text-muted);
 }
 .panel-max-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.more-wrap { position: relative; margin-left: 2px; }
+.panel-tab.more-tab { border: none; background: transparent; padding: 5px 6px; }
+.tab-more-drop { position: absolute; right: 0; top: 30px; z-index: 60; background: var(--bg-sidebar); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 4px; box-shadow: 0 6px 18px rgba(0,0,0,.15); min-width: 120px; }
+.more-item { display: flex; align-items: center; gap: 6px; width: 100%; padding: 6px 8px; border: none; background: transparent; border-radius: var(--radius-sm); cursor: pointer; color: var(--text-secondary); font-size: 12px; text-align: left; }
+.more-item.active { color: var(--text-primary); background: var(--bg-hover); }
+.more-item:hover { background: var(--bg-hover); }
 .panel-close-btn {
   display: flex; align-items: center; justify-content: center;
   width: 28px; height: 28px; border-radius: var(--radius-sm);
@@ -1000,7 +1032,8 @@ const tabs = [
 .browser-url-row { display: flex; gap: 4px; }
 .browser-url-input { flex: 1; min-width: 0; border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 4px 8px; font-size: 11px; background: var(--bg-tertiary); }
 .browser-go, .browser-refresh { border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-primary); font-size: 11px; padding: 3px 8px; cursor: pointer; color: var(--text-secondary); }
-.browser-go:hover, .browser-refresh:hover { border-color: var(--border-strong); }
+.browser-maxbtn { border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-primary); cursor: pointer; color: var(--text-secondary); display: inline-flex; align-items: center; justify-content: center; height: 20px; margin-left: 2px; padding: 0 5px; }
+.browser-maxbtn:hover { border-color: var(--border-strong); color: var(--text-primary); }
 .browser-view { border: 1px solid var(--border-color); border-radius: var(--radius-sm); overflow: hidden; }
 .browser-chrome-bar { display: flex; align-items: center; gap: 4px; padding: 4px 8px; background: #0f172a; }
 .bc-dot { width: 7px; height: 7px; border-radius: 50%; }
