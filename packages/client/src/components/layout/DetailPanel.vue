@@ -216,9 +216,15 @@
             placeholder="输入网址，AI 浏览器打开…"
             @keyup.enter="goToUrl"
           />
-          <button class="browser-go" @click="goToUrl">打开</button>
-          <button class="browser-refresh" @click="refreshPage" title="刷新">刷新</button>
-          <button class="browser-refresh" @click="browserGoBack" title="后退">后退</button>
+          <button class="browser-ico" @click="goToUrl" title="打开">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+          </button>
+          <button class="browser-ico" @click="refreshPage" title="刷新">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+          </button>
+          <button class="browser-ico" @click="browserGoBack" title="后退">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+          </button>
           <button class="browser-maxbtn" @click="maximized = !maximized" :title="maximized ? '还原侧栏' : '放大看浏览器画面'">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
           </button>
@@ -1027,9 +1033,11 @@ const tabs = [
 .browser-live-dot.active { background: #22c55e; animation: bdot 1s infinite; }
 @keyframes bdot { 0%,100%{opacity:1} 50%{opacity:.35} }
 .browser-url-row { display: flex; gap: 4px; align-items: center; }
-.browser-url-input { flex: 1; min-width: 0; border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 6px 9px; font-size: 12.5px; background: var(--bg-tertiary); color: var(--text-primary); caret-color: var(--text-primary); }
+.browser-url-input { flex: 0 0 70%; width: 70%; max-width: 70%; min-width: 0; border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 6px 9px; font-size: 12.5px; background: var(--bg-tertiary); color: var(--text-primary); caret-color: var(--text-primary); }
 .browser-url-input::placeholder { color: var(--text-tertiary); }
 .browser-go, .browser-refresh { border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-primary); font-size: 11px; padding: 3px 8px; cursor: pointer; color: var(--text-secondary); }
+.browser-ico { border: none; background: transparent; cursor: pointer; color: var(--text-secondary); width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); flex-shrink: 0; }
+.browser-ico:hover { color: var(--text-primary); background: var(--bg-hover); }
 .browser-maxbtn { border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-primary); cursor: pointer; color: var(--text-secondary); display: inline-flex; align-items: center; justify-content: center; height: 20px; margin-left: 2px; padding: 0 5px; }
 .browser-maxbtn:hover { border-color: var(--border-strong); color: var(--text-primary); }
 .browser-view { border: 1px solid var(--border-color); border-radius: var(--radius-sm); overflow: hidden; }
