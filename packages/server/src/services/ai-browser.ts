@@ -130,13 +130,33 @@ async function snapshot(p: Page): Promise<BrowserSnapshot> {
     screenshot: shot.length ? shot.toString('base64') : '',
     ts: Date.now(),
   }
-  lastFrame = s // 记录最新帧，供 D2 画面自动同步(右栏轮询 /browser/latest)
+  lastFrame = s // 记录最新帧，供 D2 画面自动同步
+  notifyWaiters(s) // 有新帧 → 唤醒 长轮询等待者(实时推，非前端轮询)
   return s
 }
 // 最新浏览器画面帧(AI/AI 驾驶的共同单例局最后截图)
 let lastFrame: BrowserSnapshot | null = null
 export function getLastBrowserFrame(): BrowserSnapshot | null { return lastFrame }
 export function resetLastBrowserFrame(): void { lastFrame = null }
+
+// ---- 长轮询: 前端 /browser/latest 等"下一个新帧", 有变化即回(实时), 无则到 timeout 返回当前 ----
+let frameWaiters: Array<{ afterTs: number; resolve: (f: BrowserSnapshot | null) => void }> = []
+function notifyWaiters(f: BrowserSnapshot) {
+  const ws = frameWaiters; frameWaiters = []
+  ws.forEach((w) => { if ((f.ts || 0) > (w.afterTs || 0)) w.resolve(f); else frameWaiters.push(w) })
+}
+export function waitForBrowserFrame(afterTs: number, timeoutMs = 15000): Promise<BrowserSnapshot | null> {
+  const cur = lastFrame
+  if (cur && (cur.ts || 0) > afterTs) return Promise.resolve(cur)
+  return new Promise((res) => {
+    const rec = { afterTs, resolve: res as (f: BrowserSnapshot | null) => void }
+    frameWaiters.push(rec)
+    setTimeout(() => {
+      const i = frameWaiters.indexOf(rec)
+      if (i >= 0) { frameWaiters.splice(i, 1); res(lastFrame) } // 超时返回当前帧(可保持画面或首帧)
+    }, timeoutMs)
+  })
+}
 
 /** 关闭浏览器实例 */
 export async function closeBrowser(): Promise<void> {

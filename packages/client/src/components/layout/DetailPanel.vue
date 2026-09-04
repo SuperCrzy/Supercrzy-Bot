@@ -726,28 +726,30 @@ async function clickPage(e: MouseEvent) {
 }
 async function browserGoBack() { await doAct({ action: 'back' }); browserLog.value.push('后退') }
 let lastFrameTs = 0
-let liveTimer: ReturnType<typeof setInterval> | null = null
-// D2 画面自动同步: 当右栏在浏览器 tab，每~1.6s 取后端最近动作帧(含 AI 自主驾驶时的画面)，有更新即刷
+let liveStop = false
+let livePolling = false
+// 画面实时(2026-09-04 长轮询): 服务端在 /browser/latest?after= 上较帧缓存至有新帧或~12s，
+// 前端只在 AI/人手动作产生新帧时收到 → 立即同步贴画面；无变化不空转(无周期轮询)
 async function pollLiveFrame() {
-  if (!props.visible || props.activeTab !== "browser") return
+  if (!props.visible || props.activeTab !== "browser" || liveStop || livePolling) return
+  livePolling = true
   try {
-    const r = await fetch('/api/collab/browser/latest')
+    const r = await fetch(`/api/collab/browser/latest?after=${lastFrameTs}`)
     if (!r.ok) return
     const f = await r.json()
-    if (f?.screenshot && f?.ts && f.ts !== lastFrameTs) {
+    if (f?.ts) {
+      const changed = f.ts !== lastFrameTs
       lastFrameTs = f.ts
-      browserScreenshotBase64.value = f.screenshot
-      if (f.url) browserUrl.value = f.url
+      if (changed && f.screenshot) { browserScreenshotBase64.value = f.screenshot; if (f.url) browserUrl.value = f.url }
     }
-  } catch { /* 静默:保留现画面 */ }
+  } catch { /* 静默 */ }
+  finally {
+    livePolling = false
+    if (props.visible && props.activeTab === "browser" && !liveStop) pollLiveFrame()
+  }
 }
-onMounted(() => {
-  lastFrameTs = 0
-  liveTimer = setInterval(pollLiveFrame, 1600)
-  // 切到 browser tab / 或一开始就停这里时立即取一帧
-  pollLiveFrame()
-})
-onUnmounted(() => { if (liveTimer) { clearInterval(liveTimer); liveTimer = null } })
+onMounted(() => { lastFrameTs = 0; liveStop = false; pollLiveFrame() })
+onUnmounted(() => { liveStop = true })
 async function doAct(body: Record<string, unknown>) {
   browserLoading.value = true
   try {
@@ -1033,7 +1035,7 @@ const tabs = [
 .browser-live-dot.active { background: #22c55e; animation: bdot 1s infinite; }
 @keyframes bdot { 0%,100%{opacity:1} 50%{opacity:.35} }
 .browser-url-row { display: flex; gap: 4px; align-items: center; }
-.browser-url-input { flex: 0 0 70%; width: 70%; max-width: 70%; min-width: 0; border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 6px 9px; font-size: 12.5px; background: var(--bg-tertiary); color: var(--text-primary); caret-color: var(--text-primary); }
+.browser-url-input { flex: 0 0 65%; width: 65%; max-width: 65%; min-width: 0; border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 6px 9px; font-size: 12.5px; background: var(--bg-tertiary); color: var(--text-primary); caret-color: var(--text-primary); }
 .browser-url-input::placeholder { color: var(--text-tertiary); }
 .browser-go, .browser-refresh { border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-primary); font-size: 11px; padding: 3px 8px; cursor: pointer; color: var(--text-secondary); }
 .browser-ico { border: none; background: transparent; cursor: pointer; color: var(--text-secondary); width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); flex-shrink: 0; }

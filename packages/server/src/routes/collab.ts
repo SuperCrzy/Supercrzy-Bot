@@ -120,11 +120,12 @@ collabRouter.get('/browser/snapshot', async (ctx: Context) => {
   try { ctx.body = await browserScreenshot() } catch (e: any) { ctx.status = 500; ctx.body = { error: e?.message || String(e) } }
 })
 
-// GET /api/collab/browser/latest → 最近一次动作后的画面帧(AI 驾驶时右栏自动轮询看实时)
+// GET /api/collab/browser/latest?after=<ts> → 长轮询: 有比 after 更新的帧立刻回; 无则等 ~12s 回当前(不忙轮询)
 collabRouter.get('/browser/latest', async (ctx: Context) => {
   try {
-    const { getLastBrowserFrame } = await import('../services/ai-browser')
-    const f = getLastBrowserFrame()
+    const { getLastBrowserFrame, waitForBrowserFrame } = await import('../services/ai-browser')
+    const after = Number((ctx.query as any).after) || 0
+    const f = await waitForBrowserFrame(after, 12000)
     ctx.body = f || { ts: 0, screenshot: '', url: '' }
   } catch (e: any) { ctx.status = 500; ctx.body = { error: e?.message || String(e) } }
 })
@@ -148,7 +149,8 @@ collabRouter.post('/browser/act', async (ctx: Context) => {
     else if (a === 'scroll') out = await browserScroll(Number(b.deltaY) || 300)
     else if (a === 'back') out = await browserBack()
     else return ctx.status = 400, ctx.body = { error: `未知 action: ${a}` }
-    const snap = out?.url ? await browserScreenshot().catch(() => null) : null
+    // 任何手动动作后都补一帧：长轮询 waiters 立即收到新画面(实时同步，非手动刷新)
+    const snap = await browserScreenshot().catch(() => null)
     ctx.body = { result: out, snapshot: snap }
   } catch (e: any) {
     ctx.status = 500; ctx.body = { error: e?.message || String(e) }
