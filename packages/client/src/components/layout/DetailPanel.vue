@@ -13,6 +13,10 @@
         <span class="tab-label">{{ tab.label }}</span>
       </button>
 
+      <button class="panel-max-btn" @click="maximized = !maximized" :title="maximized ? '还原侧栏' : '放大侧栏'">
+        <svg v-if="!maximized" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+        <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/></svg>
+      </button>
       <button class="panel-close-btn" @click="emit('toggle')" :title="$t('detail.collapse')">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <polyline points="15 18 9 12 15 6" />
@@ -220,6 +224,7 @@
             <span v-else class="browser-placeholder" :class="{ loading: browserLoading }">
               {{ browserLoading ? 'AI 浏览器导航中…' : 'AI 浏览器就绪，输入网址打开（或等 AI 操作）' }}
             </span>
+            <p class="browser-fail" v-if="browserFailHint">{{ browserFailHint }}</p>
           </div>
         </div>
         <div class="browser-console">
@@ -267,8 +272,8 @@ const chatStore = useChatStore()
 
 // ===== L1/L2 实时预览：store 数据 + 800ms 防抖 + 配套 css/js 内联 =====
 const maximized = ref(false)
-/** 宽内容 Tab（预览/变更 diff/图）：自动加宽至 58%，不覆盖用户手动 maximized（P2 内容自适应宽度） */
-const isWideTab = computed(() => !maximized.value && (props.activeTab === 'preview' || props.activeTab === 'changes'))
+/** 宽内容 Tab（预览/浏览器画面/变更 diff/图）：自动加宽至 58%（可被手动 maximized 覆盖的 default-wide） */
+const isWideTab = computed(() => !maximized.value && (props.activeTab === 'preview' || props.activeTab === 'changes' || props.activeTab === 'browser'))
 const livePreviewPath = ref('')
 
 // ===== SVG 预览操作：下载 / 复制代码 =====
@@ -627,6 +632,7 @@ function formatSize(bytes: number): string {
 
 // ---- AI 浏览器（Playwright 实接，2026-09-01）----
 const browserStatus = ref('待机')
+const browserFailHint = ref('')
 const browserUrl = ref('')
 const browserUrlInput = ref('')
 const browserScreenshotBase64 = ref('')
@@ -648,8 +654,12 @@ async function goToUrl() {
       browserUrl.value = d.url || url
       browserScreenshotBase64.value = d.screenshot || ''
       browserStatus.value = '实时'
-    } else { browserStatus.value = '失败' }
-  } catch { browserStatus.value = '断开' }
+      browserFailHint.value = ''
+    } else { browserStatus.value = '失败'; browserFailHint.value = '后端返回错误 ' + r.status + '，无法打开网页' }
+  } catch {
+    browserStatus.value = '断开'
+    browserFailHint.value = '未能连到浏览器服务(后端 3000)。请先启动后端再打开网页'
+  }
   browserLoading.value = false
   // 自动滑动到最新
   await nextTick()
@@ -761,14 +771,14 @@ const tabs = [
 
 /* 预览最大化：展开覆盖聊天区，大屏查看（L1） */
 .detail-panel.visible.maximized {
-  width: 70%;
-  min-width: 480px;
+  width: 92%;
+  min-width: 720px;
   position: absolute;
   right: 0;
   top: 0;
   bottom: 0;
-  z-index: 50;
-  box-shadow: -4px 0 16px rgba(0, 0, 0, .12);
+  z-index: 80;
+  box-shadow: -4px 0 20px rgba(0, 0, 0, .18);
 }
 
 /* 预览 Tab 工具条 */
@@ -963,8 +973,14 @@ const tabs = [
 .tab-icon { display: flex; align-items: center; flex-shrink: 0; }
 .tab-label { font-weight: 500; white-space: nowrap; flex-shrink: 0; }
 
-.panel-close-btn {
+.panel-max-btn {
   margin-left: auto;
+  display: flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: var(--radius-sm);
+  border: none; background: transparent; cursor: pointer; color: var(--text-muted);
+}
+.panel-max-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.panel-close-btn {
   display: flex; align-items: center; justify-content: center;
   width: 28px; height: 28px; border-radius: var(--radius-sm);
   border: none; background: transparent; cursor: pointer; color: var(--text-muted);
@@ -994,6 +1010,7 @@ const tabs = [
 .browser-shot { display: block; width: 100%; height: auto; }
 .browser-shot.clickable { cursor: crosshair; }
 .browser-hit-hint { font-size: 10px; color: var(--text-tertiary); text-align: center; padding: 2px 0; }
+.browser-fail { font-size: 12px; color: var(--danger, #e24b4a); text-align: center; padding: 6px 10px; line-height: 1.5; }
 .browser-placeholder { font-size: 11px; color: var(--text-muted); padding: 10px; text-align: center; line-height: 1.5; }
 .browser-placeholder.loading { color: var(--text-secondary); }
 .browser-console { background: #0f172a; border-radius: var(--radius-sm); padding: 6px 8px; font-family: var(--font-mono, monospace); font-size: 10px; color: #6ee7a0; max-height: 90px; overflow-y: auto; }
