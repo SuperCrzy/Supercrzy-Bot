@@ -6,13 +6,14 @@
  *  ③ 能用 capturePage 把真实画面截下来存 PNG(替代截图镜像的基本盘)
  * 用独立 host BrowserWindow 承载 + BrowserView, 不改产品主窗口/UI。无 BrowserView 可 require('electron/main').BrowserView。
  */
-const { app: _a, BrowserWindow: readyBW, BrowserView } = require('electron')
+const { app, BrowserWindow } = require('electron')
+const { BrowserView } = require('electron/main')
 
-module.exports = function run({ app, BrowserWindow, shell }) {
+module.exports = function run() {
   app.whenReady().then(async () => {
     console.log('[BV-DEMO] whenReady begin')
     let host = null
-    try { host = new BrowserWindow({ width: 900, height: 700, show: false, webPreferences: { contextIsolation: true } }) }
+    try { host = new BrowserWindow({ width: 900, height: 700, show: true, title: 'BV-Demo: 真实共用浏览器样衣', webPreferences: { contextIsolation: true } }) }
     catch (e) { console.error('[BV-DEMO] BrowserWindow err', e.message) }
     let view = null
     try {

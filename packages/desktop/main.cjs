@@ -408,6 +408,12 @@ if (!gotLock) {
   })
 
   app.whenReady().then(async () => {
+    // ---- BrowserView 独立样衣模式: 不依赖后端/主窗口, 规避"等3000后端失败→白屏" ----
+    if (process.env.SUPERCRZY_BV_DEMO === '1') {
+      app.commandLine.appendSwitch('disable-http-cache')
+      try { require('./bv-demo.cjs')() } catch (e) { console.error('[BV-DEMO] exec fail', e && e.message || e) }
+      return // 不 createWindow/startBackend/tray, 独立验三事即退
+    }
     // App 内嵌后端本机 serve 页面，理应"每次打开即最新"——禁用 Chromium 磁盘 HTTP 缓存，
     // 否则旧静态资源(JS/CSS)会被磁盘缓存命中，导致重打包后仍显示旧设计(老板反馈过)。
     app.commandLine.appendSwitch('disable-http-cache')
