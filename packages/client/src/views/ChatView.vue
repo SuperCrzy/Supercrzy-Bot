@@ -2102,6 +2102,29 @@ function markTextStarted(msg: ChatMessage) {
   }, 800))
 }
 
+
+/**
+ * 2026-09-04: AI 调"要观画面"的工具时自动拉起右栏对应 tab。
+ * 规矩: 右栏未展开才展开;已展开则仅当当前是默认 tab("deliverables") 才切到目标,
+ * 用户正手动盯 preview/timeline/browser 等不抢(尊重断点)。
+ */
+const AUTO_REVEAL_MAP: Record<string, 'browser' | 'preview' | 'files'> = {
+  browser: 'browser', computer_use: 'browser',
+  generate_image: 'preview', draw_diagram: 'preview', web_fetch_frame: 'preview',
+  file_write: 'files', file_edit: 'files', create_artifact: 'files',
+}
+function autoRevealPanelForTool(toolName: string) {
+  const tab = AUTO_REVEAL_MAP[toolName] || AUTO_REVEAL_MAP[toolName.split('_')[0]]
+  if (!tab) return
+  if (!appStore.detailPanelVisible) {
+    appStore.detailPanelVisible = true
+    appStore.detailPanelTab = tab
+    return
+  }
+  // 已展开 & 还在默认 tab → 切; 若用户在自定义 tab 观察则不打断
+  if (appStore.detailPanelTab === 'deliverables' || appStore.detailPanelTab === 'files') appStore.detailPanelTab = tab
+}
+
 /** 新工具信号（tool_call / tool_args_chunk）：取消延迟确认 + 回到流式平铺（坑③） */
 function markToolSignal(msg: ChatMessage) {
   const key = msgFoldKey(msg)
@@ -3510,6 +3533,8 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage, sessionId?
     case 'tool_call': {
       // 思考结束 → 开始调工具，收起 thinking
       markAllThinkingDone(msg)
+      // 2026-09-04: AI 调需要观看画面的工具 → 自动拉起右栏对应 tab（不打断主动在看别 tab 的用户）
+      try { autoRevealPanelForTool(data.name) } catch {}
       // 新工具到达 → 取消延迟确认 + 回到流式平铺（状态机 markToolSignal，坑③）
       markToolSignal(msg)
       // 先刷完剩余正文（防止打字机限速导致正文被工具卡片从中间劈开：正文前半→工具→正文后半）
