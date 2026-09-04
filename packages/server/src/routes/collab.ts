@@ -6,11 +6,21 @@
 import Router from 'koa-router'
 import type { Context } from 'koa'
 import { createCollabTask, getCollabTask, listCollabTasks, stopCollabTask, decideCollabTask, promoteCollabTask } from '../services/collab-engine'
-import { browserNavigate, browserRefresh, browserScreenshot, closeBrowser,
-  browserClickAt, browserClickText, browserTypeText, browserPressKey, browserScroll, browserBack, browserListInteractive } from '../services/ai-browser'
+import { browserSession } from '../services/ai-browser'
 import { createAuditTask, getAuditTask, listAuditTasks } from '../services/collab-audit'
 
 export const collabRouter = new Router({ prefix: '/api/collab' })
+
+/** 按请求解析浏览器实例 key(网页各会话隔离): 优先 X-Browser-Key / body.sessionId / query.sid */
+function browserKeyOf(ctx: Context): string {
+  const h = ctx.get?.('x-browser-key') || ''
+  if (h) return 'wb:' + h
+  const b = (ctx.request.body || {}) as { sessionId?: string }
+  const q = ctx.query as { sid?: string }
+  return 'wb:' + String(b.sessionId || q.sid || 'default').slice(0, 64)
+}
+function bs(ctx: Context) { return browserSession(browserKeyOf(ctx)) }
+
 
 /**
  * POST /api/collab/tasks — 发布协作任务
@@ -98,68 +108,61 @@ collabRouter.get('/audit/:id', (ctx: Context) => {
   ctx.body = t
 })
 
-// ---- AI 浏览器（Playwright 实接，2026-09-01）----
-// POST /api/collab/browser/navigate { url } → 导航并返回截图(base64)
+// ---- AI 浏览器（按会话隔离 BrowserPlaywright 池，2026-09-04）----
+// POST /api/collab/browser/navigate { url, sessionId? } / header x-browser-key → 单会话实例导航
 collabRouter.post('/browser/navigate', async (ctx: Context) => {
   const url = String((ctx.request.body as { url?: string })?.url || '').trim()
+  const sessionId = (ctx.request.body as { sessionId?: string })?.sessionId
   if (!url) { ctx.status = 400; ctx.body = { error: 'url is required' }; return }
-  try {
-    ctx.body = await browserNavigate(url)
-  } catch (e: any) {
-    ctx.status = 500; ctx.body = { error: e?.message || String(e) }
-  }
+  try { ctx.body = await bs(ctx).navigate(url) } catch (e: any) { ctx.status = 500; ctx.body = { error: e?.message || String(e) } }
+  void sessionId
 })
 
-// POST /api/collab/browser/refresh → 刷新当前页并截图
 collabRouter.post('/browser/refresh', async (ctx: Context) => {
-  try { ctx.body = await browserRefresh() } catch (e: any) { ctx.status = 500; ctx.body = { error: e?.message || String(e) } }
+  try { ctx.body = await bs(ctx).refresh() } catch (e: any) { ctx.status = 500; ctx.body = { error: e?.message || String(e) } }
 })
 
-// GET /api/collab/browser/snapshot → 当前页截图（无导航）
 collabRouter.get('/browser/snapshot', async (ctx: Context) => {
-  try { ctx.body = await browserScreenshot() } catch (e: any) { ctx.status = 500; ctx.body = { error: e?.message || String(e) } }
+  try { ctx.body = await bs(ctx).screenshot() } catch (e: any) { ctx.status = 500; ctx.body = { error: e?.message || String(e) } }
 })
 
-// GET /api/collab/browser/latest?after=<ts> → 长轮询: 有比 after 更新的帧立刻回; 无则等 ~12s 回当前(不忙轮询)
+// GET /api/collab/browser/latest?after=<ts>&sid=… → 该会话长轮询: 有新帧即回,否则~12s回当前
 collabRouter.get('/browser/latest', async (ctx: Context) => {
   try {
-    const { getLastBrowserFrame, waitForBrowserFrame } = await import('../services/ai-browser')
     const after = Number((ctx.query as any).after) || 0
-    const f = await waitForBrowserFrame(after, 12000)
+    const f = await bs(ctx).waitAfter(after)
     ctx.body = f || { ts: 0, screenshot: '', url: '' }
   } catch (e: any) { ctx.status = 500; ctx.body = { error: e?.message || String(e) } }
 })
 
-// POST /api/collab/browser/close → 关闭浏览器实例
+// POST /api/collab/browser/close → 释放该会话浏览器实例
 collabRouter.post('/browser/close', async (ctx: Context) => {
-  await closeBrowser(); ctx.body = { closed: true }
+  await bs(ctx).close(); ctx.body = { closed: true }
 })
 
-// ---- AI 浏览器动作层 L2（2026-09-03 双向操作：人点画面/AI动同一页）----
-// POST /api/collab/browser/act { action, x?, y?, text?, into?, key?, deltaY? }
+// ---- AI 浏览器动作层 L2 (经单会话实例: 人点画面/AI动统一) ----
+// POST /api/collab/browser/act { action, x?, y?, text?, into?, key?, deltaY?, sessionId? }
 collabRouter.post('/browser/act', async (ctx: Context) => {
   const b = ctx.request.body as { action?: string; x?: number; y?: number; text?: string; into?: string; key?: string; deltaY?: number }
   const a = b.action || ''
   try {
+    const h = bs(ctx)
     let out: any
-    if (a === 'click_at' && typeof b.x === 'number' && typeof b.y === 'number') out = await browserClickAt(b.x, b.y)
-    else if (a === 'click_text') out = await browserClickText(String(b.text || ''))
-    else if (a === 'type') out = await browserTypeText(String(b.text || ''), b.into ? String(b.into) : undefined)
-    else if (a === 'key') out = await browserPressKey(String(b.key || ''))
-    else if (a === 'scroll') out = await browserScroll(Number(b.deltaY) || 300)
-    else if (a === 'back') out = await browserBack()
+    if (a === 'click_at' && typeof b.x === 'number' && typeof b.y === 'number') out = await h.clickAt(b.x, b.y)
+    else if (a === 'click_text') out = await h.clickText(String(b.text || ''))
+    else if (a === 'type') out = await h.typeText(String(b.text || ''), b.into ? String(b.into) : undefined)
+    else if (a === 'key') out = await h.press(String(b.key || ''))
+    else if (a === 'scroll') out = await h.wheel(Number(b.deltaY) || 300)
+    else if (a === 'back') out = await h.goBack()
     else return ctx.status = 400, ctx.body = { error: `未知 action: ${a}` }
-    // 任何手动动作后都补一帧：长轮询 waiters 立即收到新画面(实时同步，非手动刷新)
-    const snap = await browserScreenshot().catch(() => null)
+    const snap = await h.screenshot().catch(() => null) // 动作后补帧→长轮询即时呈现
     ctx.body = { result: out, snapshot: snap }
-  } catch (e: any) {
-    ctx.status = 500; ctx.body = { error: e?.message || String(e) }
-  }
+  } catch (e: any) { ctx.status = 500; ctx.body = { error: e?.message || String(e) } }
 })
 
-// GET /api/collab/browser/interactive → 当前页可交互元素清单(LLM/人参考)
+// GET /api/collab/browser/interactive → 该会话当前页可交互元素(LLM/人参考)
 collabRouter.get('/browser/interactive', async (ctx: Context) => {
-  try { ctx.body = { items: await browserListInteractive() } } catch (e: any) { ctx.status = 500; ctx.body = { error: e?.message || String(e) } }
+  try { ctx.body = { items: await bs(ctx).interactive() } } catch (e: any) { ctx.status = 500; ctx.body = { error: e?.message || String(e) } }
 })
 
 export default collabRouter

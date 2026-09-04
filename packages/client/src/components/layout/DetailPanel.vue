@@ -668,6 +668,7 @@ const browserScreenshotBase64 = ref('')
 const browserLoading = ref(false)
 const browserLog = ref<string[]>([])
 
+function bkHdr(extra?: Record<string, string>) { const e = extra || {}; try { const sid = chatStore.currentSessionId; if (sid) e['X-Browser-Key'] = sid } catch { /* ignore */ } return e }
 async function goToUrl() {
   const url = browserUrlInput.value.trim()
   if (!url) return
@@ -676,7 +677,7 @@ async function goToUrl() {
   browserLog.value.push('导航 ' + url)
   try {
     const r = await fetch('/api/collab/browser/navigate', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }),
+      method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, bkHdr()), body: JSON.stringify({ url }),
     })
     if (r.ok) {
       const d = await r.json()
@@ -698,7 +699,7 @@ async function refreshPage() {
   browserLoading.value = true
   browserStatus.value = '刷新中'
   try {
-    const r = await fetch('/api/collab/browser/refresh', { method: 'POST' })
+    const r = await fetch('/api/collab/browser/refresh', { method: 'POST', headers: bkHdr() })
     if (r.ok) {
       const d = await r.json()
       browserUrl.value = d.url || browserUrl.value
@@ -734,7 +735,7 @@ async function pollLiveFrame() {
   if (!props.visible || props.activeTab !== "browser" || liveStop || livePolling) return
   livePolling = true
   try {
-    const r = await fetch(`/api/collab/browser/latest?after=${lastFrameTs}`)
+    const r = await fetch(`/api/collab/browser/latest?after=${lastFrameTs}`, { headers: bkHdr() })
     if (!r.ok) return
     const f = await r.json()
     if (f?.ts) {
@@ -753,7 +754,7 @@ onUnmounted(() => { liveStop = true })
 async function doAct(body: Record<string, unknown>) {
   browserLoading.value = true
   try {
-    const r = await fetch('/api/collab/browser/act', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    const r = await fetch('/api/collab/browser/act', { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, bkHdr()), body: JSON.stringify(body) })
     if (r.ok) {
       const d = await r.json()
       if (d?.snapshot?.screenshot) { browserScreenshotBase64.value = d.snapshot.screenshot; browserUrl.value = d.snapshot.url || browserUrl.value }
