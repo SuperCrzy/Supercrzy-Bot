@@ -1470,6 +1470,12 @@ export async function runAgentLoop(
           assistantMsg.content = contentBuffer || ''
         }
         if (reasoningBuffer) assistantMsg.reasoning_content = reasoningBuffer
+        // 诊断埋点(2026-09-04 浏览器自主时现"thinking must be passed back" 400/A tool_sequence):
+        // 若带 tool_calls 而本轮流式没任何 reasoning → 说明模型这次输出思考为空却仍要工具，
+        // 正是 DeepSeek "reasoning_content must be passed back" 的典型源(下一轮撤回带 tools 无 rc 必 400)。
+        if (toolCalls.length > 0 && !(reasoningBuffer || '').trim()) {
+          console.log(`[agent.warn] tool-round w/o reasoning: turn=${turn ?? '?'} tools=${toolCalls.map((t: any) => t.function?.name).join(',')}; rcLen=${(reasoningBuffer || '').length}`)
+        }
         messages.push(assistantMsg)
 
         // P0: wrap executeToolCalls with 60s per-tool timeout
