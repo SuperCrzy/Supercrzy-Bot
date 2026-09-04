@@ -284,8 +284,8 @@ const chatStore = useChatStore()
 
 // ===== L1/L2 实时预览：store 数据 + 800ms 防抖 + 配套 css/js 内联 =====
 const maximized = ref(false)
-/** 宽内容 Tab（预览/浏览器画面/变更 diff/图）：自动加宽至 58%（可被手动 maximized 覆盖的 default-wide） */
-const isWideTab = computed(() => !maximized.value && (props.activeTab === "preview" || props.activeTab === "changes" || props.activeTab === "browser"))
+/** 宽内容 Tab：仅预览/变更 diff(内容型默认宽)。浏览器默认窄像产物列，点放大才 92%(老板定) */
+const isWideTab = computed(() => !maximized.value && (props.activeTab === 'preview' || props.activeTab === 'changes'))
 const livePreviewPath = ref('')
 
 // ===== SVG 预览操作：下载 / 复制代码 =====
@@ -1026,8 +1026,9 @@ const tabs = [
 .browser-live-dot { width: 6px; height: 6px; border-radius: 50%; background: #cbd5e1; }
 .browser-live-dot.active { background: #22c55e; animation: bdot 1s infinite; }
 @keyframes bdot { 0%,100%{opacity:1} 50%{opacity:.35} }
-.browser-url-row { display: flex; gap: 4px; }
-.browser-url-input { flex: 1; min-width: 0; border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 4px 8px; font-size: 11px; background: var(--bg-tertiary); }
+.browser-url-row { display: flex; gap: 4px; align-items: center; }
+.browser-url-input { flex: 1; min-width: 0; border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 6px 9px; font-size: 12.5px; background: var(--bg-tertiary); color: var(--text-primary); caret-color: var(--text-primary); }
+.browser-url-input::placeholder { color: var(--text-tertiary); }
 .browser-go, .browser-refresh { border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-primary); font-size: 11px; padding: 3px 8px; cursor: pointer; color: var(--text-secondary); }
 .browser-maxbtn { border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-primary); cursor: pointer; color: var(--text-secondary); display: inline-flex; align-items: center; justify-content: center; height: 20px; margin-left: 2px; padding: 0 5px; }
 .browser-maxbtn:hover { border-color: var(--border-strong); color: var(--text-primary); }
