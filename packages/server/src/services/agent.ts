@@ -1090,7 +1090,8 @@ export async function runAgentLoop(
   let compressionAttempts = 0  // 压缩尝试次数
   let toolSequenceRetries = 0  // 工具序列清洗重试次数（2026-08-28：防清洗无效时死循环吃光 maxTurns）
   let emptyContentCount = 0  // 空内容重试计数
-  let forcePlainOnce = false  // 2026-09-04 零思考工具轮: 下轮强制纯文本(DeepSeek:带tools但无reasoning_content必400)
+  let forcePlainOnce = false  // 2026-09-04 零思考工具轮: 按需强制下一轮纯文本
+  let consecEmptyRc = 0  // 连续"带工具却无 reason_content"轮计数(阈值≥3才降级, 防 flash 正常0rc误拦)
   const guardrail = new ToolGuardrailController()  // 工具循环防护
   let roundStartMs = Date.now()
   const roundDurationsMs: number[] = []
@@ -1473,14 +1474,16 @@ export async function runAgentLoop(
           assistantMsg.content = contentBuffer || ''
         }
         if (reasoningBuffer) assistantMsg.reasoning_content = reasoningBuffer
-        // ---- 安全闸门(2026-09-04 治本): 带工具但本轮回无 reasoning 的轮次 → 不把带tools的坏assistant入历史
-        // DeepSeek 思考模式要求带 tool_calls 的历史必须附其 reasoning,空 rc 传回必 400 tool_sequence(此前无限重试根源)。
-        // 不能补假 reasoning,只能不让此坏轮存在: 丢弃本次工具意向 → 下轮强制纯文本 → 模型用文字收束/说明。
-        if (toolCalls.length > 0 && !(reasoningBuffer || '').trim()) {
-          console.warn(`[agent.plain] 工具轮无 reasoning_content(turn=${turn ?? '?'}, tools=${toolCalls.map((t: any) => t.function?.name).join(',')}) → 本轮不入库，下轮强制纯文本`)
+        // ---- 安全闸门(阈值版, 2026-09-04): 带工具无 reason_content 的轮
+        // DeepSeek 思考在极端时要求带 tools 历史附 rc 才可传回→连续 400。但 deepseek-v4-flash 带 tools 常本来无 rc 且能正常跑,
+        // 故不能遇到一个 0rc 就禁(否则浏览器永远跑不了)。改为: 连续 ≥3 次"带工具仍 0rc"才判定真崩 → 弃坏轮+强制纯文本一轮刹车。
+        const rcEmpty = toolCalls.length > 0 && !(reasoningBuffer || '').trim()
+        if (toolCalls.length > 0) consecEmptyRc = rcEmpty ? consecEmptyRc + 1 : 0
+        if (rcEmpty && consecEmptyRc >= 3) {
+          console.warn(`[agent.plain] 连续${consecEmptyRc}轮带工具均无 reasoning_content(turn=${turn ?? '?'}, tools=${toolCalls.map((t: any) => t.function?.name).join(',')}) → 本轮不入库,下一轮强制纯文本刹车`)
           messages.push({
             role: 'system',
-            content: '你尝试调用了工具，但本轮没有产生可供 DeepSeek 提交的思考内容(reasoning)。为避免请求被拒，本轮不执行你的工具调用，请你现在**直接用文字**继续完成任务（可用一句话说明你正打算做什么；如果已经拿到所需信息就给出结论）。',
+            content: '检测到你已连续多轮想调用工具却始终没有产生可供提交的思考。请停止工具调用——你现在**直接用文字**说明你在处理什么，若已有信息就直接给出结论；不要再发起浏览器/工具调用。',
           })
           forcePlainOnce = true
           continue
