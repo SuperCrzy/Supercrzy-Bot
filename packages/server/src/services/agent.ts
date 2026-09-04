@@ -1090,6 +1090,7 @@ export async function runAgentLoop(
   let compressionAttempts = 0  // 压缩尝试次数
   let toolSequenceRetries = 0  // 工具序列清洗重试次数（2026-08-28：防清洗无效时死循环吃光 maxTurns）
   let emptyContentCount = 0  // 空内容重试计数
+  let forcePlainOnce = false  // 2026-09-04 零思考工具轮: 下轮强制纯文本(DeepSeek:带tools但无reasoning_content必400)
   const guardrail = new ToolGuardrailController()  // 工具循环防护
   let roundStartMs = Date.now()
   const roundDurationsMs: number[] = []
@@ -1234,17 +1235,19 @@ export async function runAgentLoop(
     }
 
     try {
+      const plainTurn = forcePlainOnce
+      forcePlainOnce = false // 消费一次后复位,便于后续轮恢复用工具
       let requestBody = JSON.stringify({
         model: agentConfig.model,
         messages: apiMessages,
         temperature: agentConfig.temperature,
         max_tokens: agentConfig.maxTokens,
         stream: true,
-        tools: activeToolDefs.map(t => ({
+        tools: plainTurn ? undefined : (activeToolDefs.map(t => ({
           type: 'function',
           function: { name: t.name, description: t.description, parameters: t.parameters },
-        })),
-        tool_choice: 'auto',
+        }))),
+        tool_choice: plainTurn ? 'none' : 'auto',
         // 深度思考档位（设置 reasoningLevel，WorkBuddy thinkingLevelMap 同款映射）
         reasoning_effort: mapReasoningLevel(readSetting('reasoningLevel')),
       })
@@ -1470,11 +1473,17 @@ export async function runAgentLoop(
           assistantMsg.content = contentBuffer || ''
         }
         if (reasoningBuffer) assistantMsg.reasoning_content = reasoningBuffer
-        // 诊断埋点(2026-09-04 浏览器自主时现"thinking must be passed back" 400/A tool_sequence):
-        // 若带 tool_calls 而本轮流式没任何 reasoning → 说明模型这次输出思考为空却仍要工具，
-        // 正是 DeepSeek "reasoning_content must be passed back" 的典型源(下一轮撤回带 tools 无 rc 必 400)。
+        // ---- 安全闸门(2026-09-04 治本): 带工具但本轮回无 reasoning 的轮次 → 不把带tools的坏assistant入历史
+        // DeepSeek 思考模式要求带 tool_calls 的历史必须附其 reasoning,空 rc 传回必 400 tool_sequence(此前无限重试根源)。
+        // 不能补假 reasoning,只能不让此坏轮存在: 丢弃本次工具意向 → 下轮强制纯文本 → 模型用文字收束/说明。
         if (toolCalls.length > 0 && !(reasoningBuffer || '').trim()) {
-          console.log(`[agent.warn] tool-round w/o reasoning: turn=${turn ?? '?'} tools=${toolCalls.map((t: any) => t.function?.name).join(',')}; rcLen=${(reasoningBuffer || '').length}`)
+          console.warn(`[agent.plain] 工具轮无 reasoning_content(turn=${turn ?? '?'}, tools=${toolCalls.map((t: any) => t.function?.name).join(',')}) → 本轮不入库，下轮强制纯文本`)
+          messages.push({
+            role: 'system',
+            content: '你尝试调用了工具，但本轮没有产生可供 DeepSeek 提交的思考内容(reasoning)。为避免请求被拒，本轮不执行你的工具调用，请你现在**直接用文字**继续完成任务（可用一句话说明你正打算做什么；如果已经拿到所需信息就给出结论）。',
+          })
+          forcePlainOnce = true
+          continue
         }
         messages.push(assistantMsg)
 
