@@ -414,6 +414,10 @@ if (!gotLock) {
     setupAutoUpdater()
     startBackend()
     createWindow()
+    // ---- BrowserView 最小技术样衣(仅 SUPERCRZY_BV_DEMO=1 触发, 验证"真实共用可drive") 2026-09-04 ----
+    if (process.env.SUPERCRZY_BV_DEMO === '1') {
+      try { require('./bv-demo.cjs')({ app, BrowserWindow, BrowserView }) } catch (e) { console.error('[BV-DEMO] 启动失败', e && e.message || e) }
+    }
     createTray(ctx)
     registerGlobalShortcut(ctx)
     // App 二进制更新：启动后延迟检查一次（静默，有新版弹窗询问）
