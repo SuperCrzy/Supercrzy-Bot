@@ -1249,8 +1249,17 @@ export async function runAgentLoop(
           function: { name: t.name, description: t.description, parameters: t.parameters },
         }))),
         tool_choice: plainTurn ? 'none' : 'auto',
-        // 深度思考档位（设置 reasoningLevel，WorkBuddy thinkingLevelMap 同款映射）
-        reasoning_effort: mapReasoningLevel(readSetting('reasoningLevel')),
+        // 深度思考档位（设置 reasoningLevel）。
+        // P0 修复(2026-09-10 对标研究): 工具链轮次降档——本轮若已进入工具循环(totalToolCalls 非空 / 已有 tool 结果),
+        // 说明大概率还要继续调工具 → 用 low(官方建议"适合工具调用/多步/看重速度"), 少产 reasoning_content, 从源头减少
+        // DeepSeek "带 tools 必须原样回传 rc" 的失配面; 纯首轮问答才用用户设定档位(保留深思考体验)。
+        reasoning_effort: (() => {
+          const inToolLoop = totalToolCalls.length > 0 || messages.some((m: any) => m.role === 'tool')
+          if (!inToolLoop) return mapReasoningLevel(readSetting('reasoningLevel'))
+          const lv = (readSetting('reasoningLevel') || '').toLowerCase()
+          if (lv === 'off') return 'none'
+          return 'low'
+        })(),
       })
       const baseUrl = agentConfig.baseUrl || config.deepseek.baseUrl
       // 统一走 model-client 网关（keep-alive/认证/错误分类集中，换后端只改 model-client）
