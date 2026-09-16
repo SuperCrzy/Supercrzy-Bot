@@ -10,7 +10,9 @@
     "cli": "tsx src/cli.ts",
     "lint": "tsc --noEmit",
     "test": "vitest run",
-    "clean": "rm -rf dist node_modules"
+    "clean": "rm -rf dist node_modules",
+    "validate:tools": "tsx scripts/validate-tools.ts",
+    "verify": "npm run lint && npm run test && npm run validate:tools"
   },
   "dependencies": {
     "@koa/cors": "^5.0.0",

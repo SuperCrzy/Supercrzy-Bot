@@ -15,9 +15,10 @@
     "dev:client": "pnpm --filter @supercrzy/client dev",
     "build": "pnpm --filter @supercrzy/client build && pnpm --filter @supercrzy/server build",
     "cli": "pnpm --filter @supercrzy/server cli",
-    "lint": "pnpm -r lint",
-    "clean": "pnpm -r clean",
-    "test": "pnpm -r test"
+  "lint": "pnpm -r lint",
+  "verify": "pnpm lint && pnpm test && pnpm --filter @supercrzy/server validate:tools && pnpm build",
+  "clean": "pnpm -r clean",
+  "test": "pnpm -r test"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",
