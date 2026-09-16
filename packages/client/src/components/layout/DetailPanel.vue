@@ -647,9 +647,10 @@ function switchTab(tab: 'deliverables' | 'files' | 'changes' | 'preview' | 'time
 const tabMoreOpen = ref(false)
 const MAIN_KEYS = ['deliverables', 'files', 'preview', 'browser'] as const
 const MORE_KEYS = ['changes', 'timeline'] as const
+interface TabDef { key: string; label: string; icon: string }
 // 延迟求值(computed)：模板渲染时 tabs 已初始化，避开 tabs const TDZ 崩溃(黑屏根因,2026-09-04)
-const rowTabs = computed(() => (tabs as { key: string }[]).filter((x) => (MAIN_KEYS as readonly string[]).includes(x.key)))
-const moreTabs = computed(() => (tabs as { key: string }[]).filter((x) => (MORE_KEYS as readonly string[]).includes(x.key)))
+const rowTabs = computed<TabDef[]>(() => (tabs as TabDef[]).filter((x) => (MAIN_KEYS as readonly string[]).includes(x.key)))
+const moreTabs = computed<TabDef[]>(() => (tabs as TabDef[]).filter((x) => (MORE_KEYS as readonly string[]).includes(x.key)))
 const inMoreTab = computed(() => (MORE_KEYS as readonly string[]).includes(props.activeTab))
 function switchMainOrMore(k: string) { emit('update:tab', k as any); if ((MORE_KEYS as readonly string[]).includes(k)) tabMoreOpen.value = false }
 
