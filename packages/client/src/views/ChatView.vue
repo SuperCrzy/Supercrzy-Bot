@@ -910,6 +910,11 @@ import { applyToolArgsChunk, applyToolDuration, applyToolOutput, applyToolResult
 import { errMsg } from '@/utils/i18n-error'
 import { l10n } from '@/utils/i18n-field'
 import { playCompletionSound } from '@/utils/sound'
+// P1-04：以下纯逻辑从本文件下沉到 utils（原先堆在 6500 行里且无测试）
+import { isImageType, isPdfType, isDocType, isSheetType, formatFileSize, formatArtifactSize } from '@/utils/attachment'
+import { hasDelivery, deliveryHeadClass, fmtDeliveryDuration, fmtDeliveryCost } from '@/utils/delivery'
+import { textOf, messagePlainText, searchContent } from '@/utils/message-text'
+import { parseTrigger } from '@/utils/trigger'
 import { copyRichText, copyToClipboard, stripMarkdown } from '@/utils/clipboard'
 import MarkdownIt from 'markdown-it'
 import { parseDeepLinkFromURL, registerDeepLinkListener } from '@/utils/deeplink'
@@ -971,11 +976,6 @@ async function doSearch() {
 }
 
 /** 搜索结果内容展示：兼容纯文本 / ContentBlock[] / 双重序列化 */
-function searchContent(content: any): string {
-  if (typeof content !== 'string') return ''
-  const text = normalizeContent(content)
-  return text.length > 200 ? text.slice(0, 200) + '...' : text
-}
 
 /** 点击结果：打开对应会话 */
 async function openSearchResult(r: any) {
@@ -989,12 +989,6 @@ async function openSearchResult(r: any) {
 const shareMenuOpen = ref(false)
 
 /** 提取单条消息纯文本（兼容 string / ContentBlock[] 两种 content 形态） */
-function messagePlainText(m: any): string {
-  const raw = m?.content
-  if (typeof raw === 'string') return normalizeContent(raw)
-  if (Array.isArray(raw)) return extractText(raw)
-  return ''
-}
 
 /** 把整个对话转成 Markdown */
 function buildConversationMarkdown(): string {
@@ -1578,43 +1572,14 @@ function openArtifactFolder(a: ArtifactItem) {
 }
 
 /** 文件大小格式化 */
-function formatArtifactSize(n: number) {
-  if (!n) return ''
-  if (n < 1024) return `${n}B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)}KB`
-  return `${(n / 1024 / 1024).toFixed(1)}MB`
-}
 
 // ---- P1-05 任务交付页辅助 ----
 /** 是否渲染交付页：有产物 / 有改动 / 有结论，三者任一即渲染（此前只看产物） */
-function hasDelivery(msg: ChatMessage): boolean {
-  const d = msg.deliverySummary
-  if (!d) return false
-  return !!(d.artifacts?.length || d.changedFiles?.length || d.summary)
-}
-/** 交付页头部状态样式类（completed 绿 / cancelled 灰 / failed 红） */
-function deliveryHeadClass(msg: ChatMessage): string {
-  return `ds-head--${msg.deliverySummary?.status || 'completed'}`
-}
 /** 交付状态文案（走 i18n，避免后端中文标签串到英文界面） */
 function deliveryStatusText(msg: ChatMessage): string {
   const st = msg.deliverySummary?.status || 'completed'
   const key = st === 'completed' ? 'chat.deliveryDone' : st === 'cancelled' ? 'chat.deliveryCancelled' : 'chat.deliveryFailed'
   return t(key)
-}
-/** 耗时格式化（秒级；超过 60s 显示 m s） */
-function fmtDeliveryDuration(ms: number): string {
-  if (!ms || ms < 0) return ''
-  const totalSec = Math.round(ms / 1000)
-  if (totalSec < 60) return `${totalSec}s`
-  const m = Math.floor(totalSec / 60)
-  const sec = totalSec % 60
-  return sec ? `${m}m${sec}s` : `${m}m`
-}
-/** 成本格式化（美元，保留 4 位有效小数） */
-function fmtDeliveryCost(cost?: number): string {
-  if (!cost) return ''
-  return `$${cost.toFixed(4)}`
 }
 
 // ---- 交付摘要产物卡片（deliverySummary.artifacts 只有 {name,path,mime}，预览走工作区文件接口） ----
@@ -1809,15 +1774,13 @@ function onInputTrigger(value: string, meta?: any) {
 }
 
 function detectTrigger(text: string, caretPos: number) {
-  const before = text.slice(0, caretPos)
-  const m = before.match(/(?:^|\s)([\/@])([^\s\/@]*)$/)
-  if (m) {
-    const char = m[1] as '/' | '@'
-    const query = m[2]
-    triggerState.value = { char, query, mode: 'all' }
+  // P1-04：纯解析下沉到 utils/trigger.ts（此前这段唯一有点复杂度的字符串处理零测试覆盖）
+  const hit = parseTrigger(text, caretPos)
+  if (hit) {
+    triggerState.value = { char: hit.char, query: hit.query, mode: 'all' }
     triggerSel.value = 0
     triggerSearch.value = ''
-    void loadTriggerCandidates(char, query)
+    void loadTriggerCandidates(hit.char, hit.query)
   } else {
     triggerState.value = null
     triggerCandidates.value = []
@@ -2273,16 +2236,6 @@ const noKeyBannerDismissed = ref(false)
 const showNoKeyBanner = computed(() => !appStore.hasApiKey && !noKeyBannerDismissed.value)
 
 // ---- 文件类型判断 ----
-function isImageType(mime: string) { return mime.startsWith('image/') }
-function isPdfType(mime: string) { return mime === 'application/pdf' }
-function isDocType(mime: string) { return mime.includes('word') || mime.includes('document') }
-function isSheetType(mime: string) { return mime.includes('excel') || mime.includes('spreadsheet') }
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return bytes + ' B'
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
-  return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
-}
 
 // ---- 文件上传处理 ----
 async function handleFileSelect(event: Event) {
@@ -2468,10 +2421,6 @@ function enhanceCodeBlocks() {
 }
 
 /** 统一 content 取值：兼容 string（流式）与 ContentBlock[]（历史消息） */
-function textOf(content: ChatMessage['content']): string {
-  if (typeof content === 'string') return normalizeContent(content)
-  return extractText(content)
-}
 
 // =================================================================
 // 消息操作工具栏：复制 / 编辑 / 重发 / 反馈 / 更多菜单
