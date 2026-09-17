@@ -28,6 +28,7 @@ import {
   getTaskBySession,
   mapAgentOutcome,
   statusLabel,
+  recordTaskOutcome,
   type TaskRecord,
 } from './task-state'
 import { resolveApprovalMode } from './permission'
@@ -2190,6 +2191,14 @@ export async function runAgentLoop(
           : undefined,
         force: true,
       })
+      // P2-02 任务级可观测：token / 成本 / 耗时随任务一起落库，供 /api/task-state/stats 聚合
+      try {
+        recordTaskOutcome(taskRec.task_id, {
+          tokens: totalUsage.total,
+          costUsd: totalUsage.cost,
+          durationMs: Date.now() - taskRec.started_at,
+        })
+      } catch { /* 非关键 */ }
       emitTaskState()
     } catch { /* 收尾失败不影响主流程 */ }
   }

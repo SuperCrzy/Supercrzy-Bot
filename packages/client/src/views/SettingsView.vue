@@ -117,11 +117,6 @@
                 <n-input-number v-model:value="form.maxTurns" :min="1" :max="200" size="large" style="width:200px" />
               </div>
               <div class="form-group">
-                <label>{{ $t('settings.gatewayTimeout') }}</label>
-                <p class="input-desc">{{ $t('settings.gatewayTimeoutDesc') }}</p>
-                <n-input-number v-model:value="form.gatewayTimeout" :min="30" :max="600" size="large" style="width:200px" />
-              </div>
-              <div class="form-group">
                 <label>{{ $t('settings.permTier') }}</label>
                 <p class="input-desc">{{ $t('settings.permTierDesc') }}</p>
                 <!-- P0-04：收敛为用户能理解的三档（内部映射回历史 4 档，行为不变） -->
@@ -130,18 +125,6 @@
                     <n-radio v-for="t in PERMISSION_TIERS" :key="t" :value="t" :title="$t(TIER_I18N[t].desc)">
                       {{ $t(TIER_I18N[t].label) }}
                     </n-radio>
-                  </n-space>
-                </n-radio-group>
-              </div>
-              <div class="form-group">
-                <label>{{ $t('settings.toolAutoApproveSeconds') }}</label>
-                <p class="input-desc">{{ $t('settings.toolAutoApproveSecondsDesc') }}</p>
-                <n-radio-group v-model:value="form.toolAutoApproveSeconds" size="small">
-                  <n-space wrap>
-                    <n-radio :value="0">{{ $t('settings.toolAutoApproveOff') }}</n-radio>
-                    <n-radio :value="3">3{{ $t('settings.secondsUnit') }}</n-radio>
-                    <n-radio :value="5">5{{ $t('settings.secondsUnit') }}</n-radio>
-                    <n-radio :value="10">10{{ $t('settings.secondsUnit') }}</n-radio>
                   </n-space>
                 </n-radio-group>
               </div>
@@ -158,6 +141,30 @@
                   </n-space>
                 </n-radio-group>
               </div>
+
+              <!-- P2-01 高级入口分区：网关超时 / 自动放行秒数这类"平时不碰"的参数默认收起，
+                   避免新手在常用项里被迫面对不理解的配置（此前与常用项平铺） -->
+              <n-collapse class="settings-advanced" :default-expanded-names="[]">
+                <n-collapse-item :title="$t('settings.advancedTitle')" name="advanced">
+                  <div class="form-group">
+                    <label>{{ $t('settings.gatewayTimeout') }}</label>
+                    <p class="input-desc">{{ $t('settings.gatewayTimeoutDesc') }}</p>
+                    <n-input-number v-model:value="form.gatewayTimeout" :min="30" :max="600" size="large" style="width:200px" />
+                  </div>
+                  <div class="form-group">
+                    <label>{{ $t('settings.toolAutoApproveSeconds') }}</label>
+                    <p class="input-desc">{{ $t('settings.toolAutoApproveSecondsDesc') }}</p>
+                    <n-radio-group v-model:value="form.toolAutoApproveSeconds" size="small">
+                      <n-space wrap>
+                        <n-radio :value="0">{{ $t('settings.toolAutoApproveOff') }}</n-radio>
+                        <n-radio :value="3">3{{ $t('settings.secondsUnit') }}</n-radio>
+                        <n-radio :value="5">5{{ $t('settings.secondsUnit') }}</n-radio>
+                        <n-radio :value="10">10{{ $t('settings.secondsUnit') }}</n-radio>
+                      </n-space>
+                    </n-radio-group>
+                  </div>
+                </n-collapse-item>
+              </n-collapse>
             </div>
           </n-tab-pane>
 
@@ -814,6 +821,9 @@ async function saveSettings() {
 }
 .settings-card { background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 12px; padding: 20px 24px; margin-bottom: 20px; }
 .section-title { font-size: 14px; font-weight: 600; margin: 0 0 16px; color: var(--text-primary); }
+/* P2-01 高级折叠组：与常用项在视觉上分层 */
+.settings-advanced { margin-top: 4px; }
+.settings-advanced :deep(.n-collapse-item__header-main) { font-size: 13px; color: var(--text-secondary); }
 
 /* 管理入口网格 */
 .manage-group + .manage-group { margin-top: 12px; }

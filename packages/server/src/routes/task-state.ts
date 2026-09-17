@@ -13,6 +13,7 @@ import {
   requestTaskCancel,
   setTaskStatus,
   statusLabel,
+  aggregateTaskStats,
   type TaskStatus,
 } from '../services/task-state'
 
@@ -30,6 +31,15 @@ taskStateRouter.get('/', (ctx) => {
     return
   }
   ctx.body = { ok: true, tasks: withLabels(all ? listTasks() : listActiveTasks()) }
+})
+
+/**
+ * 任务级可观测（P2-02）：完成率 / 失败率 / 累计 token / 累计成本 / 平均耗时。
+ * 注意：必须注册在 /:id 之前，否则 'stats' 会被当成 task_id 匹配掉。
+ */
+taskStateRouter.get('/stats', (ctx) => {
+  const days = Number(ctx.query.days || 0)
+  ctx.body = { ok: true, stats: aggregateTaskStats(), days }
 })
 
 /** 单个任务 */

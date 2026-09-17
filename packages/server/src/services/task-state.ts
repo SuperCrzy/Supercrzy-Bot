@@ -76,6 +76,10 @@ export interface TaskRecord {
   source: TaskSource
   /** 派生：失败时的可读原因（failure_code 的人话版） */
   failure_message: string | null
+  /** P2-02 任务级可观测：本任务累计 token / 成本(USD) / 耗时(ms) */
+  tokens: number
+  cost_usd: number
+  duration_ms: number
 }
 
 export type TaskSource = 'agent' | 'collab' | 'automation' | 'routine' | 'unknown'
@@ -124,12 +128,19 @@ function ensureTable(): boolean {
         completed_at INTEGER,
         updated_at INTEGER NOT NULL,
         label TEXT DEFAULT '',
-        source TEXT DEFAULT 'unknown'
+        source TEXT DEFAULT 'unknown',
+        tokens INTEGER DEFAULT 0,
+        cost_usd REAL DEFAULT 0,
+        duration_ms INTEGER DEFAULT 0
       );
       CREATE INDEX IF NOT EXISTS idx_task_runs_session ON task_runs(session_id);
       CREATE INDEX IF NOT EXISTS idx_task_runs_status ON task_runs(status);
       CREATE INDEX IF NOT EXISTS idx_task_runs_updated ON task_runs(updated_at DESC);
     `)
+    // P2-02：老库缺列时补列（SQLite 报 duplicate column 属预期，逐列 try）
+    for (const col of ['tokens INTEGER DEFAULT 0', 'cost_usd REAL DEFAULT 0', 'duration_ms INTEGER DEFAULT 0']) {
+      try { db.exec(`ALTER TABLE task_runs ADD COLUMN ${col}`) } catch { /* 已存在 */ }
+    }
     tableReady = true
     return true
   } catch {
@@ -144,16 +155,17 @@ function persist(rec: TaskRecord): void {
       .prepare(
         `INSERT INTO task_runs (task_id, session_id, status, current_step, checkpoint_id,
            cancel_requested_at, failure_code, failure_message, started_at, completed_at,
-           updated_at, label, source)
+           updated_at, label, source, tokens, cost_usd, duration_ms)
          VALUES (@task_id, @session_id, @status, @current_step, @checkpoint_id,
            @cancel_requested_at, @failure_code, @failure_message, @started_at, @completed_at,
-           @updated_at, @label, @source)
+           @updated_at, @label, @source, @tokens, @cost_usd, @duration_ms)
          ON CONFLICT(task_id) DO UPDATE SET
            status=excluded.status, current_step=excluded.current_step,
            checkpoint_id=excluded.checkpoint_id, cancel_requested_at=excluded.cancel_requested_at,
            failure_code=excluded.failure_code, failure_message=excluded.failure_message,
            completed_at=excluded.completed_at, updated_at=excluded.updated_at,
-           label=excluded.label`,
+           label=excluded.label, tokens=excluded.tokens,
+           cost_usd=excluded.cost_usd, duration_ms=excluded.duration_ms`,
       )
       .run(rec as any)
   } catch {
@@ -219,6 +231,9 @@ export function createTask(input: CreateTaskInput): TaskRecord {
     updated_at: now,
     label: input.label || '',
     source: input.source || 'unknown',
+    tokens: 0,
+    cost_usd: 0,
+    duration_ms: 0,
   }
   TASKS.set(rec.task_id, rec)
   if (sessionId) BY_SESSION.set(sessionId, rec.task_id)
@@ -360,6 +375,79 @@ export function restoreFromDB(limit = 200): number {
     return n
   } catch {
     return 0
+  }
+}
+
+/**
+ * P2-02 任务级可观测：任务收尾时记录 token / 成本 / 耗时。
+ * 与状态流转分开，因为这三项在任务跑完时才知道。
+ */
+export function recordTaskOutcome(
+  taskId: string,
+  outcome: { tokens?: number; costUsd?: number; durationMs?: number },
+): boolean {
+  const rec = TASKS.get(taskId)
+  if (!rec) return false
+  if (outcome.tokens !== undefined) rec.tokens = Math.max(0, Math.round(outcome.tokens))
+  if (outcome.costUsd !== undefined) rec.cost_usd = Math.max(0, outcome.costUsd)
+  if (outcome.durationMs !== undefined) rec.duration_ms = Math.max(0, Math.round(outcome.durationMs))
+  rec.updated_at = Date.now()
+  persist(rec)
+  return true
+}
+
+export interface TaskStats {
+  /** 任务总数（含历史回填） */
+  total: number
+  /** 各状态任务数 */
+  byStatus: Record<string, number>
+  /** 完成率（completed / total），0~1；无任务时为 0 */
+  successRate: number
+  /** 失败率（failed / total） */
+  failureRate: number
+  /** 取消率（cancelled / total） */
+  cancelRate: number
+  /** 累计 token */
+  totalTokens: number
+  /** 累计成本（USD） */
+  totalCostUsd: number
+  /** 平均任务耗时（ms，仅统计有耗时的任务） */
+  avgDurationMs: number
+}
+
+/**
+ * 任务级聚合统计（P2-02）。纯函数语义：只读内存注册表，便于单测。
+ * 只统计非 created 态（即真正跑过的任务），避免把刚建的任务算进完成率分母。
+ */
+export function aggregateTaskStats(): TaskStats {
+  const all = [...TASKS.values()]
+  const byStatus: Record<string, number> = {}
+  let totalTokens = 0
+  let totalCostUsd = 0
+  let durationSum = 0
+  let durationCount = 0
+
+  for (const r of all) {
+    byStatus[r.status] = (byStatus[r.status] || 0) + 1
+    totalTokens += r.tokens || 0
+    totalCostUsd += r.cost_usd || 0
+    if (r.duration_ms > 0) {
+      durationSum += r.duration_ms
+      durationCount++
+    }
+  }
+
+  const total = all.length
+  const rate = (n: number) => (total > 0 ? n / total : 0)
+  return {
+    total,
+    byStatus,
+    successRate: rate(byStatus.completed || 0),
+    failureRate: rate(byStatus.failed || 0),
+    cancelRate: rate(byStatus.cancelled || 0),
+    totalTokens,
+    totalCostUsd: Number(totalCostUsd.toFixed(6)),
+    avgDurationMs: durationCount > 0 ? Math.round(durationSum / durationCount) : 0,
   }
 }
 

@@ -38,6 +38,34 @@
       </div>
     </div>
 
+    <!-- 任务级可观测（P2-02）：任务维度而非消息维度 —— 完成率/耗时/token/成本 -->
+    <div class="section">
+      <h3 class="section-title">{{ $t('usage.taskSection') }}</h3>
+      <div class="task-grid">
+        <div class="task-cell">
+          <div class="task-value">{{ taskStats.total }}</div>
+          <div class="task-label">{{ $t('usage.taskTotal') }}</div>
+        </div>
+        <div class="task-cell">
+          <div class="task-value">{{ (taskStats.successRate * 100).toFixed(0) }}%</div>
+          <div class="task-label">{{ $t('usage.taskSuccessRate') }}</div>
+        </div>
+        <div class="task-cell">
+          <div class="task-value">{{ formatNumber(taskStats.totalTokens) }}</div>
+          <div class="task-label">{{ $t('usage.taskTokens') }}</div>
+        </div>
+        <div class="task-cell">
+          <div class="task-value">{{ formatCurrency(taskStats.totalCostUsd, 6) }}</div>
+          <div class="task-label">{{ $t('usage.taskCost') }}</div>
+        </div>
+        <div class="task-cell">
+          <div class="task-value">{{ formatDuration(taskStats.avgDurationMs) }}</div>
+          <div class="task-label">{{ $t('usage.taskAvgDuration') }}</div>
+        </div>
+      </div>
+      <n-empty v-if="taskStats.total === 0" :description="$t('usage.noTaskData')" class="empty-mini" />
+    </div>
+
     <!-- 模型用量详情 -->
     <div class="section">
       <h3 class="section-title">{{ $t('usage.modelDetail') }}</h3>
@@ -94,6 +122,18 @@ const chartOption = computed(() => ({
 interface WeeklyPoint { date: string; messages: number; tokens: number }
 interface ModelStat { model: string; count: number; tokens: number; cost: number; lastUsed: string }
 
+/** P2-02 任务级可观测（端点 /api/task-state/stats） */
+const taskStats = reactive({
+  total: 0,
+  byStatus: {} as Record<string, number>,
+  successRate: 0,
+  failureRate: 0,
+  cancelRate: 0,
+  totalTokens: 0,
+  totalCostUsd: 0,
+  avgDurationMs: 0,
+})
+
 const stats = reactive({
   today: { messages: 0, tokens: 0, cost: 0 },
   total: { sessions: 0, messages: 0, tokens: 0, cost: 0 },
@@ -130,6 +170,15 @@ function formatCurrency(amount?: number, digits = 4) {
   return (i18n().global.locale.value === 'zh-CN' ? '¥' : '$') + v
 }
 
+/** P2-02：任务平均耗时格式化 */
+function formatDuration(ms: number) {
+  if (!ms) return '0s'
+  const sec = Math.round(ms / 1000)
+  if (sec < 60) return sec + 's'
+  const m = Math.floor(sec / 60)
+  return m + 'm' + (sec % 60 ? (sec % 60) + 's' : '')
+}
+
 function formatShortDate(d: string) {
   return d.slice(5) // MM-DD
 }
@@ -140,6 +189,14 @@ onMounted(async () => {
     if (res.ok) {
       const data = await res.json()
       Object.assign(stats, data)
+    }
+  } catch {}
+  // P2-02：任务级可观测（来自统一任务状态机 /api/task-state/stats）
+  try {
+    const res = await fetch('/api/task-state/stats')
+    if (res.ok) {
+      const data = await res.json()
+      if (data && data.stats) Object.assign(taskStats, data.stats)
     }
   } catch {}
 })
@@ -165,6 +222,12 @@ onMounted(async () => {
 
 /* Section */
 .section { padding: 0 24px 20px; }
+/* P2-02 任务级可观测 */
+.task-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+.task-cell { padding: 12px; border-radius: 10px; border: 1px solid var(--border-color); }
+.task-value { font-size: 18px; font-weight: 700; color: var(--text-primary); }
+.task-label { font-size: 11px; color: var(--text-muted); margin-top: 3px; }
+@media (max-width: 900px) { .task-grid { grid-template-columns: repeat(2, 1fr); } }
 .section-title { font-size: 14px; font-weight: 600; margin: 0 0 12px; }
 
 /* Bar Chart */

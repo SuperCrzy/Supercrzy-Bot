@@ -21,6 +21,8 @@ import {
   mapAutomationStatus,
   mapAgentOutcome,
   statusLabel,
+  recordTaskOutcome,
+  aggregateTaskStats,
   __resetTaskState,
   type TaskStatus,
 } from './task-state'
@@ -153,5 +155,74 @@ describe('子系统状态适配器', () => {
   it('状态都有中文标签', () => {
     const all: TaskStatus[] = ['created', 'planning', 'awaiting_approval', 'running', 'waiting_user', 'paused', 'failed', 'cancelled', 'completed']
     for (const s of all) expect(statusLabel(s)).not.toBe(s)
+  })
+})
+
+describe('任务级可观测（P2-02）', () => {
+  it('recordTaskOutcome 写入 token / 成本 / 耗时', () => {
+    const t = createTask({ sessionId: 's1', status: 'running' })
+    expect(recordTaskOutcome(t.task_id, { tokens: 1234, costUsd: 0.0123, durationMs: 45000 })).toBe(true)
+    const rec = getTask(t.task_id)!
+    expect(rec.tokens).toBe(1234)
+    expect(rec.cost_usd).toBeCloseTo(0.0123)
+    expect(rec.duration_ms).toBe(45000)
+  })
+
+  it('负数被夹到 0，token 取整（脏数据不放宽统计）', () => {
+    const t = createTask({ sessionId: 's1', status: 'running' })
+    recordTaskOutcome(t.task_id, { tokens: -5, costUsd: -1, durationMs: -100 })
+    const rec = getTask(t.task_id)!
+    expect(rec.tokens).toBe(0)
+    expect(rec.cost_usd).toBe(0)
+    expect(rec.duration_ms).toBe(0)
+  })
+
+  it('对不存在的任务返回 false，不抛错', () => {
+    expect(recordTaskOutcome('no-such-task', { tokens: 1 })).toBe(false)
+  })
+
+  it('聚合：状态计数 / 完成率 / 失败率 / 取消率', () => {
+    const a = createTask({ sessionId: 's1', status: 'running' })
+    const b = createTask({ sessionId: 's2', status: 'running' })
+    const c = createTask({ sessionId: 's3', status: 'running' })
+    const d = createTask({ sessionId: 's4', status: 'running' })
+    completeTask(a.task_id)
+    completeTask(b.task_id)
+    failTask(c.task_id, 'billing')
+    requestTaskCancel(d.task_id)
+    setTaskStatus(d.task_id, 'cancelled', { force: true })
+
+    const st = aggregateTaskStats()
+    expect(st.total).toBe(4)
+    expect(st.byStatus.completed).toBe(2)
+    expect(st.byStatus.failed).toBe(1)
+    expect(st.byStatus.cancelled).toBe(1)
+    expect(st.successRate).toBeCloseTo(0.5)
+    expect(st.failureRate).toBeCloseTo(0.25)
+    expect(st.cancelRate).toBeCloseTo(0.25)
+  })
+
+  it('聚合：累计 token / 成本 / 平均耗时（零耗时不进分母）', () => {
+    const a = createTask({ sessionId: 's1', status: 'running' })
+    const b = createTask({ sessionId: 's2', status: 'running' })
+    recordTaskOutcome(a.task_id, { tokens: 100, costUsd: 0.01, durationMs: 10000 })
+    recordTaskOutcome(b.task_id, { tokens: 300, costUsd: 0.03, durationMs: 30000 })
+    const c = createTask({ sessionId: 's3', status: 'running' })  // 无耗时
+    void c
+
+    const st = aggregateTaskStats()
+    expect(st.totalTokens).toBe(400)
+    expect(st.totalCostUsd).toBeCloseTo(0.04)
+    // 平均只算有耗时的 2 个任务 → (10000+30000)/2 = 20000
+    expect(st.avgDurationMs).toBe(20000)
+  })
+
+  it('聚合：无任务时全为 0，不产生 NaN', () => {
+    const st = aggregateTaskStats()
+    expect(st.total).toBe(0)
+    expect(st.successRate).toBe(0)
+    expect(st.failureRate).toBe(0)
+    expect(st.avgDurationMs).toBe(0)
+    expect(st.totalTokens).toBe(0)
   })
 })
