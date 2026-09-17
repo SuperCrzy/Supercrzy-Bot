@@ -605,6 +605,8 @@ const messages = {
       // Tabs
       tabAccount: '账户',
       manageTitle: '管理',
+      manageCore: '核心',
+      manageAdvanced: '高级 / 诊断',
       manageModels: '模型管理',
       manageGateway: '网关管理',
       manageMemory: '记忆管理',
@@ -1761,6 +1763,8 @@ const messages = {
       // Tabs
       tabAccount: 'Account',
       manageTitle: 'Manage',
+      manageCore: 'Core',
+      manageAdvanced: 'Advanced / Diagnostics',
       manageModels: 'Models',
       manageGateway: 'Gateway',
       manageMemory: 'Memory Management',

@@ -152,6 +152,10 @@
         <div class="chats-header" @click="toggleChatsCollapsed">
           <span class="chats-title">{{ $t('nav.chatGroup') }}</span>
           <span class="chats-actions" @click.stop>
+            <!-- P1-01：/search（会话历史搜索）此前**无任何入口**，只能手敲 URL；补上会话区搜索按钮 -->
+            <button class="chats-collapse-btn" @click="router.push('/search')" :title="$t('search.title')">
+              <SvgIcon name="search" :size="13" />
+            </button>
             <button class="chats-collapse-btn" @click="toggleChatsCollapsed" :title="chatsCollapsed ? $t('nav.expand') : $t('nav.collapse')">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :style="{ transform: chatsCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)', transition: 'transform .2s' }"><polyline points="6 9 12 15 18 9"/></svg>
             </button>

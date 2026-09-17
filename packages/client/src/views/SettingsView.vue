@@ -313,14 +313,18 @@
       <aside class="settings-aside">
         <div class="settings-card">
           <h3 class="section-title">{{ $t('settings.manageTitle') }}</h3>
-          <div class="manage-grid">
-            <button v-for="m in manageEntries" :key="m.path" class="manage-card" @click="router.push(m.path)">
-              <SvgIcon :name="m.icon" :size="16" />
-              <span class="manage-label">{{ m.label }}</span>
-              <span class="manage-arrow">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg>
-              </span>
-            </button>
+          <!-- P1-01：核心 / 高级分区（此前 6 项平铺，无从判断该先配哪个） -->
+          <div v-for="g in manageGroups" :key="g.key" class="manage-group">
+            <div class="manage-group-title">{{ g.title }}</div>
+            <div class="manage-grid">
+              <button v-for="m in g.items" :key="m.path" class="manage-card" @click="router.push(m.path)">
+                <SvgIcon :name="m.icon" :size="16" />
+                <span class="manage-label">{{ m.label }}</span>
+                <span class="manage-arrow">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6l6 6-6 6"/></svg>
+                </span>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -524,14 +528,30 @@ let loaded = false
 /** 自动保存防抖计时器 */
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 
-/** 管理入口：收编自侧边栏的配置/数据/诊断页面 */
-const manageEntries = computed(() => [
-  { path: '/models', icon: 'monitor', label: t('settings.manageModels') },
-  { path: '/gateway', icon: 'globe', label: t('settings.manageGateway') },
-  { path: '/memory', icon: 'brain', label: t('settings.manageMemory') },
-  { path: '/logs', icon: 'file-text', label: t('settings.manageLogs') },
-  { path: '/usage', icon: 'activity', label: t('settings.manageUsage') },
-  { path: '/images', icon: 'image', label: t('settings.manageImages') },
+/**
+ * 管理入口：收编自侧边栏的配置/数据/诊断页面（P1-01 分区，2026-09-17）
+ * 分区依据：核心 = 用起来必须配的；高级 = 诊断与进阶集成，平时不碰。
+ * 此前 6 项平铺，新手不知道先配哪个。
+ */
+const manageGroups = computed(() => [
+  {
+    key: 'core',
+    title: t('settings.manageCore'),
+    items: [
+      { path: '/models', icon: 'monitor', label: t('settings.manageModels') },
+      { path: '/memory', icon: 'brain', label: t('settings.manageMemory') },
+      { path: '/images', icon: 'image', label: t('settings.manageImages') },
+    ],
+  },
+  {
+    key: 'advanced',
+    title: t('settings.manageAdvanced'),
+    items: [
+      { path: '/gateway', icon: 'globe', label: t('settings.manageGateway') },
+      { path: '/logs', icon: 'file-text', label: t('settings.manageLogs') },
+      { path: '/usage', icon: 'activity', label: t('settings.manageUsage') },
+    ],
+  },
 ])
 
 const hasAccessToken = ref(false)
@@ -796,6 +816,15 @@ async function saveSettings() {
 .section-title { font-size: 14px; font-weight: 600; margin: 0 0 16px; color: var(--text-primary); }
 
 /* 管理入口网格 */
+.manage-group + .manage-group { margin-top: 12px; }
+.manage-group-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary, #8a8f9c);
+  margin: 0 0 6px 2px;
+}
 .manage-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
