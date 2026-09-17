@@ -59,6 +59,8 @@ import os from 'os'
 import { stopComputerUse } from './services/computer-use'
 import { mcpRouter } from './routes/mcp'
 import { routineRouter } from './routes/routines'
+import { taskStateRouter } from './routes/task-state'
+import { restoreFromDB } from './services/task-state'
 import { stopAllMcp } from './services/mcp-manager'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -407,7 +409,9 @@ async function bootstrap() {
   }
 
   // API Routes
-  const routers = [uploadRouter, chatRouter, fsRouter, settingsRouter, sessionRouter, historyRouter, statsRouter, memoryRouter, gatewayRouter, skillsRouter, tasksRouter, automationsRouter, modelsRouter, workspaceRouter, ocrRouter, checkpointsRouter, playbookRouter, rolesRouter, systemRouter, collabRouter, newsRouter, mcpRouter, routineRouter, terminalRouter]
+  const routers = [uploadRouter, chatRouter, fsRouter, settingsRouter, sessionRouter, historyRouter, statsRouter, memoryRouter, gatewayRouter, skillsRouter, tasksRouter, automationsRouter, modelsRouter, workspaceRouter, ocrRouter, checkpointsRouter, playbookRouter, rolesRouter, systemRouter, collabRouter, newsRouter, mcpRouter, routineRouter, terminalRouter, taskStateRouter]
+  // 统一任务状态机：回填历史任务（进程重启后仍可查询上次状态，幽灵任务自动收敛为 cancelled）
+  try { const n = restoreFromDB(); if (n > 0) console.log(`[task-state] 已回填 ${n} 条历史任务`) } catch { /* 不影响启动 */ }
   for (const r of routers) {
     app.use(r.routes())
     app.use(r.allowedMethods())

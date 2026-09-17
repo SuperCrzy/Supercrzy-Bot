@@ -3834,6 +3834,38 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage, sessionId?
       }
       break
     }
+    case 'task_state': {
+      // P0-03 统一任务状态机：后端唯一权威状态源。
+      // 此前状态分散在 aiStatus / 工具卡 / Plan Capsule / 检查点 等处各自维护，
+      // 导致"前端显示完成但后端还在跑"。现在统一从这里派生。
+      msg.taskState = {
+        taskId: data.task_id || '',
+        status: data.status || '',
+        step: data.current_step || '',
+        checkpointId: data.checkpoint_id || '',
+        cancelRequested: !!data.cancel_requested_at,
+        failureCode: data.failure_code || '',
+      }
+      const keyMap: Record<string, string> = {
+        created: 'chat.taskCreated',
+        planning: 'chat.taskPlanning',
+        awaiting_approval: 'chat.taskAwaitingApproval',
+        running: 'chat.taskRunning',
+        waiting_user: 'chat.taskWaitingUser',
+        paused: 'chat.taskPaused',
+        failed: 'chat.taskFailed',
+        cancelled: 'chat.taskCancelled',
+        completed: 'chat.taskCompleted',
+      }
+      const isTerminalState = ['completed', 'failed', 'cancelled'].includes(data.status)
+      if (data.cancel_requested_at) {
+        // 已请求取消但循环仍在跑 → 显示"正在停止…"（这正是 cancel_requested_at 的语义）
+        aiStatus.value = 'chat.taskCancelling'
+      } else if (!isTerminalState) {
+        aiStatus.value = keyMap[data.status] || 'chat.statusThinking'
+      }
+      break
+    }
     case 'done': {
       // 流结束：只标记状态（打字机收尾由 finish 处理）
       markEnd(msg)

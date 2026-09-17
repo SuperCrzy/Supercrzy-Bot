@@ -199,6 +199,15 @@ export interface ChatMessage {
   _userFoldState?: 'folded' | 'expanded'
   /** 结构化停止原因（对齐 WorkBuddy MaxTurnsExceededError：轮次超限/空内容兜底/API 失败时让用户知道为什么停） */
   stopReason?: { reason: string; message: string; checkpointId?: string; toolCalls?: number; turns?: number }
+  /** P0-03 统一任务状态机：后端唯一权威状态（task_id/status/current_step/cancel_requested_at…） */
+  taskState?: {
+    taskId: string
+    status: string
+    step: string
+    checkpointId: string
+    cancelRequested: boolean
+    failureCode?: string
+  }
   /** 是否被用户中止 */
   isAborted?: boolean
   tokenCount?: number

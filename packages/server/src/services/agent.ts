@@ -19,6 +19,17 @@ import { requestChat, chatCompletion, normalizeBaseUrl, buildApiError } from './
 import { getDB } from '../services/database'
 import { toolDefinitions, executeToolCalls, type ToolCall, type ToolResultWithMeta, getToolMeta, type ToolExecCtx, DEFERRED_TOOLS, classifySensitiveTool } from './tools'
 import { pushMemorySync, pushReflection } from './memory-worker'
+import {
+  createTask as createTaskState,
+  setTaskStatus,
+  setTaskStep,
+  setTaskCheckpoint,
+  isCancelRequested,
+  getTaskBySession,
+  mapAgentOutcome,
+  statusLabel,
+  type TaskRecord,
+} from './task-state'
 
 // ---- 敏感工具确认机制（先确认后执行）----
 const pendingConfirmations = new Map<string, (decision: 'allow' | 'deny') => void>()
@@ -1142,9 +1153,52 @@ export async function runAgentLoop(
   if (runKey) clearStop(runKey)
   registerStopSignal(ctx, runKey)
 
+  // ---- 统一任务状态机（P0-03，2026-09-16）----
+  // 本会话的唯一权威状态源。所有前端进度/通知/恢复/自动化都从这里派生，
+  // 不再各自维护一份状态（此前分散在 Agent loop / SSE / 前端 / 工具卡 / 检查点 等 7 处）。
+  let taskRec: TaskRecord | null = null
+  try {
+    const existing = sessionId ? getTaskBySession(sessionId) : null
+    if (existing && !['completed', 'failed', 'cancelled'].includes(existing.status)) {
+      taskRec = existing
+      setTaskStatus(taskRec.task_id, 'running', { checkpointId, step: '执行中' })
+    } else {
+      taskRec = createTaskState({
+        sessionId: sessionId || checkpointId,
+        label: (lastUserContent || '').slice(0, 40),
+        source: 'agent',
+        checkpointId,
+        currentStep: '执行中',
+        status: 'running',
+      })
+    }
+  } catch { taskRec = null }
+
+  /** 广播规范状态（前端单一真源） */
+  const emitTaskState = () => {
+    if (!taskRec) return
+    try {
+      const cur = getTaskBySession(taskRec.session_id) || taskRec
+      emitSSE(ctx, 'task_state', {
+        task_id: cur.task_id,
+        session_id: cur.session_id,
+        status: cur.status,
+        status_label: statusLabel(cur.status),
+        current_step: cur.current_step,
+        checkpoint_id: cur.checkpoint_id,
+        cancel_requested_at: cur.cancel_requested_at,
+        failure_code: cur.failure_code,
+        started_at: cur.started_at,
+        completed_at: cur.completed_at,
+      })
+    } catch { /* 状态广播失败不影响主流程 */ }
+  }
+  emitTaskState()
+
   while (turn < effectiveMaxTurns && !finished) {
     // 用户按下停止 → 保存进度并收尾，而不是继续烧 token
-    if (runKey && isStopRequested(runKey)) {
+    // （P0-03：除 SSE 断开标记外，也认统一状态机的 cancel_requested_at）
+    if (runKey && (isStopRequested(runKey) || (taskRec && isCancelRequested(taskRec.task_id)))) {
       emitSSE(ctx, 'error', { message: '已收到停止指令，正在保存进度...', stopped: true })
       interrupted = 'user_stopped'
       finished = true
@@ -1464,6 +1518,8 @@ export async function runAgentLoop(
         for (const tc of toolCalls) {
           totalToolCalls.push(tc.function.name)
           const isSensitive = SENSITIVE_TOOLS.has(tc.function.name)
+          // P0-03: 统一状态机记录当前步骤（前端"当前执行"从这里派生，不再各自猜）
+          if (taskRec) { try { setTaskStep(taskRec.task_id, `执行工具：${tc.function.name}`) } catch { /* 非关键 */ } }
           emitSSE(ctx, 'tool_call', {
             name: tc.function.name,
             arguments: tc.function.arguments,
@@ -2062,6 +2118,26 @@ export async function runAgentLoop(
     try {
       const snap = finishPlan(sessionId)
       if (snap) emitSSE(ctx, 'plan_update', snap)
+    } catch { /* 收尾失败不影响主流程 */ }
+  }
+
+  // ---- 统一任务状态机收尾（P0-03）----
+  // 收尾状态从同一处派生，避免"前端显示完成但后端仍在跑"。
+  if (taskRec) {
+    try {
+      setTaskCheckpoint(taskRec.task_id, checkpointId)
+      const finalStatus = interrupted
+        ? mapAgentOutcome(interrupted)
+        : (finished ? 'completed' : 'failed')
+      setTaskStatus(taskRec.task_id, finalStatus, {
+        step: statusLabel(finalStatus),
+        failureCode: finalStatus === 'failed' ? (interrupted || 'turn_limit') : undefined,
+        failureMessage: finalStatus === 'failed'
+          ? (interrupted ? `任务因 ${interrupted} 中断，进度已保存` : `已达 ${effectiveMaxTurns} 轮上限`)
+          : undefined,
+        force: true,
+      })
+      emitTaskState()
     } catch { /* 收尾失败不影响主流程 */ }
   }
 
