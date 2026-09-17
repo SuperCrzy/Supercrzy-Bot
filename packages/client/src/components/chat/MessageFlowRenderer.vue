@@ -142,6 +142,7 @@ import hljs from 'highlight.js/lib/common'
 import 'highlight.js/styles/github-dark.css'
 import type { ChatMessage, ChatFlowNode } from '@/types'
 import { composeFoldSummary, formatDurationMs } from '@/utils/tool-summary'
+import { stageOfTool, stageBreakdown, formatStageBreakdown, STAGE_I18N } from '@/utils/stage'
 import { openFilePreview } from '@/utils/file-preview'
 import { useAppStore } from '@/stores/app'
 import ThinkingGroup from './ThinkingGroup.vue'
@@ -523,12 +524,19 @@ function segSummary(seg: FlowSegment): string {
       if (isToolRunning(n)) {
         const atom = composeFoldSummary([n] as ChatFlowNode[], (key: string) => t(key) || key)
         const lines = runningLines(n)
-        return t('chat.processRunning', { action: atom || n.tool.name }) + (lines ? ` · ${lines}` : '')
+        // P1-02：拿不到宾语时退到「阶段名」，绝不把内部工具名(browser/shell_exec)抛给用户
+        const fallback = t(STAGE_I18N[stageOfTool(n.tool.name)]) || t('chat.statusWorking')
+        return t('chat.processRunning', { action: atom || fallback }) + (lines ? ` · ${lines}` : '')
       }
     }
   }
+  // P1-02：完成态改为「阶段画像」（读取 3 · 编辑 2 · 验证 1），替代原来的"N 次工具调用"——
+  // 同样紧凑，但用户看得懂这次到底做了什么。无工具时退回原有计数。
   const parts: string[] = []
-  if (seg.tools) parts.push(t('chat.processTools', { n: seg.tools }))
+  const tt = t as unknown as (k: string, p?: Record<string, unknown>) => string
+  const stages = formatStageBreakdown(stageBreakdown(seg.nodes), tt)
+  if (stages) parts.push(stages)
+  else if (seg.tools) parts.push(t('chat.processTools', { n: seg.tools }))
   if (props.showReasoning && seg.thinks) parts.push(t('chat.processThinking', { n: seg.thinks }))
   // 纯说明文本段（无工具无思考）兜底：显示"执行过程"，避免空摘要
   if (!parts.length) return t('chat.processCollapsed')
