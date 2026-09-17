@@ -1096,6 +1096,10 @@ export async function runAgentLoop(
   const db = getDB()  // 顶层 DB 句柄（产物持久化等用）
   const createdFiles: Array<{ name: string; path: string; mime: string; size?: number }> = []
   const totalToolCalls: string[] = []
+  // P1-05 任务交付页：本任务改过的文件（file_changed 事件来源，去重）
+  const changedFiles = new Map<string, { name: string; path: string }>()
+  // P1-05：全任务 token / 成本累计（此前只有逐轮 usage 事件，交付页拿不到总量）
+  const totalUsage = { prompt: 0, completion: 0, total: 0, cost: 0 }
   let lastCheckpointTurn = 0
   let toolErrorCount = 0  // 工具失败计数器，避免无限重试提示
   let consecutiveApiErrors = 0  // API 连续错误计数器
@@ -1674,6 +1678,11 @@ export async function runAgentLoop(
           },
           // 文件变更：写入文件 → 推送变更 tab（改前/改后对比）
           onFileChange: (path, oldContent, newContent) => {
+            // P1-05：记入交付页的"改动清单"
+            try {
+              const pth = String(path || '')
+              if (pth) changedFiles.set(pth, { name: pth.split(/[\\/]/).pop() || pth, path: pth })
+            } catch { /* 非关键 */ }
             emitSSE(ctx, 'file_changed', { path, oldContent, newContent })
           },
           // shell 命令产生的文件 → 补录产物（持久化 + 实时推送）
@@ -1883,11 +1892,16 @@ export async function runAgentLoop(
 
       // 本轮结束：把真实 token 用量发给前端（有 usage 时），cost 按模型单价估算
       if (lastUsage && lastUsage.total_tokens) {
+        const roundCost = estimateCost(agentConfig.model, lastUsage)
+        totalUsage.prompt += lastUsage.prompt_tokens || 0
+        totalUsage.completion += lastUsage.completion_tokens || 0
+        totalUsage.total += lastUsage.total_tokens || 0
+        totalUsage.cost += roundCost
         emitSSE(ctx, 'usage', {
           promptTokens: lastUsage.prompt_tokens || 0,
           completionTokens: lastUsage.completion_tokens || 0,
           totalTokens: lastUsage.total_tokens || 0,
-          cost: estimateCost(agentConfig.model, lastUsage),
+          cost: roundCost,
         })
       }
 
@@ -2065,13 +2079,46 @@ export async function runAgentLoop(
     }
   }
 
-  if (createdFiles.length > 0) {
-    emitSSE(ctx, 'delivery_summary', {
-      artifacts: createdFiles.map(f => ({ name: f.name, path: f.path, mime: f.mime })),
-      artifactCount: createdFiles.length,
-      toolCallCount: totalToolCalls.length,
-      turns: turn,
-    })
+  // ---- P1-05 任务交付页：统一交付叙事（2026-09-17）----
+  // 此前只在"产生了文件"时才发交付摘要 → 只改代码/只调研/被中断的任务全都没有交付叙事。
+  // 现在凡是有实际动作(tool 调用)或产出的任务都发，并带上状态/结论/改动/统计/下一步。
+  {
+    const finalStatus = interrupted
+      ? mapAgentOutcome(interrupted)
+      : (finished ? 'completed' : 'failed')
+    const hasWork = totalToolCalls.length > 0 || createdFiles.length > 0 || changedFiles.size > 0
+    if (hasWork) {
+      const changed = [...changedFiles.values()]
+      const bits: string[] = []
+      if (createdFiles.length > 0) bits.push(`新增 ${createdFiles.length} 个文件`)
+      if (changed.length > 0) bits.push(`改动 ${changed.length} 个文件`)
+      bits.push(`${turn} 轮 / ${totalToolCalls.length} 次工具`)
+      const summaryLine = finalStatus === 'completed'
+        ? `任务完成：${bits.join('，')}`
+        : finalStatus === 'cancelled'
+          ? `已按你的要求停止：${bits.join('，')}`
+          : `任务未完成：${bits.join('，')}`
+      const startedAtMs = taskRec ? taskRec.started_at : 0
+      emitSSE(ctx, 'delivery_summary', {
+        status: finalStatus,
+        statusLabel: statusLabel(finalStatus),
+        summary: summaryLine,
+        artifacts: createdFiles.map(f => ({ name: f.name, path: f.path, mime: f.mime })),
+        artifactCount: createdFiles.length,
+        changedFiles: changed,
+        changedCount: changed.length,
+        toolCallCount: totalToolCalls.length,
+        turns: turn,
+        durationMs: startedAtMs ? Date.now() - startedAtMs : 0,
+        promptTokens: totalUsage.prompt,
+        completionTokens: totalUsage.completion,
+        totalTokens: totalUsage.total,
+        cost: totalUsage.cost,
+        failureCode: finalStatus === 'failed' ? (interrupted || 'turn_limit') : '',
+        checkpointId: finalStatus === 'completed' ? '' : checkpointId,
+        canResume: finalStatus !== 'completed',
+      })
+    }
   }
 
   // ---- 画图兜底：用户要画图但 AI 没输出 SVG（也没调 draw_diagram）→ 自动补一次 LLM 生成图 ----

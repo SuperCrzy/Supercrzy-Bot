@@ -394,7 +394,17 @@
               :data="parseCompareContent(msg.content)"
             />
             <!-- 交付摘要：本消息产物卡片行（默认折叠只显示前 3 个 + 展开全部；多个产物不铺开） -->
-            <div v-if="msg.deliverySummary && msg.deliverySummary.artifacts.length" class="delivery-summary">
+            <!-- 任务交付页（P1-05）：状态 + 结论 + 产物 + 改动 + 统计 + 下一步。
+                 此前只有"产物卡片行"，且仅当产生了文件才出现；现在凡有实际动作的任务都有交付叙事。 -->
+            <div v-if="hasDelivery(msg)" class="delivery-summary">
+              <!-- ① 状态 + 一句话结论 -->
+              <div v-if="msg.deliverySummary?.summary" class="ds-head" :class="deliveryHeadClass(msg)">
+                <span class="ds-dot"></span>
+                <span class="ds-status">{{ deliveryStatusText(msg) }}</span>
+                <span class="ds-summary-text">{{ msg.deliverySummary?.summary }}</span>
+              </div>
+              <!-- ② 产物卡片 -->
+              <template v-if="msg.deliverySummary?.artifacts.length">
               <div class="ds-title" :class="{ 'ds-title-toggle': deliverySummaryArtifacts(msg).length > 3 }" @click="toggleDeliverySummary(msg)">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
                 {{ $t('chat.deliveryTitle') }} ({{ msg.deliverySummary.artifactCount }})
@@ -419,6 +429,26 @@
                 <div v-if="deliverySummaryArtifacts(msg).length > 3" class="ds-more" @click="toggleDeliverySummary(msg)">
                   {{ deliverySummaryExpanded(msg) ? $t('chatui.webFetchCollapse') : $t('chat.deliveryMore', { n: msg.deliverySummary.artifactCount - 3 }) }}
                 </div>
+              </div>
+              </template>
+              <!-- ③ 改动清单（最多列 5 个 + 余量计数） -->
+              <div v-if="msg.deliverySummary?.changedFiles?.length" class="ds-changes">
+                <span class="ds-changes-label">{{ $t('chat.deliveryChanges', { n: msg.deliverySummary?.changedCount || msg.deliverySummary?.changedFiles?.length }) }}</span>
+                <span v-for="(c, i) in (msg.deliverySummary?.changedFiles || []).slice(0, 5)" :key="i" class="ds-change" :title="c.path">{{ c.name }}</span>
+                <span v-if="(msg.deliverySummary?.changedFiles?.length || 0) > 5" class="ds-change-more">+{{ (msg.deliverySummary?.changedFiles?.length || 0) - 5 }}</span>
+              </div>
+              <!-- ④ 统计（轮次 / 工具 / 耗时 / token / 成本） -->
+              <div class="ds-stats">
+                <span>{{ $t('chat.deliveryTurns', { n: msg.deliverySummary?.turns }) }}</span>
+                <span>{{ $t('chat.deliveryTools', { n: msg.deliverySummary?.toolCallCount }) }}</span>
+                <span v-if="msg.deliverySummary?.durationMs">{{ fmtDeliveryDuration(msg.deliverySummary?.durationMs || 0) }}</span>
+                <span v-if="msg.deliverySummary?.totalTokens">{{ $t('chat.deliveryTokens', { n: msg.deliverySummary?.totalTokens }) }}</span>
+                <span v-if="msg.deliverySummary?.cost">{{ fmtDeliveryCost(msg.deliverySummary?.cost) }}</span>
+              </div>
+              <!-- ⑤ 下一步：未完成时给出可继续的检查点 -->
+              <div v-if="msg.deliverySummary?.canResume && msg.deliverySummary?.checkpointId" class="ds-next">
+                {{ $t('chat.deliveryResume') }}
+                <code class="ds-ckpt">{{ msg.deliverySummary?.checkpointId }}</code>
               </div>
             </div>
 
@@ -1553,6 +1583,38 @@ function formatArtifactSize(n: number) {
   if (n < 1024) return `${n}B`
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)}KB`
   return `${(n / 1024 / 1024).toFixed(1)}MB`
+}
+
+// ---- P1-05 任务交付页辅助 ----
+/** 是否渲染交付页：有产物 / 有改动 / 有结论，三者任一即渲染（此前只看产物） */
+function hasDelivery(msg: ChatMessage): boolean {
+  const d = msg.deliverySummary
+  if (!d) return false
+  return !!(d.artifacts?.length || d.changedFiles?.length || d.summary)
+}
+/** 交付页头部状态样式类（completed 绿 / cancelled 灰 / failed 红） */
+function deliveryHeadClass(msg: ChatMessage): string {
+  return `ds-head--${msg.deliverySummary?.status || 'completed'}`
+}
+/** 交付状态文案（走 i18n，避免后端中文标签串到英文界面） */
+function deliveryStatusText(msg: ChatMessage): string {
+  const st = msg.deliverySummary?.status || 'completed'
+  const key = st === 'completed' ? 'chat.deliveryDone' : st === 'cancelled' ? 'chat.deliveryCancelled' : 'chat.deliveryFailed'
+  return t(key)
+}
+/** 耗时格式化（秒级；超过 60s 显示 m s） */
+function fmtDeliveryDuration(ms: number): string {
+  if (!ms || ms < 0) return ''
+  const totalSec = Math.round(ms / 1000)
+  if (totalSec < 60) return `${totalSec}s`
+  const m = Math.floor(totalSec / 60)
+  const sec = totalSec % 60
+  return sec ? `${m}m${sec}s` : `${m}m`
+}
+/** 成本格式化（美元，保留 4 位有效小数） */
+function fmtDeliveryCost(cost?: number): string {
+  if (!cost) return ''
+  return `$${cost.toFixed(4)}`
 }
 
 // ---- 交付摘要产物卡片（deliverySummary.artifacts 只有 {name,path,mime}，预览走工作区文件接口） ----
@@ -4235,6 +4297,46 @@ onMounted(async () => {
   padding: 4px 0;
 }
 
+/* ---- P1-05 任务交付页 ---- */
+.ds-head {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; line-height: 1.5;
+  padding: 6px 8px; margin-bottom: 8px;
+  border-radius: 7px;
+  background: var(--bg-secondary, rgba(127,127,127,.07));
+}
+.ds-dot { width: 6px; height: 6px; border-radius: 50%; flex: 0 0 auto; background: #2fa36b; }
+.ds-head--cancelled .ds-dot { background: #9aa0ab; }
+.ds-head--failed .ds-dot { background: #d9534f; }
+.ds-status { font-weight: 600; color: var(--text-primary); flex: 0 0 auto; }
+.ds-summary-text { color: var(--text-secondary); min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ds-changes {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+  margin-top: 8px; font-size: 11px;
+}
+.ds-changes-label { color: var(--text-secondary); }
+.ds-change {
+  padding: 1px 6px; border-radius: 5px;
+  background: var(--bg-secondary, rgba(127,127,127,.1));
+  color: var(--text-primary);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ds-change-more { color: var(--text-secondary); }
+.ds-stats {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
+  margin-top: 8px; font-size: 11px; color: var(--text-tertiary, var(--text-secondary));
+}
+.ds-next {
+  display: flex; align-items: center; gap: 6px;
+  margin-top: 8px; font-size: 11px; color: var(--text-secondary);
+}
+.ds-ckpt {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  padding: 1px 5px; border-radius: 4px;
+  background: var(--bg-secondary, rgba(127,127,127,.1));
+  font-size: 10px;
+}
 .delivery-summary {
   margin: 10px 0;
   padding: 10px 12px;

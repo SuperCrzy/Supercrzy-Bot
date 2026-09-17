@@ -522,8 +522,15 @@ export const useChatStore = defineStore('chat', () => {
     // attachments 保持原数组形态（防止 {...数组} 展开成对象导致前端 .filter() 报错），flow 并排存储
     // deliverySummary 一并序列化（2026-08-26 修复：否则 AI 回复底部的"本会话产物"刷新后丢失，
     // 而横栏产物列表（artifacts 表）还在 → 状态错位。老板反馈"产物刷新就没了"）
+    // P1-05：交付页从"仅产物"扩展为"状态+结论+产物+改动" → 只要三者任一存在就必须持久化，
+    // 否则只改代码/被中断的任务刷新后交付页整体丢失（沿用 2026-08-26 的产物持久化教训）。
     const ds = (message as any).deliverySummary
-    const extra = (ds && Array.isArray(ds.artifacts) && ds.artifacts.length > 0) ? { deliverySummary: ds } : undefined
+    const hasDelivery = !!ds && (
+      (Array.isArray(ds.artifacts) && ds.artifacts.length > 0)
+      || (Array.isArray(ds.changedFiles) && ds.changedFiles.length > 0)
+      || !!ds.summary
+    )
+    const extra = hasDelivery ? { deliverySummary: ds } : undefined
     if (base) return { attachments: base, flow: trimmed, ...extra }
     if (extra) return { flow: trimmed, ...extra }
     return { flow: trimmed }
@@ -544,8 +551,13 @@ export const useChatStore = defineStore('chat', () => {
   function parseDeliveryFromAttachments(attachments: any): any | undefined {
     try {
       const parsed = typeof attachments === 'string' ? JSON.parse(attachments) : attachments
-      if (parsed && parsed.deliverySummary && Array.isArray(parsed.deliverySummary.artifacts) && parsed.deliverySummary.artifacts.length > 0) {
-        return parsed.deliverySummary
+      const ds = parsed && parsed.deliverySummary
+      if (ds && (
+        (Array.isArray(ds.artifacts) && ds.artifacts.length > 0)
+        || (Array.isArray(ds.changedFiles) && ds.changedFiles.length > 0)
+        || !!ds.summary
+      )) {
+        return ds
       }
     } catch { /* 旧数据无 deliverySummary */ }
     return undefined

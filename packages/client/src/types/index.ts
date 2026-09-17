@@ -249,12 +249,34 @@ export interface ChatMessage {
   roleRouted?: { roleId: string; roleName: string; matchedKeyword: string }
   /** AI 绘制的矢量图（draw_diagram 工具，diagram 事件） */
   diagrams?: Array<{ title: string; svg: string }>
-  /** 交付摘要 */
+  /**
+   * 任务交付页（P1-05，2026-09-17）
+   * 从"只有产物卡片"扩展为统一交付叙事：状态 + 结论 + 产物 + 改动 + 统计 + 下一步。
+   * 后端在**任何有实际动作的任务**收尾时都会发（不再限于产生了文件的任务）。
+   */
   deliverySummary?: {
+    /** 规范终态：completed / cancelled / failed（来自统一任务状态机） */
+    status?: string
+    statusLabel?: string
+    /** 一句话结论（"任务完成：新增 2 个文件，改动 3 个文件，12 轮 / 34 次工具"） */
+    summary?: string
     artifactCount: number
     artifacts: Array<{ name: string; path: string; mime: string }>
+    /** 本次任务改动过的文件（file_changed 去重） */
+    changedFiles?: Array<{ name: string; path: string }>
+    changedCount?: number
     toolCallCount: number
     turns: number
+    /** 任务总耗时（毫秒） */
+    durationMs?: number
+    promptTokens?: number
+    completionTokens?: number
+    totalTokens?: number
+    cost?: number
+    failureCode?: string
+    checkpointId?: string
+    /** 未完成时是否可继续 */
+    canResume?: boolean
   }
 }
 
