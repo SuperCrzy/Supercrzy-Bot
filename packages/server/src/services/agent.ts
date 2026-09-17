@@ -30,6 +30,7 @@ import {
   statusLabel,
   type TaskRecord,
 } from './task-state'
+import { resolveApprovalMode } from './permission'
 
 // ---- 敏感工具确认机制（先确认后执行）----
 const pendingConfirmations = new Map<string, (decision: 'allow' | 'deny') => void>()
@@ -1561,8 +1562,13 @@ export async function runAgentLoop(
         const regularCalls = toolCalls.filter((tc: any) => !SENSITIVE_TOOLS.has(tc.function.name))
         let allowSensitive: ('allow' | 'deny')[] = []
         if (sensitiveCalls.length > 0) {
-          // 授权模式（settings.toolApprovalMode）：auto=分类器自动授权 / deny=一律拒绝 / prompt=每次询问 / accept-edits=自动批编辑拦命令
-          const approvalMode = readSetting('toolApprovalMode') || 'prompt'
+          // P0-04：授权档位统一为三档（仅查看/执行前询问/自动执行），内部映射回历史 4 档，行为不变。
+          // permissionTier 优先；未设置时回退历史 toolApprovalMode；再回退按会话权限档推导。
+          const approvalMode = resolveApprovalMode(
+            readSetting('permissionTier'),
+            readSetting('toolApprovalMode'),
+            permissionLevel,
+          )
           if (approvalMode === 'auto') {
             // 2026-08-29 对齐 WorkBuddy PermissionMode.auto：不再是"始终允许一切"，
             // 而是用 classifySensitiveTool 分类——显然安全的命令自动放行，危险/未知的操作弹窗确认。

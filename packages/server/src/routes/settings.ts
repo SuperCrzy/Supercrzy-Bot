@@ -77,8 +77,10 @@ settingsRouter.post('/', (ctx: Context) => {
       'memoryEnabled', 'memoryCharLimit',
       // 隐私 Privacy
       'piiMaskingEnabled',
-      // 工具授权模式（auto=始终允许 / prompt=每次询问 / deny=一律拒绝）
+      // 工具授权模式（auto=始终允许 / prompt=每次询问 / deny=一律拒绝）——历史内部档位
       'toolApprovalMode', 'toolAutoApproveSeconds', 'reasoningLevel', 'fallbackModel',
+      // P0-04 用户面向的三档权限（readonly 仅查看 / ask 执行前询问 / auto 自动执行），优先于 toolApprovalMode
+      'permissionTier',
       // Tavily 搜索 API key（web_search 工具优先用，未配置时回退 Serper/Bing RSS）
       'tavilyApiKey',
       // Serper 搜索 API key（Google 原生结果，免费 2500 次/月；服务端执行不受本地网络限制）

@@ -122,21 +122,13 @@
                 <n-input-number v-model:value="form.gatewayTimeout" :min="30" :max="600" size="large" style="width:200px" />
               </div>
               <div class="form-group">
-                <label>{{ $t('settings.toolApproval') }}</label>
-                <p class="input-desc">{{ $t('settings.toolApprovalDesc') }}</p>
-                <n-radio-group v-model:value="form.toolApprovalMode" size="large">
+                <label>{{ $t('settings.permTier') }}</label>
+                <p class="input-desc">{{ $t('settings.permTierDesc') }}</p>
+                <!-- P0-04：收敛为用户能理解的三档（内部映射回历史 4 档，行为不变） -->
+                <n-radio-group v-model:value="form.permissionTier" size="large">
                   <n-space wrap>
-                    <n-radio value="auto" :title="$t('settings.toolApprovalAutoDesc')">
-                      {{ $t('settings.toolApprovalAuto') }}
-                    </n-radio>
-                    <n-radio value="accept-edits" :title="$t('settings.toolApprovalAcceptEditsDesc')">
-                      {{ $t('settings.toolApprovalAcceptEdits') }}
-                    </n-radio>
-                    <n-radio value="prompt" :title="$t('settings.toolApprovalPromptDesc')">
-                      {{ $t('settings.toolApprovalPrompt') }}
-                    </n-radio>
-                    <n-radio value="deny" :title="$t('settings.toolApprovalDenyDesc')">
-                      {{ $t('settings.toolApprovalDeny') }}
+                    <n-radio v-for="t in PERMISSION_TIERS" :key="t" :value="t" :title="$t(TIER_I18N[t].desc)">
+                      {{ $t(TIER_I18N[t].label) }}
                     </n-radio>
                   </n-space>
                 </n-radio-group>
@@ -347,6 +339,7 @@ import { useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { detectLocale } from '@/utils/locale'
+import { PERMISSION_TIERS, TIER_I18N, isPermissionTier, resolvePermissionTier } from '@/utils/permission'
 import { useAppStore } from '@/stores/app'
 import { getModelSelectOptions } from '@/data/models'
 import ProfileAvatar from '@/components/ui/ProfileAvatar.vue'
@@ -562,8 +555,10 @@ interface SettingsForm {
   // Agent
   maxTurns: number
   gatewayTimeout: number
-  // 工具授权模式
+  // 工具授权模式（历史内部档位，保留兼容）
   toolApprovalMode: string
+  // P0-04 用户面向三档权限：readonly 仅查看 / ask 执行前询问 / auto 自动执行
+  permissionTier: string
   toolAutoApproveSeconds: number
   // 生图 Provider 配置
   imageProvider: string
@@ -597,6 +592,7 @@ const form = reactive<SettingsForm>({
   maxTurns: 10,
   gatewayTimeout: 120,
   toolApprovalMode: 'prompt',
+  permissionTier: 'ask',
   toolAutoApproveSeconds: 0,
   imageProvider: 'pollinations',
   imageApiKey: '',
@@ -701,6 +697,11 @@ onMounted(async () => {
     if (!res.ok) throw new Error('Failed to fetch')
     const data = await res.json()
     Object.assign(form, data)
+    // P0-04：三档回显——优先用已存的 permissionTier，否则从历史 toolApprovalMode 投影
+    // （老用户只配过 4 档，必须正确投影到对应档位，不能一律显示默认值）
+    form.permissionTier = isPermissionTier(data.permissionTier)
+      ? data.permissionTier
+      : resolvePermissionTier(data.toolApprovalMode)
     // 语言按钮高亮恢复为客户端实际语言（忽略后端历史值）
     form.language = detectLocale(localStorage.getItem('supercrzy-lang'), (() => { try { return navigator.language || '' } catch { return '' } })())
     // 访问令牌状态（后端只返回掩码，明文仅在生成时一次性展示）
