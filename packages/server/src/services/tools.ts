@@ -298,134 +298,18 @@ export const toolExecutors: Record<string, ToolExecutor> = {
     return storeMemory(db, key, content, args.category, args.importance)
   },
 
-  async memory_recall(args) {
-    const db = getDB()
-    const memRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('memoryEnabled') as any
-    if (memRow && memRow.value !== 'true') return '⛔ 记忆功能已关闭（设置 → 记忆 → 记忆开关）。'
-    // 混合检索：配置了 embedding key 时 FTS5 + 语义余弦融合（α=0.8），否则退化纯 FTS5 ranking
-    const rows = await memoryRankedSearchHybrid(String(args.query || ''), args.limit || 5)
-    if (rows.length === 0) return '未找到相关记忆。'
-    return rows.map((r) => `[${r.key}] (${r.category}, importance:${r.importance}, score:${r.score.toFixed(2)}) ${r.content}`).join('\n')
-  },
 
-  async memory_list(_args) {
-    const db = getDB()
-    const memRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('memoryEnabled') as any
-    if (memRow && memRow.value !== 'true') return '⛔ 记忆功能已关闭（设置 → 记忆 → 记忆开关）。'
-    const rows = db.prepare(
-      'SELECT key, content, category, importance FROM agent_memory ORDER BY importance DESC LIMIT 20'
-    ).all() as any[]
-    if (rows.length === 0) return 'No memories stored.'
-    return rows.map((r: any) => `[${r.key}] (${r.category}, importance:${r.importance}) ${r.content}`).join('\n')
-  },
 
   // ---- 任务工具 ----
-  async task_create(args) {
-    const db = getDB()
-    const id = randomUUID()
-    db.prepare(
-      'INSERT INTO tasks (id, session_id, subject, description, status) VALUES (?, ?, ?, ?, ?)'
-    ).run(id, args.session_id || null, args.subject, args.description || '', 'pending')
 
-    // Auto-create sub-tasks if provided
-    if (Array.isArray(args.subtasks)) {
-      for (let i = 0; i < args.subtasks.length; i++) {
-        const sub = args.subtasks[i]
-        db.prepare(
-          'INSERT INTO tasks (id, session_id, parent_id, subject, description, status, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)'
-        ).run(randomUUID(), args.session_id || null, id, sub.subject || sub, sub.description || '', 'pending', i)
-      }
-    }
 
-    return `Task created: [${id}] "${args.subject}" ${args.subtasks ? `with ${args.subtasks.length} sub-tasks` : ''}`
-  },
-
-  async task_update(args) {
-    const db = getDB()
-    const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(args.id) as any
-    if (!task) return `Task not found: ${args.id}`
-
-    const updates: string[] = []
-    if (args.status) { db.prepare('UPDATE tasks SET status = ?, updated_at = datetime(\'now\') WHERE id = ?').run(args.status, args.id); updates.push(`status → ${args.status}`) }
-    if (args.progress !== undefined) { db.prepare('UPDATE tasks SET progress = ?, updated_at = datetime(\'now\') WHERE id = ?').run(args.progress, args.id); updates.push(`progress → ${args.progress}%`) }
-    if (args.subject) { db.prepare('UPDATE tasks SET subject = ?, updated_at = datetime(\'now\') WHERE id = ?').run(args.subject, args.id); updates.push(`subject updated`) }
-
-    return updates.length > 0 ? `Task updated: ${updates.join(', ')}` : 'No changes made. Use status/pending, status/in_progress, status/completed, progress/0-100.'
-  },
-
-  async task_list(args) {
-    const db = getDB()
-    let query = 'SELECT * FROM tasks WHERE 1=1'
-    const params: any[] = []
-    if (args.session_id) { query += ' AND session_id = ?'; params.push(args.session_id) }
-    if (args.status) { query += ' AND status = ?'; params.push(args.status) }
-    query += ' ORDER BY sort_order ASC LIMIT 20'
-
-    const tasks = db.prepare(query).all(...params) as any[]
-    if (tasks.length === 0) return args.status ? `No ${args.status} tasks` : 'No tasks found.'
-
-    return tasks.map((t: any) =>
-      `${t.status === 'in_progress' ? '▶' : t.status === 'completed' ? '✓' : '○'} [${t.status}] ${t.subject}${t.progress ? ` (${t.progress}%)` : ''}`
-    ).join('\n')
-  },
 
   // ---- AskQuestion：Agent 结构化提问（学 Grok）----
   // 需要关键决策/补充信息时向用户提问，挂起等待答复（超时返回超时标记）
-  async ask_question(args, ctx) {
-    if (!ctx?.askQuestion || !ctx?.emitQuestion) {
-      return '⛔ 当前环境不支持提问交互，请基于现有信息合理假设后继续。'
-    }
-    const id = `q_${randomUUID()}`
-    const question = String(args.question || '').trim()
-    if (!question) return '❌ ask_question 需要提供 question 参数'
-    // 2026-08-27 修复：options 可能是对象数组（{label/description}/{text} 等），String(对象)=[object Object]
-    // → 归一化为字符串数组（与 ask_user 一致）
-    const options: string[] = Array.isArray(args.options)
-      ? args.options.map((o: any) => {
-          if (typeof o === 'string') return o
-          if (o == null) return ''
-          if (typeof o === 'object') return String(o.label ?? o.text ?? o.value ?? '')
-          return String(o)
-        }).filter(Boolean)
-      : []
-    // 推送前端展示
-    ctx.emitQuestion({ id, question, options })
-    // 挂起等待答复
-    const answer = await ctx.askQuestion(id, question, options)
-    if (answer === '__timeout__') return '⏰ 用户未在时限内答复，请基于现有信息合理假设后继续。'
-    return `用户答复: ${answer}`
-  },
 
   // ---- CreatePlan：Agent 多步骤计划（学 Grok CreatePlan）----
   // 任务较复杂时先创建结构化计划（任务列表 + 子任务），前端以计划卡片展示进度
   // 注：get_goal 已迁至 tools/ 目录（ToolDef 注册表，2026-08-25 工具架构轻量包化示范）
-  async create_plan(args, ctx) {
-    const db = getDB()
-    const title = String(args.title || args.subject || '').trim()
-    if (!title) return '❌ create_plan 需要提供 title（计划标题）'
-    const steps: Array<{ subject: string; description?: string }> = Array.isArray(args.steps)
-      ? args.steps.map((s: any) => (typeof s === 'string' ? { subject: s } : { subject: s.subject || '', description: s.description }))
-      : []
-    if (steps.length === 0) return '❌ create_plan 需要提供 steps（步骤列表）'
-
-    // 先创建计划根任务（session 归属：模型传的 session_id 优先，否则用 ctx 注入兜底）
-    const planSessionId = args.session_id || ctx?.sessionId || null
-    const planId = randomUUID()
-    db.prepare(
-      'INSERT INTO tasks (id, session_id, subject, description, status, sort_order) VALUES (?, ?, ?, ?, ?, ?)'
-    ).run(planId, planSessionId, title, args.description || '', 'in_progress', 0)
-
-    // 每个步骤创建子任务；第一步立即进入 in_progress（驱动前端进度推进）
-    const stepIds: string[] = []
-    for (let i = 0; i < steps.length; i++) {
-      const stepId = randomUUID()
-      db.prepare(
-        'INSERT INTO tasks (id, session_id, parent_id, subject, description, status, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)'
-      ).run(stepId, planSessionId, planId, steps[i].subject, steps[i].description || '', i === 0 ? 'in_progress' : 'pending', i + 1)
-      stepIds.push(stepId)
-    }
-    return `📋 计划已创建: "${title}"，共 ${steps.length} 步。\n` + steps.map((s, i) => `  ${i + 1}. [ ] ${s.subject}`).join('\n')
-  },
 
   // ---- Git 操作（学 Grok AgenticGitAction）：commit/diff/status ----
   async git_status(args, ctx) {
@@ -451,26 +335,6 @@ export const toolExecutors: Record<string, ToolExecutor> = {
 
   // ---- Computer Use（学 Grok ComputerUse，接入开源 computer-use-mcp）----
   // 仅 permissionLevel=full 时启用；复用工具确认机制（Agent 调用前需用户确认）
-  async computer_use(args, ctx) {
-    if (ctx?.permissionLevel !== 'full') {
-      return '⛔ computer_use 需要 full 权限（设置中把会话权限调到「完全访问」才能操控电脑）\n\n授权路径：对话输入区下方权限选择器 → 选「完全访问」→ 重新发送消息'
-    }
-    const { callComputerUse } = await import('./computer-use')
-    const action = String(args.action || '').trim()
-    if (!action) return '❌ computer_use 需要提供 action（screenshot/click/type/key/scroll/move/open）'
-    const params = { ...(args.args || {}) }
-    try {
-      const result = await callComputerUse(action, params)
-      return result
-    } catch (err: any) {
-      const msg = String(err?.message || '')
-      // macOS 权限不足（录屏/辅助功能）→ 给出具体授权步骤
-      if (/permission|denied|screen recording|accessibility|TCC|not authorized/i.test(msg)) {
-        return `❌ computer_use 需要 macOS 权限授权（当前被系统拒绝）\n\n授权步骤：\n1. 打开「系统设置 → 隐私与安全性」\n2. 录屏与屏幕录制：把 SUPERCRZY BOT 加入并开启\n3. 辅助功能：把 SUPERCRZY BOT 加入并开启\n4. 重启应用后重试`
-      }
-      return `❌ computer_use 调用失败: ${msg}`
-    }
-  },
 
   // ---- 文件工具（沙箱路径白名单，支持会话级工作目录） ----
   async file_read(args, ctx) {
@@ -693,58 +557,13 @@ export const toolExecutors: Record<string, ToolExecutor> = {
     return res.ok ? `✅ 终端会话已打开：${res.id}（cwd: ${cwd || process.cwd()}）。用 terminal_send 发命令、terminal_read 读输出。` : `❌ ${res.error}`
   },
 
-  async terminal_list() {
-    const list = terminalList()
-    if (list.length === 0) return '当前没有终端会话。用 terminal_open 打开一个。'
-    return '终端会话：\n' + list.map((s) => `- ${s.id} [${s.running ? '运行中' : '已退出'}] shell=${s.shell} cwd=${s.cwd}`).join('\n')
-  },
 
-  async terminal_send(args) {
-    if (!args.id) return '❌ 缺少会话 id'
-    const res = terminalSend(String(args.id), String(args.command ?? ''))
-    return res.ok ? `✅ 已发送到 ${args.id}（用 terminal_read 读取输出）` : `❌ ${res.error}`
-  },
 
-  async terminal_read(args) {
-    if (!args.id) return '❌ 缺少会话 id'
-    const res = terminalRead(String(args.id), args.offset ? Number(args.offset) : undefined)
-    if (!res.ok) return `❌ ${res.error}`
-    if (!res.output) return `（${args.id} 暂无新输出）`
-    return `${res.output}\n[输出结束 nextOffset=${res.nextOffset}${res.exited ? ' 会话已退出' : ''}]`
-  },
 
-  async terminal_signal(args) {
-    if (!args.id) return '❌ 缺少会话 id'
-    const sig = String(args.signal || 'SIGINT').toUpperCase()
-    const res = terminalSignal(String(args.id), sig)
-    return res.ok ? `✅ 已发送 ${sig} 到 ${args.id}` : `❌ ${res.error}`
-  },
 
-  async terminal_close(args) {
-    if (!args.id) return '❌ 缺少会话 id'
-    const res = terminalClose(String(args.id))
-    return res.ok ? `✅ 已关闭终端会话 ${args.id}` : `❌ ${res.error}`
-  },
 
   // ---- 可视化指南（WorkBuddy visualizer:read_me 同款）----
   /** 读取项目的可视化操作指南（README/SKILL.md 等），帮助 AI 了解当前工作区约定 */
-  async read_me(args, ctx) {
-    const cwd = ctx?.cwd || WORKSPACE_ROOT
-    const candidates = ['README.md', 'README.zh-CN.md', '.agents/skills/README.md', 'SUPERCRZY_AGENT_参考手册.md']
-    for (const name of candidates) {
-      const p = join(cwd, name)
-      const guard = assertSafeFilePath(p, { level: ctx?.permissionLevel, workspaceDir: ctx?.cwd, extraAllowed: ctx?.cwd ? [ctx.cwd] : [] })
-      if (guard) continue
-      try {
-        await access(p, constants.F_OK)
-        const content = await readFile(p, 'utf-8')
-        const max = Math.min(Number(args.maxLength) || 8000, content.length)
-        const sliced = content.slice(0, max)
-        return `已读取可视化指南：${name}（${content.length} 字符）\n\n${sliced}${max < content.length ? '\n\n…（已截断，共 ' + content.length + ' 字符）' : ''}`
-      } catch { /* 尝试下一个 */ }
-    }
-    return '未找到可视化指南文件（README.md / .agents/skills/README.md）。可先用 file_search 查找项目文档。'
-  },
 
   // ---- 工具发现（2026-08-29 两级加载：重型工具按需暴露 schema） ----
   async tool_search(args) {
@@ -1044,64 +863,8 @@ export const toolExecutors: Record<string, ToolExecutor> = {
   },
 
   // ---- 内容工厂：一次跑完(抓取→提炼→配图文) ----
-  async make_article(args, ctx) {
-    const url = String(args.url || '').trim()
-    if (!url) return '❌ make_article 需要 url 参数'
-    try {
-      const { makeArticle } = await import('./content-factory')
-      const stream = (m: string) => { if (ctx?.onOutput) ctx.onOutput('', `[内容工厂] ${m}\n`) }
-      const r = await makeArticle({ url, focus: args.focus }, (p) => stream(`（${p.msg}）`))
-      if (!r.ok) return `❌ 内容工厂未能完成: ${r.stage?.msg || r.error}`
-      // 产物返回 markdown；若前端支持大文本将走 onOutput 已流式
-      return `${r.title}\n\n${r.md}`
-    } catch (e: any) {
-      return `❌ 内容工厂调用失败: ${e.message}`
-    }
-  },
 
   // ---- AI 浏览器驾驶(让 Agent 自己能开/点/读网页; LLM 逐原语决策) 2026-09-03 ----
-  async browser(args, ctx) {
-    const a = String(args.action || '').trim()
-    try {
-      const { browserNavigate, browserScreenshot, browserReadText,
-        browserClickText, browserClickAt, browserTypeText, browserPressKey, browserBack, browserScroll, browserListInteractive } = await import('./ai-browser')
-      let out: unknown = ''
-      if (a === 'navigate') {
-        const url = String(args.url || '').trim()
-        if (!url) return '❌ browser navigate 需要 url'
-        const s = await browserNavigate(url); out = `已打开 ${s.url}（${s.title || ''}）`
-      } else if (a === 'look') {
-        const items = await browserListInteractive().catch(() => [])
-        out = '当前页可交互元素:\n' + (items.length ? items.join('\n') : '(无可点击简单页)')
-        try { const t = await browserReadText(12000); if (t.text) out += `\n文本预览: ${t.text.slice(0, 400)}` } catch {}
-      } else if (a === 'click') {
-        const r = args.text ? await browserClickText(String(args.text)) : args.x != null ? await browserClickAt(Number(args.x), Number(args.y)) : null
-        out = r ? `已点击${r.ok ? '' : '失败: ' + r.error}${r.ok && r.url ? ' → ' + r.url : ''}` : '❌ click 需 text 或 x/y'
-      } else if (a === 'type') {
-        const r = await browserTypeText(String(args.text || ''), args.into ? String(args.into) : undefined)
-        out = r.ok ? '已输入' : '输入失败'
-      } else if (a === 'press') {
-        out = (await browserPressKey(String(args.key || ''))).ok ? `已按 ${args.key}` : '按键失败'
-      } else if (a === 'back') {
-        out = (await browserBack()).ok ? '已后退' : '后退失败'
-      } else if (a === 'scroll') {
-        out = (await browserScroll(Number(args.deltaY) || 300)).ok ? '已滚动' : '滚动失败'
-      } else if (a === 'url') {
-        const s = await browserScreenshot(); out = `当前: ${s.url}`
-      } else if (a === 'snapshot') {
-        const s = await browserScreenshot(); return `📄 ${s.url}\n标题: ${s.title || ''}`
-      } else return '❌ browser 未知 action: ' + a
-      // 动作后带回一屏缩略文本，便于 AI 自读是不是要到目标
-      try { const t = await browserReadText(2000); if (t.text) out += `\n[现页可见] ${t.text.slice(0, 200)}` } catch {}
-      // 页面已变化动作后补一帧截图 → 更新 lastFrame，右栏 /browser/latest 轮询即见跳转(2026-09-04)
-      if (a === 'navigate' || a === 'click' || a === 'back' || a === 'scroll' || a === 'press' || a === 'type') {
-        try { await browserScreenshot() } catch { /* 忽略，read 类已自带 */ }
-      }
-      return String(out)
-    } catch (e: any) {
-      return '❌ browser 失败: ' + (e?.message || e)
-    }
-  },
 
   // ---- 网页工具 ----
   async web_fetch(args) {
@@ -1180,153 +943,13 @@ export const toolExecutors: Record<string, ToolExecutor> = {
     }
   },
 
-  async web_search(args) {
-    // 搜索 Provider 抽象（2026-08-28 重构：从 5 层 if 嵌套改为 search-providers 插件式，见 services/search-providers.ts）
-    // 优先级：Tavily → Serper → SearXNG → DeepSeek → Bing，探测→降级；新增引擎=加 provider 对象
-    try {
-      const query = String(args.query || '').trim()
-      if (!query) return '❌ 缺少查询参数 query'
-      const count = Math.min(args.count || 8, 10)
-      const timeRange = ['day', 'week', 'month', 'year'].includes(args.timeRange) ? args.timeRange : ''
-      const NEWS_HINTS = /新闻|今日|今天|最新|快讯|报道|发布|速递|资讯|简报|News|Breaking|Today|Latest|Headline/i
-      const effectiveSource = args.source === 'news' || (NEWS_HINTS.test(query) && timeRange) ? 'news' : (args.source || '')
-      const maxAgeDays = timeRange ? ({ day: 1, week: 7, month: 31, year: 365 } as Record<string, number>)[timeRange] : 0
-      // 时效/news 类请求走"并行全源"更全面（DeepSeek当日+自建SearXNG+Bing 同时并行合并去重）；
-      // 普通搜索走快通道（首个非空即返，省时省费）
-      const wantFresh = effectiveSource === 'news' || timeRange === 'day' || timeRange === 'week'
-      if (wantFresh) {
-        const r = await runExhaustiveSearch({ query, count, timeRange, depth: args.depth || 'basic', source: effectiveSource, maxAgeDays })
-        if (r.results.length === 0) return JSON.stringify({ results: [], query, engine: r.engine, message: '未找到关于 "' + query + '" 的搜索结果。' })
-        return JSON.stringify({ engine: r.engine, engines: r.engines, results: r.results, query })
-      }
-      const { engine, results } = await runSearchChain({ query, count, timeRange, depth: args.depth || 'basic', source: effectiveSource, maxAgeDays })
-      if (results.length === 0) return JSON.stringify({ results: [], query, message: '未找到关于 "' + query + '" 的搜索结果。' })
-      return JSON.stringify({ engine, results, query })
-    } catch (err: any) {
-      return '❌ 搜索失败：' + err.message
-    }
-  },
 
   // ---- P1 Deep Research Engine：深度研究（多轮递归搜索+提炼 → 3+ 页报告） ----
-  async deep_research(args, ctx) {
-    const query = String(args.query || '').trim()
-    if (!query) return '❌ 缺少参数 query（研究主题）'
-    const breadth = Math.min(Math.max(parseInt(args.breadth) || 4, 2), 6)
-    const depth = Math.min(Math.max(parseInt(args.depth) || 2, 1), 3)
-    try {
-      const { runDeepResearch } = await import('./deep-research.js')
-      const progress = (p: any) => {
-        const line = `[深度研究] 深度 ${p.currentDepth}/${p.totalDepth} · 查询 ${p.completedQueries}/${p.totalQueries || '?'} · 当前：${p.currentQuery || '…'}\n`
-        ctx?.onOutput?.('', line)
-      }
-      const result = await runDeepResearch({ query, breadth, depth, onProgress: progress })
-      return JSON.stringify({
-        engine: 'deep-research',
-        learnings: result.learnings,
-        visitedUrls: result.visitedUrls,
-        report: result.report,
-        summary: `深度研究完成：${result.learnings.length} 条学习点、${result.visitedUrls.length} 个来源、报告 ${result.report.length} 字符`,
-      })
-    } catch (err: any) {
-      return `❌ 深度研究失败：${err.message}`
-    }
-  },
 
   // ---- 技能管理工具 ----
-  async skill_list(_args) {
-    const db = getDB()
-    const rows = db.prepare(
-      'SELECT name, description, category, enabled, is_builtin, trigger_keywords FROM skills ORDER BY sort_order ASC, created_at DESC'
-    ).all() as any[]
-    if (rows.length === 0) return 'No skills installed.'
-    return rows.map((r: any) => {
-      const status = r.enabled ? 'ON' : 'OFF'
-      const source = r.is_builtin ? 'builtin' : 'installed'
-      return `[${status}] ${r.name} (${r.category}, ${source}) - ${r.description}`
-    }).join('\n')
-  },
 
-  async skill_search(args) {
-    const query = args.query || args.q || ''
-    if (!query.trim()) return 'Usage: skill_search(query="docker deploy")'
 
-    const searchQuery = `${query} SKILL.md agent skill github`
-    try {
-      const encoded = encodeURIComponent(searchQuery)
-      const url = `https://www.bing.com/search?format=rss&q=${encoded}&count=8`
-      const response = await fetch(url, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; SUPERCRZY-BOT/1.0)', 'Accept': 'application/rss+xml' },
-      })
-      if (!response.ok) return `Search failed: HTTP ${response.status}`
 
-      const xml = await response.text()
-      const itemRegex = /<item>([\s\S]*?)<\/item>/g
-      const titleRegex = /<title><!\[CDATA\[(.*?)\]\]><\/title>|<title>(.*?)<\/title>/
-      const linkRegex = /<link>(.*?)<\/link>/
-
-      const results: string[] = []
-      let match
-      while ((match = itemRegex.exec(xml)) !== null && results.length < 8) {
-        const item = match[1]
-        const titleM = item.match(titleRegex)
-        const linkM = item.match(linkRegex)
-        const title = titleM ? (titleM[1] || titleM[2] || '').trim() : ''
-        const repoUrl = linkM ? linkM[1].trim() : ''
-        if (title && repoUrl) {
-          results.push(`- ${title}\n  ${repoUrl}`)
-        }
-      }
-
-      if (results.length === 0) return `No skills found for "${query}". Try broader keywords.`
-      return `Found ${results.length} results for "${query}":\n\n${results.join('\n\n')}\n\nUse skill_install(url="...") to install any of these.`
-    } catch (err: any) {
-      return `Skill search failed: ${err.message}`
-    }
-  },
-
-  async skill_view(args) {
-    const db = getDB()
-    const name = args.name || args.id || ''
-    if (!name) return 'Usage: skill_view(name="skill-name") or skill_view(id="uuid")'
-
-    const skill = name.length > 20
-      ? db.prepare('SELECT * FROM skills WHERE id = ?').get(name) as any
-      : db.prepare('SELECT * FROM skills WHERE name LIKE ?').get(`%${name}%`) as any
-
-    if (!skill) return `Skill not found: ${name}. Use skill_list() to see available skills.`
-
-    let tools = ''
-    try { tools = JSON.parse(skill.tools || '[]').join(', ') || 'none' } catch { tools = skill.tools || 'none' }
-
-    return [
-      `=== ${skill.name} ===`,
-      `Description: ${skill.description}`,
-      `Category: ${skill.category}`,
-      `Status: ${skill.enabled ? 'Active' : 'Disabled'}`,
-      `Source: ${skill.is_builtin ? 'builtin' : 'installed'}`,
-      `Keywords: ${skill.trigger_keywords || 'none'}`,
-      `Tools: ${tools}`,
-      skill.source_file ? `File: ${skill.source_file}` : '',
-      skill.prompt_template ? `\n--- Prompt Template ---\n${skill.prompt_template}` : '',
-    ].filter(Boolean).join('\n')
-  },
-
-  async skill_install(args) {
-    const url = args.url || args.github || ''
-    if (!url.trim()) return 'Usage: skill_install(url="https://github.com/user/skill-repo")'
-
-    try {
-      initSkillsDirectory(process.cwd())
-      const result = await installSkillFromGitHub(url.trim(), process.cwd())
-      if (result.success) {
-        return `Installed skill: ${result.name}\nSkill is now active. Use skill_view(name="${result.name}") to see details.`
-      } else {
-        return `Install failed: ${result.error}`
-      }
-    } catch (err: any) {
-      return `Skill install error: ${err.message}`
-    }
-  },
 
   // ---- 交互工具 ----
   async ask_user(args, ctx) {
@@ -1526,28 +1149,6 @@ export const toolDefinitions: ToolDefinition[] = [
     },
   },
   {
-    name: 'memory_recall',
-    description: '搜索已存储的记忆。在需要回忆用户信息时使用。',
-    category: 'memory',
-    parameters: {
-      type: 'object',
-      properties: {
-        query: { type: 'string', description: '搜索关键词' },
-        limit: { type: 'number', description: '返回结果数量，默认5' },
-      },
-      required: ['query'],
-    },
-  },
-  {
-    name: 'memory_list',
-    description: '列出所有已存储的记忆。',
-    category: 'memory',
-    parameters: {
-      type: 'object',
-      properties: {},
-    },
-  },
-  {
     name: 'file_read',
     description: '读取本地文件内容。支持文本文件。读取大文件时可用 startLine/endLine 只读取指定行范围（省 token 且能精确看某段代码），返回内容带行号；不传则读取全文（maxLength 以内）。',
     category: 'file',
@@ -1662,74 +1263,6 @@ export const toolDefinitions: ToolDefinition[] = [
     },
   },
   {
-    name: 'terminal_list',
-    description: '列出当前所有终端会话（id/运行状态/shell/cwd）。',
-    category: 'terminal',
-    parameters: { type: 'object', properties: {} },
-  },
-  {
-    name: 'terminal_send',
-    description: '向终端会话发送命令（追加换行执行）。适合长任务后台运行（如启动 dev server）、交互式程序。',
-    category: 'terminal',
-    parameters: {
-      type: 'object',
-      properties: {
-        id: { type: 'string', description: '终端会话 id（terminal_open 返回）' },
-        command: { type: 'string', description: '要执行的命令' },
-      },
-      required: ['id', 'command'],
-    },
-  },
-  {
-    name: 'terminal_read',
-    description: '增量读取终端会话输出（从上次读取位置；返回 nextOffset 供下次续读）。',
-    category: 'terminal',
-    parameters: {
-      type: 'object',
-      properties: {
-        id: { type: 'string', description: '终端会话 id' },
-        offset: { type: 'number', description: '可选：起始读取位置（默认上次消费位置）' },
-      },
-      required: ['id'],
-    },
-  },
-  {
-    name: 'terminal_signal',
-    description: '向终端会话发送信号：SIGINT 中断当前命令（Ctrl-C）、SIGTERM 终止等。',
-    category: 'terminal',
-    parameters: {
-      type: 'object',
-      properties: {
-        id: { type: 'string', description: '终端会话 id' },
-        signal: { type: 'string', description: '信号名：SIGINT（默认）/ SIGTERM / SIGHUP 等' },
-      },
-      required: ['id'],
-    },
-  },
-  {
-    name: 'terminal_close',
-    description: '关闭终端会话（SIGTERM + 1s 强杀兜底）。',
-    category: 'terminal',
-    parameters: {
-      type: 'object',
-      properties: {
-        id: { type: 'string', description: '终端会话 id' },
-      },
-      required: ['id'],
-    },
-  },
-  {
-    name: 'read_me',
-    description: '读取项目的可视化操作指南（README.md / .agents/skills/README.md 等），了解当前工作区的约定、目录结构和用法。适合任务开始前快速了解项目背景。',
-    category: 'file',
-    parameters: {
-      type: 'object',
-      properties: {
-        maxLength: { type: 'number', description: '最大读取字符数，默认 8000' },
-      },
-    },
-  },
-  {
     name: 'shell_exec',
     description: '执行 Shell 命令并获取输出。仅限只读/查询类命令（查看、搜索、测试、构建）。**严禁用 echo/cat/heredoc 等命令写文件或改文件**——写文件请用 file_write 工具。输出限制 8000 字符。**必须提供 description 参数**：用一句话说明本命令要做什么（如"运行查看 deeplink.ts 实际位置"），前端用它作为命令卡片标题。',
     category: 'system',
@@ -1769,25 +1302,6 @@ export const toolDefinitions: ToolDefinition[] = [
     },
   },
   {
-    name: 'browser',
-    description: 'AI 浏览器驾驶：让你能自主打开网页、看页面可点元素、点/输入/后退/滚动、读现页文本。当任务需要 核实一个网页的精确内容/看真实排版视觉(截图)/在站内做交互(点结果/填字段/翻页) 时，先用它 navigate 打开目标，再 look 看可点清单 → click/type 逐原语推进。也可 tab 右栏实时看画面。',
-    category: 'system',
-    parameters: {
-      type: 'object',
-      properties: {
-        action: { type: 'string', enum: ['navigate', 'look', 'click', 'type', 'press', 'back', 'scroll', 'url', 'snapshot'], description: 'navigate(开url)/look(看可点清单+文本)/click(需text或x,y)/type(输入text,into可选焦点占位)/press(key)/back(后退)/scroll(deltaY)/url(当前地址)/snapshot(标题)' },
-        url: { type: 'string', description: 'navigate 要打开的网址' },
-        text: { type: 'string', description: 'click 要点的可见文本 / type 要输入的文字' },
-        x: { type: 'number', description: 'click 用坐标时的 x' },
-        y: { type: 'number', description: 'click 用坐标时的 y' },
-        into: { type: 'string', description: 'type 要填的占位/控件名(可选)' },
-        key: { type: 'string', description: 'press 的键(Enter/Escape/Backspace…)' },
-        deltaY: { type: 'number', description: 'scroll 像素(默认300)' },
-      },
-      required: ['action'],
-    },
-  },
-  {
     name: 'generate_image',
     description: '用 AI 生成图片（文生图）。支持 op 为：generate(文生图)。通过 provider 选择生图通道：pollinations(免key默认) / doubao(火山方舟Seedream,需Doubao key) / gemini(谷歌Nano Banana,需Gemini key)。用户可在设置里配置 provider 和对应 API key。输入 prompt(画面描述，越具体越好)，可选 width/height。生成的图为交付产物，对话内显示+右侧预览tab展示。',
     category: 'system',
@@ -1804,19 +1318,6 @@ export const toolDefinitions: ToolDefinition[] = [
     },
   },
   {
-    name: 'make_article',
-    description: '内容工厂：给定一个 URL（网页/文章/视频页），自动 抓正文→提炼成结构化中文文稿→输出图文成品，一次跑完，无需你分步操作。适合"把这个链接整理成文章/转成中文稿/做摘要长文"。',
-    category: 'system',
-    parameters: {
-      type: 'object',
-      properties: {
-        url: { type: 'string', description: '要加工的网页/文章/视频的完整 URL' },
-        focus: { type: 'string', description: '（可选）你特别关注的要点/角度' },
-      },
-      required: ['url'],
-    },
-  },
-  {
     name: 'web_fetch',
     description: '获取网页内容。返回网页的文本内容。',
     category: 'network',
@@ -1827,78 +1328,6 @@ export const toolDefinitions: ToolDefinition[] = [
         maxLength: { type: 'number', description: '最大返回字符数，默认5000' },
       },
       required: ['url'],
-    },
-  },
-  {
-    name: 'web_search',
-    description: '网络搜索。返回搜索结果列表（标题/链接/摘要/日期）。**用户问"最新/今天/本周"等时效性问题时必须调用并传 timeRange，不要凭训练数据回答过时信息。** 新闻/时效类问题用 source=news（新闻流，结果带精确发布日期）→ 直接按日期筛选即可，**不要逐个打开网页核实发布日期**；结果中 date 为空的条目标注"日期未知"即可。',
-    category: 'network',
-    parameters: {
-      type: 'object',
-      properties: {
-        query: { type: 'string', description: '搜索关键词' },
-        count: { type: 'number', description: '返回结果数量，默认8，最大10' },
-        timeRange: { type: 'string', enum: ['day', 'week', 'month', 'year'], description: '时间范围过滤：day=近24小时 / week=近1周 / month=近1月 / year=近1年。要"今天的消息"必须用 day，时效性问题至少 week。' },
-        source: { type: 'string', enum: ['news'], description: '新闻流模式：只搜新闻媒体，结果带精确发布日期（时效性问题推荐使用，省去逐条核实）。' },
-      },
-      required: ['query'],
-    },
-  },
-  {
-    name: 'deep_research',
-    description: '深度研究：多轮递归搜索+AI 提炼，生成 3 页以上的详细研究报告（含 Sources 来源列表）。适用于需要全面深入调研的问题（公司分析/产品对比/技术解读/新闻事件背景）。参数 query 为研究主题，breadth 每轮搜索数量(2-6，默认4)，depth 递归深度(1-3，默认2)。耗时 1-3 分钟，请等待完成。',
-    category: 'network',
-    parameters: {
-      type: 'object',
-      properties: {
-        query: { type: 'string', description: '研究主题（清晰具体，如"对比 OpenAI GPT-5 与 Google Gemini 3 的推理能力"）' },
-        breadth: { type: 'number', description: '每轮搜索数量，2-6，默认 4' },
-        depth: { type: 'number', description: '递归下钻深度，1-3，默认 2' },
-      },
-      required: ['query'],
-    },
-  },
-  {
-    name: 'ask_question',
-    description: '向用户提出结构化问题（带选项或开放输入），挂起等待答复。当任务需要关键决策、缺少必要信息或需要用户确认时使用。',
-    category: 'interaction',
-    parameters: {
-      type: 'object',
-      properties: {
-        question: { type: 'string', description: '要问的问题（清晰具体）' },
-        options: { type: 'array', items: { type: 'string' }, description: '可选答案列表（2-4 个，可为空表示自由输入）' },
-      },
-      required: ['question'],
-    },
-  },
-  {
-    name: 'task_create',
-    description: 'Create a new task with optional sub-tasks. Use for planning and tracking work.',
-    category: 'system',
-    parameters: {
-      type: 'object',
-      properties: {
-        subject: { type: 'string', description: 'Task title' },
-        description: { type: 'string', description: 'Task description' },
-        session_id: { type: 'string', description: 'Associated session ID' },
-        subtasks: { type: 'array', items: { type: 'object', properties: { subject: { type: 'string' }, description: { type: 'string' } } }, description: 'Sub-tasks' },
-      },
-      required: ['subject'],
-    },
-  },
-  {
-    name: 'create_plan',
-    description: '创建多步骤执行计划（学 Grok CreatePlan）。任务较复杂（>2 步）时先规划步骤再执行，前端展示计划卡片跟踪进度。',
-    category: 'system',
-    parameters: {
-      type: 'object',
-      properties: {
-        title: { type: 'string', description: '计划标题' },
-        description: { type: 'string', description: '计划说明' },
-        steps: { type: 'array', items: { type: 'object', properties: { subject: { type: 'string', description: '步骤标题' }, description: { type: 'string' } } }, description: '步骤列表（2-8 步）' },
-        session_id: { type: 'string', description: 'Associated session ID' },
-      },
-      required: ['title', 'steps'],
     },
   },
   {
@@ -1918,91 +1347,6 @@ export const toolDefinitions: ToolDefinition[] = [
     description: '提交当前工作区全部变更（git add -A + commit）。提交前先 git_status/git_diff 确认变更内容。',
     category: 'git',
     parameters: { type: 'object', properties: { message: { type: 'string', description: '提交信息（清晰描述变更）' } }, required: ['message'] },
-  },
-  {
-    name: 'computer_use',
-    description: '操控用户电脑（截屏/点击/输入/按键/滚动/打开应用）。仅 full 权限可用，调用前需用户确认。action 可选：screenshot(截屏)/click(点击 x,y)/type(输入文本)/key(按键 combo)/scroll(滚动)/move(移动鼠标)/open(打开应用)。',
-    category: 'system',
-    dangerous: true,
-    parameters: {
-      type: 'object',
-      properties: {
-        action: { type: 'string', description: '操作：screenshot / click / type / key / scroll / move / open' },
-        args: { type: 'object', description: '参数：click 需 {x,y}；type 需 {text}；key 需 {combo}；scroll 需 {clicks}；move 需 {x,y}；open 需 {name}' },
-      },
-      required: ['action'],
-    },
-  },
-  {
-    name: 'task_update',
-    description: 'Update task status, progress, or subject. Status: pending/in_progress/completed.',
-    category: 'system',
-    parameters: {
-      type: 'object',
-      properties: {
-        id: { type: 'string', description: 'Task ID' },
-        status: { type: 'string', enum: ['pending', 'in_progress', 'completed'], description: 'New status' },
-        progress: { type: 'number', description: 'Progress 0-100' },
-        subject: { type: 'string', description: 'New subject' },
-      },
-      required: ['id'],
-    },
-  },
-  {
-    name: 'task_list',
-    description: 'List tasks, optionally filtered by session or status.',
-    category: 'system',
-    parameters: {
-      type: 'object',
-      properties: {
-        session_id: { type: 'string', description: 'Filter by session' },
-        status: { type: 'string', enum: ['pending', 'in_progress', 'completed'], description: 'Filter by status' },
-      },
-    },
-  },
-  {
-    // get_goal 已迁至 tools/ 目录（ToolDef 注册表，2026-08-25 工具架构轻量包化）——此处不再内联定义，避免工具名重复
-    name: 'skill_list',
-    description: '列出所有已安装的技能模块。查看 agent 当前具备哪些能力。',
-    category: 'system',
-    parameters: { type: 'object', properties: {} },
-  },
-  {
-    name: 'skill_search',
-    description: '搜索互联网上的开源技能。当你需要的能力没有内置技能支持时使用，如 docker、deploy、lint 等。',
-    category: 'system',
-    parameters: {
-      type: 'object',
-      properties: {
-        query: { type: 'string', description: '搜索关键词，如 "docker deploy"、"python lint"、"react testing"' },
-      },
-      required: ['query'],
-    },
-  },
-  {
-    name: 'skill_view',
-    description: '查看指定技能的完整详情，包括 prompt template 和可用工具。',
-    category: 'system',
-    parameters: {
-      type: 'object',
-      properties: {
-        name: { type: 'string', description: '技能名称（模糊匹配）' },
-        id: { type: 'string', description: '技能 UUID' },
-      },
-    },
-  },
-  {
-    name: 'skill_install',
-    description: '从 GitHub 安装第三方技能。传入包含 SKILL.md 的 GitHub 仓库 URL。',
-    category: 'system',
-    dangerous: true,
-    parameters: {
-      type: 'object',
-      properties: {
-        url: { type: 'string', description: 'GitHub 仓库 URL，如 https://github.com/user/skill-repo' },
-      },
-      required: ['url'],
-    },
   },
   {
     name: 'ask_user',

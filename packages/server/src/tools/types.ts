@@ -5,15 +5,30 @@
  */
 
 export interface ToolContext {
-  /** 当前会话 id（agent 注入） */
-  sessionId?: string
-  /** 工作目录 */
+  /** 会话工作目录（绝对路径）；为空则用 WORKSPACE_ROOT */
   cwd?: string
+  /** 会话 id（agent 注入） */
+  sessionId?: string
   /** 权限级别 */
   permissionLevel?: 'workspace-only' | 'sandbox' | 'full'
-  /** 向用户提问（ask_question 用） */
+  /** 产物上报回调：命令产生/修改的文件（由 agent 持久化到 artifacts 表） */
+  onArtifacts?: (files: Array<{ name: string; path: string; action: 'created' | 'updated'; size: number }>) => void
+  /** 工具流式输出回调：命令执行分片实时推送 */
+  onOutput?: (toolCallId: string, chunk: string) => void
+  /** 实时预览回调：写入 .html 时触发（前端右侧边栏实时渲染） */
+  onPreview?: (path: string, content: string) => void
+  /** 画图回调：生成 SVG 图表时触发 */
+  onDiagram?: (title: string, svg: string) => void
+  /** 画图流式块回调：SVG 按标签边界切块实时推送 */
+  onDiagramChunk?: (chunk: string) => void
+  /** 生图回调：生成图片后推送 */
+  onImage?: (data: string, isUrl: boolean, title: string) => void
+  /** 文件变更回调：写入文件时触发（前端变更 tab 显示改前/改后 diff） */
+  onFileChange?: (path: string, oldContent: string, newContent: string) => void
+  /** 向用户提问（挂起等待答复，由 agent 注入） */
   askQuestion?: (id: string, question: string, options?: string[]) => Promise<string>
-  emitQuestion?: (q: { id: string; question: string; options?: string[] }) => void
+  /** 提问结果发送回调：把提问/选项推给前端展示 */
+  emitQuestion?: (data: { id: string; question: string; options?: string[] }) => void
   [key: string]: unknown
 }
 
