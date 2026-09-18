@@ -5,7 +5,8 @@
  * 异步：POST 立即返回 taskId，后台并行跑成员，前端轮询进度/结果。
  */
 import { randomUUID } from 'crypto'
-import { readdirSync, statSync } from 'fs'
+import { readdir } from 'fs/promises'
+import type { Dirent } from 'fs'
 import { join } from 'path'
 import { getDB } from './database'
 import { runToolAuditMember } from './tool-audit'
@@ -70,32 +71,44 @@ export function createAuditTask(projectPath: string, instruction?: string): Audi
   return task
 }
 
-/** 扫描项目文件计数（供 progress 展示） */
-function countFiles(root: string): number {
-  const SKIP = new Set(['node_modules', '.git', 'dist', 'build', '.next', '.workbuddy'])
+/**
+ * 扫描项目文件计数（供 progress 展示）
+ *
+ * 2026-09-18 两点修正：
+ * 1. **改异步**：原实现是 readdirSync + statSync 的**无上限**递归全量遍历，
+ *    而"项目会诊"是 `void runAsync()` 后台跑的——扫大项目时会同步占住事件循环，
+ *    把前台正在进行的对话 SSE 一起冻住。这正是"浏览器活跃 + 并发时流不动"的一个真实来源。
+ * 2. **加上限**：这个数字只用于进度文案，没必要为它遍历整个仓库，
+ *    超过 MAX_COUNT 就停止（文案里标注"+"）。
+ */
+const COUNT_SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.next', '.nuxt', 'coverage', '.workbuddy', 'uploads', 'data'])
+const COUNT_MAX = 20000
+
+async function countFiles(root: string): Promise<{ n: number; capped: boolean }> {
   let n = 0
-  const walk = (d: string) => {
-    let e: string[] = []
-    try { e = readdirSync(d) } catch { return }
-    for (const name of e) {
-      if (SKIP.has(name)) continue
-      const p = join(d, name)
-      let s: any
-      try { s = statSync(p) } catch { continue }
-      if (s.isDirectory()) walk(p)
-      else n++
+  let capped = false
+  const walk = async (d: string): Promise<void> => {
+    if (capped) return
+    let e: Dirent[] = []
+    try { e = await readdir(d, { withFileTypes: true }) } catch { return }
+    for (const ent of e) {
+      if (capped) return
+      if (COUNT_SKIP_DIRS.has(ent.name)) continue
+      if (ent.isDirectory()) { await walk(join(d, ent.name)); continue }
+      n++
+      if (n >= COUNT_MAX) { capped = true; return }
     }
   }
-  walk(root)
-  return n
+  await walk(root)
+  return { n, capped }
 }
 
 async function runAsync(t: AuditTask) {
   try {
     const db = getDB()
-    const files = countFiles(t.project)
+    const { n: files, capped } = await countFiles(t.project)
     const instruct = t.instruction || '找出这个项目的 BUG、安全隐患、逻辑错误'
-    db.prepare(`UPDATE collab_audit SET progress=?, member_count=? WHERE id=?`).run(`工具型审计中（扫描 ${files} 个文件）`, 1, t.id)
+    db.prepare(`UPDATE collab_audit SET progress=?, member_count=? WHERE id=?`).run(`工具型审计中（扫描 ${files}${capped ? '+' : ''} 个文件）`, 1, t.id)
 
     // 工具型成员并行：DeepSeek 已验证能带工具审计(不400)；Kimi 的 runAgentLoop 适配(baseUrl/temp/thinking)
     // 待后续；第一版先用 DeepSeek 单成员跑通"真能出问题"验证。

@@ -137,10 +137,12 @@ export async function scanSkillRepo(githubUrl: string): Promise<SkillScanReport>
     const { tmpdir } = await import('os')
     cloneDir = join(tmpdir(), `supercrzy-scan-${owner}-${repo}`)
     rmSync(cloneDir, { recursive: true, force: true })
-    const { execSync } = await import('child_process')
-    execSync(`git clone --depth 1 https://github.com/${owner}/${repo}.git "${cloneDir}"`, {
+    // 必须异步：execSync 会在克隆的整个过程中冻住事件循环（秒~分钟级），
+    // 同一后端的并发 SSE 流会被一起冻住。带 timeout 会抛错，由外层 catch 兜住。
+    const { exec } = await import('child_process')
+    const { promisify } = await import('util')
+    await promisify(exec)(`git clone --depth 1 https://github.com/${owner}/${repo}.git "${cloneDir}"`, {
       timeout: 60000,
-      stdio: 'pipe',
     })
 
     // 目标目录
@@ -539,11 +541,12 @@ export async function installSkillFromGitHub(
     cloneDir = join(tmpdir(), `supercrzy-skill-${repoName}`)
     rmSync(cloneDir, { recursive: true, force: true })
 
-    // Clone 仓库（浅克隆）
-    const { execSync } = await import('child_process')
-    execSync(`git clone --depth 1 https://github.com/${owner}/${repo}.git "${cloneDir}"`, {
+    // Clone 仓库（浅克隆）—— 必须异步：execSync 会在克隆全程冻住事件循环，
+    // 拖住同后端上所有并发 SSE 流（实测单条 git 命令同步执行即冻结几十~上千毫秒，克隆是秒~分钟级）。
+    const { exec } = await import('child_process')
+    const { promisify } = await import('util')
+    await promisify(exec)(`git clone --depth 1 https://github.com/${owner}/${repo}.git "${cloneDir}"`, {
       timeout: 60000,
-      stdio: 'pipe',
     })
 
     // 确定目标 SKILL.md 集合

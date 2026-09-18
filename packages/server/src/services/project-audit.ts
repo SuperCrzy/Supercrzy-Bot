@@ -4,7 +4,8 @@
  * → 汇总去重 → 输出带 文件:行号 的问题清单。
  * 第一版只"找问题"，不改文件（先让用户确认找得准，再接执行AI修复）。
  */
-import { readdirSync, readFileSync, statSync } from 'fs'
+import { readdir, readFile, stat } from 'fs/promises'
+import type { Dirent } from 'fs'
 import { join, extname, relative } from 'path'
 import { chatWithProvider } from './llm-config'
 
@@ -30,31 +31,38 @@ const MAX_FILES = 60         // 单项目最多扫描文件数
 const MAX_BYTES = 60 * 1024  // 单文件最多读 60KB
 const MAX_CHARS_PER_MEMBER = 5200  // 每个成员最多喂的代码量
 
-/** 递归扫描项目文件，生成 [{path, rel, preview}]（preview 为截断内容） */
-function scanProject(root: string): Array<{ rel: string; preview: string; bytes: number }> {
+/**
+ * 递归扫描项目文件，生成 [{path, rel, preview}]（preview 为截断内容）
+ *
+ * 全异步（2026-09-18）：原实现用 readdirSync + statSync + readFileSync 递归，
+ * 会在扫盘全程同步占住事件循环（实测 4k 文件约 62ms，大仓库线性放大），
+ * 而"项目会诊"是后台跑、和前台对话并发的——扫盘期间用户看到的 SSE 会整体停推。
+ * 改用 fs/promises 后同样的裁剪上限（MAX_FILES/MAX_BYTES/SKIP_DIRS）一并保留。
+ */
+export async function scanProject(root: string): Promise<Array<{ rel: string; preview: string; bytes: number }>> {
   const out: Array<{ rel: string; preview: string; bytes: number }> = []
-  const walk = (dir: string) => {
+  const walk = async (dir: string): Promise<void> => {
     if (out.length >= MAX_FILES) return
-    let entries: string[] = []
-    try { entries = readdirSync(dir) } catch { return }
-    for (const name of entries) {
-      if (out.length >= MAX_FILES) break
-      if (SKIP_DIRS.has(name)) continue
-      const p = join(dir, name)
-      let st: any
-      try { st = statSync(p) } catch { continue }
-      if (st.isDirectory()) { walk(p); continue }
+    let entries: Dirent[] = []
+    try { entries = await readdir(dir, { withFileTypes: true }) } catch { return }
+    for (const e of entries) {
+      if (out.length >= MAX_FILES) return
+      if (SKIP_DIRS.has(e.name)) continue
+      const p = join(dir, e.name)
+      if (e.isDirectory()) { await walk(p); continue }
       // 只看代码/可读文本
-      const ext = extname(name).toLowerCase()
+      const ext = extname(e.name).toLowerCase()
       if (!['.ts', '.tsx', '.js', '.jsx', '.py', '.go', '.java', '.rs', '.sh', '.json', '.vue', '.html', '.css', '.md', '.sql'].includes(ext)) continue
       try {
-        if (st.size > MAX_BYTES) continue
-        const content = readFileSync(p, 'utf8')
+        // 用 stat 而不是 dirent.isFile()：保留原语义（跟随符号链接），且反正要读 size
+        const st = await stat(p)
+        if (!st.isFile() || st.size > MAX_BYTES) continue
+        const content = await readFile(p, 'utf8')
         out.push({ rel: relative(root, p), preview: content.slice(0, 700), bytes: content.length })
       } catch { /* ignore */ }
     }
   }
-  walk(root)
+  await walk(root)
   return out
 }
 
@@ -76,7 +84,7 @@ export async function runProjectAudit(
   providers: string[] = ['deepseek', 'kimi'],
   instruction = '找出这个项目的 BUG、安全隐患、逻辑错误',
 ): Promise<AuditReport> {
-  const files = scanProject(projectPath)
+  const files = await scanProject(projectPath)
   const issues: AuditIssue[] = []
   const membersRaw: Array<{ brand: string; raw: string }> = []
   const members: Array<{ provider: string; brand: string; fileCount: number }> = []
