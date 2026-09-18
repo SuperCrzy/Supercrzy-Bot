@@ -91,6 +91,12 @@
                 <n-switch v-model:value="form.showReasoning" size="small" />
               </div>
               <div class="setting-row">
+                <span class="setting-label">{{ $t('settings.reasoningLive') }}</span>
+                <span class="setting-desc">{{ $t('settings.reasoningLiveDesc') }}</span>
+                <!-- 思考折叠偏好：本地偏好（localStorage），改完即时生效无需保存（阶段三-⑤） -->
+                <n-switch :value="reasoningLiveExpanded" size="small" @update:value="setReasoningLive" />
+              </div>
+              <div class="setting-row">
                 <span class="setting-label">{{ $t('settings.showCost') }}</span>
                 <span class="setting-desc">{{ $t('settings.showCostDesc') }}</span>
                 <n-switch v-model:value="form.showCost" size="small" />
@@ -351,6 +357,7 @@ import { useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { detectLocale } from '@/utils/locale'
 import { PERMISSION_TIERS, TIER_I18N, isPermissionTier, resolvePermissionTier } from '@/utils/permission'
+import { useReasoningDisplay } from '@/utils/reasoning-display'
 import { useAppStore } from '@/stores/app'
 import { getModelSelectOptions } from '@/data/models'
 import ProfileAvatar from '@/components/ui/ProfileAvatar.vue'
@@ -534,6 +541,14 @@ const saving = ref(false)
 let loaded = false
 /** 自动保存防抖计时器 */
 let saveTimer: ReturnType<typeof setTimeout> | null = null
+
+/**
+ * 思考过程折叠偏好（阶段三-⑤，2026-09-16）
+ * 本地偏好（localStorage），不进 settings 表单——服务端 BOOL_KEYS 是白名单，
+ * 且这是纯客户端渲染策略，塞进表单只会多一次无意义的 POST。
+ * 改动即时生效并落盘，无需点保存。
+ */
+const { liveExpanded: reasoningLiveExpanded, setLiveExpanded: setReasoningLive } = useReasoningDisplay()
 
 /**
  * 管理入口：收编自侧边栏的配置/数据/诊断页面（P1-01 分区，2026-09-17）

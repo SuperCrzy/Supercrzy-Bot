@@ -1,17 +1,20 @@
 <template>
   <div class="thinking-block" :class="{ completed: isCompleted }">
-    <!-- 未完成：脉动指示 + 深度思考标题 + 推理实时流式（进行中不折叠，展开可见——老板 2026-08-21） -->
+    <!-- 未完成：脉动指示 + 深度思考标题 + 推理实时流式（默认折叠，点击展开——阶段三-⑤ 2026-09-16）
+         折叠态显示推理末行摘要，思考仍在推进但首屏只占一行；展开态保留 2026-08-21 的实时可见性 -->
     <template v-if="!isCompleted">
       <div class="thinking-indicator">
         <div class="thinking-pulse active"></div>
       </div>
       <div class="thinking-content">
-        <div class="thinking-header">
+        <div class="thinking-header" :class="{ 'thinking-header-clickable': !!reasoning }" @click="toggleLive">
           <span v-if="turn" class="thinking-turn">Turn {{ turn }}</span>
           <span class="thinking-message">{{ $t('chatui.deepThinking') }}</span>
+          <span v-if="reasoning && !liveOpen" class="thinking-summary">{{ liveSummary }}</span>
+          <svg v-if="reasoning" class="thinking-arrow" :class="{ open: liveOpen }" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
         </div>
-        <!-- 思考进行中：实时流式显示推理内容（markdown 渲染，代码框整洁；限高滚动防刷屏；自动跟随最新一行） -->
-        <div v-if="reasoning" ref="reasoningEl" class="thinking-reasoning live" @scroll="onReasoningScroll" v-html="reasoningHtml"></div>
+        <!-- 展开态：实时流式显示推理内容（markdown 渲染，代码框整洁；限高滚动防刷屏；自动跟随最新一行） -->
+        <div v-if="reasoning && liveOpen" ref="reasoningEl" class="thinking-reasoning live" @scroll="onReasoningScroll" v-html="reasoningHtml"></div>
       </div>
     </template>
     <!-- 已完成：一行"深度思考"标题，点击展开/收起推理（对齐 WorkBuddy ReasoningRenderer） -->
@@ -34,6 +37,7 @@
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js/lib/common'
+import { defaultCompletedOpen, useReasoningDisplay } from '@/utils/reasoning-display'
 
 // ============ 推理内容 markdown 渲染（对齐 WorkBuddy reasoning theme：代码显示成整洁代码框，不是纯文本） ============
 const reasoningMd = new MarkdownIt({
@@ -62,18 +66,50 @@ const props = withDefaults(defineProps<{
   reasoning: '',
 })
 
-const reasoningOpen = ref(false)
+/** 完成态展开态：恒初始折叠（defaultCompletedOpen 单一事实源），仅用户点击可展开 */
+const reasoningOpen = ref(defaultCompletedOpen())
 const isCompleted = computed(() => props.completed)
+
+/**
+ * 流式思考面板展开态（阶段三-⑤，2026-09-16）
+ *
+ * ⚠️ 硬约束：只在挂载时按用户偏好折算一次，之后**仅由用户点击**改变。
+ * 绝不允许 watch(流式事件) 去改写它——自动中途折叠/展开会让思考框随推理增长反复伸缩，
+ * 这就是 2026-08-26「打字机框随回复长短震荡 61~441px」的根因（见 utils/fold-state.ts 注释）。
+ * 想改默认值 → 改设置项，不要在这里加事件分支。
+ */
+const { liveExpanded } = useReasoningDisplay()
+const liveOpen = ref(!props.completed && liveExpanded.value)
+
+/** 点击"深度思考"标题：展开/收起实时推理 */
+function toggleLive() {
+  if (!props.reasoning) return
+  liveOpen.value = !liveOpen.value
+  // 展开时立即贴底，用户看到的是最新推理而不是顶部旧内容
+  if (liveOpen.value && stickReasoningBottom) {
+    nextTick(() => {
+      const el = reasoningEl.value
+      if (el) el.scrollTop = el.scrollHeight
+    })
+  }
+}
+
+/** 流式折叠态摘要：推理最后一个非空行（沿用 #13 约定"流式中最后一行 / 完成第一行"），截断防溢出 */
+const liveSummary = computed(() => {
+  const lines = (props.reasoning || '').split('\n').filter((l) => l.trim())
+  const line = (lines[lines.length - 1] || '').trim()
+  return line.slice(0, 42)
+})
 
 // ============ 推理容器自动跟随最新（思考流式时滚到底部，用户上滑则暂停跟随） ============
 const reasoningEl = ref<HTMLElement>()
 let stickReasoningBottom = true
 
-/** 推理内容增长 → 自动滚到底部（用户没上滑时），最新思考始终可见不用手滑 */
+/** 推理内容增长 → 自动滚到底部（用户没上滑、且面板处于展开态时），最新思考始终可见不用手滑 */
 watch(
   () => props.reasoning,
   () => {
-    if (!stickReasoningBottom) return
+    if (!liveOpen.value || !stickReasoningBottom) return
     nextTick(() => {
       const el = reasoningEl.value
       if (el) el.scrollTop = el.scrollHeight
@@ -178,7 +214,8 @@ function cleanReasoning(text: string | undefined): string {
 }
 .thinking-summary {
   font-size: var(--text-sm);
-  color: var(--text-2);
+  /* 2026-09-16 修：原 var(--text-2) 全仓未定义（唯一使用处）→ 声明无效、颜色失控，改用已定义的 --text-muted */
+  color: var(--text-muted);
   margin-left: 6px;
   overflow: hidden;
   text-overflow: ellipsis;
