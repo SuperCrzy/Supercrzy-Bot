@@ -274,6 +274,9 @@
             </div>
           </div>
         </div>
+
+        <!-- 首用引导：任务模板（阶段三-③④；点一下填进输入框，不直接发送） -->
+        <WelcomeTemplates @pick="onTemplatePick" />
       </div>
 
       <!-- 文件夹选择弹窗：浏览 + 搜索（公共组件；欢迎页"工作文件夹"入口使用） -->
@@ -948,6 +951,7 @@ import QuestionNavRail from '@/components/chat/QuestionNavRail.vue'
 import ErrorBanner from '@/components/chat/ErrorBanner.vue'
 import InputBanner from '@/components/chat/InputBanner.vue'
 import WorkspacePickerModal from '@/components/workspace/WorkspacePickerModal.vue'
+import WelcomeTemplates from '@/components/chat/WelcomeTemplates.vue'
 import CompareResult from '@/components/chat/CompareResult.vue'
 
 const chatStore = useChatStore()
@@ -1556,6 +1560,16 @@ function formatArtifactTime(s: string) {
 
 // ============ 欢迎页中央输入框 ============
 const welcomeInputRef = ref<HTMLTextAreaElement>()
+
+/**
+ * 任务模板被点击 → 填进输入框并聚焦。
+ * 刻意**不直接发送**：让用户先看见将要发出去的话、可以改（首用引导不该替用户做决定），
+ * 也避免模板文案跟用户真实需求有偏差时白烧一次模型调用。
+ */
+function onTemplatePick(prompt: string) {
+  inputText.value = prompt
+  nextTick(() => welcomeInputRef.value?.focus())
+}
 
 /** 欢迎页输入框自动增高（对齐 WorkBuddy ChatInput autosize：文字多时输入框长高，操作栏独立在底部不重叠） */
 watch(inputText, () => {
