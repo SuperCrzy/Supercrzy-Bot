@@ -1545,27 +1545,83 @@ export function classifySensitiveTool(toolName: string, argText: string): 'allow
   return 'ask' // 未知命令，询问
 }
 
-// 思想：不用把全部工具 schema 塞进每轮请求的 tools 数组。核心调查工具常驻；
-// 重型/少用工具（生图/视频/终端/绘图/MCP 资源等）默认不暴露完整 schema，
-// 模型需要时先调用 tool_search(名称) 按需加载其定义，随后即可像普通工具一样调用。
-// 这样显著压缩每轮 prompt 体积（我们 37 个工具，其中多数带很长 parameters）。
-// ------------------------------------------------------------
+// ============================
+// 工具两级加载（动态工具集）
+// ============================
+// 思想：不用把全部工具 schema 塞进每轮请求的 tools 数组 —— 42 个工具的 schema 又长又贵，
+// 而且会给模型制造"选择过载"，是选错工具/绕远路的直接原因。
+// 核心闭环工具常驻；其余默认不暴露完整 schema，模型先 tool_search 发现，随后即可正常调用。
+//
+// 常驻契约（2026-09-18 收紧，对齐报告指标「普通任务默认注入工具数 ≤ 12」）：
+//   常驻 12 个以内，且必须包含 tool_search —— 否则模型无从发现按需工具。
+//   由 validateAlwaysOnContract() 与单测双重看守，超限即失败，不允许静默回归。
+//
+// 常驻（12）：tool_search / file_read / file_write / multi_edit / shell_exec /
+//            web_search / web_fetch / deep_research / create_plan /
+//            task_create / task_update / ask_user
+// 取舍依据：本产品核心价值是「完成任务 → 交付结果 → 可控安全 → 可恢复 → 扩展」，
+//   故工作区读写+执行（file_*/shell_exec）、信息获取（web_*/deep_research）、
+//   计划与进度（create_plan/task_*）、澄清（ask_user）常驻；
+//   git/技能/记忆/终端/生图/浏览器/桌面控制等属"用到才需要的扩展能力"，按需加载。
 export const DEFERRED_TOOLS = new Set<string>([
-  'generate_image',   // 重型：图片生成参数多、少用
-  'make_article',     // 内容工厂：一次跑完型编辑，重/耗时
-  'browser',          // AI 浏览器驾驶(自主开/点/读，需 Chrome)
-  'video_edit',       // 视频剪辑
-  'computer_use',     // 桌面/浏览器控制（重）
+  // ---- 重型生成类：参数多、调用少，最该按需 ----
+  'generate_image',
+  'video_edit',
+  'make_article',
   'draw_diagram',
+  // ---- 交互式外部环境：需要 Chrome / 桌面权限，且是长流程 ----
+  'browser',
+  'computer_use',
   'terminal_open', 'terminal_send', 'terminal_read', 'terminal_signal', 'terminal_close', 'terminal_list',
-  'skill_view', 'skill_install',  // 技能内容详情/安装（需要时才看）
-  'git_commit',        // 带风险的操作，按需暴露
-  'memory_store',      // 写入型，非核心
+  // ---- 扩展能力：技能与记忆（记忆已自动注入上下文，显式检索属按需） ----
+  'skill_list', 'skill_search', 'skill_view', 'skill_install',
+  'memory_store', 'memory_recall', 'memory_list',
+  // ---- 仓库操作：git 三件套（带风险/低频） ----
+  'git_status', 'git_diff', 'git_commit',
+  // ---- 补充调查类：不作为主干（web_search 已常驻） ----
+  'news_search',
+  'read_me',
+  // ---- 文件辅助：容易被 file_read/file_write/shell_exec 覆盖 ----
+  'file_exists', 'file_delete', 'lint_file',
+  // ---- 计划辅助：create_plan/task_create/task_update 已常驻，其余按需 ----
+  'get_goal', 'task_list',
+  // ---- 提问：与常驻的 ask_user 语义重复（同一条前端提问链路），按需即可 ----
+  'ask_question',
 ])
+
+/**
+ * 常驻工具数上限（报告指标：普通任务默认注入工具数 ≤ 12）。
+ * 改 DEFERRED_TOOLS 时若把常驻数顶超，validateAlwaysOnContract 会直接报错。
+ */
+export const MAX_ALWAYS_ON_TOOLS = 12
 
 /** 常驻 tools 数组 = 全部去掉 DEFERRED */
 export const alwaysOnToolDefs = (): ToolDefinition[] =>
   toolDefinitions.filter(t => !DEFERRED_TOOLS.has(t.name))
+
+/**
+ * 常驻契约校验：① 常驻数 ≤ MAX_ALWAYS_ON_TOOLS ② tool_search 必须常驻
+ * ③ 按需工具必须真实存在（防止 DEFERRED 里写了已删除的工具名，永远搜不到）
+ * 由 scripts/validate-tools.ts 与单测调用，把"工具膨胀"变成 CI 可拦的度量。
+ */
+export function validateAlwaysOnContract(): { ok: boolean; errors: string[] } {
+  const errors: string[] = []
+  const on = alwaysOnToolDefs()
+  if (on.length > MAX_ALWAYS_ON_TOOLS) {
+    errors.push(`常驻工具 ${on.length} 个，超过上限 ${MAX_ALWAYS_ON_TOOLS}（报告指标 ≤12）；请把新工具登记进 DEFERRED_TOOLS 或复核取舍`)
+  }
+  if (!on.some((t) => t.name === 'tool_search')) {
+    errors.push('tool_search 必须常驻 —— 否则模型无从发现按需工具')
+  }
+  const known = new Set(toolDefinitions.map((t) => t.name))
+  for (const n of DEFERRED_TOOLS) {
+    if (!known.has(n)) errors.push(`DEFERRED_TOOLS 中的 "${n}" 不是已注册工具（拼写错误或工具已删除）`)
+  }
+  if (!DEFERRED_TOOLS.has('tool_search') && on.length === 0) {
+    errors.push('toolDefinitions 为空，工具注册异常')
+  }
+  return { ok: errors.length === 0, errors }
+}
 
 
 export function getToolsByCategory(category: string): ToolDefinition[] {
