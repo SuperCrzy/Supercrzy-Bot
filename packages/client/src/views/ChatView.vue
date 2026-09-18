@@ -823,6 +823,17 @@
           <button class="wc-icon-btn" :class="{ listening: isListening }" :title="isListening ? $t('chat.wcVoiceStop') : $t('chat.wcVoice')" @click="toggleVoice">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><line x1="12" y1="18" x2="12" y2="22"/></svg>
           </button>
+          <!-- 暂停（阶段二-②）：后端在轮次边界停下并保留检查点，随后用"继续"从断点恢复 -->
+          <button
+            v-if="chatStore.isLoading"
+            class="wc-icon-btn pause-btn"
+            :class="{ 'is-pausing': isPausing }"
+            :disabled="isPausing"
+            :title="$t('chat.pause')"
+            @click="pauseGeneration"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="5" width="3.4" height="14" rx="1.2"/><rect x="13.6" y="5" width="3.4" height="14" rx="1.2"/></svg>
+          </button>
           <!-- 发送/停止一体（对齐 WorkBuddy：发送按钮在控制行最右，语音紧挨其左） -->
           <n-button
             :type="chatStore.isLoading ? 'error' : 'primary'"
@@ -2034,6 +2045,42 @@ function stopGeneration() {
   }
   abortController.value?.abort()
 }
+
+// =================================================================
+// 暂停（阶段二-②）：与"停止"的关键区别
+//   停止 = 终态（cancelled），前端 abort fetch，进度只能靠检查点续跑；
+//   暂停 = 非终态（paused），后端在轮次边界优雅收尾，保留 checkpoint 与
+//          任务状态，可回到 running。
+// **此处绝不能 abort fetch** —— abort 会让前端收不到 checkpoint_available
+// 与 delivery_summary，暂停就退化成"停止"（用户看不到"继续"入口）。
+// =================================================================
+const isPausing = ref(false)
+async function pauseGeneration() {
+  if (isPausing.value) return
+  const sid = chatStore.currentSessionId
+  if (!sid) return
+  isPausing.value = true
+  aiStatus.value = 'chat.statusPausing'
+  try {
+    const res = await fetch('/api/chat/pause', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: sid }),
+    })
+    if (!res.ok) {
+      // 后端拒绝（任务已是终态/不存在）→ 复位，不静默卡住 UI
+      isPausing.value = false
+      aiStatus.value = null
+    }
+  } catch {
+    isPausing.value = false
+    aiStatus.value = null
+  }
+}
+// 流结束后复位暂停按钮态（后端落 paused 会关闭 SSE，isLoading 随之转 false）
+watch(() => chatStore.isLoading, (loading) => {
+  if (!loading) isPausing.value = false
+})
 
 // =================================================================
 // 流式处理核心（stores/chat-stream.ts）：打字机引擎 + flow 更新从 ChatView 抽出
@@ -3920,6 +3967,13 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage, sessionId?
       flushAllPending()
       // 2026-08-27 保险：出错也清未答提问，避免询问窗残留
       if (msg.pendingQuestion) msg.pendingQuestion = undefined
+      if (data.paused) {
+        // 阶段二-②：暂停走 error 通道传"正在保存进度"的即时反馈，但它**不是失败**——
+        // 后端随后会发 checkpoint_available 让前端渲染"继续"。此处不写 ❌ 文案。
+        aiStatus.value = 'chat.statusPausing'
+        aiStatusTarget.value = ''
+        break
+      }
       if (data.retrying) {
         msg.retrying = data.message || t('chat.retrying')
         aiStatus.value = 'chat.statusRetrying'
@@ -4857,6 +4911,14 @@ onMounted(async () => {
   0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.45); }
   50% { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
 }
+/* 暂停按钮（阶段二-②）：常态为中性图标；已请求暂停时转为等待态并禁用重复点击 */
+.pause-btn.is-pausing {
+  color: var(--warning, #f59e0b);
+  background: var(--bg-hover);
+  cursor: default;
+  opacity: 0.7;
+}
+.pause-btn:disabled { pointer-events: none; }
 .wc-send {
   width: 34px;
   height: 34px;

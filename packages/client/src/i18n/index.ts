@@ -285,6 +285,8 @@ const messages = {
       resizeInput: '拖拽调整输入框高度',
       wcSettings: '任务设置',
       stop: '停止',
+      pause: '暂停',
+      pauseRequested: '已请求暂停，正在保存进度',
       regenerate: '重新生成',
       streamReconnectFailed: '连接中断，已自动重试但仍未恢复，请重新发送',
       streamInterrupted: '连接中断（任务可能已执行部分操作），建议稍后重新发送',
@@ -328,6 +330,7 @@ const messages = {
       statusComputerUse: '正在操作桌面',
       statusWorking: '正在处理',
       statusRetrying: '正在重试',
+      statusPausing: '正在暂停，保存进度中',
       /* 折叠条摘要动词（对齐 WorkBuddy metaFold.summary.action.*） */
       sumCmd: '运行命令',
       sumRead: '读取',
@@ -1473,6 +1476,8 @@ const messages = {
       streamReconnectFailed: 'Connection lost after retries. Please resend.',
       streamInterrupted: 'Connection interrupted (some actions may have run). Resend carefully.',
       stop: 'Stop',
+      pause: 'Pause',
+      pauseRequested: 'Pause requested, saving progress',
       regenerate: 'Regenerate',
       welcomePrefix: 'Welcome to',
       welcomeDesc: 'An intelligent agent with tool calling, memory, and web search. Start by typing your question.',
@@ -1514,6 +1519,7 @@ const messages = {
       statusComputerUse: 'Controlling desktop',
       statusWorking: 'Working',
       statusRetrying: 'Retrying',
+      statusPausing: 'Pausing, saving progress',
       /* Fold summary verbs (aligned with WorkBuddy metaFold.summary.action.*) */
       sumCmd: 'Run command',
       sumRead: 'Read',
