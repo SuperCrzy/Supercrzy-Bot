@@ -5,6 +5,7 @@
 import type { ToolDef } from './types'
 import { getDB } from '../services/database'
 import { SENSITIVE_MEMORY_PATTERN, storeMemory } from './shared'
+import { MEMORY_CATEGORIES } from '../services/memory-category'
 
 const tool: ToolDef = {
   name: 'memory_store',
@@ -13,14 +14,17 @@ const tool: ToolDef = {
   parameters: {
     type: 'object',
     properties: {
-      key: { type: 'string', description: '记忆标识，如"用户名"、"偏好语言"' },
+      key: { type: 'string', description: '记忆标识，如"用户名"、"偏好语言"。同一 key 会覆盖旧值，请用稳定的 key' },
       content: { type: 'string', description: '记忆内容' },
       category: {
+        // 2026-09-18（#147）：原 enum 是 ['general','preference','fact','rule'] —— 这是第 6 套词表：
+        // 含已废弃的 `fact`，又缺 experience/topic/user/knowledge，模型照它填的值全被判成脏值。
+        // 现直接引用权威枚举，从此不可能再漂移。
         type: 'string',
-        enum: ['general', 'preference', 'fact', 'rule'],
-        description: '记忆分类',
+        enum: [...MEMORY_CATEGORIES],
+        description: '记忆分类：user 用户身份/个人事实，preference 用户偏好，rule 约定与教训，knowledge 项目事实与技术决策，topic 长期关注方向，experience 任务经验，general 兜底',
       },
-      importance: { type: 'number', description: '重要性 1-5', minimum: 1, maximum: 5 },
+      importance: { type: 'number', description: '重要性 1-10（5 = 普通，8+ = 高价值可复用）', minimum: 1, maximum: 10 },
     },
     required: ['key', 'content'],
   },

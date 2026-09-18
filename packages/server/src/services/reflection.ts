@@ -5,8 +5,8 @@
 
 import { config } from '../config/index.js'
 import { getDB } from './database.js'
-import { randomUUID } from 'crypto'
 import { installSkill } from './skill-loader'
+import { upsertMemory } from './memory-service'
 
 export interface ReflectionResult {
   problem: string
@@ -73,7 +73,34 @@ async function llmJson(system: string, user: string, fallback: unknown): Promise
 const REFLECTION_SYSTEM = `You are an experience reflection engine for an AI agent. After a task completes, you reflect on what happened and decide whether the experience is worth remembering. Be honest and concise. Prefer concrete, reusable insights over generic statements.`
 
 /**
- * 任务完成后 5 问反思 → 写入 category='experience' 记忆
+ * 稳定的任务 key（2026-09-18，#147）
+ *
+ * 病灶：原 key 是 `经验:${skillName || problem.slice(0,24)}` —— 而 `problem` 是 LLM
+ * **每次现场生成**的一句英文描述。同一个任务跑两遍，模型会写出不同措辞的 problem
+ * （实测库里并存 "User wanted to know wher…" / "Verify that shell_exec i…" 这类 key），
+ * 于是**精确去重永远触发不了**：103 条 experience 里有 88 个互不相同的 key，
+ * 去重只省下 15 行。表就随任务数线性膨胀。
+ *
+ * 修法：key 锚定到**用户的任务文本**（重复的任务天然同 key），而不是模型转述。
+ * 归一化：折叠空白 + 去标点 + 去掉汉字两侧的空格 → 再截断，
+ * 让"同一句话多打一个空格/标点"也算同一主题。
+ *
+ * 为什么只删**汉字两侧**的空格、保留拉丁词之间的空格：
+ * 拉丁词之间的空格是 `memory-consolidate.ts` 切词元的依据 —— 全删会把
+ * `verify shell tool` 变成一个词元，反而让近似合并失效。汉字本来不用空格分词，
+ * 两侧的空格纯属手滑，删掉即对齐（`帮我查今天 AI 新闻` 与 `帮我查今天AI新闻` 归一后同 key）。
+ */
+export function stableTaskKey(text: string): string {
+  const norm = String(text || '')
+    .replace(/[《》「」【】（）()[\]{}<>"'`~!@#$%^&*_+=|\\/?,.;:、，。！？；：…—－\-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/\s+(?=[\u4e00-\u9fa5])/g, '')
+    .replace(/(?<=[\u4e00-\u9fa5])\s+/g, '')
+    .trim()
+  return norm.slice(0, 40)
+}
+
+/** 任务完成后 5 问反思 → 写入 category='experience' 记忆
  * 返回 null 表示不反思（无工具调用 = 简单问答，无沉淀价值）
  */
 export async function runReflection(opts: {
@@ -131,19 +158,27 @@ Return JSON: {"problem": "...", "strategy": "...", "tools": ["..."], "repeat": t
   if (!result.strategy && !result.problem) return null
 
   const db = getDB()
-  const id = randomUUID()
-  const key = `经验:${result.skillName || result.problem.slice(0, 24)}`
+  // key 优先级：用户任务文本（最稳定）→ 模型提议的技能名 → 模型问题描述（最后兜底）
+  const taskKey = stableTaskKey(userContent)
+  const key = `经验:${taskKey || result.skillName || result.problem.slice(0, 40)}`
   const content = `[任务] ${userContent.slice(0, 300)}\n[问题] ${result.problem}\n[策略] ${result.strategy}\n[工具] ${result.tools.join(', ')}\n[会重复] ${result.repeat}\n[该沉淀技能] ${result.skillWorthy}${result.skillName ? ` → ${result.skillName}` : ''}`
-  const now = new Date().toISOString()
-  try {
-    db.prepare(
-      'INSERT INTO agent_memory (id, key, content, category, importance, confidence, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(id, key, content, 'experience', result.importance, 0.7, now, now)
-    console.log(`[Reflection] 已沉淀经验记忆 (importance=${result.importance}, skillWorthy=${result.skillWorthy})`)
-  } catch (e: any) {
-    console.log(`[Reflection] 写入记忆失败: ${e?.message || e}`)
+  // 2026-09-18 修：此处原为裸 INSERT（零去重），导致 experience 涨到 103 条占全表 49.5%，
+  // 且每完成一个任务无条件 +1 条 → 表随任务数线性无限增长。改走统一入口 upsertMemory：
+  // 同主题（同 key）覆盖旧值 + importance 取 MAX，表增长从"任务数"变成"新主题数"。
+  const upsert = upsertMemory(db, {
+    key,
+    content,
+    category: 'experience',
+    importance: result.importance,
+    confidence: 0.7,
+  })
+  if (upsert.action === 'rejected') {
+    console.log(`[Reflection] 写入记忆失败: ${upsert.reason}`)
     return null
   }
+  console.log(
+    `[Reflection] 经验记忆 ${upsert.action} (importance=${upsert.importance}, skillWorthy=${result.skillWorthy})`
+  )
 
   // P2 Skill Generation：LLM 自主判定值得沉淀 → 生成 Agent Skill 入库（对齐 Hermes skill_manage）
   if (result.skillWorthy && result.skillName) {

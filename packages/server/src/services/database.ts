@@ -2,6 +2,7 @@ import Database from 'better-sqlite3'
 import { existsSync, mkdirSync, copyFileSync } from 'fs'
 import { dirname } from 'path'
 import { config } from '../config'
+import { CATEGORY_ALIASES, MEMORY_CATEGORIES } from './memory-category'
 
 let db: Database.Database
 
@@ -523,9 +524,27 @@ export function initDatabase() {
   try {
     db.exec("ALTER TABLE agent_memory ADD COLUMN last_used TEXT")
   } catch { /* already exists */ }
-  // 旧数据语义归类：fact → knowledge（FTS5 时代 category 四语义：general/user/knowledge/experience）
+  // 旧数据语义归类（2026-09-18 #147：由 memory-category.ts 的别名表**驱动**，不再硬编码）
+  //
+  // 为什么必须表驱动：本次收敛前分类词表散在 5 处互不相认，历史库因此积累了
+  // 7 个分类（含中文脏值 `经验`、已废弃的 `fact`）。若迁移与运行时归一各写一套映射，
+  // 就会出现"写进去的折算成 A、读出来的还是 B"的长期漂移 —— 那正是本次要根治的病。
+  // 现在两处共用 CATEGORY_ALIASES / MEMORY_CATEGORIES 这一个源。
   try {
-    db.exec("UPDATE agent_memory SET category = 'knowledge' WHERE category = 'fact'")
+    for (const [from, to] of Object.entries(CATEGORY_ALIASES)) {
+      if (from === to) continue
+      db.prepare('UPDATE agent_memory SET category = ? WHERE category = ?').run(to, from)
+    }
+    // 大小写/空白容错（模型可能落过 'Knowledge' / ' rule '）
+    const lowered = MEMORY_CATEGORIES.map((c) => `'${c}'`).join(', ')
+    db.exec(`UPDATE agent_memory
+                SET category = lower(trim(category))
+              WHERE category <> lower(trim(category))
+                AND lower(trim(category)) IN (${lowered})`)
+    // 兜底：仍不属于现行枚举的值一律落 general（词表已封闭，不该再有活着的未知分类）
+    db.exec(`UPDATE agent_memory
+                SET category = 'general'
+              WHERE category NOT IN (${lowered})`)
   } catch { /* ignore */ }
   // FTS5 虚拟表（content 表 + rowid + trigram 中文友好）与同步触发器
   // 每次启动 DROP 重建保证一致性（记忆量小，重建成本可忽略，避免 'delete' 回填的 malformed 风险）

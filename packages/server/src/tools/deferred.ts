@@ -27,7 +27,7 @@ export const DEFERRED_TOOLS = new Set<string>([
   'terminal_open', 'terminal_send', 'terminal_read', 'terminal_signal', 'terminal_close', 'terminal_list',
   // ---- 扩展能力：技能与记忆（记忆已自动注入上下文，显式检索属按需） ----
   'skill_list', 'skill_search', 'skill_view', 'skill_install',
-  'memory_store', 'memory_recall', 'memory_list',
+  'memory_store', 'memory_recall', 'memory_list', 'memory_consolidate',
   // ---- 仓库操作：git 三件套（带风险/低频） ----
   'git_status', 'git_diff', 'git_commit',
   // ---- 补充调查类：不作为主干（web_search 已常驻） ----

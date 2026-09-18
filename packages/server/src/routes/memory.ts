@@ -1,7 +1,8 @@
 import Router from 'koa-router'
 import type { Context } from 'koa'
 import { getDB } from '../services/database'
-import { randomUUID } from 'crypto'
+import { upsertMemory } from '../services/memory-service'
+import { normalizeCategory, normalizeImportance } from '../services/memory-category'
 import { config } from '../config'
 
 export const memoryRouter = new Router({ prefix: '/api/memory' })
@@ -60,15 +61,24 @@ memoryRouter.post('/', (ctx: Context) => {
     return
   }
 
-  const id = randomUUID()
-  const category = body.category || 'general'
-  const importance = body.importance || 1
+  // 2026-09-18：改走统一写入入口。
+  // 原先此处是裸 INSERT：同 key 会插出重复行（与"同 key 覆盖"的其它路径行为不一致），
+  // 且 category 完全不校验（能落进任何脏值，包括已废弃的 'fact'）。
+  // importance 原先默认 1 —— 用户手动存的记忆反而排在全表最低，候选池按 importance 取时永远进不去；
+  // 这里改默认 5（= normal），用户显式传入的值仍然尊重。
+  const result = upsertMemory(db, {
+    key: body.key,
+    content: body.content,
+    category: body.category,
+    importance: body.importance ?? 5,
+  })
+  if (result.action === 'rejected') {
+    ctx.status = 400
+    ctx.body = { error: result.reason || 'invalid memory' }
+    return
+  }
 
-  db.prepare(
-    'INSERT INTO agent_memory (id, key, content, category, importance) VALUES (?, ?, ?, ?, ?)'
-  ).run(id, body.key, body.content, category, importance)
-
-  const row = db.prepare('SELECT * FROM agent_memory WHERE id = ?').get(id)
+  const row = db.prepare('SELECT * FROM agent_memory WHERE id = ?').get(result.id)
   ctx.status = 201
   ctx.body = row
 })
@@ -90,8 +100,9 @@ memoryRouter.put('/:id', (ctx: Context) => {
 
   if (body.key !== undefined) { updates.push('key = ?'); params.push(body.key) }
   if (body.content !== undefined) { updates.push('content = ?'); params.push(body.content) }
-  if (body.category !== undefined) { updates.push('category = ?'); params.push(body.category) }
-  if (body.importance !== undefined) { updates.push('importance = ?'); params.push(body.importance) }
+  // 分类与 importance 一律归一（原先原样入库，脏分类会直接落库并被注入 system prompt）
+  if (body.category !== undefined) { updates.push('category = ?'); params.push(normalizeCategory(body.category)) }
+  if (body.importance !== undefined) { updates.push('importance = ?'); params.push(normalizeImportance(body.importance)) }
 
   if (updates.length > 0) {
     updates.push("updated_at = datetime('now')")
@@ -160,7 +171,8 @@ memoryRouter.post('/import', async (ctx: Context) => {
 规则：
 1. 只提取跨对话仍有价值的信息；过滤寒暄、一次性内容、重复内容。
 2. key 是短标签（如"工作流偏好"），content 是具体内容（可含要点）。
-3. category 取值：preference(用户偏好) / fact(项目事实) / rule(经验教训或约定) / general(通用)。
+3. category 取值：user(用户身份/个人事实) / preference(用户偏好) / rule(经验教训或约定) / knowledge(项目事实) / topic(长期关注方向) / general(通用)。
+   注意：不要再使用已废弃的 fact —— 项目事实一律归 knowledge。
 4. importance 为 1-5 整数，5 最重要。
 5. 最多返回 10 条。
 6. 只输出 JSON 数组，不要 markdown 代码块、不要多余解释。
@@ -213,12 +225,13 @@ function parseMemoryCandidates(raw: string): Array<{ key: string; content: strin
     }
     const arr = JSON.parse(s)
     if (!Array.isArray(arr)) return []
-    const CATEGORIES = ['general', 'preference', 'fact', 'rule']
+    // 2026-09-18：词表来自 memory-category.ts（原先是本文件私有的 ['general','preference','fact','rule']，
+    // 含已废弃的 'fact'，且缺 preference/rule 之外的合法分类）
     return arr
       .map((x: any) => ({
         key: String(x.key || x.title || '').trim().slice(0, 100),
         content: String(x.content || x.description || x.text || '').trim().slice(0, 2000),
-        category: CATEGORIES.includes(x.category) ? x.category : 'general',
+        category: normalizeCategory(x.category),
         importance: Math.min(5, Math.max(1, parseInt(String(x.importance ?? x.star ?? 3), 10) || 1)),
       }))
       .filter((x: any) => x.key && x.content)

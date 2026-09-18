@@ -8,6 +8,12 @@
           <span class="memory-toggle-label">{{ $t('settings.memoryEnabled') }}</span>
           <n-switch :value="memoryEnabled" size="small" @update:value="toggleMemoryEnabled" />
         </label>
+        <!-- 2026-09-18（#147）：自动整理会合并近似重复并按分类上限淘汰低价值旧记忆（含删除），
+             所以必须给用户一个看得见、关得掉的开关，不能只藏在后台静默跑。 -->
+        <label class="memory-toggle" :title="$t('settings.memoryAutoConsolidateDesc')">
+          <span class="memory-toggle-label">{{ $t('settings.memoryAutoConsolidate') }}</span>
+          <n-switch :value="memoryAutoConsolidate" size="small" @update:value="toggleAutoConsolidate" />
+        </label>
         <n-input
           v-model:value="searchQuery"
           :placeholder="$t('memory.searchPlaceholder')"
@@ -440,6 +446,7 @@ onMounted(() => {
     .then((r) => r.json())
     .then((d) => {
       if (d.memoryEnabled !== undefined) memoryEnabled.value = !!d.memoryEnabled
+      if (d.memoryAutoConsolidate !== undefined) memoryAutoConsolidate.value = !!d.memoryAutoConsolidate
     })
     .catch(() => {})
 })
@@ -456,6 +463,21 @@ async function toggleMemoryEnabled(v: boolean) {
     })
   } catch (err) {
     console.error('Failed to save memoryEnabled:', err)
+  }
+}
+
+// 自动整理开关（默认开）：关掉后后台不再合并/淘汰记忆，仍可用 AI 显式调用整理
+const memoryAutoConsolidate = ref(true)
+async function toggleAutoConsolidate(v: boolean) {
+  memoryAutoConsolidate.value = v
+  try {
+    await fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ memoryAutoConsolidate: v }),
+    })
+  } catch (err) {
+    console.error('Failed to save memoryAutoConsolidate:', err)
   }
 }
 </script>

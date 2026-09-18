@@ -14,11 +14,12 @@ import { writeFile, mkdir, appendFile } from 'fs/promises'
 import { existsSync, readdirSync } from 'fs'
 import type { Context } from 'koa'
 import { config } from '../config'
-import { rankMemories, memoryRankedSearch } from './memory-search'
+import { rankMemories, memoryRankedSearch, selectMemoryCandidates, applyCategoryQuota } from './memory-search'
 import { requestChat, chatCompletion, normalizeBaseUrl, buildApiError } from './model-client'
 import { getDB } from '../services/database'
 import { toolDefinitions, executeToolCalls, type ToolCall, type ToolResultWithMeta, getToolMeta, type ToolExecCtx, DEFERRED_TOOLS, classifySensitiveTool } from './tools'
 import { pushMemorySync, pushReflection } from './memory-worker'
+import { upsertMemory } from './memory-service'
 import { safeWriteSse } from './sse-health'
 import {
   createTask as createTaskState,
@@ -669,13 +670,12 @@ function buildSystemPrompt(basePrompt: string, userMessage: string, model?: stri
 
   // 角色级记忆隔离：有 roleId 时只注入该角色的记忆（+全局记忆），无则全部
   // P0.1：先按 importance 取候选（预算 3 倍），再走 rankMemories 综合排序（importance×confidence×时间衰减×分类权重）
+  // 2026-09-18（#147）：候选池改为「分类配额抽样」——原 `ORDER BY importance DESC LIMIT 75` 被 importance≥6 的 82 条垄断，
+  // importance≤5 的 126 条永远进不了池；且 experience 占全表 49.5% 且逐任务膨胀，会持续吃掉候选位。
+  // 现在：① selectMemoryCandidates 按分类各取前 N 条进池，防止单分类刷屏；② applyCategoryQuota 限制单分类在最终注入中占比。
   const memories = memoryEnabled ? (() => {
-    const candidates = db.prepare(
-      `SELECT id, key, content, category, importance, confidence, usage_count, last_used FROM agent_memory
-       WHERE role_id IS NULL OR role_id = ? OR role_id = ''
-       ORDER BY importance DESC LIMIT ${memoryItemLimit * 3}`
-    ).all(roleId || '') as any[]
-    return rankMemories(candidates).slice(0, memoryItemLimit)
+    const candidates = selectMemoryCandidates(db, roleId || '', memoryItemLimit * 3)
+    return applyCategoryQuota(rankMemories(candidates), memoryItemLimit)
   })() : []
 
   let memorySection = ''
@@ -703,7 +703,7 @@ function buildSystemPrompt(basePrompt: string, userMessage: string, model?: stri
 - shell_exec: Execute shell commands (read-only/query only — view/query only; never write files via shell). **ALWAYS include a "description" argument** explaining what the command does
 - create_plan: For complex tasks create a step-by-step plan first（配合 task_create / task_update 维护步骤状态，让用户看到进度）
 - ask_user: 遇到歧义或需要用户拍板时提问（列出选项），等用户选择后继续。\n\n### 按需（先 tool_search 加载，加载后即可正常调用）
-- **[按需]** memory_store / memory_recall / memory_list: 长期记忆的存储与检索（常用记忆已自动注入上下文，这里用于显式存取）
+- **[按需]** memory_store / memory_recall / memory_list / memory_consolidate: 长期记忆的存储、检索与整理（常用记忆已自动注入上下文，这里用于显式存取；memory_consolidate 用于合并同主题重复记忆并按分类上限淘汰低价值旧记忆，破坏性操作，先 dryRun 试算）
 - **[按需]** news_search: Search SUPERCRZY's own AI news library (supercrzy.com, real-time, each item has precise publication date + category Models/Business/Hardware/Agents/Open Source/Research). **When the user asks about 最近/今日/最新 AI 动态、模型/硬件/Agent 进展、或具体方向(如 '推理成本' '某模型') — prefer news_search first (time-accurate by built-in dates), then web_search for cross-source depth. After returning, if an item deserves deeper digging, call deep_research on it.**
 - **[按需]** file_exists / file_delete / lint_file / read_me: 文件存在性检查 / 删除 / 内容校验 / 读取网页正文（多数场景已被 file_read、file_write、shell_exec、web_fetch 覆盖）
 - **[按需]** get_goal / task_list: 长任务自查目标与列出任务清单（防跑偏）
@@ -872,6 +872,7 @@ If something blocks you, say so directly. Never fabricate results.
 你是带长期记忆的助手。使用规则：
 - **何时存（memory_store）**：用户在对话中透出可复用的个人事实时保存——①偏好（"以后都用简洁回答"）②项目事实（"这项目用 pnpm + Koa"）③跨对话相关的关键结论。保存时给一个稳的 key（如 pref:short-answers）和一句话内容。
 - **何时召回（memory_recall）**：新对话/新任务**开始前**，先召回与本次任务相关的记忆（用户是谁、历史偏好、做过什么类似任务），避免答非所问或重复提问。
+- **何时整理（memory_consolidate）**：用户要求"整理/清理/合并记忆"时，或你发现记忆库里同一主题有多条近似重复时调用。它是**破坏性操作**（会删除行），务必先 dryRun=true 试算并把结果告诉用户，用户认可后再执行。
 - **何时不存**：临时性、一次性、与任务无关的内容不存，避免记忆库膨胀。下结论前若记忆里已有该用户偏好，直接遵循，不必再问。
 Save important facts with memory_store. Retrieve relevant history with memory_recall before starting a task.
 
@@ -1528,7 +1529,10 @@ export async function runAgentLoop(
           function: { name: tc.name, arguments: tc.args },
         }))
 
-        const SENSITIVE_TOOLS = new Set(['shell_exec', 'file_write', 'file_delete'])
+        // 2026-09-18（#147）：补 memory_consolidate —— 它会 DELETE 记忆行，属于破坏性操作，
+        // 必须与 file_delete 同级走"先确认后执行"。此前不在名单里 = 模型可静默删用户记忆。
+        // 注：auto 档下 classifySensitiveTool 对未特判的工具返回 'ask'，所以这一条就足以拦住。
+        const SENSITIVE_TOOLS = new Set(['shell_exec', 'file_write', 'file_delete', 'memory_consolidate'])
 
         // ---- ToolCallLoopDetector（WorkBuddy 同款）：同一工具 + 相似参数连续调用 ≥4 次 → 干预，防死循环烧 token ----
         const loopHit = detectToolLoop(toolCalls)
@@ -2404,11 +2408,14 @@ async function autoExtractMemories(assistantContent: string, userContent: string
   const memoryEnabledRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('memoryEnabled') as any
   if (memoryEnabledRow && memoryEnabledRow.value !== 'true') return
 
+  // 2026-09-18：分类词表收敛到 memory-category.ts。
+  // 原先这里写 'fact' —— database.ts 早已把 fact 迁成 knowledge，两个分类名并存，
+  // 而 'fact' 不在任何权重表里 → 新抽出来的身份/项目名拿默认权重。
   const memoryPatterns = [
-    { pattern: /我叫\s*(\S+)/, key: '用户名称', category: 'preference' },
-    { pattern: /我是\s*(.+)/, key: '用户身份', category: 'fact' },
+    { pattern: /我叫\s*(\S+)/, key: '用户名称', category: 'user' },
+    { pattern: /我是\s*(.+)/, key: '用户身份', category: 'user' },
     { pattern: /用\s*(.+)\s*语言/, key: '偏好语言', category: 'preference' },
-    { pattern: /项目[名称是]*\s*[：:]\s*(.+)/, key: '项目名称', category: 'fact' },
+    { pattern: /项目[名称是]*\s*[：:]\s*(.+)/, key: '项目名称', category: 'knowledge' },
     { pattern: /喜欢\s*(.+)/, key: '用户偏好', category: 'preference' },
   ]
 
@@ -2417,13 +2424,8 @@ async function autoExtractMemories(assistantContent: string, userContent: string
   for (const { pattern, key, category } of memoryPatterns) {
     const match = combinedText.match(pattern)
     if (match && match[1]) {
-      const existing = db.prepare('SELECT id FROM agent_memory WHERE key = ?').get(key) as any
-      if (!existing) {
-        const id = randomUUID()
-        db.prepare(
-          'INSERT INTO agent_memory (id, key, content, category, importance) VALUES (?, ?, ?, ?, ?)'
-        ).run(id, key, match[1], category, 3)
-      }
+      // 改走统一入口：原先"只在不存在时插入"导致改了名字/语言后记忆永不更新，现在同 key 覆盖。
+      upsertMemory(db, { key, content: String(match[1]).trim(), category, importance: 3 })
     }
   }
 }

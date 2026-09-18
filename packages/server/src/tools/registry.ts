@@ -19,6 +19,7 @@ import taskUpdate from './task-update'
 import taskList from './task-list'
 import memoryRecall from './memory-recall'
 import memoryList from './memory-list'
+import memoryConsolidate from './memory-consolidate'
 import skillList from './skill-list'
 import skillSearch from './skill-search'
 import skillView from './skill-view'
@@ -91,6 +92,8 @@ export const directoryTools: ToolDef[] = [
   taskList,
   memoryRecall,
   memoryList,
+  // 2026-09-18（#147）：补上 app.ts 里早有中文名、却一直没有实现的 `合并记忆`
+  memoryConsolidate,
   skillList,
   skillSearch,
   skillView,

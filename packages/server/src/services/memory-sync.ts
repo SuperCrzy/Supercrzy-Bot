@@ -4,7 +4,8 @@
 
 import { config } from '../config/index.js'
 import { getDB } from './database.js'
-import { randomUUID } from 'crypto'
+import { upsertMemories } from './memory-service'
+import { normalizeCategory } from './memory-category'
 
 function readSetting(key: string): string {
   try {
@@ -60,8 +61,6 @@ async function llmJson(system: string, user: string, fallback: unknown): Promise
 
 const SYNC_SYSTEM = `You are a memory curator for an AI agent. After a conversation turn, decide whether the exchange contains facts worth remembering long-term: user preferences, personal facts, project facts, or important decisions. Be conservative — only extract durable, reusable information, not one-off task details.`
 
-const VALID_CATEGORIES = new Set(['user', 'knowledge', 'general', 'topic'])
-
 /**
  * turn 后记忆同步：LLM 从本次对话提取值得长期记住的信息（最多 3 条）写入 agent_memory
  * 同 key 已存在 → 更新 content；不存在 → 插入。importance 冲突取较高值。
@@ -77,11 +76,13 @@ export async function syncTurnMemories(userContent: string, assistantContent: st
 
 Extract 0-3 durable memories worth storing long-term. Categories:
 - "user": user preferences, personal facts, identity (我叫/我喜欢/我在做X)
+- "preference": 用户明确表达的工作方式偏好（回复风格/语言/详细程度/技术选型倾向）
 - "knowledge": project facts, technical decisions, domain facts stated with confidence
+- "rule": 用户立下的硬约定或纠正（"以后都要 X""不要再 Y"）——违反会出错，务必单独归类
 - "topic": 用户长期关注/感兴趣的方向（如"关注推理成本""关注某模型""对机器人领域有兴趣"）——用于后续 news_search 主动提醒进展
 - "general": anything else durable
 Rules: skip task-specific details, skip obvious content, skip anything already covered by the exchange itself. Prefer short keys.
-Return JSON: {"memories": [{"key": "简短键名(中文)", "content": "一句话事实", "category": "user|knowledge|topic|general", "importance": 5}]}`
+Return JSON: {"memories": [{"key": "简短键名(中文)", "content": "一句话事实", "category": "user|preference|knowledge|rule|topic|general", "importance": 5}]}`
 
   let memories: Array<{ key: string; content: string; category: string; importance: number }> = []
   try {
@@ -91,7 +92,7 @@ Return JSON: {"memories": [{"key": "简短键名(中文)", "content": "一句话
       .map((m: any) => ({
         key: String(m.key).slice(0, 60),
         content: String(m.content).slice(0, 300),
-        category: VALID_CATEGORIES.has(String(m.category)) ? String(m.category) : 'general',
+        category: normalizeCategory(m.category),
         importance: Math.min(Math.max(parseInt(m.importance) || 5, 1), 10),
       }))
   } catch (e: any) {
@@ -101,18 +102,12 @@ Return JSON: {"memories": [{"key": "简短键名(中文)", "content": "一句话
   if (memories.length === 0) return
 
   const db = getDB()
-  const now = new Date().toISOString()
-  let added = 0
-  for (const m of memories) {
-    const existing = db.prepare('SELECT id, importance FROM agent_memory WHERE key = ?').get(m.key) as any
-    if (existing) {
-      db.prepare('UPDATE agent_memory SET content = ?, importance = MAX(importance, ?), updated_at = ? WHERE id = ?')
-        .run(m.content, m.importance, now, existing.id)
-    } else {
-      db.prepare('INSERT INTO agent_memory (id, key, content, category, importance, confidence, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-        .run(randomUUID(), m.key, m.content, m.category, m.importance, 0.5, now, now)
-      added++
-    }
+  // 2026-09-18：改走统一写入入口（去重 / 归一 / 时间格式统一都在那里）。
+  // 原先此处自己写了一套 SELECT+UPDATE / INSERT，与 reflection.ts、tools/shared.ts 各写各的。
+  const results = upsertMemories(db, memories)
+  const inserted = results.filter((r) => r.action === 'inserted').length
+  const updated = results.filter((r) => r.action === 'updated').length
+  if (inserted > 0 || updated > 0) {
+    console.log(`[MemorySync] 新增 ${inserted} 条 / 更新 ${updated} 条（共 ${memories.length} 条候选）`)
   }
-  if (added > 0) console.log(`[MemorySync] 新增 ${added} 条记忆（共 ${memories.length} 条候选）`)
 }

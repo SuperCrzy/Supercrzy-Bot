@@ -137,25 +137,37 @@ describe('SENSITIVE_MEMORY_PATTERN 凭据拦截', () => {
   })
 })
 
-/** 最小假 db：只实现 storeMemory 用到的 prepare/get/run 语义 */
+/**
+ * 最小假 db：只实现 storeMemory 用到的 prepare/get/run 语义。
+ *
+ * 2026-09-18（#147）：storeMemory 已下沉到 `services/memory-service.upsertMemory`，
+ * 它写的是**多行 SQL**（`UPDATE agent_memory\n  SET content = ?…`）。原先这里用
+ * `sql.startsWith('UPDATE agent_memory SET content')` 做前缀匹配 → 换行后整个失配、静默不写。
+ * 现改为"先把空白归一成单空格再匹配"，测试就不会再被生产 SQL 的排版方式绑架。
+ *
+ * ⚠️ 注意：本文件只验证 storeMemory 的**对外反馈文案**。真正的去重/归一语义在
+ * `services/memory-service.test.ts` 里用真实内存 SQLite 验证——SQL 语义别在这里测。
+ */
 function fakeDb(initial: Array<Record<string, any>> = []) {
   const rows = initial.map((r) => ({ ...r }))
+  const flat = (sql: string) => sql.replace(/\s+/g, ' ').trim()
   return {
     rows,
     prepare(sql: string) {
+      const s = flat(sql)
       return {
         get: (...a: any[]) => {
-          if (sql.includes('content = ?')) return rows.find((r) => r.key === a[0] && r.content === a[1])
+          if (s.includes('content = ?')) return rows.find((r) => r.key === a[0] && r.content === a[1])
           return rows.find((r) => r.key === a[0])
         },
         run: (...a: any[]) => {
-          if (sql.startsWith('UPDATE agent_memory SET importance')) {
+          if (s.startsWith('UPDATE agent_memory SET importance')) {
             const r = rows.find((x) => x.id === a[1])
             if (r) r.importance = a[0]
-          } else if (sql.startsWith('UPDATE agent_memory SET content')) {
+          } else if (s.startsWith('UPDATE agent_memory SET content')) {
             const r = rows.find((x) => x.id === a[3])
             if (r) { r.content = a[0]; r.category = a[1]; r.importance = a[2] }
-          } else if (sql.startsWith('INSERT')) {
+          } else if (s.startsWith('INSERT')) {
             rows.push({ id: a[0], key: a[1], content: a[2], category: a[3], importance: a[4] })
           }
         },
@@ -173,11 +185,20 @@ describe('storeMemory 记忆入库三分支', () => {
     expect(db.rows[0].key).toBe('k1')
   })
 
-  it('同 key 同内容 → 去重跳过', () => {
+  it('同 key 同内容且 importance 未提升 → 去重跳过', () => {
+    // 2026-09-18（#147）：unchanged 的判定是"内容相同 **且** importance 不会变"。
+    // 这里显式传同等 importance，才落到"无变化"分支（不传则默认 5，见下一个用例）。
     const db = fakeDb([{ id: 'x', key: 'k1', content: 'v1', importance: 3 }])
-    const msg = storeMemory(db, 'k1', 'v1')
+    const msg = storeMemory(db, 'k1', 'v1', 'general', 3)
     expect(msg).toContain('自动去重跳过')
     expect(db.rows).toHaveLength(1)
+  })
+
+  it('同 key 同内容但走默认 importance(5) → 抬升 importance，仍不新增行', () => {
+    const db = fakeDb([{ id: 'x', key: 'k1', content: 'v1', importance: 3 }])
+    storeMemory(db, 'k1', 'v1')
+    expect(db.rows).toHaveLength(1)
+    expect(db.rows[0].importance).toBe(5)
   })
 
   it('同 key 同内容但 importance 更高 → 只抬 importance 不重复插入', () => {
@@ -189,17 +210,32 @@ describe('storeMemory 记忆入库三分支', () => {
 
   it('同 key 不同内容 → 覆盖旧值', () => {
     const db = fakeDb([{ id: 'x', key: 'k1', content: 'v1', importance: 3 }])
-    const msg = storeMemory(db, 'k1', 'v2', 'cat', 4)
+    const msg = storeMemory(db, 'k1', 'v2', 'knowledge', 4)
     expect(msg).toContain('覆盖旧值')
     expect(db.rows).toHaveLength(1)
     expect(db.rows[0].content).toBe('v2')
-    expect(db.rows[0].category).toBe('cat')
+    expect(db.rows[0].category).toBe('knowledge')
   })
 
-  it('未传 category/importance 时落默认值 general/3', () => {
+  // 2026-09-18（#147）：分类不再原样落库，一律经 normalizeCategory 归一。
+  // 改动前 `category='cat'` 会被原样写进表（词表散在 5 处时没人管），现在非法值落 general。
+  it('非法 category → 归一为 general（不再是原样落库）', () => {
+    const db = fakeDb([{ id: 'x', key: 'k1', content: 'v1', importance: 3 }])
+    storeMemory(db, 'k1', 'v2', 'cat', 4)
+    expect(db.rows[0].category).toBe('general')
+  })
+
+  it('中文脏分类 经验 → 归一为 experience', () => {
+    const db = fakeDb()
+    storeMemory(db, 'k3', 'v3', '经验', 4)
+    expect(db.rows[0].category).toBe('experience')
+  })
+
+  it('未传 category/importance 时落默认值 general/5', () => {
+    // 改动前该默认值是 3（工具侧）而 reflection 用 5，两套并存即本次要根治的病 → 统一 5
     const db = fakeDb()
     storeMemory(db, 'k2', 'v2')
     expect(db.rows[0].category).toBe('general')
-    expect(db.rows[0].importance).toBe(3)
+    expect(db.rows[0].importance).toBe(5)
   })
 })

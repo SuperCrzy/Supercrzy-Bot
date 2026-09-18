@@ -38,6 +38,8 @@ const TOOL_DESCRIPTORS: Record<string, ToolDescriptor> = {
   memory_store: { actionKey: 'chat.sumMemory', objectFields: [] },
   memory_recall: { actionKey: 'chat.sumMemory', objectFields: [] },
   memory_list: { actionKey: 'chat.sumMemory', objectFields: [] },
+  // 2026-09-18（#147）：整理记忆是破坏性操作，折叠条单独给个动词，别与"存储/回忆"混在一起
+  memory_consolidate: { actionKey: 'chat.sumConsolidate', objectFields: [] },
   create_plan: { actionKey: 'chat.sumPlan', objectFields: ['task', 'goal'] },
   ask_question: { actionKey: 'chat.sumAsk', objectFields: ['question'] },
   ask_user: { actionKey: 'chat.sumAsk', objectFields: ['question'] },

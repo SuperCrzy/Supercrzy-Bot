@@ -10,8 +10,8 @@
  * 避免循环 import。
  */
 import { getDB } from '../services/database'
+import { upsertMemory } from '../services/memory-service'
 import { WORKSPACE_ROOT } from '../services/sandbox'
-import { randomUUID } from 'crypto'
 import { exec } from 'child_process'
 import { readdirSync, statSync } from 'fs'
 import { basename, join } from 'path'
@@ -115,33 +115,26 @@ export function runGit(cmd: string, cwd: string | undefined, label: string): Pro
   })
 }
 
-/** 记忆入库核心：同 key 同内容去重 / 同 key 覆盖 / 新增插入 */
+/**
+ * 记忆入库核心（工具侧入口）。
+ *
+ * 2026-09-18：去重/归一/时间格式的实现**全部下沉到 `services/memory-service.upsertMemory`**，
+ * 本函数只负责把结构化结果翻译成工具给模型看的中文反馈。
+ * 此前这里是独立的一份实现（同 key 同内容跳过 / 同 key 覆盖），与 memory-sync、reflection、
+ * agent 正则抽取各写一套，彼此行为不一致（默认 importance 3 vs 5、category 不归一）。
+ */
 export function storeMemory(db: any, key: string, content: string, category?: string, importance?: number): string {
-  const existing = db.prepare(
-    'SELECT id, importance FROM agent_memory WHERE key = ? AND content = ? LIMIT 1'
-  ).get(key, content) as any
-  if (existing) {
-    const imp = Number(importance || 3)
-    if (imp > (existing.importance || 0)) {
-      db.prepare('UPDATE agent_memory SET importance = ?, updated_at = datetime(\'now\') WHERE id = ?')
-        .run(imp, existing.id)
-    }
-    return `✅ 记忆已存在（同 key 同内容），自动去重跳过：${key}`
+  const r = upsertMemory(db, { key, content, category, importance })
+  switch (r.action) {
+    case 'inserted':
+      return `✅ 记忆已存储：${r.key}`
+    case 'updated':
+      return `✅ 记忆已更新（同 key 覆盖旧值）：${r.key}`
+    case 'unchanged':
+      return `✅ 记忆已存在（同 key 同内容），自动去重跳过：${r.key}`
+    default:
+      return `⛔ 记忆未存储：${r.reason || '入参非法'}`
   }
-
-  const sameKey = db.prepare('SELECT id FROM agent_memory WHERE key = ? LIMIT 1').get(key) as any
-  if (sameKey) {
-    db.prepare(
-      "UPDATE agent_memory SET content = ?, category = ?, importance = ?, updated_at = datetime('now') WHERE id = ?"
-    ).run(content, category || 'general', importance || 3, sameKey.id)
-    return `✅ 记忆已更新（同 key 覆盖旧值）：${key}`
-  }
-
-  const id = randomUUID()
-  db.prepare(
-    'INSERT INTO agent_memory (id, key, content, category, importance, created_at, updated_at) VALUES (?, ?, ?, ?, ?, datetime(\'now\'), datetime(\'now\'))'
-  ).run(id, key, content, category || 'general', importance || 3)
-  return `✅ 记忆已存储：${key}`
 }
 
 /** lint_file 静态检查规则：危险模式 / 凭据 / 括号配对粗检（复用技能安全扫描思路） */

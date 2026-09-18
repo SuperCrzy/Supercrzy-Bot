@@ -1,5 +1,6 @@
 import { getDB } from './database'
 import { getEmbeddings, embeddingEnabled, normCosine } from './embedding'
+import { MEMORY_CATEGORIES, categoryWeight } from './memory-category'
 
 /**
  * Memory Retrieval Ranking（P0.1 定稿规格，2026-08-23）
@@ -7,14 +8,12 @@ import { getEmbeddings, embeddingEnabled, normCosine } from './embedding'
  * 核心思想：FTS5 是检索引擎，排序才是记忆系统。
  * score = (0.3 + importance/10) × confidence × timeDecay × categoryWeight
  * timeDecay = 0.95 ^ daysSinceLastUsed（封顶 365 天）
+ *
+ * 2026-09-18：`categoryWeight` 从本文件私有的 4 项表（experience/user/knowledge/general）
+ * 迁到 `memory-category.ts` 的权威表（覆盖全部 7 个实际分类）。
+ * 原先 `preference`（用户偏好）与 `rule`（约定/教训）不在表里 → 落 `?? 1.0` 默认值，
+ * 结果"越有用的越排不过任务流水"。
  */
-
-const CATEGORY_WEIGHT: Record<string, number> = {
-  experience: 1.5, // 经验方法：最高优先（反复验证的策略）
-  user: 1.3,       // 用户画像：个性化关键
-  knowledge: 1.0,  // 事实知识
-  general: 0.8,    // 兜底
-}
 
 export interface RankedMemory {
   id: string
@@ -39,7 +38,7 @@ export function rankMemories(memories: any[]): RankedMemory[] {
       const t = m.last_used || m.created_at
       const days = t ? (now - new Date(t).getTime()) / 86400000 : 30
       const decay = Math.pow(0.95, Math.min(Math.max(days, 0), 365))
-      const catW = CATEGORY_WEIGHT[m.category] ?? 1.0
+      const catW = categoryWeight(m.category)
       return {
         id: m.id, key: m.key, content: m.content, category: m.category,
         importance, confidence, usage_count: m.usage_count ?? 0, last_used: m.last_used ?? null,
@@ -47,6 +46,82 @@ export function rankMemories(memories: any[]): RankedMemory[] {
       }
     })
     .sort((a, b) => b.score - a.score)
+}
+
+/**
+ * 候选池选取（2026-09-18 新增，修"低分记忆被重要性垄断挤死"）
+ *
+ * 原实现是 `SELECT … ORDER BY importance DESC LIMIT memoryItemLimit*3`（= 75）。
+ * 实测：库里 `importance ≥ 6` 的已有 82 条 > 75 → **`importance ≤ 5` 的 126 条永远进不了候选池**；
+ * 且 experience 单品类占 49.5% 还在每日膨胀，会把池子持续占满。
+ *
+ * 新实现：先用窗口函数按分类各取前 perCategory 条（保证每个分类都有代表进池），
+ * 再按 importance 截到 limit。这样"一个分类数量暴涨"不再能挤掉其它分类。
+ */
+export function selectMemoryCandidates(db: any, roleId: string, limit: number): any[] {
+  const perCategory = Math.max(8, Math.ceil(limit / 3))
+  try {
+    return db.prepare(
+      `SELECT id, key, content, category, importance, confidence, usage_count, last_used, created_at
+         FROM (
+           SELECT id, key, content, category, importance, confidence, usage_count, last_used, created_at,
+                  ROW_NUMBER() OVER (PARTITION BY category ORDER BY importance DESC, updated_at DESC) AS rn
+             FROM agent_memory
+            WHERE (role_id IS NULL OR role_id = ? OR role_id = '')
+         )
+        WHERE rn <= ?
+        ORDER BY importance DESC
+        LIMIT ?`
+    ).all(roleId || '', perCategory, limit) as any[]
+  } catch (e: any) {
+    // 窗口函数不可用（极老 SQLite）→ 退回原逻辑，保证功能不因排序优化而挂掉
+    console.warn('[MemorySearch] 候选池窗口查询失败，退回 importance 排序:', e?.message || e)
+    return db.prepare(
+      `SELECT id, key, content, category, importance, confidence, usage_count, last_used, created_at
+         FROM agent_memory
+        WHERE (role_id IS NULL OR role_id = ? OR role_id = '')
+        ORDER BY importance DESC LIMIT ?`
+    ).all(roleId || '', limit) as any[]
+  }
+}
+
+/**
+ * 分类配额（2026-09-18 新增）
+ *
+ * 目的：防止单一分类独占 prompt 位。实测 experience 占全表 49.5% 且每个任务还在 +N 条，
+ * 而它权重 1.5 又偏高——不设限的话它会持续把候选位吃光。
+ *
+ * 规则：按排名顺序入选；受限分类最多占 `ceil(limit × maxShare)` 个位；
+ * 若因此没填满 limit，则回填被限额挡下的（**限额是为了排序公平，不是为了让注入变少**）。
+ *
+ * 纯函数，便于单测锁行为。
+ */
+export function applyCategoryQuota(
+  ranked: RankedMemory[],
+  limit: number,
+  opts: { maxShare?: number; limited?: string[] } = {},
+): RankedMemory[] {
+  if (limit <= 0) return []
+  const maxShare = opts.maxShare ?? 0.4
+  const limited = new Set(opts.limited ?? ['experience'])
+  const cap = Math.max(1, Math.ceil(limit * maxShare))
+
+  const picked: RankedMemory[] = []
+  const overflow: RankedMemory[] = []
+  const used = new Map<string, number>()
+
+  for (const r of ranked) {
+    if (picked.length >= limit) break
+    if (!limited.has(r.category)) { picked.push(r); continue }
+    const n = used.get(r.category) ?? 0
+    if (n < cap) { used.set(r.category, n + 1); picked.push(r) }
+    else overflow.push(r)
+  }
+  for (const r of overflow) {
+    if (picked.length >= limit) break
+    picked.push(r)
+  }
+  return picked
 }
 
 /** FTS5 语义检索 + ranking：召回匹配记忆并按综合分数排序；命中即更新 usage_count/last_used */

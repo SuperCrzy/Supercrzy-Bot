@@ -371,6 +371,7 @@ const messages = {
       sumTask: '整理任务',
       sumSkill: '加载技能',
       sumMemory: '处理记忆',
+      sumConsolidate: '整理记忆',
       sumPlan: '制定执行计划',
       sumAsk: '向你提问',
       sumComputer: '操作桌面',
@@ -826,6 +827,8 @@ const messages = {
       replicateModelDesc: 'Replicate 图像模型（默认 black-forest-labs/flux-schnell）',
       // Memory
       memoryEnabled: '启用记忆',
+      memoryAutoConsolidate: '自动整理记忆',
+      memoryAutoConsolidateDesc: '定期合并同一主题的近似重复记忆，并按分类上限淘汰重要性≤4的旧记忆，防止记忆库无限膨胀',
       memoryEnabledDesc: '允许 AI 记住对话上下文',
       userProfileEnabled: '用户画像',
       userProfileEnabledDesc: '允许 AI 记住用户偏好信息',
@@ -2038,6 +2041,8 @@ const messages = {
       replicateModelDesc: 'Replicate image model (default black-forest-labs/flux-schnell)',
       // Memory
       memoryEnabled: 'Enable memory',
+      memoryAutoConsolidate: 'Auto-tidy memories',
+      memoryAutoConsolidateDesc: 'Periodically merge near-duplicate memories on the same topic and evict stale ones with importance ≤ 4, keeping the memory store from growing unbounded',
       memoryEnabledDesc: 'Allow AI to remember conversation context',
       userProfileEnabled: 'User profile',
       userProfileEnabledDesc: 'Allow AI to remember user preferences',

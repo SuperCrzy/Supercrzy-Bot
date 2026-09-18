@@ -14,7 +14,7 @@ export function maskSecret(value: string, headLen: number): string {
 const FLOAT_KEYS = ['temperature', 'maxTokens', 'maxTurns', 'gatewayTimeout', 'memoryCharLimit', 'idleTimeout']
 
 // Boolean keys that should be parsed as boolean
-const BOOL_KEYS = ['streamingEnabled', 'compactMode', 'showReasoning', 'showCost', 'completionSound', 'busyInputMode', 'memoryEnabled', 'piiMaskingEnabled']
+const BOOL_KEYS = ['streamingEnabled', 'compactMode', 'showReasoning', 'showCost', 'completionSound', 'busyInputMode', 'memoryEnabled', 'piiMaskingEnabled', 'memoryAutoConsolidate']
 
 // Get all settings
 settingsRouter.get('/', (ctx: Context) => {
@@ -74,7 +74,7 @@ settingsRouter.post('/', (ctx: Context) => {
       // 代理 Agent
       'maxTurns', 'gatewayTimeout',
       // 记忆 Memory
-      'memoryEnabled', 'memoryCharLimit',
+      'memoryEnabled', 'memoryCharLimit', 'memoryAutoConsolidate',
       // 隐私 Privacy
       'piiMaskingEnabled',
       // 工具授权模式（auto=始终允许 / prompt=每次询问 / deny=一律拒绝）——历史内部档位
