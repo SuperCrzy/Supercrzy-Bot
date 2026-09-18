@@ -856,15 +856,15 @@ onMounted(() => {
               color var(--duration-fast) var(--ease-out);
 }
 
-/* 2026-08-29 超级协作平台：置顶主入口高亮（取代幽灵工作台） */
+/* 2026-08-29 超级协作平台：置顶主入口(现与其他导航一致:非选中无底,选中才高亮) */
 .nav-item.collab-nav {
-  color: #534AB7;
-  background: #f5f3ff;
+  color: var(--text-secondary);
+  background: transparent;
   margin-bottom: 2px;
 }
 .nav-item.collab-nav.active {
-  background: #eeedfe;
-  color: #3c3489;
+  background: color-mix(in srgb, var(--accent, #4f7cff) 22%, var(--bg-primary, #1b1f2b));
+  color: var(--accent, #9db8ff);
   font-weight: 500;
 }
 

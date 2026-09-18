@@ -391,16 +391,16 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 .collab-workbench { height: 100%; display: flex; flex-direction: column; background: var(--bg-primary); overflow: hidden; }
 .collab-topbar { flex-shrink: 0; display: flex; align-items: center; gap: 14px; padding: 12px 20px; border-bottom: 1px solid var(--border-color); }
 .collab-brand { display: flex; align-items: center; gap: 8px; }
-.collab-logo { width: 26px; height: 26px; border-radius: 7px; background: #f5f3ff; color: #534AB7; display: flex; align-items: center; justify-content: center; }
+.collab-logo { width: 26px; height: 26px; border-radius: 7px; background: color-mix(in srgb, var(--accent, #4f7cff) 16%, transparent); color: var(--accent,#7aa2ff); display: flex; align-items: center; justify-content: center; }
 .collab-name { font-weight: 600; font-size: 14px; }
 .collab-mode-switch { display: flex; background: var(--bg-tertiary); border-radius: 8px; padding: 3px; gap: 2px; }
 .mode-btn { border: none; background: transparent; font-size: 12px; padding: 5px 16px; border-radius: 6px; color: var(--text-muted); cursor: pointer; }
 .mode-btn.active { background: var(--bg-primary); color: var(--text-primary); font-weight: 500; box-shadow: inset 0 0 0 1px var(--border-color); }
-.collab-auth { font-size: 11px; background: #f0fdf4; color: #0f766e; border-radius: 6px; padding: 2px 10px; }
-.collab-auth.on { background: #f0fdf4; color: #0f766e; }
+.collab-auth { font-size: 11px; background: color-mix(in srgb, #0f766e 14%, transparent); color: color-mix(in srgb, #34d399 86%, #0f766e); border-radius: 6px; padding: 2px 10px; }
+.collab-auth.on { color: color-mix(in srgb, #34d399 86%, #0f766e); }
 .collab-api { font-size: 11px; color: var(--text-tertiary); margin-left: auto; }
-.collab-browser-toggle { margin-left: 8px; display: flex; align-items: center; gap: 5px; font-size: 12px; color: #534AB7; background: #f5f3ff; border: 1px solid #e4dcf5; border-radius: 6px; padding: 4px 10px; cursor: pointer; }
-.collab-browser-toggle:hover { background: #eeedfe; }
+.collab-browser-toggle { margin-left: 8px; display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--accent, #7aa2ff); background: color-mix(in srgb, var(--accent, #4f7cff) 14%, transparent); border: 1px solid color-mix(in srgb, var(--accent, #4f7cff) 30%, transparent); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+.collab-browser-toggle:hover { background: color-mix(in srgb, var(--accent, #4f7cff) 24%, transparent); }
 .collab-body { flex: 1; min-height: 0; display: flex; }
 .collab-left { overflow-y: auto; border-right: 1px solid var(--border-color); padding: 14px; background: var(--bg-tertiary); min-height: 0; }
 .collab-main { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg-tertiary); overflow: hidden; }

@@ -67,7 +67,7 @@ export function getProviderConfig(providerKey: string) {
 export async function chatWithProvider(
   providerKey: string,
   messages: Array<{ role: string; content: string }>,
-  opts: { maxTokens?: number; temperature?: number } = {},
+  opts: { maxTokens?: number; temperature?: number; timeoutMs?: number } = {},
 ): Promise<string> {
   const p = getProviderConfig(providerKey)
   if (!p) throw new Error(`provider ${providerKey} 未配置可用 key`)
@@ -82,12 +82,19 @@ export async function chatWithProvider(
     if (providerKey === 'kimi') body.temperature = 1
     else body.temperature = opts.temperature
   }
-  const resp = await fetch(`${p.baseUrl}/v1/chat/completions`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${p.apiKey}` },
-    body: JSON.stringify(body),
-  })
-  if (!resp.ok) throw new Error(`LLM HTTP ${resp.status}`)
-  const data = (await resp.json()) as any
-  return String(data?.choices?.[0]?.message?.content || '').trim()
+  const controller = new AbortController()
+  const timer = opts.timeoutMs ? setTimeout(() => controller.abort(), opts.timeoutMs) : null
+  try {
+    const resp = await fetch(`${p.baseUrl}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${p.apiKey}` },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    })
+    if (!resp.ok) throw new Error(`LLM HTTP ${resp.status}`)
+    const data = (await resp.json()) as any
+    return String(data?.choices?.[0]?.message?.content || '').trim()
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 }

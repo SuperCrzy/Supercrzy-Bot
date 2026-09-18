@@ -382,6 +382,22 @@ export function initDatabase() {
     db.exec("ALTER TABLE collab_tasks ADD COLUMN suggest_senate INTEGER NOT NULL DEFAULT 0")
   } catch { /* already exists */ }
 
+  // 2026-09-01 项目会诊异步任务表（大项目给议院找bug，后台跑+轮询）
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS collab_audit (
+      id TEXT PRIMARY KEY,
+      project TEXT NOT NULL,
+      instruction TEXT DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'running',
+      progress TEXT DEFAULT '',
+      member_count INTEGER NOT NULL DEFAULT 0,
+      done_count INTEGER NOT NULL DEFAULT 0,
+      result TEXT DEFAULT '',
+      error TEXT DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`)
+  } catch { /* already exists */ }
+
   // Migration: add notify_channel column to automations
   try {
     db.exec("ALTER TABLE automations ADD COLUMN notify_channel TEXT NOT NULL DEFAULT ''")
