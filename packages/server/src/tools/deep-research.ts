@@ -3,17 +3,6 @@
  * 定义与执行器一体：加工具 = 加一个文件，不再双写。
  */
 import type { ToolDef } from './types'
-import { getDB } from '../services/database'
-import { randomUUID } from 'crypto'
-import { join, basename } from 'path'
-import { readFile, writeFile, access, appendFile, stat, readdir, rm, rmdir } from 'fs/promises'
-import { exec, execFile, spawn } from 'child_process'
-import { constants, readdirSync, statSync } from 'fs'
-import { runSearchChain, runExhaustiveSearch } from '../services/search-providers'
-import { memoryRankedSearch, memoryRankedSearchHybrid } from '../services/memory-search'
-import { installSkillFromGitHub, initSkillsDirectory } from '../services/skill-loader'
-import { terminalOpen, terminalList, terminalSend, terminalRead, terminalSignal, terminalClose } from '../services/terminal-manager'
-import { scanDangerousPath, sandboxify, WORKSPACE_ROOT, assertSafeFilePath } from '../services/sandbox'
 
 const tool: ToolDef = {
     name: 'deep_research',

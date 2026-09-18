@@ -4,16 +4,6 @@
  */
 import type { ToolDef } from './types'
 import { getDB } from '../services/database'
-import { randomUUID } from 'crypto'
-import { join, basename } from 'path'
-import { readFile, writeFile, access, appendFile, stat, readdir, rm, rmdir } from 'fs/promises'
-import { exec, execFile, spawn } from 'child_process'
-import { constants, readdirSync, statSync } from 'fs'
-import { runSearchChain, runExhaustiveSearch } from '../services/search-providers'
-import { memoryRankedSearch, memoryRankedSearchHybrid } from '../services/memory-search'
-import { installSkillFromGitHub, initSkillsDirectory } from '../services/skill-loader'
-import { terminalOpen, terminalList, terminalSend, terminalRead, terminalSignal, terminalClose } from '../services/terminal-manager'
-import { scanDangerousPath, sandboxify, WORKSPACE_ROOT, assertSafeFilePath } from '../services/sandbox'
 
 const tool: ToolDef = {
     // get_goal 已迁至 tools/ 目录（ToolDef 注册表，2026-08-25 工具架构轻量包化）——此处不再内联定义，避免工具名重复
