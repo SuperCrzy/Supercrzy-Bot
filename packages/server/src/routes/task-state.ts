@@ -11,6 +11,8 @@ import {
   getTask,
   getTaskBySession,
   requestTaskCancel,
+  requestTaskPause,
+  resumeTask,
   setTaskStatus,
   statusLabel,
   aggregateTaskStats,
@@ -59,6 +61,39 @@ taskStateRouter.post('/:id/cancel', (ctx) => {
   const t = getTask(ctx.params.id)
   ctx.status = ok ? 200 : 409
   ctx.body = { ok, task: t, message: ok ? '已请求取消' : '任务不存在或已结束' }
+})
+
+/**
+ * 请求暂停（阶段二-②）：与取消同款"只打标记"语义 ——
+ * 立即返回 paused=false，UI 应显示"正在暂停…"；agent loop 在轮次边界落 paused 后广播。
+ */
+taskStateRouter.post('/:id/pause', (ctx) => {
+  const ok = requestTaskPause(ctx.params.id)
+  const t = getTask(ctx.params.id)
+  ctx.status = ok ? 200 : 409
+  ctx.body = {
+    ok,
+    task: t,
+    pausing: ok,
+    message: ok ? '已请求暂停（将在当前轮次结束时停下）' : '任务不存在、已结束、或已请求取消',
+  }
+})
+
+/**
+ * 恢复（阶段二-②）：paused → running。
+ * 只改状态；真正的续跑由前端既有 checkpoint 通道触发（resumeFromCheckpoint）。
+ */
+taskStateRouter.post('/:id/resume', (ctx) => {
+  const ok = resumeTask(ctx.params.id)
+  const t = getTask(ctx.params.id)
+  ctx.status = ok ? 200 : 409
+  ctx.body = {
+    ok,
+    task: t,
+    message: ok ? '已恢复执行' : '任务不是暂停态，或已被取消',
+    /** 前端据此走 resumeFromCheckpoint */
+    checkpointId: t?.checkpoint_id || '',
+  }
 })
 
 /** 手工流转（供适配器/恢复使用） */

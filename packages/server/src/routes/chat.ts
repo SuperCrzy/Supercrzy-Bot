@@ -1,7 +1,7 @@
 import Router from 'koa-router'
 import { handleStreamChat, handleChat, handleAgentChat, handleCompareChat, handleCompareStreamChat } from '../services/chat'
 import { resolveToolConfirmation, approveSessionTools, resolveQuestion, requestStop, clearStop, isStopRequested } from '../services/agent'
-import { getTaskBySession, requestTaskCancel } from '../services/task-state'
+import { getTaskBySession, requestTaskCancel, requestTaskPause, resumeTask } from '../services/task-state'
 
 export const chatRouter = new Router({ prefix: '/api/chat' })
 
@@ -41,6 +41,70 @@ chatRouter.post('/stop/clear', async (ctx) => {
   }
   clearStop(String(sessionId))
   ctx.body = { ok: true, cleared: true, stopped: isStopRequested(String(sessionId)) }
+})
+
+// 暂停正在运行的 Agent（阶段二-②，2026-09-18）
+// 与 /stop 的区别：停止是终态（cancelled，不再继续）；暂停是**可恢复**的 ——
+// 在当前轮次边界停下并保存 checkpoint，状态落 paused，恢复时从断点续跑。
+// body: { sessionId }
+chatRouter.post('/pause', async (ctx) => {
+  const { sessionId } = (ctx.request.body as any) || {}
+  if (!sessionId) {
+    ctx.status = 400
+    ctx.body = { error: 'sessionId is required' }
+    return
+  }
+  // 只打标记不改状态：循环可能还在跑，此时状态仍 running + 带暂停标记，UI 显示"正在暂停…"
+  let pausing = false
+  let taskId = ''
+  try {
+    const t = getTaskBySession(String(sessionId))
+    if (t) {
+      taskId = t.task_id
+      pausing = requestTaskPause(t.task_id)
+    }
+  } catch { /* 不影响暂停主流程 */ }
+  ctx.status = pausing ? 200 : 409
+  ctx.body = {
+    ok: pausing,
+    pausing,
+    sessionId: String(sessionId),
+    taskId,
+    message: pausing
+      ? '已请求暂停，将在当前轮次结束时停下并保存进度'
+      : '没有可暂停的任务（任务不存在、已结束，或已请求取消）',
+  }
+})
+
+// 恢复已暂停的任务（阶段二-②）
+// 只把状态从 paused 改回 running 并回传 checkpointId；真正的续跑由前端既有通道触发
+// （resumeFromCheckpoint → POST /api/chat/agent 带 checkpointId），不另造执行入口。
+chatRouter.post('/resume', async (ctx) => {
+  const { sessionId } = (ctx.request.body as any) || {}
+  if (!sessionId) {
+    ctx.status = 400
+    ctx.body = { error: 'sessionId is required' }
+    return
+  }
+  let ok = false
+  let checkpointId = ''
+  let taskId = ''
+  try {
+    const t = getTaskBySession(String(sessionId))
+    if (t) {
+      taskId = t.task_id
+      checkpointId = t.checkpoint_id || ''
+      ok = resumeTask(t.task_id)
+    }
+  } catch { /* 不影响主流程 */ }
+  ctx.status = ok ? 200 : 409
+  ctx.body = {
+    ok,
+    sessionId: String(sessionId),
+    taskId,
+    checkpointId,
+    message: ok ? '已恢复，正在从断点继续' : '任务不是暂停态，或已被取消',
+  }
 })
 // AskQuestion 答复（Agent 提问面板的选项/输入提交）
 chatRouter.post('/question-answer', async (ctx) => {

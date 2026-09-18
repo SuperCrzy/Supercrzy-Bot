@@ -25,6 +25,9 @@ import {
   setTaskStep,
   setTaskCheckpoint,
   isCancelRequested,
+  isPauseRequested,
+  pauseTask,
+  clearTaskPause,
   getTaskBySession,
   mapAgentOutcome,
   statusLabel,
@@ -1189,6 +1192,9 @@ export async function runAgentLoop(
     if (existing && !['completed', 'failed', 'cancelled'].includes(existing.status)) {
       taskRec = existing
       setTaskStatus(taskRec.task_id, 'running', { checkpointId, step: '执行中' })
+      // 阶段二-②：新一次执行开始前清掉上一轮的暂停标记，
+      // 否则从 paused 恢复后循环会在第一个轮次边界立刻又暂停。
+      clearTaskPause(taskRec.task_id)
     } else {
       taskRec = createTaskState({
         sessionId: sessionId || checkpointId,
@@ -1214,6 +1220,7 @@ export async function runAgentLoop(
         current_step: cur.current_step,
         checkpoint_id: cur.checkpoint_id,
         cancel_requested_at: cur.cancel_requested_at,
+        pause_requested_at: cur.pause_requested_at,
         failure_code: cur.failure_code,
         started_at: cur.started_at,
         completed_at: cur.completed_at,
@@ -1229,6 +1236,16 @@ export async function runAgentLoop(
       emitSSE(ctx, 'error', { message: '已收到停止指令，正在保存进度...', stopped: true })
       interrupted = 'user_stopped'
       finished = true
+      break
+    }
+    // 用户按下暂停（阶段二-②）→ 在轮次边界停下，落 paused（**非终态**，可恢复）
+    // 与"停止"的区别：停止是终态（cancelled），暂停保留 checkpoint 且状态可回到 running。
+    if (taskRec && !interrupted && isPauseRequested(taskRec.task_id)) {
+      emitSSE(ctx, 'error', { message: '已收到暂停指令，正在保存进度...', paused: true })
+      interrupted = 'user_paused'
+      finished = true
+      // 立刻落 paused（不等收尾），让 UI 即时反映；checkpoint 由收尾处写入并回填到任务上。
+      pauseTask(taskRec.task_id, { step: '已暂停' })
       break
     }
     turn++
@@ -2073,7 +2090,9 @@ export async function runAgentLoop(
         toolCallCount: totalToolCalls.length,
         message: interrupted === 'user_stopped'
           ? `已按你的要求停止，${turn} 轮进度已保存。可随时继续。`
-          : `任务因 ${interrupted || 'API 异常'} 中断，已保存进度。可切换模型后继续（${turn} 轮进程已保留）。`,
+          : interrupted === 'user_paused'
+            ? `已暂停，${turn} 轮进度已保存。点"恢复"即可从断点继续（不会重跑已完成的步骤）。`
+            : `任务因 ${interrupted || 'API 异常'} 中断，已保存进度。可切换模型后继续（${turn} 轮进程已保留）。`,
       })
     } else {
       // 超限：原有 turn_limit_reached 提示

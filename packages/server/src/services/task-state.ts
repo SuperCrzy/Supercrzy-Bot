@@ -18,6 +18,11 @@
  *   task_id / session_id / status / current_step / checkpoint_id
  *   cancel_requested_at / failure_code / started_at / completed_at
  *
+ * 阶段二-②（2026-09-18）补齐「暂停/恢复」闭环：与 cancel 同款设计 ——
+ * pause_requested_at 只打标记不改状态（UI 显示"正在暂停…"），
+ * 真正落到 paused 由 agent loop 在轮次边界观察后完成；
+ * 恢复复用既有 checkpoint 续跑通道，不另造一套。
+ *
  * 设计原则：**只新增、不改写**。各子系统（agent loop / collab / automations）
  * 通过 mapXxx() 适配器把自己的本地状态投影到本状态机，不再各自向 UI 暴露状态。
  * 落库走独立表 task_runs，懒建表，失败不影响主流程。
@@ -65,6 +70,8 @@ export interface TaskRecord {
   current_step: string
   checkpoint_id: string
   cancel_requested_at: number | null
+  /** 暂停请求时间戳（只打标记不改状态；null = 无暂停请求） */
+  pause_requested_at: number | null
   failure_code: string | null
   started_at: number
   completed_at: number | null
@@ -122,6 +129,7 @@ function ensureTable(): boolean {
         current_step TEXT DEFAULT '',
         checkpoint_id TEXT DEFAULT '',
         cancel_requested_at INTEGER,
+        pause_requested_at INTEGER,
         failure_code TEXT,
         failure_message TEXT,
         started_at INTEGER NOT NULL,
@@ -138,7 +146,7 @@ function ensureTable(): boolean {
       CREATE INDEX IF NOT EXISTS idx_task_runs_updated ON task_runs(updated_at DESC);
     `)
     // P2-02：老库缺列时补列（SQLite 报 duplicate column 属预期，逐列 try）
-    for (const col of ['tokens INTEGER DEFAULT 0', 'cost_usd REAL DEFAULT 0', 'duration_ms INTEGER DEFAULT 0']) {
+    for (const col of ['tokens INTEGER DEFAULT 0', 'cost_usd REAL DEFAULT 0', 'duration_ms INTEGER DEFAULT 0', 'pause_requested_at INTEGER']) {
       try { db.exec(`ALTER TABLE task_runs ADD COLUMN ${col}`) } catch { /* 已存在 */ }
     }
     tableReady = true
@@ -154,14 +162,15 @@ function persist(rec: TaskRecord): void {
     getDB()
       .prepare(
         `INSERT INTO task_runs (task_id, session_id, status, current_step, checkpoint_id,
-           cancel_requested_at, failure_code, failure_message, started_at, completed_at,
+           cancel_requested_at, pause_requested_at, failure_code, failure_message, started_at, completed_at,
            updated_at, label, source, tokens, cost_usd, duration_ms)
          VALUES (@task_id, @session_id, @status, @current_step, @checkpoint_id,
-           @cancel_requested_at, @failure_code, @failure_message, @started_at, @completed_at,
+           @cancel_requested_at, @pause_requested_at, @failure_code, @failure_message, @started_at, @completed_at,
            @updated_at, @label, @source, @tokens, @cost_usd, @duration_ms)
          ON CONFLICT(task_id) DO UPDATE SET
            status=excluded.status, current_step=excluded.current_step,
            checkpoint_id=excluded.checkpoint_id, cancel_requested_at=excluded.cancel_requested_at,
+           pause_requested_at=excluded.pause_requested_at,
            failure_code=excluded.failure_code, failure_message=excluded.failure_message,
            completed_at=excluded.completed_at, updated_at=excluded.updated_at,
            label=excluded.label, tokens=excluded.tokens,
@@ -224,6 +233,7 @@ export function createTask(input: CreateTaskInput): TaskRecord {
     current_step: input.currentStep || '',
     checkpoint_id: input.checkpointId || '',
     cancel_requested_at: null,
+    pause_requested_at: null,
     failure_code: null,
     failure_message: null,
     started_at: now,
@@ -323,6 +333,75 @@ export function requestTaskCancel(taskId: string): boolean {
 export function isCancelRequested(taskId: string): boolean {
   const rec = TASKS.get(taskId)
   return !!rec && !!rec.cancel_requested_at && !isTerminal(rec.status)
+}
+
+// ---------------- 暂停 / 恢复（阶段二-②） ----------------
+
+/**
+ * 请求暂停：**只打标记，不改状态** —— 与 requestTaskCancel 同款设计。
+ * 语义差别：取消是终态（cancel_requested_at → cancelled），暂停不是终态
+ * （pause_requested_at → paused，可 resume 回到 running）。
+ * 取消优先：已请求取消的任务不再接受暂停请求。
+ */
+export function requestTaskPause(taskId: string): boolean {
+  const rec = TASKS.get(taskId)
+  if (!rec) return false
+  if (isTerminal(rec.status)) return false
+  if (rec.cancel_requested_at) return false // 取消优先，避免语义打架
+  if (rec.status === 'paused') return true // 已暂停，幂等
+  rec.pause_requested_at = Date.now()
+  rec.updated_at = rec.pause_requested_at
+  persist(rec)
+  notify(rec, rec.status)
+  return true
+}
+
+/** 查询是否需要暂停（agent loop 每轮调用） */
+export function isPauseRequested(taskId: string): boolean {
+  const rec = TASKS.get(taskId)
+  return !!rec && !!rec.pause_requested_at && !isTerminal(rec.status) && rec.status !== 'paused'
+}
+
+export function isPaused(taskId: string): boolean {
+  const rec = TASKS.get(taskId)
+  return !!rec && rec.status === 'paused'
+}
+
+/** 清除暂停标记（loop 落 paused 后调用，避免下一轮又判定为需暂停） */
+export function clearTaskPause(taskId: string): void {
+  const rec = TASKS.get(taskId)
+  if (!rec) return
+  if (rec.pause_requested_at === null) return
+  rec.pause_requested_at = null
+  rec.updated_at = Date.now()
+  persist(rec)
+}
+
+/**
+ * 落到 paused（由 agent loop 在轮次边界调用，不是用户直接调）。
+ * 保留 checkpoint_id，供 resume 复用既有续跑通道。
+ */
+export function pauseTask(taskId: string, opts: { step?: string; checkpointId?: string } = {}): boolean {
+  const rec = TASKS.get(taskId)
+  if (!rec) return false
+  if (isTerminal(rec.status)) return false
+  const ok = setTaskStatus(taskId, 'paused', { step: opts.step ?? '已暂停', checkpointId: opts.checkpointId })
+  clearTaskPause(taskId)
+  return ok
+}
+
+/**
+ * 恢复：paused → running。**只改状态**，真正的续跑由既有 checkpoint 通道触发
+ * （前端 resumeFromCheckpoint → sendAgentMessage(..., ckptId, ...)），不另造一套执行入口。
+ */
+export function resumeTask(taskId: string): boolean {
+  const rec = TASKS.get(taskId)
+  if (!rec) return false
+  if (rec.status !== 'paused') return false
+  if (rec.cancel_requested_at) return false // 已被取消，不允许恢复
+  const ok = setTaskStatus(taskId, 'running', { step: '已恢复执行' })
+  if (ok) clearTaskPause(taskId)
+  return ok
 }
 
 export function completeTask(taskId: string, step = ''): boolean {
@@ -509,6 +588,9 @@ export function mapAgentOutcome(reason: string): TaskStatus {
       return 'completed'
     case 'user_stopped':
       return 'cancelled'
+    case 'user_paused':
+      // 暂停不是终态：保留 checkpoint，可用既有续跑通道恢复
+      return 'paused'
     default:
       // billing / auth / rate_limit / server_error / tool_sequence / turn_limit … 一律失败
       return 'failed'
