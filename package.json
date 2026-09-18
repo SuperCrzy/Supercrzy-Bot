@@ -9,16 +9,21 @@
     "url": "https://github.com/SuperCrzy/supercrzy-bot"
   },
   "homepage": "https://github.com/SuperCrzy/supercrzy-bot#readme",
+  "packageManager": "pnpm@10.33.3",
+  "engines": {
+    "node": ">=22.18.0 <23",
+    "pnpm": ">=10.0.0"
+  },
   "scripts": {
     "dev": "concurrently \"pnpm --filter @supercrzy/server dev\" \"pnpm --filter @supercrzy/client dev\"",
     "dev:server": "pnpm --filter @supercrzy/server dev",
     "dev:client": "pnpm --filter @supercrzy/client dev",
     "build": "pnpm --filter @supercrzy/client build && pnpm --filter @supercrzy/server build",
     "cli": "pnpm --filter @supercrzy/server cli",
-  "lint": "pnpm -r lint",
-  "verify": "pnpm lint && pnpm test && pnpm --filter @supercrzy/server validate:tools && pnpm build",
-  "clean": "pnpm -r clean",
-  "test": "pnpm -r test"
+    "lint": "pnpm -r lint",
+    "verify": "pnpm lint && pnpm test && pnpm --filter @supercrzy/server validate:tools && pnpm build",
+    "clean": "pnpm -r clean",
+    "test": "pnpm -r test"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",

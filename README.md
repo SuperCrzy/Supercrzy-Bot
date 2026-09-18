@@ -41,6 +41,25 @@ A built-in **Ollama (local)** provider is included: install [Ollama](https://oll
 
 ## 🚀 Quick Start (3 minutes)
 
+### Requirements (pinned)
+
+| Item | Required | Why |
+|---|---|---|
+| **Node.js** | **22.x**（`>=22.18.0 <23`；见 `.nvmrc` = `22.22.2`） | Declared in `engines`. Other majors are unverified. |
+| **pnpm** | **`>=10`**（`packageManager` = `pnpm@10.33.3`） | Repo is a pnpm workspace; npm/yarn will break the lockfile. Enable via `corepack enable`. |
+| **Chrome / Chromium** | *optional* | Only needed by the `browser` tool and `computer_use` (Playwright drives your real Chrome). Everything else runs without it. |
+| **OS** | macOS / Linux / Windows | Verified on macOS 15 (arm64). |
+
+Quick check + install:
+
+```bash
+node -v    # should print v22.x
+pnpm -v    # should print 10.x  (corepack enable  # if missing)
+```
+
+> Versions above are **pinned on purpose** — a mismatched Node/pnpm is the most common
+> "install works but build/test fails" cause. Use `nvm use` (reads `.nvmrc`) to match.
+
 ### Option 1: double-click launcher (easiest)
 
 > **macOS**:
@@ -65,7 +84,7 @@ cd supercrzy-agent
 ### Option 3: manual (development)
 
 ```bash
-# 1. Install dependencies (Node >= 20 and pnpm required)
+# 1. Install dependencies (Node 22.x + pnpm 10.x required — see Requirements above)
 pnpm install
 
 # 2. Configure (choose one)
@@ -92,9 +111,10 @@ Open **http://localhost:3000** (one port serves both the page and the API — no
 | `pnpm dev` | dev mode (hot reload, frontend 5173 + backend 3000) |
 | `pnpm cli` | terminal chat mode (CLI-first!) |
 | `pnpm build` | production build (outputs to client/dist, served statically by backend) |
+| `pnpm test` | run all tests (server + client) |
+| **`pnpm verify`** | **pre-push gate: lint + test + tool-registry check + build.** Run this before "it works on my machine". |
 | `./scripts/install.command` | installer: creates a launch icon on the Desktop |
 | `./scripts/make-app.sh` | regenerate the macOS desktop app (run after updating the logo) |
-| `pnpm test` | run tests (server 37 + client 9) |
 
 ## 🎮 CLI Mode
 

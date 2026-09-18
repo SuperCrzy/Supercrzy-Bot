@@ -15,7 +15,7 @@ dist/
 # 2026-08-28：任务检查点是运行时数据（packages/server/data/checkpoints/*.json），不该进仓库
 packages/server/data/
 uploads/
-nul# 任务日志（2026-08-26 起写到用户目录 ~/.supercrzy/logs；此条兜底防误入库）
+# 任务日志（2026-08-26 起写到用户目录 ~/.supercrzy/logs；此条兜底防误入库）
 logs/
 
 # ── 敏感文件：含服务器凭据，禁止入库 ──
@@ -55,6 +55,10 @@ _tmp_*
 # server 试验残留（2026-08-28 加）
 packages/server/test_stream_*.py
 packages/server/union-demo.html
+# 临时探针脚本（2026-09-18 加：一次性 UI/接口探查用，非产品代码；保留文件但挡入库）
+packages/server/ui*.mts
+packages/server/*-probe.mts
+packages/server/*-probe.ts
 # desktop 构建产物（2026-08-28 加，只入库源码）
 packages/desktop/node_modules/
 packages/desktop/dist/
