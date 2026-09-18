@@ -14,6 +14,8 @@ import serve from 'koa-static'
 import { createServer } from 'http'
 import { config } from './config'
 import { initDatabase } from './services/database'
+import { startEventLoopMonitor, getEventLoopStats } from './services/event-loop-lag'
+import { getSseStats } from './services/sse-health'
 import { createTerminalServer } from './services/terminal'
 import { startTunnel, stopTunnel, renderPreviewPage, getTunnelUrl, createPreviewLink } from './services/tunnel'
 import { chatRouter } from './routes/chat'
@@ -81,6 +83,8 @@ function getLocalIP(): string {
 
 async function bootstrap() {
   initDatabase()
+  // 事件循环延迟采样：/api/health 与 /api/system/diagnostics 的客观判据来源（见 services/event-loop-lag.ts）
+  startEventLoopMonitor()
   initChannelsTable()
   seedBuiltinSkills()
   initSkillsDirectory(process.cwd())
@@ -420,7 +424,17 @@ async function bootstrap() {
   // Health check
   app.use(async (ctx) => {
     if (ctx.path === '/api/health') {
-      ctx.body = { status: 'ok', model: config.deepseek.defaultModel, uptime: process.uptime(), tunnel: getTunnelUrl() || 'offline' }
+      const el = getEventLoopStats()
+      const sse = getSseStats()
+      ctx.body = {
+        status: 'ok',
+        model: config.deepseek.defaultModel,
+        uptime: process.uptime(),
+        tunnel: getTunnelUrl() || 'offline',
+        // 只给最小集：健康检查常被外部监控/隧道探活调用，明细留给 /api/system/diagnostics（仅 localhost）
+        eventLoop: { verdict: el.verdict, max_60s_ms: el.max_60s_ms },
+        sse: { active: sse.active, dropped: sse.dropped },
+      }
       return
     }
     // 文件预览（安全加固：仅允许白名单目录内文件，防任意文件读取）

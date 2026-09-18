@@ -4,10 +4,12 @@
  */
 import Router from 'koa-router'
 import type { Context } from 'koa'
-import { exec, execSync } from 'child_process'
+import { exec } from 'child_process'
 import { promisify } from 'util'
 import { existsSync } from 'fs'
 import { join, dirname } from 'path'
+import { safeWriteSse, endSseStream, registerSseStream, getSseStats, resetSseStats } from '../services/sse-health'
+import { getEventLoopStats, resetEventLoopStats } from '../services/event-loop-lag'
 
 const execAsync = promisify(exec)
 
@@ -32,21 +34,35 @@ function isLocalhost(ctx: Context): boolean {
   return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1' || ip.startsWith('192.168.') || ip.startsWith('10.')
 }
 
-/** 获取当前 git commit hash */
-function getGitHead(): string {
+/**
+ * 获取当前 git commit hash。
+ *
+ * 2026-09-18：由 execSync 改 async exec。execSync 会**同步**等子进程，把事件循环整体冻住——
+ * 同一台后端的并发 SSE 流在这段时间里一个字节都推不出去。git 命令在冷启动/大仓库下几百毫秒起步，
+ * git fetch 在网络慢时能顶满 8 秒超时（check-update）。这类"看起来像 SSE 卡住"的现象，
+ * 真凶往往是它，所以系统命令一律走异步。
+ */
+async function getGitHead(): Promise<string> {
   try {
-    return execSync('git rev-parse --short HEAD', { cwd: PROJECT_ROOT }).toString().trim()
+    const { stdout } = await execAsync('git rev-parse --short HEAD', { cwd: PROJECT_ROOT, timeout: 5000 })
+    return stdout.toString().trim()
   } catch {
     return 'unknown'
   }
 }
 
 // 当前版本信息
-systemRouter.get('/version', (ctx: Context) => {
+systemRouter.get('/version', async (ctx: Context) => {
+  let branch = 'unknown'
+  try {
+    const { stdout } = await execAsync('git branch --show-current', { cwd: PROJECT_ROOT, timeout: 5000 })
+    branch = stdout.toString().trim()
+  } catch { /* 非 git 目录/命令不可用 → 保持 unknown */ }
+
   ctx.body = {
     version: process.env.APP_VERSION || '0.3.0',
-    gitHead: getGitHead(),
-    branch: (() => { try { return execSync('git branch --show-current', { cwd: PROJECT_ROOT }).toString().trim() } catch { return 'unknown' } })(),
+    gitHead: await getGitHead(),
+    branch,
   }
 })
 
@@ -57,11 +73,13 @@ systemRouter.get('/check-update', async (ctx: Context) => {
     ctx.body = { error: 'Forbidden' }
     return
   }
-  const localHead = getGitHead()
+  const localHead = await getGitHead()
   try {
     // 先尝试获取远程（不拉取代码，只更新远程跟踪分支）；GIT_TERMINAL_PROMPT=0 防凭据交互卡死；8s 超时避免弹窗久等
-    execSync('GIT_TERMINAL_PROMPT=0 git fetch origin', { cwd: PROJECT_ROOT, timeout: 8000 })
-    const remoteHead = execSync('git rev-parse --short origin/main 2>/dev/null || git rev-parse --short origin/HEAD 2>/dev/null || echo unknown', { cwd: PROJECT_ROOT }).toString().trim()
+    // 注意：这里必须是 async exec——execSync 会把事件循环连同所有并发 SSE 流一起冻住最多 8 秒
+    await execAsync('GIT_TERMINAL_PROMPT=0 git fetch origin', { cwd: PROJECT_ROOT, timeout: 8000 })
+    const { stdout: remoteOut } = await execAsync('git rev-parse --short origin/main 2>/dev/null || git rev-parse --short origin/HEAD 2>/dev/null || echo unknown', { cwd: PROJECT_ROOT, timeout: 5000 })
+    const remoteHead = remoteOut.toString().trim()
     if (remoteHead === 'unknown') {
       ctx.body = { hasUpdate: false, localHead, remoteHead: null, reason: 'no-remote-branch', message: '远程分支不可用' }
       return
@@ -90,10 +108,11 @@ systemRouter.post('/update', async (ctx: Context) => {
   })
   ctx.status = 200
   ctx.respond = false
-  ctx.res.write(': connected\n\n')
+  safeWriteSse(ctx, ': connected\n\n')
+  registerSseStream(ctx, 'system-update')
 
   const send = (step: string, message: string, ok?: boolean) => {
-    ctx.res.write(`data: ${JSON.stringify({ step, message, ok: ok ?? null })}\n\n`)
+    safeWriteSse(ctx, `data: ${JSON.stringify({ step, message, ok: ok ?? null })}\n\n`)
   }
 
   const steps: Array<{ name: string; cmd: string; cwd?: string; tolerant?: boolean }> = [
@@ -126,7 +145,7 @@ systemRouter.post('/update', async (ctx: Context) => {
         } else {
           send(step.name, `失败: ${msg.slice(0, 300)}`, false)
           send('error', `更新中断于「${step.name}」`, false)
-          ctx.res.end()
+          endSseStream(ctx)
           return
         }
       }
@@ -135,6 +154,47 @@ systemRouter.post('/update', async (ctx: Context) => {
   } catch (err: any) {
     send('error', `更新异常: ${err.message}`, false)
   } finally {
-    ctx.res.end()
+    endSseStream(ctx)
+  }
+})
+
+/**
+ * 运行健康诊断（仅 localhost）。
+ *
+ * 存在意义：08-27 那次"SSE 并发卡"的排查死在没有客观数字上——一头说卡了 2 分钟，一头说前台重测完全正常，
+ * 结论反复。之后所有"卡不卡/稳不稳"的判断都应该先看这两个数字：
+ *
+ * - `eventLoop.verdict`：`blocked` 说明有同步调用把事件循环冻住（execSync/递归扫盘/大文件同步读），
+ *   此时**所有**并发 SSE 都会停推——这才是后端真卡的形态。
+ * - `sse.active`：当前活跃流数。eventLoop 正常 + 前端仍不动 → 问题在传输层/客户端（浏览器连接数上限、
+ *   代理缓冲、主线程被渲染占满），别再翻后端。
+ *
+ * `?reset=1` 清零滚窗与计数（压测前调一次，保证读数属于本次压测）。
+ */
+systemRouter.get('/diagnostics', async (ctx: Context) => {
+  if (!isLocalhost(ctx)) {
+    ctx.status = 403
+    ctx.body = { error: 'Forbidden' }
+    return
+  }
+  if (ctx.query.reset === '1') {
+    resetEventLoopStats()
+    resetSseStats()
+  }
+  const eventLoop = getEventLoopStats()
+  ctx.body = {
+    eventLoop,
+    sse: getSseStats(),
+    process: {
+      uptime_s: Math.round(process.uptime()),
+      rss_mb: Math.round(process.memoryUsage().rss / 1024 / 1024),
+      pid: process.pid,
+      node: process.version,
+    },
+    hint: eventLoop.verdict === 'blocked'
+      ? '事件循环被同步调用冻住 >1s：并发 SSE 会整体停推。查 execSync / 递归 readdirSync / 大文件 readFileSync。'
+      : eventLoop.verdict === 'busy'
+        ? '存在百毫秒级同步阻塞，长任务并发时可能看到流抖动。'
+        : '事件循环健康；若前端仍不推进，问题在传输层/客户端，不在后端。',
   }
 })

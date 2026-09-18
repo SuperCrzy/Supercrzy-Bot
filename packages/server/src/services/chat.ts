@@ -5,6 +5,7 @@ import { runAgentLoop } from './agent'
 import { basename, join } from 'path'
 import { readFile } from 'fs/promises'
 import { existsSync } from 'fs'
+import { safeWriteSse, endSseStream, registerSseStream } from './sse-health'
 
 /** 标准化 base URL，确保不会出现双重 /v1 */
 function normalizeBaseUrl(url: string): string {
@@ -146,10 +147,12 @@ export async function handleStreamChat(ctx: Context) {
   })
   const sock = (res as any).socket
   if (sock) { sock.setNoDelay(true); sock.setTimeout(0) }
+  // 逐 token 转发是背压最重的路径：客户端一旦消费不动，写会开始返回 false
+  registerSseStream(ctx, 'chat-stream')
 
   const reader = response.body?.getReader()
   if (!reader) {
-    ctx.res.end()
+    endSseStream(ctx)
     return
   }
 
@@ -168,12 +171,12 @@ export async function handleStreamChat(ctx: Context) {
       if (line.startsWith('data: ')) {
         const data = line.slice(6).trim()
         if (data === '[DONE]') {
-          ctx.res.write('data: [DONE]\n\n')
+          safeWriteSse(ctx, 'data: [DONE]\n\n')
           continue
         }
         try {
           JSON.parse(data) // validate
-          ctx.res.write(`data: ${data}\n\n`)
+          safeWriteSse(ctx, `data: ${data}\n\n`)
         } catch {
           // skip
         }
@@ -181,7 +184,7 @@ export async function handleStreamChat(ctx: Context) {
     }
   }
 
-  ctx.res.end()
+  endSseStream(ctx)
 }
 
 export async function handleChat(ctx: Context) {
@@ -336,7 +339,9 @@ export async function handleAgentChat(ctx: Context) {
   if (sock) { sock.setNoDelay(true); sock.setTimeout(0) }
 
   // 发送初始注释心跳，让浏览器立即收到 headers
-  ctx.res.write(': connected\n\n')
+  safeWriteSse(ctx, ': connected\n\n')
+  // 登记活跃流：/api/health 的 sse.active 就靠这个判断"有没有长任务占着连接"
+  registerSseStream(ctx, 'agent')
 
   try {
     // 兼容两种 resumeCheckpoint 语义：checkpoint id 或完整文件路径
@@ -375,10 +380,10 @@ export async function handleAgentChat(ctx: Context) {
       })(),
       (body as any).language as string | undefined,  // 前端界面语言 → AI 回复语言跟随
     )
-    ctx.res.end()
+    endSseStream(ctx)
   } catch (err: any) {
-    ctx.res.write(`event: error\ndata: ${JSON.stringify({ message: err.message })}\n\n`)
-    ctx.res.end()
+    safeWriteSse(ctx, `event: error\ndata: ${JSON.stringify({ message: err.message })}\n\n`)
+    endSseStream(ctx)
   }
 }
 
@@ -573,8 +578,9 @@ export async function handleCompareStreamChat(ctx: Context) {
     Connection: 'keep-alive',
   })
   ctx.res.flushHeaders?.()
+  registerSseStream(ctx, 'compare-stream')
   const send = (obj: unknown) => {
-    ctx.res.write(`data: ${JSON.stringify(obj)}\n\n`)
+    safeWriteSse(ctx, `data: ${JSON.stringify(obj)}\n\n`)
   }
 
   // 并发请求每个模型（stream），增量转发
@@ -657,5 +663,5 @@ export async function handleCompareStreamChat(ctx: Context) {
   }
 
   send({ t: 'end' })
-  ctx.res.end()
+  endSseStream(ctx)
 }

@@ -19,6 +19,7 @@ import { requestChat, chatCompletion, normalizeBaseUrl, buildApiError } from './
 import { getDB } from '../services/database'
 import { toolDefinitions, executeToolCalls, type ToolCall, type ToolResultWithMeta, getToolMeta, type ToolExecCtx, DEFERRED_TOOLS, classifySensitiveTool } from './tools'
 import { pushMemorySync, pushReflection } from './memory-worker'
+import { safeWriteSse } from './sse-health'
 import {
   createTask as createTaskState,
   setTaskStatus,
@@ -563,12 +564,15 @@ function registerStopSignal(ctx: any, runKey: string): void {
 
 /**
  * 发送 SSE 事件给前端（带自增 seq 写入标准 id 行——断线重连去重/续传的基础，对齐 WorkBuddy eventId 机制）
+ *
+ * 走 safeWriteSse 而不是裸 res.write：客户端已断开时裸写会抛 ERR_STREAM_WRITE_AFTER_END，
+ * 而 ctx.respond=false 后 Koa 不再接管该响应，未捕获异常会直接终止后端进程（2026-09-18 收口）。
  */
 const sseSeqMap = new WeakMap<object, number>()
 function emitSSE(ctx: Context, event: string, data: any) {
   const seq = (sseSeqMap.get(ctx) || 0) + 1
   sseSeqMap.set(ctx, seq)
-  ctx.res.write(`id: ${seq}\nevent: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
+  safeWriteSse(ctx, `id: ${seq}\nevent: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
 }
 
 // ---- 上下文窗口：按模型动态配置（体验补强 1）----
