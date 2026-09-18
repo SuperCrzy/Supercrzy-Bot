@@ -54,9 +54,17 @@ import { startBot, setMessageHandlerFull } from './services/wechat-bot-runner'
 import { QQBotRunner } from './services/qqbot-runner'
 import { getDB } from './services/database'
 import { randomUUID } from 'crypto'
-import { readFileSync, readdirSync, statSync, existsSync } from 'fs'
+import { existsSync } from 'fs'
+import { readFile, stat } from 'fs/promises'
 import { join, relative, dirname, resolve, sep } from 'path'
 import { fileURLToPath } from 'url'
+
+/**
+ * /api/preview/ 单文件预览上限（5 MB）。
+ * 2026-09-18：原实现 readFileSync 整文件读入后交给渲染器 —— 阻塞时长与文件大小线性成正比，
+ * 预览一个大文件会把事件循环占住到读完为止，同后端上所有并发 SSE 流一起停推。
+ */
+const PREVIEW_MAX_BYTES = 5 * 1024 * 1024
 import os from 'os'
 import { stopComputerUse } from './services/computer-use'
 import { mcpRouter } from './routes/mcp'
@@ -455,7 +463,16 @@ async function bootstrap() {
         if (resolve(fallback) !== absPath || !existsSync(fallback)) { ctx.status = 404; ctx.body = `File not found: ${filePath}`; return }
         absPath = fallback
       }
-      const content = readFileSync(absPath, 'utf-8')
+      // 2026-09-18：改异步读 + 上限。原 readFileSync 会按文件大小同步占住事件循环，
+      // 用户预览一个大文件时，同后端上正在跑的对话 SSE 会整体停推。
+      let previewSize = 0
+      try { previewSize = (await stat(absPath)).size } catch { ctx.status = 404; ctx.body = `File not found: ${filePath}`; return }
+      if (previewSize > PREVIEW_MAX_BYTES) {
+        ctx.status = 413
+        ctx.body = `File too large to preview: ${(previewSize / 1024 / 1024).toFixed(1)} MB (limit ${PREVIEW_MAX_BYTES / 1024 / 1024} MB)`
+        return
+      }
+      const content = await readFile(absPath, 'utf-8')
       ctx.type = 'html'
       ctx.body = renderPreviewPage(filePath, content)
       return
@@ -465,7 +482,7 @@ async function bootstrap() {
       const indexPath = join(distPath, 'index.html')
       if (existsSync(indexPath)) {
         ctx.type = 'html'
-        ctx.body = readFileSync(indexPath, 'utf-8')
+        ctx.body = await readFile(indexPath, 'utf-8')
       }
     }
   })

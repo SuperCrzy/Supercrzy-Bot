@@ -1,8 +1,18 @@
 import Router from 'koa-router'
-import { readdirSync, readFileSync, statSync, existsSync } from 'fs'
+import { readdirSync, existsSync } from 'fs'
+import { readFile, stat } from 'fs/promises'
 import { join, resolve, dirname } from 'path'
 import { homedir } from 'os'
 import { assertSafeFilePath } from '../services/sandbox'
+
+/**
+ * 文件内容预览的单文件上限。
+ *
+ * 2026-09-18：预览原本是 `readFileSync` 整文件读入再 split，阻塞时长与文件大小线性成正比——
+ * 用户点开一个几百 MB 的日志，事件循环会被占住到读完为止，同后端上所有并发 SSE 流一起停推。
+ * 改为异步读 + 明确上限：超限直接给可行动的提示，而不是让整个后端陪着卡。
+ */
+const MAX_PREVIEW_BYTES = 5 * 1024 * 1024
 
 /**
  * 目录浏览/搜索 API：供前端"选择工作文件夹"弹窗使用。
@@ -11,19 +21,19 @@ import { assertSafeFilePath } from '../services/sandbox'
 export const fsRouter = new Router({ prefix: '/api/filesystem' })
 
 /** 列出指定路径下的子目录 */
-fsRouter.get('/dirs', (ctx) => {
+fsRouter.get('/dirs', async (ctx) => {
   const raw = String(ctx.query.path || homedir())
   const p = resolve(raw)
   if (!existsSync(p)) {
     ctx.body = { error: '路径不存在' }
     return
   }
-  let stat
-  try { stat = statSync(p) } catch {
+  let st: Awaited<ReturnType<typeof stat>>
+  try { st = await stat(p) } catch {
     ctx.body = { error: '无法访问' }
     return
   }
-  if (!stat.isDirectory()) {
+  if (!st.isDirectory()) {
     ctx.body = { error: '不是目录' }
     return
   }
@@ -73,7 +83,7 @@ fsRouter.get('/search', (ctx) => {
  * 走 assertSafeFilePath 同一套沙箱白名单——shell 沙箱不堵文件工具等于白做，文件 API 同理。
  * 支持行号范围：?path=...&start=12&end=30（返回对应行区间 + 总行数，前端定位滚动）。
  */
-fsRouter.get('/read', (ctx) => {
+fsRouter.get('/read', async (ctx) => {
   const raw = String(ctx.query.path || '').trim()
   const start = parseInt(String(ctx.query.start || ''), 10) || 0
   const end = parseInt(String(ctx.query.end || ''), 10) || 0
@@ -88,12 +98,28 @@ fsRouter.get('/read', (ctx) => {
     return
   }
   safePath = resolve(raw)
-  if (!existsSync(safePath) || !statSync(safePath).isFile()) {
+  let fileStat: Awaited<ReturnType<typeof stat>> | null = null
+  try {
+    fileStat = await stat(safePath)
+  } catch {
     ctx.body = { error: '文件不存在' }
     return
   }
+  if (!fileStat.isFile()) {
+    ctx.body = { error: '文件不存在' }
+    return
+  }
+  if (fileStat.size > MAX_PREVIEW_BYTES) {
+    ctx.body = {
+      error: `文件过大（${(fileStat.size / 1024 / 1024).toFixed(1)} MB），预览上限 ${MAX_PREVIEW_BYTES / 1024 / 1024} MB`,
+      size: fileStat.size,
+      tooLarge: true,
+    }
+    return
+  }
   try {
-    const allLines = readFileSync(safePath, 'utf-8').split('\n')
+    // 异步读：大文件不再同步占住事件循环（本路由只做预览，异步读完全够用）
+    const allLines = (await readFile(safePath, 'utf-8')).split('\n')
     const totalLines = allLines.length
     const s = start > 0 ? Math.min(start, totalLines) : 1
     const e = end >= s ? Math.min(end, totalLines) : totalLines

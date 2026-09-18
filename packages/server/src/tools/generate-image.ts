@@ -4,6 +4,7 @@
  */
 import type { ToolDef } from './types'
 import { join } from 'path'
+import { writeFile } from 'fs/promises'
 import { WORKSPACE_ROOT, assertSafeFilePath } from '../services/sandbox'
 import { readSetting } from './shared'
 
@@ -121,16 +122,25 @@ const tool: ToolDef = {
         imageData = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=${width}&height=${height}&nologo=true`; isUrl = true
       }
       // 落盘 & 上报（pollinations 下载 / doubao下载 / gemini已有dataURL）
+      // 用 fs/promises 写：图片动辄几 MB，writeFileSync 会按大小同步占住事件循环，
+      // 而生图过程本身一直在等网络，没有任何理由在最后一步同步写（2026-09-18）。
+      let writtenSize = 0
       try {
         if (isUrl) {
           const resp = await fetch(imageData)
-          if (resp.ok) { const buf = Buffer.from(await resp.arrayBuffer()); require('fs').writeFileSync(outPath, buf) }
+          if (resp.ok) {
+            const buf = Buffer.from(await resp.arrayBuffer())
+            await writeFile(outPath, buf)
+            writtenSize = buf.length
+          }
         } else {
           const base64 = imageData.slice(imageData.indexOf(',') + 1)
-          require('fs').writeFileSync(outPath, Buffer.from(base64, 'base64'))
+          const buf = Buffer.from(base64, 'base64')
+          await writeFile(outPath, buf)
+          writtenSize = buf.length
         }
       } catch {}
-      if (ctx?.onArtifacts) { try { ctx.onArtifacts([{ name: fileName, path: outPath, action: 'created', size: require('fs').existsSync(outPath) ? require('fs').statSync(outPath).size : 0 }]) } catch {} }
+      if (ctx?.onArtifacts) { try { ctx.onArtifacts([{ name: fileName, path: outPath, action: 'created', size: writtenSize }]) } catch {} }
       pushImage(imageData, isUrl)
       return `✅ 图片已生成（${provider}）: ${fileName}${isUrl ? `\nURL: ${imageData.slice(0,150)}` : ''}`
     } catch (e: any) {
