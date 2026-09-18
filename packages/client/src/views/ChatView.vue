@@ -929,6 +929,16 @@ import { parseTrigger } from '@/utils/trigger'
 import { copyRichText, copyToClipboard, stripMarkdown } from '@/utils/clipboard'
 import MarkdownIt from 'markdown-it'
 import { parseDeepLinkFromURL, registerDeepLinkListener } from '@/utils/deeplink'
+// P1-04 拆分（2026-09-18）：交付页判定与对话导出下沉为纯模块，组件只留副作用
+import {
+  isArtifactImage, isArtifactSheet, isArtifactDoc,
+  deliverySummaryArtifacts, deliverySummaryExpanded, toggleDeliverySummary,
+  deliveryStatusKey, formatArtifactTime as formatArtifactTimeRaw,
+} from '@/utils/artifact-kind'
+import {
+  safeFileName, buildConversationMarkdown as buildConversationMarkdownRaw,
+  computeShareBlocks, computeShareImageHeight, drawShareImage,
+} from '@/utils/share-export'
 import ContextUsageRing from '@/components/chat/ContextUsageRing.vue'
 import PlanCapsule from '@/components/chat/PlanCapsule.vue'
 import MessageFlowRenderer from '@/components/chat/MessageFlowRenderer.vue'
@@ -1001,18 +1011,15 @@ const shareMenuOpen = ref(false)
 
 /** 提取单条消息纯文本（兼容 string / ContentBlock[] 两种 content 形态） */
 
-/** 把整个对话转成 Markdown */
+/** 把整个对话转成 Markdown（纯逻辑在 utils/share-export，此处只供标题与文案） */
 function buildConversationMarkdown(): string {
-  const title = currentSession.value?.title || t('nav.newTask')
-  const head = `# ${title}\n\n> SUPERCRZY BOT · ${new Date().toLocaleString()}\n`
-  const body: string[] = []
-  for (const m of messages.value) {
-    if (m.role !== 'user' && m.role !== 'assistant') continue
-    const text = messagePlainText(m).trim()
-    if (!text) continue
-    body.push(`---\n\n**${m.role === 'user' ? t('chat.me') : 'SUPERCRZY'}**\n\n${text}`)
-  }
-  return [head, ...body].join('\n\n')
+  return buildConversationMarkdownRaw({
+    title: currentSession.value?.title || t('nav.newTask'),
+    messages: messages.value,
+    plainText: messagePlainText,
+    meLabel: t('chat.me'),
+    assistantLabel: 'SUPERCRZY',
+  })
 }
 
 /** 复制为 Markdown */
@@ -1037,95 +1044,33 @@ function downloadConversationMarkdown() {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `${(currentSession.value?.title || 'conversation').replace(/[\\/:*?"<>|]/g, '_')}.md`
+  a.download = `${safeFileName(currentSession.value?.title)}.md`
   a.click()
   URL.revokeObjectURL(url)
 }
 
-/** canvas 文本自动换行 */
-function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
-  const lines: string[] = []
-  for (const para of text.split('\n')) {
-    if (!para) { lines.push(''); continue }
-    let line = ''
-    for (const ch of para) {
-      const test = line + ch
-      if (ctx.measureText(test).width > maxWidth && line) { lines.push(line); line = ch }
-      else line = test
-    }
-    lines.push(line)
-  }
-  return lines
-}
-
-/** 生成分享图（canvas 绘制对话卡片 → 下载 PNG） */
+/** 生成分享图（canvas 绘制对话卡片 → 下载 PNG）；布局与绘制在 utils/share-export */
 function generateShareImage() {
   shareMenuOpen.value = false
-  const msgs = messages.value.filter((m) => m.role === 'user' || m.role === 'assistant').slice(-6)
+  const msgs = messages.value.filter((m) => m.role === 'user' || m.role === 'assistant')
   if (!msgs.length) { nMessage.warning(t('chat.shareEmpty')); return }
   nMessage.info(t('chat.shareImageGenerating'))
-  const W = 1080
-  const pad = 56
-  const titleH = 132
   const canvas = document.createElement('canvas')
   const ctx = canvas.getContext('2d')!
   ctx.font = '15px system-ui, sans-serif'
-  const textMaxW = W - pad * 2 - 40
-  // 预计算每条消息块高度
-  const blocks: Array<{ role: string; lines: string[]; h: number }> = []
-  for (const m of msgs) {
-    const text = messagePlainText(m).trim()
-    if (!text) continue
-    const lines = wrapText(ctx, text, textMaxW)
-    blocks.push({ role: m.role, lines, h: 46 + lines.length * 26 + 22 })
-  }
-  const H = titleH + blocks.reduce((s, b) => s + b.h + 18, 0) + pad
-  canvas.width = W
-  canvas.height = H
-  // 背景
-  ctx.fillStyle = '#f5f5f7'
-  ctx.fillRect(0, 0, W, H)
-  // 标题区
-  ctx.fillStyle = '#141414'
-  ctx.font = '700 26px system-ui, sans-serif'
-  ctx.fillText('SUPERCRZY BOT', pad, 64)
-  ctx.fillStyle = '#6b6b70'
-  ctx.font = '400 16px system-ui, sans-serif'
-  const sub = (currentSession.value?.title || '').slice(0, 60)
-  if (sub) ctx.fillText(sub, pad, 96)
-  ctx.fillStyle = '#b0b0b6'
-  ctx.font = '400 13px system-ui, sans-serif'
-  ctx.fillText(new Date().toLocaleDateString(), pad, 120)
-  // 消息块
-  let y = titleH
-  for (const b of blocks) {
-    const isUser = b.role === 'user'
-    ctx.fillStyle = isUser ? '#ffffff' : '#141414'
-    if (typeof ctx.roundRect === 'function') {
-      ctx.beginPath()
-      ctx.roundRect(pad, y, W - pad * 2, b.h, 16)
-      ctx.fill()
-    } else {
-      ctx.fillRect(pad, y, W - pad * 2, b.h)
-    }
-    // 角色标签
-    ctx.fillStyle = isUser ? '#9a9aa2' : '#8a8a94'
-    ctx.font = '600 13px system-ui, sans-serif'
-    ctx.fillText(isUser ? t('chat.me') : 'SUPERCRZY', pad + 22, y + 26)
-    // 文本
-    ctx.fillStyle = isUser ? '#1f1f23' : '#e9e9ec'
-    ctx.font = '15px system-ui, sans-serif'
-    let ty = y + 54
-    for (const ln of b.lines) {
-      ctx.fillText(ln, pad + 22, ty)
-      ty += 26
-    }
-    y += b.h + 18
-  }
-  // 下载 PNG
+  const blocks = computeShareBlocks(msgs, ctx, { plainText: messagePlainText, maxMessages: 6 })
+  if (!blocks.length) { nMessage.warning(t('chat.shareEmpty')); return }
+  canvas.width = 1080
+  canvas.height = computeShareImageHeight(blocks)
+  drawShareImage(ctx, blocks, {
+    title: currentSession.value?.title || '',
+    dateText: new Date().toLocaleDateString(),
+    meLabel: t('chat.me'),
+    assistantLabel: 'SUPERCRZY',
+  })
   const a = document.createElement('a')
   a.href = canvas.toDataURL('image/png')
-  a.download = `${(currentSession.value?.title || 'conversation').replace(/[\\/:*?"<>|]/g, '_')}.png`
+  a.download = `${safeFileName(currentSession.value?.title)}.png`
   a.click()
 }
 
@@ -1586,23 +1531,11 @@ function openArtifactFolder(a: ArtifactItem) {
 
 // ---- P1-05 任务交付页辅助 ----
 /** 是否渲染交付页：有产物 / 有改动 / 有结论，三者任一即渲染（此前只看产物） */
-/** 交付状态文案（走 i18n，避免后端中文标签串到英文界面） */
+/** 交付状态文案（走 i18n，避免后端中文标签串到英文界面）；状态→key 判定在 utils/artifact-kind */
 function deliveryStatusText(msg: ChatMessage): string {
-  const st = msg.deliverySummary?.status || 'completed'
-  const key = st === 'completed' ? 'chat.deliveryDone' : st === 'cancelled' ? 'chat.deliveryCancelled' : 'chat.deliveryFailed'
-  return t(key)
+  return t(deliveryStatusKey(msg.deliverySummary?.status))
 }
 
-// ---- 交付摘要产物卡片（deliverySummary.artifacts 只有 {name,path,mime}，预览走工作区文件接口） ----
-function isArtifactImage(a: { path?: string; name?: string }) {
-  return /\.(png|jpe?g|gif|webp|svg|ico)$/i.test(a.path || a.name || '')
-}
-function isArtifactSheet(a: { path?: string; name?: string }) {
-  return /\.(xlsx?|csv|tsv)$/i.test(a.path || a.name || '')
-}
-function isArtifactDoc(a: { path?: string; name?: string }) {
-  return /\.(docx?|pdf|md|txt|html?)$/i.test(a.path || a.name || '')
-}
 /** 在新标签打开/预览产物（工作区文件接口按 mime 返回；浏览器可显示的图片/MD/PDF 直接看） */
 function openDeliveryArtifact(a: { path?: string; name?: string }) {
   const p = a.path || ''
@@ -1610,26 +1543,13 @@ function openDeliveryArtifact(a: { path?: string; name?: string }) {
   window.open(`/api/workspace/file?path=${encodeURIComponent(p)}`, '_blank')
 }
 
-// ===== 交付摘要折叠（多个产物不铺开：默认显示前 3 个 + "展开全部"） =====
-const DELIVERY_SUMMARY_MAX = 3
-function deliverySummaryArtifacts(msg: any): any[] {
-  const arts = msg?.deliverySummary?.artifacts || []
-  return (msg as any)._dsExpanded ? arts : arts.slice(0, DELIVERY_SUMMARY_MAX)
-}
-function deliverySummaryExpanded(msg: any): boolean {
-  return !!(msg as any)._dsExpanded
-}
-function toggleDeliverySummary(msg: any) {
-  ;(msg as any)._dsExpanded = !(msg as any)._dsExpanded
-}
+// ===== 交付摘要折叠 / 产物类型判定 =====
+// isArtifactImage/Sheet/Doc、deliverySummaryArtifacts/Expanded、toggleDeliverySummary
+// 已下沉到 utils/artifact-kind（P1-04，2026-09-18），此处直接使用导入版本。
 
 /** 产物时间（SQLite UTC → 本地 HH:mm，跟随界面语言；en 自动 12 小时制） */
 function formatArtifactTime(s: string) {
-  if (!s) return ''
-  const normalized = s.includes(' ') && !s.includes('T') && !s.endsWith('Z') ? s.replace(' ', 'T') + 'Z' : s
-  const d = new Date(normalized)
-  if (isNaN(d.getTime())) return ''
-  return d.toLocaleTimeString(locale.value === 'zh-CN' ? 'zh-CN' : 'en-US', { hour: '2-digit', minute: '2-digit' })
+  return formatArtifactTimeRaw(s, locale.value)
 }
 
 /** 按扩展名取文件图标类型 */

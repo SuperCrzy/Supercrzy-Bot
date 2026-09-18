@@ -14,13 +14,15 @@ import { describe, it, expect } from 'vitest'
 import chatViewSrc from '../views/ChatView.vue?raw'
 import detailPanelSrc from '../components/layout/DetailPanel.vue?raw'
 
-/** 上限（实测 2026-09-17：ChatView 6455 / DetailPanel 1103） */
+/** 上限（实测 2026-09-18：ChatView 6436 / DetailPanel 1102） */
 const LIMITS: Array<{ name: string; src: string; max: number; hint: string }> = [
   {
     name: 'views/ChatView.vue',
     src: chatViewSrc,
-    max: 6550,
-    hint: 'ChatView 已超体量上限。请把纯逻辑下沉到 utils/ 或抽成 components/chat/ 子组件（参考已下沉的 utils/stage.ts、utils/trigger.ts、utils/message-text.ts、utils/delivery.ts），而不是继续加行。',
+    // 2026-09-18：把交付页判定（utils/artifact-kind）与对话导出（utils/share-export）
+    // 下沉后由 6550 收紧到 6460，锁定这次收益；后续继续**下调**才是方向。
+    max: 6460,
+    hint: 'ChatView 已超体量上限。请把纯逻辑下沉到 utils/ 或抽成 components/chat/ 子组件（参考已下沉的 utils/stage.ts、utils/trigger.ts、utils/message-text.ts、utils/delivery.ts、utils/artifact-kind.ts、utils/share-export.ts），而不是继续加行。',
   },
   {
     name: 'components/layout/DetailPanel.vue',
