@@ -65,8 +65,10 @@
       <!-- 执行中数字滚动徽标（GPT 同款：+N 实时滚动——写入行数平滑增长，WorkBuddy +N/-M 徽标） -->
       <span v-if="liveLines && (status === 'running' || status === 'stream_executing')" class="tool-lines lines-live-badge"><span class="lines-badge live">+{{ displayedLines }}</span></span>
       <span v-if="lineStat && status === 'done'" class="tool-lines" :class="{ 'lines-live': justCompleted }"><span class="lines-badge">{{ lineStat }}</span></span>
-      <!-- 授权按钮组（对齐 WorkBuddy tool-head__actions：header 一行内决策，pending 不展开 body） -->
-      <span v-if="status === 'pending' && isSensitive" class="tool-head-actions" @click.stop>
+      <!-- 授权按钮组（对齐 WorkBuddy tool-head__actions：header 一行内决策，pending 不展开 body）
+           判据只有 status：服务端对"需要审批"的工具下发 pending（agent.ts:1695），
+           不再叠一份客户端手写名单 —— 那会让服务端已挂起的工具在界面上没有按钮（#13）。 -->
+      <span v-if="status === 'pending'" class="tool-head-actions" @click.stop>
         <!-- 倒计时结束已自动放行：不挂按钮，明确提示正在自动执行 -->
         <span v-if="autoApproved" class="tba-auto-approving">{{ $t('chatui.autoApproving') }}</span>
         <template v-else>
@@ -376,9 +378,14 @@ watch(() => props.status, (newStatus, oldStatus) => {
   }
 })
 
-// 敏感操作列表 — 需要用户确认
-const SENSITIVE_TOOLS = new Set(['shell_exec', 'file_write', 'file_delete'])
-const isSensitive = computed(() => SENSITIVE_TOOLS.has(props.toolName))
+// 🔴 2026-10-14（#13）：删掉手写的 3 项敏感名单。
+// 它取自 I2 之前的服务端旧值，而 I2 已把服务端从 4 项收紧到 **7 项**
+// （shell_exec/file_write/file_delete/memory_consolidate/multi_edit/skill_install/computer_use）
+// ⇒ 那 7 项里多出的 4 项在界面上**永远没有授权按钮**，只能等 120s 超时被自动拒绝，
+// 而模型收到的是「用户拒绝执行此操作」—— 把「没人能点按钮」报成了「用户拒绝」。
+// 唯一真相是服务端下发的 status：agent.ts:1695 `status: isSensitive ? 'pending' : 'running'`
+// （isSensitive 又由 ToolDef.requiresApproval 派生，= SENSITIVE_TOOLS）。
+// 所以这里**只判 status**，不再维护第二份名单。
 const sensitiveDesc = computed(() => {
   const map: Record<string, string> = {
     shell_exec: t('chatui.toolDescShell'),

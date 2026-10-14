@@ -1631,14 +1631,16 @@ function markAllThinkingDone(msg: ChatMessage) {
 const currentSession = computed(() => chatStore.currentSession)
 const messages = computed(() => chatStore.currentMessages)
 
-/** 敏感工具（需要授权确认；对齐后端 SENSITIVE_TOOLS，file_delete 永远确认） */
-const SENSITIVE_TOOLS_SET = new Set(['shell_exec', 'file_write', 'file_delete'])
+// 🔴 2026-10-14（#13）：原先这里有一份手写名单 SENSITIVE_TOOLS_SET = 3 项，
+// 而服务端 I2 之后 = 7 项（由 ToolDef.requiresApproval 派生）。两份名单不一致
+// ⇒ 服务端已挂起等授权的工具，界面上**两个入口都不渲染** → 只能等 120s 超时。
+// 唯一真相是服务端下发的 `status`（agent.ts:1695），故已删除本地名单。
 
-/** 待授权工具（授权浮层数据源）：当前消息流中第一个 pending 的敏感工具（对齐 WorkBuddy 一次处理一个，处理完自动切下一个/消失） */
+/** 待授权工具（授权浮层数据源）：当前消息流中第一个 pending 的工具（处理完自动切下一个/消失） */
 const pendingApprovalTool = computed<ToolCallEvent | null>(() => {
   for (const m of messages.value) {
     for (const n of m.flow || []) {
-      if (n.kind === 'tool' && n.tool.status === 'pending' && SENSITIVE_TOOLS_SET.has(n.tool.name)) {
+      if (n.kind === 'tool' && n.tool.status === 'pending') {
         return n.tool
       }
     }

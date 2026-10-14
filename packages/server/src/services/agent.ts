@@ -127,7 +127,7 @@ export function resolveToolConfirmation(id: string, decision: 'allow' | 'deny') 
   pendingConfirmations.delete(id)
 }
 
-function waitForToolConfirmation(id: string, timeoutMs = 120000): Promise<'allow' | 'deny'> {
+function waitForToolConfirmation(id: string, timeoutMs = 120000): Promise<'allow' | 'deny' | 'timeout'> {
   // 自动允许等待（设置 toolAutoApproveSeconds：>0 秒后无人确认自动放行；0=关闭，保持超时拒绝兜底）
   let autoSec = 0
   try { autoSec = Number(readSetting('toolAutoApproveSeconds') || 0) } catch { autoSec = 0 }
@@ -136,10 +136,27 @@ function waitForToolConfirmation(id: string, timeoutMs = 120000): Promise<'allow
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
       pendingConfirmations.delete(id)
-      resolve(autoAllow ? 'allow' : 'deny')
+      // 🔴 2026-10-14（#13）：超时必须与"用户点了拒绝"区分开。
+      // 旧实现两者都返回 'deny' ⇒ 下游一律告诉模型"用户拒绝执行此操作"，
+      // 而真实情况可能是**根本没人能点按钮**（客户端名单失配），
+      // 模型据此换方案或放弃，用户只看到 BOT 卡了 2 分钟。这属于「对模型说假话」。
+      resolve(autoAllow ? 'allow' : 'timeout')
     }, effective)
     pendingConfirmations.set(id, (d) => { clearTimeout(timer); resolve(d) })
   })
+}
+
+/**
+ * 未获授权的真实原因（#13 / I11）。
+ * 三者语义不同，不能都说成"用户拒绝"：
+ *   - 'timeout' 弹了但 120s 内无人确认（用户可能没看到 / 界面没渲染出按钮）
+ *   - 'deny'    被授权档位或安全策略**直接**拒绝（压根没弹窗）
+ * 只有用户在弹窗上显式点了拒绝，才谈得上"用户拒绝"。
+ */
+function approvalDenialText(kind: 'deny' | 'timeout', toolName: string): string {
+  return kind === 'timeout'
+    ? `等待授权超时：${toolName} 需要授权，但 120 秒内没有人确认，已按拒绝处理。`
+    : `该操作未获授权：${toolName} 属于敏感操作，被当前授权档位或安全策略直接拒绝。`
 }
 
 // ---- AskQuestion：Agent 结构化提问（学 Grok AskQuestion 工具）----
@@ -1731,7 +1748,7 @@ export async function runAgentLoop(
         // 敏感工具先确认后执行：挂起等待用户 allow/deny（120s 超时自动拒绝）
         const sensitiveCalls = toolCalls.filter((tc: any) => SENSITIVE_TOOLS.has(tc.function.name))
         const regularCalls = toolCalls.filter((tc: any) => !SENSITIVE_TOOLS.has(tc.function.name))
-        let allowSensitive: ('allow' | 'deny')[] = []
+        let allowSensitive: ('allow' | 'deny' | 'timeout')[] = []
         if (sensitiveCalls.length > 0) {
           // P0-04：授权档位统一为三档（仅查看/执行前询问/自动执行），内部映射回历史 4 档，行为不变。
           // permissionTier 优先；未设置时回退历史 toolApprovalMode；再回退按会话权限档推导。
@@ -1772,9 +1789,11 @@ export async function runAgentLoop(
         }
         for (let i = 0; i < sensitiveCalls.length; i++) {
           if (allowSensitive[i] !== 'allow') {
+            const verdict = allowSensitive[i] as 'deny' | 'timeout'
             emitSSE(ctx, 'tool_result', {
               name: sensitiveCalls[i].function.name,
-              content: '用户拒绝执行此操作',
+              // #13/I11：按真实原因出文案，不再一律"用户拒绝执行此操作"
+              content: approvalDenialText(verdict, sensitiveCalls[i].function.name),
               tool_call_id: sensitiveCalls[i].id,
               status: 'denied',
             })
@@ -1895,16 +1914,17 @@ export async function runAgentLoop(
         // 被拒绝的敏感工具调用也注入结果，让 LLM 感知并自主决策
         if (sensitiveCalls.length > 0) {
           for (let i = 0; i < sensitiveCalls.length; i++) {
-            if (allowSensitive[i] !== 'allow') {
-              messages.push({
-                role: 'tool' as const,
-                tool_call_id: sensitiveCalls[i].id,
-                content: `用户拒绝执行该操作（${sensitiveCalls[i].function.name} 属于敏感操作，未获授权）。请自主判断：
+              if (allowSensitive[i] !== 'allow') {
+                const verdict = allowSensitive[i] as 'deny' | 'timeout'
+                messages.push({
+                  role: 'tool' as const,
+                  tool_call_id: sensitiveCalls[i].id,
+                  content: `${approvalDenialText(verdict, sensitiveCalls[i].function.name)}请自主判断：
 1. 如果任务必须依赖此操作才能完成：向用户说明为什么需要该权限、会做什么，然后停止等待用户授权；
 2. 如果存在不需要敏感权限的替代方案：改用非敏感工具完成，不要反复尝试被拒绝的操作；
 3. 无论如何不要在未授权时尝试绕过权限限制。`,
-              })
-            }
+                })
+              }
           }
         }
 
