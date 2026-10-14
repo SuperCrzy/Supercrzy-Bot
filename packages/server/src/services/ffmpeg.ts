@@ -39,6 +39,35 @@ export interface FfmpegResolution {
 /** 上一次自动解析成功的路径（避免每次调用都 spawn 一次探测） */
 let cachedPath: string | null = null
 
+/**
+ * 可用性快照（**同步可读**，供提示词这类同步场景使用）：null = 尚未探测过。
+ *
+ * 用途见 agent.ts 的「内容工厂」能力声明：`video_edit` 的前置条件就是本机有可用的 ffmpeg，
+ * 所以提示词不能说死「有视频剪辑能力」——那等于系统推荐一个必然失败的工具（I11 的同一条原则：
+ * 能力声明必须由真实状态生成，而不是写死）。
+ */
+let cachedAvailable: boolean | null = null
+let availabilityProbe: Promise<boolean> | null = null
+
+/** 最近一次探测结论：true 可用 / false 不可用 / null 尚未探测。**不触发探测**。 */
+export function isFfmpegAvailable(): boolean | null {
+  return cachedAvailable
+}
+
+/**
+ * 主动探测一次可用性（带 in-flight 去重，不会并发 spawn 一堆）。
+ * 调用方通常 fire-and-forget：本轮拿到 null 就按「未知」保守渲染，探测完下一轮生效。
+ */
+export function refreshFfmpegAvailability(): Promise<boolean> {
+  if (!availabilityProbe) {
+    availabilityProbe = resolveFfmpeg()
+      .then((r) => { cachedAvailable = !!r.path; return cachedAvailable })
+      .catch(() => { cachedAvailable = false; return false })
+      .finally(() => { availabilityProbe = null })
+  }
+  return availabilityProbe
+}
+
 /** 统一的 spawn 失败文案：把 EBADARCH(-86) 这类「架构不匹配」单独说清楚，别让用户猜 */
 function fmtSpawnErr(e: any): string {
   const msg = e?.message || 'unknown'
@@ -141,6 +170,7 @@ export function ffmpegInstallHint(): string {
 export async function resolveFfmpeg(explicit?: string): Promise<FfmpegResolution> {
   const want = String(explicit || '').trim()
   if (!want && cachedPath && existsSync(cachedPath)) {
+    cachedAvailable = true
     return { path: cachedPath, tried: [{ path: cachedPath, ok: true, reason: '缓存命中' }] }
   }
   const tried: FfmpegProbe[] = []
@@ -153,11 +183,13 @@ export async function resolveFfmpeg(explicit?: string): Promise<FfmpegResolution
     tried.push(r)
     if (r.ok) {
       if (!want) cachedPath = bin
+      cachedAvailable = true
       return { path: bin, tried }
     }
   }
+  cachedAvailable = false
   return { path: '', tried }
 }
 
 /** 测试用：清掉缓存 */
-export function __resetFfmpegCache(): void { cachedPath = null }
+export function __resetFfmpegCache(): void { cachedPath = null; cachedAvailable = null; availabilityProbe = null }

@@ -37,6 +37,7 @@ import {
   type TaskRecord,
 } from './task-state'
 import { resolveApprovalMode, decideToolApproval } from './permission'
+import { isFfmpegAvailable, refreshFfmpegAvailability, ffmpegInstallHint } from './ffmpeg'
 
 // ---- 敏感工具确认机制（先确认后执行）----
 const pendingConfirmations = new Map<string, (decision: 'allow' | 'deny') => void>()
@@ -743,6 +744,32 @@ export function estimateCost(model: string | undefined, usage: { prompt_tokens?:
 /**
  * 从数据库加载相关记忆并构建系统提示
  */
+/**
+ * 「内容工厂」那一行能力声明的渲染（#5 决断 / I11 同一条原则）。
+ *
+ * `video_edit` 的前置条件是「本机有可用的 ffmpeg」（解析链见 services/ffmpeg.ts：
+ * 设置项 ffmpegPath → PATH → ~/.supercrzy/bin → 包管理器安装位，且真跑 `-version` 验过
+ * —— 存在 ≠ 能跑，旧内置件是 x86_64 Mach-O，在 arm64 上 execve 直接 EBADARCH）。
+ *
+ * 旧写法无条件列出 `video_edit: 视频剪辑`，而当时包内那份二进制在本机必然失败
+ * ⇒ 等于系统主动推荐一个必错的工具。现改为三态（保守优先，宁可少说不可说错）：
+ *   true  → 正常列出
+ *   false → **不列出该能力**，并原样给出安装指引，让模型能指导用户
+ *   null  → 尚未探测：列出但显式标注前置条件（后台补探测，下一轮生效）
+ *
+ * 导出以便单测：这条断言必须能在「有人又把它写死」时变红。
+ */
+export function contentFactoryPromptLine(ffmpegState: boolean | null, hint: string = ffmpegInstallHint()): string {
+  if (ffmpegState === false) {
+    return '- **[按需]** make_article: 内容工厂（抓取→成稿）\n' +
+      '  ⚠️ video_edit 未列出：本机未检测到可用的 ffmpeg。用户要用视频剪辑时，\n' +
+      '  把下面这段安装指引原样告诉他，装好后再用：\n' +
+      hint.split('\n').map((l) => '    ' + l).join('\n') + '\n'
+  }
+  return '- **[按需]** make_article / video_edit: 内容工厂（抓取→成稿）/ 视频剪辑' +
+    '（video_edit 需本机有可用的 ffmpeg；缺依赖时调用会返回安装指引）\n'
+}
+
 function buildSystemPrompt(basePrompt: string, userMessage: string, model?: string, roleId?: string, sessionWorkspace?: string, uiLanguage?: string): { prompt: string; matchedSkills: Array<{ name: string; name_en: string }>; allowedTools: string[] } {
   const db = getDB()
 
@@ -800,6 +827,23 @@ function buildSystemPrompt(basePrompt: string, userMessage: string, model?: stri
       relatedMemories.map((m: any) => `- [${m.key}] ${m.content}`).join('\n')
   }
 
+  // 🔴 2026-10-14（#5 决断 / I11 同一条原则）：能力声明必须由**真实状态**生成，不写死。
+  //
+  // `video_edit` 的前置条件是「本机有可用的 ffmpeg」——解析链见 services/ffmpeg.ts：
+  // 设置项 ffmpegPath → PATH → ~/.supercrzy/bin → 包管理器安装位，且**真跑 -version 验过**
+  // （存在 ≠ 能跑：旧内置件是 x86_64 Mach-O，在 arm64 上 execve 直接 EBADARCH）。
+  //
+  // 旧写法是无条件 `video_edit: 视频剪辑`，而当时包内那份二进制在本机必然失败
+  // ⇒ 等于系统主动推荐一个必错的工具，模型选了就错。
+  //
+  // 三态处理（保守优先，宁可少说不可说错）：
+  //   true  → 正常列出
+  //   false → **不列出这个能力**，并告诉模型替代动作（让用户先装）
+  //   null  → 尚未探测：列出但显式标注前置条件，同时后台补一次探测（下一轮生效）
+  const ffmpegState = isFfmpegAvailable()
+  if (ffmpegState === null) { void refreshFfmpegAvailability() }
+  const contentFactoryLine = contentFactoryPromptLine(ffmpegState)
+
   const toolsSection = `\n\n## Available Tools（两级加载：常驻 + 按需）
 常驻工具可直接调用。标记 **[按需]** 的工具**本轮未注入 schema**，需要时先调用 tool_search("<工具名>") 加载，加载后即可像常驻工具一样正常调用 —— 不要因为"工具不在列表里"就放弃能力，先搜。\n\n### 常驻（可直接调用）
 - web_search: Search the internet for up-to-date information. **After searching, every factual claim in your answer MUST cite its source URL (e.g. [来源](url)); NEVER fabricate URLs or sources. When the user asks for "today's latest / 最新 / 今天" news: pass timeRange='day' (今天的消息必须用 day，近一周用 week) AND source='news' — news mode returns results with exact publication dates, so filter by date directly and report each item's REAL publication date; NEVER open pages one by one to verify dates (that wastes minutes); items with missing dates are labeled "日期未知". Only items published today may be labeled "今日", others get their actual date (e.g. "8月21日"). Prioritize authoritative sources when citing: ① official channels (company/product official sites, official blogs, official GitHub) ② established media (TechCrunch, Reuters, Bloomberg, The Information, 新浪财经, etc.) ③ academic sources (arxiv, ACL, university labs) for technical topics; de-prioritize AI-tool aggregator sites and trending-list sites (AI工具集/AI热榜 style) which are often stale or clickbait.**
@@ -822,7 +866,7 @@ function buildSystemPrompt(basePrompt: string, userMessage: string, model?: stri
 - **[按需]** skill_list: List all installed skills\n- **[按需]** skill_search: Search for third-party skills on GitHub
 - **[按需]** skill_view: View skill details and prompt template\n- **[按需]** skill_install: Install a skill from a GitHub repository
 - **[按需]** ask_question: Ask the user a structured question when you need a decision or missing info（与常驻的 ask_user 等效，二者择一即可）
-- **[按需]** make_article / video_edit: 内容工厂（抓取→成稿）/ 视频剪辑\n`
+${contentFactoryLine}`
 
   let skillIndexSection = ''
   let skillSection = ''
