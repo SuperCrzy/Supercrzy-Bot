@@ -5,8 +5,8 @@
  * 技能目录：{workspace}/data/skills/{skill-name}/SKILL.md
  */
 
-import { existsSync, readFileSync, readdirSync, mkdirSync, rmSync, statSync, writeFileSync, type Dirent } from 'fs'
-import { join } from 'path'
+import { existsSync, readFileSync, readdirSync, mkdirSync, rmSync, statSync, writeFileSync, copyFileSync, type Dirent } from 'fs'
+import { join, dirname, resolve, sep } from 'path'
 import { randomUUID } from 'crypto'
 import { getDB } from './database'
 
@@ -27,6 +27,12 @@ export interface SkillScanReport {
   skillNames: string[]
   files: number
   repoUrl: string
+  /**
+   * 扫描到的许可文件（2026-10-14 加）。
+   * 存在的理由：扫描阶段本来就递归读到了 LICENSE/COPYING，但安装阶段原先只落 SKILL.md，
+   * 用户在装之前看不到这份技能受什么许可约束。这里把许可信息带到报告里，供安装前展示。
+   */
+  licenses?: Array<{ file: string; kind: string }>
 }
 
 /** 高危规则：直接拒绝安装 */
@@ -115,6 +121,36 @@ function collectScanFiles(dir: string, base: string, out: Array<{ abs: string; r
 }
 
 /**
+ * 从许可文件正文识别许可类型（2026-10-14 加）。
+ * 只读头部 4KB —— 全文匹配没必要，许可标识都在开头。
+ * 返回人可读的短标签，识别不出时明确说「未识别」，不猜。
+ */
+export function detectLicenseKind(path: string): string {
+  let head = ''
+  try {
+    head = readFileSync(path, 'utf-8').slice(0, 4000)
+  } catch {
+    return '无法读取'
+  }
+  // 顺序有讲究：先匹配具体许可，最后才用 "All rights reserved" 兜底
+  // —— BSD-2 正文里也有 "All rights reserved"，放前面会被误判成保留所有权利。
+  if (/Apache License\s*[\r\n\s]*Version 2\.0/i.test(head)) return 'Apache-2.0'
+  if (/GNU LESSER GENERAL PUBLIC LICENSE[\s\S]{0,120}Version 3/i.test(head)) return 'LGPL-3.0'
+  if (/GNU LESSER GENERAL PUBLIC LICENSE[\s\S]{0,120}Version 2/i.test(head)) return 'LGPL-2.1'
+  if (/GNU GENERAL PUBLIC LICENSE[\s\S]{0,120}Version 3/i.test(head)) return 'GPL-3.0'
+  if (/GNU GENERAL PUBLIC LICENSE[\s\S]{0,120}Version 2/i.test(head)) return 'GPL-2.0'
+  if (/MIT License/i.test(head)) return 'MIT'
+  if (/Redistribution and use in source and binary forms/i.test(head)) return 'BSD'
+  if (/All rights reserved/i.test(head)) return '保留所有权利 / 专有（source-available）'
+  return '未识别'
+}
+
+/** 许可文件名识别（LICENSE / LICENSE.txt / COPYING / NOTICE 等） */
+export function isLicenseFile(baseName: string): boolean {
+  return /^(licen[cs]e|copying|notice|copyright)(\.[a-z]+)?$/i.test(baseName)
+}
+
+/**
  * 从 GitHub 仓库 URL 下载并安全扫描（不安装）。
  * 返回扫描报告：level=safe 可直接安装；warn 提示风险；danger 拒绝。
  */
@@ -126,6 +162,7 @@ export async function scanSkillRepo(githubUrl: string): Promise<SkillScanReport>
     skillNames: [],
     files: 0,
     repoUrl: githubUrl,
+    licenses: [],
   }
   let cloneDir = ''
   try {
@@ -158,6 +195,11 @@ export async function scanSkillRepo(githubUrl: string): Promise<SkillScanReport>
     collectScanFiles(target, '', scanFiles)
     report.files = scanFiles.length
     for (const f of scanFiles) {
+      const base = f.rel.split('/').pop() || ''
+      // 许可文件：扫描阶段顺手识别，供安装前展示（2026-10-14）
+      if (isLicenseFile(base)) {
+        report.licenses!.push({ file: f.rel, kind: detectLicenseKind(f.abs) })
+      }
       if (f.abs.toLowerCase().endsWith('skill.md')) {
         try {
           const content = readFileSync(f.abs, 'utf-8')
@@ -514,17 +556,62 @@ function scanSkillFiles(dirPath: string, maxDepth: number, depth = 0): string[] 
   return results
 }
 
+/** 整目录搬运时跳过的目录名（与 scanSkillFiles 的 SKIP 对齐，另加 .git 杜绝嵌套仓库） */
+const COPY_SKIP = new Set([
+  '.git', 'node_modules', 'dist', 'build', '.cache', 'vendor', 'venv', '.venv',
+  '__pycache__', '.DS_Store', '.pytest_cache', '.mypy_cache', '.tox',
+])
+
+/**
+ * 递归复制技能目录（2026-10-14 加）。
+ *
+ * 为什么必须整目录搬：旧实现只把 SKILL.md 的内容写进 DB，随后 finally 删掉整个 clone，
+ * 于是 `scripts/`、`references/`、`templates/` 与 `LICENSE.txt` 全部丢失。后果是装进来的技能
+ * 「正文引用 scripts/xxx.py 但文件不存在」（功能残废），并且丢掉许可文件（许可归属不明）。
+ * 上游 docx/pdf/pptx/xlsx 当初就是这样变成「既无授权、又跑不起来的空壳」的。
+ *
+ * 跳过 .git：把上游的 git 元数据带进来会形成嵌套仓库（gitlink），既污染本项目仓库，
+ * 也让「这段内容到底是谁的」变得模糊 —— 正是本次整改要避免的状态。
+ *
+ * @returns 实际复制的文件数
+ */
+export function copySkillDir(src: string, dest: string): number {
+  let copied = 0
+  mkdirSync(dest, { recursive: true })
+  for (const entry of readdirSync(src, { withFileTypes: true })) {
+    if (COPY_SKIP.has(entry.name)) continue
+    const s = join(src, entry.name)
+    const d = join(dest, entry.name)
+    if (entry.isDirectory()) {
+      copied += copySkillDir(s, d)
+    } else if (entry.isFile()) {
+      copyFileSync(s, d)
+      copied++
+    }
+  }
+  return copied
+}
+
 /**
  * Clone and install skills from a GitHub repository URL.
  * 支持两种形态：
  * 1. 仓库根 URL（如 https://github.com/anthropics/skills）→ 扫描仓库内全部 SKILL.md 安装
  * 2. 子路径 URL（如 https://github.com/anthropics/skills/tree/main/skills/skill-creator）
  *    → 只安装指定路径下的技能
+ *
+ * 2026-10-14 起：**整目录搬运**，不再只取 SKILL.md 文本（原因见 copySkillDir 注释）。
  */
 export async function installSkillFromGitHub(
   githubUrl: string,
   workspaceDir: string,
-): Promise<{ success: boolean; name?: string; skills?: string[]; error?: string }> {
+): Promise<{
+  success: boolean
+  name?: string
+  skills?: string[]
+  error?: string
+  /** 随技能一并落盘的许可文件（2026-10-14 加，供安装后向用户提示许可归属） */
+  licenses?: Array<{ skill: string; file: string; kind: string }>
+}> {
   let cloneDir = ''
   try {
     // 解析 GitHub URL：owner/repo 及可选的 tree|blob/<branch>/<path>
@@ -570,20 +657,43 @@ export async function installSkillFromGitHub(
       return { success: false, error: '未找到 SKILL.md（支持标准 Agent Skills 格式的仓库）' }
     }
 
-    // 安装所有找到的技能
+    // 安装所有找到的技能：整目录搬运 + 写 DB 索引
     const installed: string[] = []
+    const licenses: Array<{ skill: string; file: string; kind: string }> = []
+    const skillsRoot = join(workspaceDir, '.agents', 'skills')
     for (const skillMdPath of candidates) {
       const skill = loadSkillFile(skillMdPath)
-      if (skill) {
-        installSkill(skill)
-        installed.push(skill.name)
+      if (!skill) continue
+
+      const srcDir = dirname(skillMdPath)
+      const dirName = skillToDirName(skill.name)
+      const targetDir = join(skillsRoot, dirName)
+      // 越界防护：dirName 由 skillToDirName 生成（只含 [a-z0-9-]），这里再断言一次 ——
+      // 安全不变量不该建立在「上游函数恰好不产出 ..」这个隐含前提上。
+      if (!resolve(targetDir).startsWith(resolve(skillsRoot) + sep)) {
+        console.warn(`[SkillLoader] 跳过越界目录名：${skill.name} → ${dirName}`)
+        continue
       }
+
+      const copied = copySkillDir(srcDir, targetDir)
+      installSkill(skill)
+      installed.push(skill.name)
+      console.log(`[SkillLoader] Installed "${skill.name}" → ${targetDir}（${copied} 个文件）`)
+
+      // 把随附的许可文件一并带出来，供调用方向用户提示许可归属
+      try {
+        for (const f of readdirSync(targetDir)) {
+          if (isLicenseFile(f)) {
+            licenses.push({ skill: skill.name, file: f, kind: detectLicenseKind(join(targetDir, f)) })
+          }
+        }
+      } catch { /* 许可信息是附加项，读不到不影响安装本身 */ }
     }
 
     if (installed.length === 0) {
       return { success: false, error: 'SKILL.md 无效（缺少 name/description frontmatter）' }
     }
-    return { success: true, name: installed[0], skills: installed }
+    return { success: true, name: installed[0], skills: installed, licenses }
   } catch (err: any) {
     return { success: false, error: `安装失败: ${err.message}` }
   } finally {
@@ -616,9 +726,20 @@ export function exportSkillToFile(skill: Record<string, any>, workspaceDir: stri
   const dir = join(workspaceDir, '.agents', 'skills', dirName)
   mkdirSync(dir, { recursive: true })
 
+  // 🔴 2026-10-14：skills 表没有 license 列，重建 frontmatter 时必然丢掉 `license:` 行。
+  // 若不从旧文件里捞回来，导出会用「无许可声明」的版本覆盖用户目录里带着许可的 SKILL.md。
+  // 这批上游技能当初丢掉 license 行、许可靠声明消失，根因就在这里（不是有人手工删的）。
+  let preservedLicense: string | null = null
+  try {
+    const old = readFileSync(join(dir, 'SKILL.md'), 'utf-8')
+    const lm = old.match(/^license:\s*.+$/m)
+    if (lm) preservedLicense = lm[0]
+  } catch { /* 首次导出，无旧文件 */ }
+
   const fmLines: string[] = ['---']
   fmLines.push(`name: ${skill.name}`)
   fmLines.push(`description: ${(skill.description || '').replace(/\n/g, ' ').slice(0, 1024)}`)
+  if (preservedLicense) fmLines.push(preservedLicense)
   if (skill.version) fmLines.push(`version: ${skill.version}`)
   if (skill.category && skill.category !== 'general') fmLines.push(`category: ${skill.category}`)
   // 扩展字段：触发关键词（tags 形式，符合标准）
