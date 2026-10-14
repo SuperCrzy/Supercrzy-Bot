@@ -17,7 +17,7 @@ import { config } from '../config'
 import { rankMemories, memoryRankedSearch, selectMemoryCandidates, applyCategoryQuota } from './memory-search'
 import { requestChat, chatCompletion, normalizeBaseUrl, buildApiError } from './model-client'
 import { getDB } from '../services/database'
-import { toolDefinitions, executeToolCalls, type ToolCall, type ToolResultWithMeta, getToolMeta, type ToolExecCtx, DEFERRED_TOOLS, classifySensitiveTool } from './tools'
+import { toolDefinitions, executeToolCalls, type ToolCall, type ToolResultWithMeta, type ToolExecCtx, DEFERRED_TOOLS, classifySensitiveTool, setApprovalWorkspaceRoot, SENSITIVE_TOOLS } from './tools'
 import { pushMemorySync, pushReflection } from './memory-worker'
 import { upsertMemory } from './memory-service'
 import { safeWriteSse } from './sse-health'
@@ -36,7 +36,7 @@ import {
   recordTaskOutcome,
   type TaskRecord,
 } from './task-state'
-import { resolveApprovalMode } from './permission'
+import { resolveApprovalMode, decideToolApproval } from './permission'
 
 // ---- 敏感工具确认机制（先确认后执行）----
 const pendingConfirmations = new Map<string, (decision: 'allow' | 'deny') => void>()
@@ -70,7 +70,9 @@ function persistSessionApprovals() {
   } catch { /* 持久化失败不阻塞授权 */ }
 }
 
-/** 本会话全部允许：记录整会话（忽略 toolName），后续该会话任何敏感工具均自动放行（file_delete 除外）。持久化跨重启。 */
+/** 本会话全部允许：记录整会话（**故意忽略 toolName** —— 按钮语义是"这个会话别再问我了"），
+ *  之后该会话任何敏感工具自动放行；`block` 类（删除/高危命令/装代码/操作本机/系统路径写入）除外，
+ *  它们在 permission.ts 的 decideToolApproval 里被挡在白名单**之前**，任何档位都拦。持久化跨重启。 */
 export function approveSessionTools(sessionId: string, toolName?: string) {
   if (!sessionId) return
   loadSessionApprovals()
@@ -81,6 +83,43 @@ export function approveSessionTools(sessionId: string, toolName?: string) {
 export function revokeSessionApproval(sessionId: string) {
   loadSessionApprovals()
   if (sessionApprovedTools.delete(sessionId)) persistSessionApprovals()
+}
+
+// ---- "拦一次后记住"（老板 2026-09-24 17:57 裁决）----
+// block 类（删除/高危命令/装代码/操作本机/系统路径写入）第一次弹窗，用户点「允许」后
+// 本会话记住、后续不再拦；点「拒绝」不记。与 sessionAllowedIds 分开存：
+// 后者语义是「本会话全部允许」按钮，前者是"用户对高危操作做过一次明确放行"。
+const sessionApprovedBlockTools = new Set<string>()
+let sessionBlockApprovalsLoaded = false
+
+function loadSessionBlockApprovals() {
+  if (sessionBlockApprovalsLoaded) return
+  sessionBlockApprovalsLoaded = true
+  try {
+    const row = getDB().prepare('SELECT value FROM settings WHERE key = ?').get('sessionAllowedBlockIds') as any
+    if (row?.value) {
+      const ids: unknown = JSON.parse(row.value)
+      if (Array.isArray(ids)) ids.filter(Boolean).forEach(id => sessionApprovedBlockTools.add(String(id)))
+    }
+  } catch { /* settings 无该键或损坏则忽略 */ }
+}
+
+function persistSessionBlockApprovals() {
+  try {
+    getDB()
+      .prepare("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('sessionAllowedBlockIds', ?, datetime('now'))")
+      .run(JSON.stringify(Array.from(sessionApprovedBlockTools)))
+  } catch { /* 持久化失败不阻塞授权 */ }
+}
+
+/** block 类工具被用户显式允许 → 本会话记住（"拦一次后记住"）。跨重启持久化。 */
+export function approveSessionBlockTools(sessionId: string) {
+  if (!sessionId) return
+  loadSessionBlockApprovals()
+  if (!sessionApprovedBlockTools.has(sessionId)) {
+    sessionApprovedBlockTools.add(sessionId)
+    persistSessionBlockApprovals()
+  }
 }
 
 export function resolveToolConfirmation(id: string, decision: 'allow' | 'deny') {
@@ -205,27 +244,30 @@ function isDeferredTool(name: string): boolean {
 }
 
 export function sanitizeToolCallSequence(msgs: AgentMessage[]): AgentMessage[] {
-  // 全量校验并降级两类"会导致 DeepSeek 400"的 assistant 消息：
+  // 只做一件事：把"孤立 tool_calls"的 assistant 降级为纯文本——
+  // 某 tool_call_id 没有被任何 tool 消息响应
+  // （"An assistant message with tool_calls must be followed by tool messages"）。
+  // 来源：上下文压缩按 token 切分 head/tail 拆散配对、检查点续跑、工具超时中断。
   //
-  // ① 孤立 tool_calls：某 tool_call_id 没有被任何 tool 消息响应
-  //    （"An assistant message with tool_calls must be followed by tool messages"）
-  //    来源：上下文压缩按 token 切分 head/tail 拆散配对、检查点续跑、工具超时中断。
-  //
-  // ② 已配对但缺 reasoning_content（2026-08-28 补，实测 199 个检查点里 55 个中招）
-  //    DeepSeek 深度思考硬性协议：带 tool_calls 的 assistant 消息必须**原样传回**
-  //    reasoning_content，缺失即 400 "reasoning_content must be passed back"。
-  //    根因在 agent.ts 构造 assistantMsg 时 `if (reasoningBuffer) ... = reasoningBuffer`
-  //    —— 模型某些轮次不输出思考内容时该字段根本不存在，落盘后恢复必然 400。
-  //    **不能补假 rc**（违反"原样传回"语义，仍会被拒），只能整轮降级。
-  //
-  // 安全闸门：② 只在"本序列确实处于推理模式"（存在任一 assistant 带 reasoning_content）
-  // 时才启用——否则非推理模型（GPT/Claude 等本就没有 rc）会被误删全部工具调用。
+  // 🔴 2026-10-14 撤除原「② 已配对但缺 reasoning_content → 整轮降级」分支。
+  //    它基于 08-28 的旧推理「不能补假 rc，只能整轮降级」，已被 09-20 的对照实验推翻：
+  //    字段值为**空串 ""** 也满足协议（见 ensureReasoningEcho 与 scripts/diag/confirm-rc-rule.ts），
+  //    且"最后一条 user 之前"的历史回合缺 rc 本就无害。
+  //    留着它的实际后果是**静默丢工具历史**：本函数在 saveCheckpoint(:992) 与恢复(:1116)
+  //    两处都被调用，若 assistant 带 tool_calls 而 rc 是空串（模型该轮没输出思考），
+  //    旧判据 hasReasoningContent（rc.trim() !== ''）会把它判成"缺失"→ 整轮降级 →
+  //    tool_calls 与其 tool 响应一并删除，而 API 照常返回 200：不报错，只丢历史。
+  //    对照实验（唯一变量 = rc 取 '' 还是 'x'）：rc:'' ⇒ 7 条消息降成 6 条、
+  //    tool_calls 2→1、tool 消息 2→1；rc:'x' ⇒ 全部保留。
+  //    rc 的补齐是 ensureReasoningEcho 的职责，本函数不再掺和。
   const responded = new Set<string>()
+  const issuedIds = new Set<string>() // ③ 能被"发出去"的 tool_call_id 全集（发起者未被剔除的那些）
   for (const m of msgs) {
     if (m.role === 'tool' && m.tool_call_id) responded.add(m.tool_call_id)
+    if (m.role === 'assistant' && Array.isArray((m as any).tool_calls)) {
+      for (const tc of (m as any).tool_calls) if (tc?.id) issuedIds.add(tc.id)
+    }
   }
-
-  const usesReasoning = msgs.some((m) => m.role === 'assistant' && hasReasoningContent(m))
 
   const demoteIdx = new Set<number>()   // 需降级的 assistant 索引
   const dropToolIds = new Set<string>() // 随之要移除的 tool 响应 id
@@ -236,25 +278,90 @@ export function sanitizeToolCallSequence(msgs: AgentMessage[]): AgentMessage[] {
     const calls = (m as any).tool_calls as Array<{ id?: string }>
     if (calls.length === 0) continue
 
+    // 2026-10-14：此处曾另有 missingRc 判据（推理模式下缺 rc 也整轮降级），已撤除。
+    // 判据只看"是否孤立"——缺 rc 不构成孤立，交由 ensureReasoningEcho 补空串。
     const orphan = !calls.every((tc) => tc?.id && responded.has(tc.id))
-    const missingRc = usesReasoning && !hasReasoningContent(m)
-    if (orphan || missingRc) {
+    if (orphan) {
       demoteIdx.add(i)
       for (const tc of calls) if (tc?.id) dropToolIds.add(tc.id)
     }
   }
-  if (demoteIdx.size === 0) return msgs // 全部合法，原样返回
+
+  // ③ 反向孤立（2026-09-20 补）：tool 消息的 tool_call_id 找不到发起它的 assistant，
+  //    或发起者已被降级 → 该 tool 消息必须一并移除，否则 400
+  //    "Messages with role 'tool' must be a response to a preceding message with 'tool_calls'"。
+  //    来源：上下文压缩按 token 把 head/tail 切开，assistant 落进 middle 被摘要掉，tool 消息留在 tail。
+  const dropIdx = new Set<number>()
+  for (let i = 0; i < msgs.length; i++) {
+    const m = msgs[i]
+    if (m.role !== 'tool' || !m.tool_call_id) continue
+    if (!issuedIds.has(m.tool_call_id) || dropToolIds.has(m.tool_call_id)) dropIdx.add(i)
+  }
+
+  if (demoteIdx.size === 0 && dropIdx.size === 0) return msgs // 全部合法，原样返回
 
   // 降级 assistant 为纯文本，并移除其 tool 响应——否则 tool 消息变成孤儿，同样触发 400。
   return msgs
     .map((m, i) => {
       if (demoteIdx.has(i)) {
-        const text = (m as any).content || '（该轮工具调用记录不完整，已省略）'
-        return { role: 'assistant' as const, content: text }
+        const src: any = m
+        const text = src.content || '（该轮工具调用记录不完整，已省略）'
+        const out: any = { role: 'assistant' as const, content: text }
+        // 2026-09-20 关键修复：降级**必须保留 reasoning_content**。
+        // 实测（scripts/diag/verify-fixes.ts）：丢掉 rc 的纯文本 assistant 一旦落在
+        // "最后一条 user 之后"的尾部，会让之后每一次请求都 400
+        // "The reasoning_content in the thinking mode must be passed back to the API"。
+        // 换句话说，旧实现自己造出了它想修的那个 400 —— 这是 08-28 修完 09-04 反爆 10 次的原因。
+        if (typeof src.reasoning_content === 'string') out.reasoning_content = src.reasoning_content
+        return out as AgentMessage
       }
       return m
     })
-    .filter((m) => !(m.role === 'tool' && m.tool_call_id && dropToolIds.has(m.tool_call_id)))
+    .filter((_m, i) => !dropIdx.has(i))
+}
+
+/**
+ * 2026-09-20 实测确立的不变量（逐条验证脚本：scripts/diag/confirm-rc-rule.ts）
+ *
+ * 请求**带 tools** 时，"最后一条 user 消息之后"的尾部里，每条 assistant 都必须带
+ * `reasoning_content` 字段，否则 DeepSeek 返回：
+ *   400 The `reasoning_content` in the thinking mode must be passed back to the API.
+ *
+ * 三条关键实测事实（都做了对照实验）：
+ *   ① 同一个序列**不带 tools** → 200。tools 是触发开关。
+ *   ② 字段值为**空串 ""** 也满足要求（不是"必须原样"）。所以补空串是安全的最小动作。
+ *   ③ 带 tool_calls 的 assistant 缺 rc 同样在射程内，不留例外。
+ *
+ * 只在 DeepSeek 系模型上补——reasoning_content 是它的私有协议字段，注入到别家可能被拒。
+ */
+export function ensureReasoningEcho(
+  msgs: AgentMessage[],
+  opts: { withTools: boolean; model?: string; baseUrl?: string },
+): AgentMessage[] {
+  if (!opts.withTools) return msgs
+  if (!isDeepSeekFamily(opts.model, opts.baseUrl)) return msgs
+
+  let lastUser = -1
+  for (let i = 0; i < msgs.length; i++) if (msgs[i].role === 'user') lastUser = i
+
+  let patched = 0
+  const out = msgs.map((m, i) => {
+    if (i <= lastUser || m.role !== 'assistant') return m
+    if (Object.prototype.hasOwnProperty.call(m as any, 'reasoning_content')) return m
+    patched++
+    return { ...(m as any), reasoning_content: '' } as AgentMessage
+  })
+  if (patched > 0) {
+    console.warn(`[ReasoningEcho] 补齐 ${patched} 条尾部 assistant 的 reasoning_content（空串），规避 DeepSeek 400`)
+  }
+  return patched > 0 ? out : msgs
+}
+
+/** 是否 DeepSeek 系（reasoning_content 回显协议只属于它，别把该字段注入到别家请求） */
+function isDeepSeekFamily(model?: string, baseUrl?: string): boolean {
+  const m = (model || '').toLowerCase()
+  const u = (baseUrl || '').toLowerCase()
+  return m.startsWith('deepseek') || u.includes('deepseek')
 }
 
 /**
@@ -262,29 +369,29 @@ export function sanitizeToolCallSequence(msgs: AgentMessage[]): AgentMessage[] {
  * 2026-08-28 加：agent 重试前需要知道"清洗到底能不能解决问题"——
  * 若返回 false 说明序列本身是配对的，API 仍报 tool_sequence 则是别的原因
  * （如 reasoning_content 未原样传回），此时继续重试必然失败，不该白烧轮次。
+ * 🔴 2026-10-14：正因如此，本函数的判据**不应**包含"缺 rc"——缺 rc 恰恰是"别的原因"。
  */
 export function hasOrphanToolCalls(msgs: AgentMessage[]): boolean {
   const responded = new Set<string>()
+  const issuedIds = new Set<string>()
   for (const m of msgs) {
     if (m.role === 'tool' && m.tool_call_id) responded.add(m.tool_call_id)
+    if (m.role === 'assistant' && Array.isArray((m as any).tool_calls)) {
+      for (const tc of (m as any).tool_calls) if (tc?.id) issuedIds.add(tc.id)
+    }
   }
-  // 与 sanitizeToolCallSequence 保持同一判据：孤立 tool_calls，
-  // 或（推理模式下）带 tool_calls 却缺 reasoning_content —— 两者都会导致 400。
-  const usesReasoning = msgs.some((m) => m.role === 'assistant' && hasReasoningContent(m))
+  // 与 sanitizeToolCallSequence 保持同一判据：孤立 tool_calls、反向孤立 tool 消息——两者都会导致 400。
+  // 🔴 2026-10-14：原第三类"推理模式下带 tool_calls 却缺 reasoning_content"已移除。
+  //    缺 rc 不属于序列配对问题（空串即满足协议，补齐由 ensureReasoningEcho 负责）；
+  //    把它算成"孤立"只会让重试逻辑误判"清洗能解决"——而清洗只会把工具历史删掉。
   for (const m of msgs) {
+    if (m.role === 'tool' && m.tool_call_id && !issuedIds.has(m.tool_call_id)) return true
     if (m.role !== 'assistant' || !Array.isArray((m as any).tool_calls)) continue
     const calls = (m as any).tool_calls as Array<{ id?: string }>
     if (calls.length === 0) continue
     if (!calls.every((tc) => tc?.id && responded.has(tc.id))) return true
-    if (usesReasoning && !hasReasoningContent(m)) return true
   }
   return false
-}
-
-/** 该消息是否带有实质性的 reasoning_content（空白字符串不算） */
-function hasReasoningContent(m: AgentMessage): boolean {
-  const rc = (m as any).reasoning_content
-  return typeof rc === 'string' && rc.trim() !== ''
 }
 
 /** 读取 settings 配置（工具授权模式等） */
@@ -307,7 +414,7 @@ function readSetting(key: string): string {
   }
 }
 
-// ===== Plan 进度管理（横栏任务胶囊：create_plan 落库 tasks 表 → 每轮推进 → done 收尾） =====
+// ===== Plan 进度管理（横栏任务胶囊：create_plan 落库 tasks 表 → 模型 task_update 显式声明进度 → 轮末重发真实快照 → done 收尾） =====
 interface PlanSnapshot {
   planId: string
   title: string
@@ -328,25 +435,6 @@ function getPlanSnapshot(sessionId: string): PlanSnapshot | null {
   }
 }
 
-/** 推进一步：当前 in_progress → completed，下一个 pending → in_progress */
-function advancePlan(sessionId: string): PlanSnapshot | null {
-  const db = getDB()
-  const plan = db.prepare("SELECT * FROM tasks WHERE session_id=? AND parent_id IS NULL AND status='in_progress' ORDER BY created_at DESC LIMIT 1").get(sessionId) as any
-  if (!plan) return null
-  const steps = db.prepare('SELECT * FROM tasks WHERE parent_id=? ORDER BY sort_order').all(plan.id) as any[]
-  if (!steps.length) return null
-  const current = steps.find((s: any) => s.status === 'in_progress')
-  if (current) db.prepare("UPDATE tasks SET status='completed' WHERE id=?").run(current.id)
-  const next = steps.find((s: any) => s.status === 'pending')
-  if (next) db.prepare("UPDATE tasks SET status='in_progress' WHERE id=?").run(next.id)
-  // 全部完成 → 根任务也标记完成
-  const fresh = db.prepare('SELECT * FROM tasks WHERE parent_id=? ORDER BY sort_order').all(plan.id) as any[]
-  if (fresh.length > 0 && fresh.every((s: any) => s.status === 'completed')) {
-    db.prepare("UPDATE tasks SET status='completed' WHERE id=?").run(plan.id)
-  }
-  return { planId: plan.id, title: plan.subject, steps: fresh.map((s: any) => ({ id: s.id, subject: s.subject, status: s.status })) }
-}
-
 /** 任务结束：全部步骤 + 根任务标记完成 */
 function finishPlan(sessionId: string): PlanSnapshot | null {
   const db = getDB()
@@ -363,6 +451,7 @@ import { ToolGuardrailController } from './tool-guardrails'
 import { shouldCompress, compressContext, pruneOldToolResults } from './context-compressor'
 import { matchPlaybooks } from './playbook-match'
 import { maybeCreateSkill, maybeRepairSkill } from './skill-evolve'
+import { createContentCoalescer } from './content-coalescer'
 
 interface AgentMessage {
   role: 'system' | 'user' | 'assistant' | 'tool'
@@ -817,6 +906,8 @@ function buildSystemPrompt(basePrompt: string, userMessage: string, model?: stri
 - Always reply in the SAME LANGUAGE the user writes in. If the user writes English, reply in English. If Chinese, reply in Chinese.
 - User's UI language: ${uiLanguage || 'unknown'} (UI language is a hint, not a rule — the user's message language wins).
 - Never switch to Chinese just because system sections below are written in Chinese; those are instructions for you, not for the user.
+- **过程说明也算回复（2026-09-29 补）**：工具调用之前/之间的进度旁白（例如 "Let me search with real sources."、"先看一下目录结构"）、计划说明、阶段性汇报，必须与最终答案**同一语言**。过程区是用户直接看得到的正文，不是内部推理。
+- **同一次回复内不要来回换语言**：禁止一段中文一段英文交替（用户在过程区会看到中英反复横跳）。工具名、文件名、代码标识符、专有名词保持原样即可——那是标识符，不算语言切换。
 
 ## 引用标记（用户可能引用对话内容，必须优先回应）
 用户消息中如果出现「> 用户引用：xxx」或「> AI 回复引用：xxx」标记（引用块），表示用户引用了某条历史消息的原文来引导你——**引用的内容是最重要的上下文，必须先针对引用内容回应**（确认/纠正/说明），再处理其后的新提问；不要把引用内容当作普通正文忽略。
@@ -855,7 +946,7 @@ If something blocks you, say so directly. Never fabricate results.
 7. Never stop early: keep calling tools until the task is truly complete (all sub-steps done and verified). Do not output a final answer or stop calling tools while work remains — e.g. if you found issues, fix and verify them all; if you only inspected, finish the actual work. A short "final report" before finishing the job is a failure.
 
 ## 目标保持（goal，必须遵守）
-- 复杂/长任务开始前：先用 **create_plan** 创建结构化计划（标题 + 步骤），并在执行中同步 task_update 更新步骤状态（in_progress/completed）。
+- 复杂/长任务开始前：先用 **create_plan** 创建结构化计划（标题 + 步骤）。**进度契约（必须遵守）**：前端任务胶囊的进度完全来自你的 task_update 声明，系统不会自动推进——①每完成一步，立刻 task_update(id, status='completed')；②开始下一步前 task_update(id, status='in_progress')；③计划有变（跳步/改步骤）也用 task_update 同步。漏报会导致用户看到的进度停滞在旧步骤。
 - 执行中途（完成关键步骤后、或感觉方向可能偏离时）：调用 **get_goal** 自查原始目标与当前进度，确认没有偏离用户需求主线。
 - 一旦发现偏离：立即回到目标主线，或向用户说明当前发现的新情况并征询调整。禁止做着做着忘记原始需求。
 
@@ -979,6 +1070,8 @@ export async function runAgentLoop(
 ) {
   const sessionWorkspace = sessionCfg?.workspaceDir || ''
   const permissionLevel = sessionCfg?.permissionLevel || 'sandbox'
+  // rm 分级的"工作区内"判定源（2026-09-25）：会话覆盖 > 全局 config
+  setApprovalWorkspaceRoot(sessionWorkspace || config.workspaceDir || '')
   // ---- 动态 maxTurns ----
   // 用户配置的 maxTurns 就是上限，简单任务靠 estimateComplexity 自动缩短
   // （修复：之前 estimateComplexity 从未被调用 → 所有消息都按用户上限走 → "hello"也触发 planner）
@@ -1279,8 +1372,16 @@ export async function runAgentLoop(
       // 注意：DeepSeek 深度思考要求带 tool_calls 的 assistant 消息，其 reasoning_content 必须原样传回，
       // 若替换成占位文本会触发 "reasoning_content must be passed back" 400。故仅裁剪"无 tool_calls 的纯文本
       // assistant 消息"，且直接删除字段而非替换成假内容。（2026-08-28 修真因）
+      // 2026-09-20 加：**尾部（最后一条 user 之后）的 rc 一律不裁**。
+      // 实测：尾部里"原本有 rc 的纯文本 assistant 被裁成无 rc"之后，每次请求都 400
+      // "reasoning_content must be passed back"。裁剪只应作用于已经完结的历史回合。
+      let lastUserIdx = -1
+      for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].role === 'user') { lastUserIdx = i; break }
+      }
       let reasoningCount = 0
       for (let i = messages.length - 1; i >= 0; i--) {
+        if (i > lastUserIdx) continue // 尾部不裁（否则自己造 400）
         const mm = messages[i]
         if (!mm.reasoning_content) continue
         // 带 tool_calls 的 assistant：跳过，reasoning 必须原样保留（DeepSeek 深度思考硬性要求）
@@ -1306,11 +1407,19 @@ export async function runAgentLoop(
       }
     }
 
-    // 工具消息序列清洗（2026-08-28 修复 400：检查点/压缩/中断可能留下孤立 tool_calls，发请求前兜底）
-    const sanitizedMessages = sanitizeToolCallSequence(messages)
-    if (sanitizedMessages.length !== messages.length) {
-      console.warn(`[Sanitize] turn ${turn}: 清洗 ${messages.length}→${sanitizedMessages.length} 条消息（移除孤立 tool_calls）`)
+    // 发请求前两道闸门，缺一即 400：
+    //   ① sanitizeToolCallSequence —— 工具消息配对（孤立 / 反向孤立）
+    //   ② ensureReasoningEcho     —— 带 tools 时尾部 assistant 必须带 reasoning_content 字段
+    const willSendTools = !forcePlainOnce && activeToolDefs.length > 0
+    const cleaned = sanitizeToolCallSequence(messages)
+    if (cleaned.length !== messages.length) {
+      console.warn(`[Sanitize] turn ${turn}: 清洗 ${messages.length}→${cleaned.length} 条消息（移除孤立/反向孤立工具消息）`)
     }
+    const sanitizedMessages = ensureReasoningEcho(cleaned, {
+      withTools: willSendTools,
+      model: agentConfig.model,
+      baseUrl: agentConfig.baseUrl || config.deepseek.baseUrl,
+    })
     const apiMessages = [
       { role: 'system', content: systemPrompt.prompt },
       ...sanitizedMessages,
@@ -1409,6 +1518,10 @@ export async function runAgentLoop(
       const decoder = new TextDecoder()
       let buffer = ''
       let contentBuffer = ''
+      // 正文合并窗口（2026-09-28 真流式转发）：上游 delta 是**匀速**到达的
+      // （实测 875 个 delta / 1375 字 / 6.58s ≈ 208 字每秒），这里边收边发，
+      // 由合并窗口把 SSE 写次数压在 ~165 次/轮，而不是逐 delta 直发的 875 次。
+      const contentCoalescer = createContentCoalescer()
       let reasoningBuffer = ''
       const toolCallBuffer: Map<number, { id: string; name: string; args: string }> = new Map()
       // 本轮真实 token 用量（流式结束时的 usage 字段）
@@ -1428,8 +1541,10 @@ export async function runAgentLoop(
               const ch = JSON.parse(ds)
               const dl = ch.choices?.[0]?.delta
               if (dl?.content) {
-                // 轮内只累积；轮末统一决定推送（中间工具轮文本不进正文，避免碎文）
                 contentBuffer += dl.content
+                // 边收边发：合并窗口够条件就立刻推给前端（详见 content-coalescer.ts）
+                const flushed = contentCoalescer.push(dl.content)
+                if (flushed) emitSSE(ctx, 'content_chunk', { text: flushed })
               }
               if (dl?.tool_calls) {
                 for (const tc of dl.tool_calls) {
@@ -1471,8 +1586,11 @@ export async function runAgentLoop(
             }
 
             if (delta?.content) {
-              // 轮内只累积；轮末判断：工具轮 → process_text（不进正文），最终轮 → 分片流式推正文
+              // 边收边发（2026-09-28 真流式转发）：上游匀速吐字，这里不再攒到轮末，
+              // 进合并窗口后即时 emit —— 替代旧的"轮末 8 字/4ms 回放"
               contentBuffer += delta.content
+              const flushed = contentCoalescer.push(delta.content)
+              if (flushed) emitSSE(ctx, 'content_chunk', { text: flushed })
             }
 
             if (delta?.reasoning_content) {
@@ -1500,27 +1618,19 @@ export async function runAgentLoop(
         }
       }
 
-      // 正文收敛策略（WorkBuddy 同款）：中间工具轮的过程文本（"好，我去抓取...🔍"）不进正文区，
-      // 避免一段段碎文 + 工具执行停顿造成"卡顿"观感——工具卡片已表达过程；正文只出最终答案。
-      if (toolCallBuffer.size === 0 && contentBuffer.trim()) {
-        const isJsonish = contentBuffer.startsWith('{') || contentBuffer.startsWith('[')
-        if (isJsonish) {
-          emitSSE(ctx, 'content_chunk', { text: contentBuffer })
-        } else {
-          // 分片模拟流式（每片 8 字符 4ms，1KB 约 500ms），保留"逐字出现"观感
-          for (let i = 0; i < contentBuffer.length; i += 8) {
-            emitSSE(ctx, 'content_chunk', { text: contentBuffer.slice(i, i + 8) })
-            await new Promise((r) => setTimeout(r, 4))
-          }
-        }
-      } else if (toolCallBuffer.size > 0 && contentBuffer.trim()) {
-        // 中间工具轮文本：渲染给前端（对齐 WorkBuddy/ChatGPT 交替式——工具间模型会输出简短说明，用户实时看到进度）
-        // 修正：之前走 process_text（前端不渲染）导致"只有深度思考和命令、中间无回复"；工具轮正文应平铺显示
-        for (let i = 0; i < contentBuffer.length; i += 8) {
-          emitSSE(ctx, 'content_chunk', { text: contentBuffer.slice(i, i + 8) })
-          await new Promise((r) => setTimeout(r, 4))
-        }
-      }
+      // 正文已经在读循环里边收边发 ⇒ 这里只补发合并窗口里还押着的尾巴。
+      //
+      // 🔴 2026-09-28 删除「轮末回放」。原实现对 contentBuffer 再按 8 字/4ms 切一遍，
+      //    把上游**匀速**到达的正文整体推迟到读循环结束之后才发 ⇒ 客户端实测
+      //    "1071 字里约 850 字挤在流最后 0.7 秒到达"，打字机变成"憋完一口气抖出来"，
+      //    本轮新加的「边生成边朗读」也只能省下 644ms（合成必然晚于流结束）。
+      //    改法见 content-coalescer.ts；这里同时删掉 `isJsonish` 整块直发特判 ——
+      //    它解决的正是"回放把 JSON 切碎"这个问题，真流式下不存在；而且流式下
+      //    也无法在发首片之前判断整块是不是 JSON。
+      //    ⚠️ contentBuffer 仍完整累积：assistantMsg.content（:1710）、轮末 content 事件
+      //    （:2034）、记忆抽取与反思都依赖它，别顺手删掉累积那两行。
+      const contentTail = contentCoalescer.flush()
+      if (contentTail) emitSSE(ctx, 'content_chunk', { text: contentTail })
 
       if (toolCallBuffer.size > 0) {
         const toolCalls = Array.from(toolCallBuffer.values()).map(tc => ({
@@ -1532,7 +1642,13 @@ export async function runAgentLoop(
         // 2026-09-18（#147）：补 memory_consolidate —— 它会 DELETE 记忆行，属于破坏性操作，
         // 必须与 file_delete 同级走"先确认后执行"。此前不在名单里 = 模型可静默删用户记忆。
         // 注：auto 档下 classifySensitiveTool 对未特判的工具返回 'ask'，所以这一条就足以拦住。
-        const SENSITIVE_TOOLS = new Set(['shell_exec', 'file_write', 'file_delete', 'memory_consolidate'])
+        //
+        // ⚠️ 2026-09-24（I2）**不再在这里手写名单**。原先是内联的
+        //   `new Set(['shell_exec','file_write','file_delete','memory_consolidate'])`，
+        // 与工具定义里的 `requiresApproval` 完全脱钩 —— 实测 `computer_use` / `skill_install` /
+        // `multi_edit` 声明了危险却**根本不走审批**（模型可静默改文件 / 装代码 / 操作本机）。
+        // 现在改成从工具定义派生（`services/tools.ts` 的 SENSITIVE_TOOLS），
+        // 并由 `scripts/validate-tools.ts` 的契约断言保证"声明了就必须真的拦"。
 
         // ---- ToolCallLoopDetector（WorkBuddy 同款）：同一工具 + 相似参数连续调用 ≥4 次 → 干预，防死循环烧 token ----
         const loopHit = detectToolLoop(toolCalls)
@@ -1594,6 +1710,10 @@ export async function runAgentLoop(
         // ---- 安全闸门(阈值版, 2026-09-04): 带工具无 reason_content 的轮
         // DeepSeek 思考在极端时要求带 tools 历史附 rc 才可传回→连续 400。但 deepseek-v4-flash 带 tools 常本来无 rc 且能正常跑,
         // 故不能遇到一个 0rc 就禁(否则浏览器永远跑不了)。改为: 连续 ≥3 次"带工具仍 0rc"才判定真崩 → 弃坏轮+强制纯文本一轮刹车。
+        // ⚠️ 2026-09-20 更正诊断（只改注释、不改行为）: 上面的方向对了但**定位错了**。实测确立的真规则是
+        //    —— 只有落在"最后一条 user 之后"尾部的 assistant 缺 rc 才 400；更早的历史回合缺 rc 无害，
+        //    带 tool_calls 的更不受影响。真正的元凶是降级/裁剪自己把 rc 删掉（见 sanitizeToolCallSequence
+        //    与上方裁剪循环的 2026-09-20 修复）。该闸门已非必需，但它真实生效过，本次不擅自移除以免引入新变量。
         const rcEmpty = toolCalls.length > 0 && !(reasoningBuffer || '').trim()
         if (toolCalls.length > 0) consecEmptyRc = rcEmpty ? consecEmptyRc + 1 : 0
         if (rcEmpty && consecEmptyRc >= 3) {
@@ -1620,60 +1740,44 @@ export async function runAgentLoop(
             readSetting('toolApprovalMode'),
             permissionLevel,
           )
-          if (approvalMode === 'auto') {
-            // 2026-08-29 对齐 WorkBuddy PermissionMode.auto：不再是"始终允许一切"，
-            // 而是用 classifySensitiveTool 分类——显然安全的命令自动放行，危险/未知的操作弹窗确认。
-            allowSensitive = await Promise.all(
-              sensitiveCalls.map(async (tc: any) => {
-                const args = tc.function?.arguments || ''
-                const decision = classifySensitiveTool(tc.function.name, args)
-                if (decision === 'allow') return 'allow' as const
-                // 危险或未知 → 走 waitForToolConfirmation 弹窗（或超时自动拒绝）
-                return waitForToolConfirmation(tc.id)
-              }),
-            )
-          } else if (approvalMode === 'deny') {
-            allowSensitive = sensitiveCalls.map(() => 'deny')
-          } else if (approvalMode === 'accept-edits') {
-            // AcceptEdits（对齐 WorkBuddy acceptEdits，2026-08-27 加）：自动批准文件编辑(file_write)，拦截危险命令(shell_exec)与删除(file_delete)
-            loadSessionApprovals()
-            allowSensitive = await Promise.all(
-              sensitiveCalls.map((tc: any) => {
-                if (tc.function.name === 'file_write') return Promise.resolve('allow' as const)
-                if (tc.function.name === 'file_delete') return waitForToolConfirmation(tc.id)
-                return waitForToolConfirmation(tc.id) // shell_exec 仍询问
-              }),
-            )
-          } else if (permissionLevel === 'full') {
-            // full 权限（对齐 WorkBuddy fullAccess→autoRun）：非删除敏感工具自动放行，基本不弹授权；file_delete 仍确认
-            allowSensitive = await Promise.all(
-              sensitiveCalls.map((tc: any) =>
-                tc.function.name === 'file_delete' ? waitForToolConfirmation(tc.id) : Promise.resolve('allow' as const),
-              ),
-            )
-          } else {
-            // 按会话授权（对齐 WorkBuddy 记忆式授权）：本会话已"允许全部"则自动放行所有敏感工具；
-            // file_delete 永远确认（"删文件才再授权"的高危体验，老板 2026-08-21）
-            loadSessionApprovals()
-            allowSensitive = await Promise.all(
-              sensitiveCalls.map((tc: any) => {
-                if (tc.function.name === 'file_delete') return waitForToolConfirmation(tc.id)
-                if (sessionId && sessionApprovedTools.has(sessionId)) {
-                  return Promise.resolve('allow' as const)
-                }
-                return waitForToolConfirmation(tc.id)
-              }),
-            )
-          }
-          for (let i = 0; i < sensitiveCalls.length; i++) {
-            if (allowSensitive[i] !== 'allow') {
-              emitSSE(ctx, 'tool_result', {
-                name: sensitiveCalls[i].function.name,
-                content: '用户拒绝执行此操作',
-                tool_call_id: sensitiveCalls[i].id,
-                status: 'denied',
+          // 2026-09-24 / I14：四档各自为政的分支收敛为**一个纯函数**（permission.ts）。
+          // 旧实现的三个坑（都在这里被修掉）：
+          //  ① `auto` 档全程不读 sessionApprovedTools → 点过「本会话全部允许」照样逐个弹窗；
+          //  ② `accept-edits` 档 loadSessionApprovals() 调了但从不用返回值（死调用）；
+          //  ③ 只有 `prompt` 档读白名单 → 同一个按钮在不同档位行为不一致。
+          loadSessionApprovals()
+          loadSessionBlockApprovals()
+          const sessionApproved = !!(sessionId && sessionApprovedTools.has(sessionId))
+          const sessionBlockApproved = !!(sessionId && sessionApprovedBlockTools.has(sessionId))
+          allowSensitive = await Promise.all(
+            sensitiveCalls.map(async (tc: any) => {
+              const args = tc.function?.arguments || ''
+              const action = decideToolApproval(tc.function.name, args, {
+                mode: approvalMode,
+                permissionLevel,
+                sessionApproved,
+                sessionBlockApproved,
+                classify: classifySensitiveTool,
               })
-            }
+              if (action === 'deny') return 'deny' as const
+              if (action === 'allow') return 'allow' as const
+              const verdict = await waitForToolConfirmation(tc.id)
+              // "拦一次后记住"：block 类被用户显式允许 → 本会话记住，后续不再拦（拒绝不记）
+              if (verdict === 'allow' && sessionId && classifySensitiveTool(tc.function.name, args) === 'block') {
+                approveSessionBlockTools(sessionId)
+              }
+              return verdict
+            }),
+          )
+        }
+        for (let i = 0; i < sensitiveCalls.length; i++) {
+          if (allowSensitive[i] !== 'allow') {
+            emitSSE(ctx, 'tool_result', {
+              name: sensitiveCalls[i].function.name,
+              content: '用户拒绝执行此操作',
+              tool_call_id: sensitiveCalls[i].id,
+              status: 'denied',
+            })
           }
         }
         const executeList = [
@@ -1686,6 +1790,11 @@ export async function runAgentLoop(
         const toolCtx: ToolExecCtx = {
           cwd: sessionWorkspace || undefined,
           permissionLevel,
+          // 结构化进度（G5/I13，2026-09-24）：工具上报 {added,deleted,done,count,total,phase} →
+          // 前端直接显示数字，**不再解析** "📝 写入 N/M 行" 这类中文文案（那条路改文案即静默失效）
+          onProgress: (toolCallId, progress) => {
+            emitSSE(ctx, 'tool_progress', { toolCallId, ...progress })
+          },
           // 工具流式输出：分片实时推送（前端 ToolCallBlock 边跑边显示）
           onOutput: (toolCallId, chunk) => {
             const LIMIT = 5 * 1024 * 1024
@@ -1876,17 +1985,13 @@ export async function runAgentLoop(
             } catch {}
           }
 
-          // ---- Plan 进度推进（横栏任务胶囊）：每轮工具调用后，当前步骤 completed → 下一步 in_progress ----
+          // ---- Plan 进度推送（横栏任务胶囊）：进度唯一来源 = 模型 task_update 显式声明 ----
+          // 2026-09-26 砍掉旧的 advancePlan 按轮次无条件推进（纯轮次计数与实际零关联，且会叠加/覆盖
+          // 模型的 task_update 声明造成"虚进"）。轮末只重发真实快照：模型在轮中 task_update 改表 →
+          // 这里把改后的真实状态推给前端。task_update 内部含"无 in_progress 步骤时衔接下一步"的兜底。
           if (sessionId) {
-            const hasCreatePlan = toolCalls.some((tc: any) => tc.function?.name === 'create_plan')
-            if (hasCreatePlan) {
-              // 本轮创建了计划：推送初始快照（第一步已 in_progress）
-              const snap = getPlanSnapshot(sessionId)
-              if (snap) emitSSE(ctx, 'plan_update', snap)
-            } else {
-              const snap = advancePlan(sessionId)
-              if (snap) emitSSE(ctx, 'plan_update', snap)
-            }
+            const snap = getPlanSnapshot(sessionId)
+            if (snap) emitSSE(ctx, 'plan_update', snap)
           }
         }
       } else {
@@ -2294,6 +2399,17 @@ export async function runAgentLoop(
         maybeRepairSkill({ ...evolveOpts, usedSkills, failureReason: `任务未完成（finished=false，${turn} 轮）` }).catch(() => {})
       }
     }
+  }
+
+  // ---- 任务结束清理（2026-09-23）：释放本会话的 AI 浏览器实例 + 临时 profile ----
+  // 放在任务正常收尾处，覆盖所有 runAgentLoop 入口（聊天/会诊/自动化），
+  // 不只在 chat 路由的 finally 里兜（异常路径由 chat.ts 的 finally 兜底，closeKey 幂等）。
+  // 仅在确有 sessionId 时清理 —— 会诊成员的哑 ctx 无 sessionId，避免误关 default 桶。
+  if (sessionId) {
+    try {
+      const { closeBrowserForSession } = await import('./ai-browser')
+      await closeBrowserForSession(sessionId)
+    } catch { /* 清理失败不影响任务结果 */ }
   }
 }
 
