@@ -19,17 +19,16 @@
 # ============================================================
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-# npm 解析：原先写死 .../node/versions/22.22.2/bin/npm —— 该目录后来变成了 22.22.2-3，
-# 路径失效 + set -e 会让脚本在第一步就静默死掉（2026-09-23 修）。现在按候选列表探测。
+# npm 解析：按候选列表探测，**不写死任何开发机路径**（写死会在别人机器上必然失败，
+# 且会把本机用户名带进公开仓库）。顺序：显式 NPM → PATH → 常见包管理器安装位。
 pick_npm() {
   local c
   for c in "${NPM:-}" \
-           /Users/chaojiphonekuang/.workbuddy/binaries/node/versions/22.22.2-3/bin/npm \
-           /Users/chaojiphonekuang/.workbuddy/binaries/node/versions/22.22.2/bin/npm \
+           "$(command -v npm 2>/dev/null || true)" \
            /opt/homebrew/bin/npm /usr/local/bin/npm; do
     [ -n "$c" ] && [ -x "$c" ] && { echo "$c"; return 0; }
   done
-  command -v npm || true
+  return 0
 }
 NPM="$(pick_npm)"
 if [ -z "$NPM" ] || [ ! -x "$NPM" ]; then

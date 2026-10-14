@@ -18,8 +18,11 @@
  */
 import { copyFileSync, existsSync, unlinkSync, mkdirSync } from 'fs'
 import Database from 'better-sqlite3'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 
-const SRC = '/Users/chaojiphonekuang/.supercrzy/data/supercrzy.db'
+// 不许写死开发机的绝对路径
+const SRC = join(homedir(), '.supercrzy', 'data', 'supercrzy.db')
 const COPY = '/tmp/supercrzy-verify/copy.db'
 mkdirSync('/tmp/supercrzy-verify', { recursive: true })
 copyFileSync(SRC, COPY)

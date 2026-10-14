@@ -61,7 +61,7 @@ async function openStreamConnection(clientId: string, clientSecret: string): Pro
         subscriptions: [
           { topic: TOPIC_BOT_MESSAGE, type: 'CALLBACK' },
         ],
-        ua: 'supercrzy-agent/1.0',
+        ua: 'SupercrzyBot/1.0',
       }),
       signal: controller.signal,
     })

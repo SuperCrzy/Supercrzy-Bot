@@ -31,8 +31,13 @@
  * 跑法：node scripts/diag/verify-speak-continuity.mjs
  */
 import { createRequire } from 'node:module'
-const require = createRequire('/Users/chaojiphonekuang/Downloads/supercrzy/supercrzy-agent/packages/server/')
-const { chromium } = require('/Users/chaojiphonekuang/Downloads/supercrzy/supercrzy-agent/packages/server/node_modules/playwright-core')
+// 项目根由脚本位置推导 —— 不许写死本机绝对路径（对外发布后会指向不存在的目录，
+// 且会把开发机的用户名带进公开仓库）。
+import { fileURLToPath as __f2p } from 'node:url'
+import { dirname as __dn, join as __j } from 'node:path'
+const __ROOT = __j(__dn(__f2p(import.meta.url)), '../..')
+const require = createRequire(__ROOT + '/packages/server/')
+const { chromium } = require(__ROOT + '/packages/server/node_modules/playwright-core')
 
 const BASE = 'http://localhost:5173'
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'

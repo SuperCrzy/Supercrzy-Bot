@@ -7,11 +7,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/SuperCrzy/supercrzy-agent.git"
+    "url": "git+https://github.com/SuperCrzy/Supercrzy-Bot.git"
   },
-  "homepage": "https://github.com/SuperCrzy/supercrzy-agent#readme",
+  "homepage": "https://github.com/SuperCrzy/Supercrzy-Bot#readme",
   "bugs": {
-    "url": "https://github.com/SuperCrzy/supercrzy-agent/issues"
+    "url": "https://github.com/SuperCrzy/Supercrzy-Bot/issues"
   },
   "packageManager": "pnpm@10.33.3",
   "engines": {

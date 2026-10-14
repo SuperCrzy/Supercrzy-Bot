@@ -11,9 +11,12 @@
  * 目的不是"证明函数对不对"，而是量化**这条死路在真实数据上有多常见**。
  */
 import Database from 'better-sqlite3'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { extractSpeakText } from '../../packages/client/src/utils/speech-text.ts'
 
-const DB = '/Users/chaojiphonekuang/.supercrzy/data/supercrzy.db'
+// 不许写死开发机的绝对路径 —— 用户工作区固定为 ~/.supercrzy（见 config/index.ts）
+const DB = join(homedir(), '.supercrzy', 'data', 'supercrzy.db')
 const db = new Database(DB, { readonly: true, fileMustExist: true })
 
 const rows = db

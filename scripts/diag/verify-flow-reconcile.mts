@@ -2,7 +2,7 @@
  * I15 验收：flow × content 对账在**真实运行库**上的表现（可重跑）。
  *
  * 用法：
- *   /Users/chaojiphonekuang/.workbuddy/binaries/node/versions/22.22.2-3/bin/node \
+ *   node \
  *     node_modules/tsx/dist/cli.mjs scripts/diag/verify-flow-reconcile.mts
  *
  * ⚠️ 不要用 `npx tsx`（宿主 PATH 里有 brokered-bin 代理 + BASH_ENV 注入，会静默失败）。

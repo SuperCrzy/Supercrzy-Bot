@@ -78,8 +78,8 @@ pnpm -v    # should print 10.x  (corepack enable  # if missing)
 ### Option 2: one-liner script
 
 ```bash
-git clone https://github.com/SuperCrzy/supercrzy-agent.git
-cd supercrzy-agent
+git clone https://github.com/SuperCrzy/Supercrzy-Bot.git
+cd Supercrzy-Bot
 ./start.sh          # checks env → installs deps → builds frontend → starts → opens browser
 ```
 
@@ -141,7 +141,7 @@ Chat with the agent directly in the terminal — streaming output and tool calls
 ## 🏗️ Architecture
 
 ```
-supercrzy-agent/
+Supercrzy-Bot/
 ├── packages/
 │   ├── client/          # Vue3 + NaiveUI + Monaco frontend
 │   │   └── src/views/   # chat / workspace / skills / memory / models / usage pages

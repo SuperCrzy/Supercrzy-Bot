@@ -230,7 +230,7 @@ class DiscordBotInstance {
           this.send({ op: 2, d: {
             token: this.token,
             intents: INTENTS,
-            properties: { os: 'macOS', browser: 'supercrzy-agent', device: 'supercrzy-agent' },
+            properties: { os: 'macOS', browser: 'SupercrzyBot', device: 'SupercrzyBot' },
           } })
         }
         break
@@ -248,7 +248,7 @@ class DiscordBotInstance {
           this.sessionId = ''
           this.send({ op: 2, d: {
             token: this.token, intents: INTENTS,
-            properties: { os: 'macOS', browser: 'supercrzy-agent', device: 'supercrzy-agent' },
+            properties: { os: 'macOS', browser: 'SupercrzyBot', device: 'SupercrzyBot' },
           } })
         }
         break

@@ -1,4 +1,9 @@
-import { chromium } from '/Users/chaojiphonekuang/Downloads/supercrzy/supercrzy-agent/packages/server/node_modules/playwright-core/index.mjs'
+// 项目根由脚本位置推导 —— 不许写死本机绝对路径（对外发布后会指向不存在的目录，
+// 且会把开发机的用户名带进公开仓库）。
+import { fileURLToPath as __f2p } from 'node:url'
+import { dirname as __dn, join as __j } from 'node:path'
+const __ROOT = __j(__dn(__f2p(import.meta.url)), '../..')
+const { chromium } = await import(__ROOT + '/packages/server/node_modules/playwright-core/index.mjs')
 import { mkdirSync } from 'node:fs'
 
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'

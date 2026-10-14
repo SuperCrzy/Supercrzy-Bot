@@ -9,7 +9,7 @@
 Use either channel:
 
 1. **GitHub private vulnerability reporting (preferred)** —
-   [Security → Report a vulnerability](https://github.com/SuperCrzy/supercrzy-agent/security/advisories/new).
+   [Security → Report a vulnerability](https://github.com/SuperCrzy/Supercrzy-Bot/security/advisories/new).
    This keeps the report private and gives us a place to coordinate the fix.
 2. **Email** — `security@supercrzy.com`. Encrypt if you can; ask for our PGP key in the first message.
 

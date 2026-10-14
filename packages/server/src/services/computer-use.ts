@@ -189,7 +189,10 @@ async function saveScreenshotWithOcr(base64Data: string): Promise<string> {
       const { promisify } = await import('util')
       const execFileP = promisify(execFile)
       const __dirname = dirname(fileURLToPath(import.meta.url))
-      const PYTHON_BIN = process.env.OCR_PYTHON_BIN || '/Users/chaojiphonekuang/.workbuddy/binaries/python/envs/default/bin/python'
+      // 🔴 不许写死解释器路径：曾经这里硬编码了某个开发机上的 python 绝对路径，
+      // 对外发布后别人的机器必然命中不存在 ⇒ OCR 每次失败，且顺带泄露本机路径。
+      // 解析顺序：显式配置 → PATH 里的 python3（下面的 catch 会把「找不到」变成可读提示）。
+      const PYTHON_BIN = process.env.OCR_PYTHON_BIN || 'python3'
       const OCR_SCRIPT = join(__dirname, '../../scripts/ocr_service.py')
       const { stdout } = await execFileP(PYTHON_BIN, [OCR_SCRIPT, fpath], { timeout: 30000 })
       const ocr = JSON.parse(stdout) as { texts?: string[]; error?: string }

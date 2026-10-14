@@ -21,7 +21,7 @@ SUPERCRZY BOT 宣传视频的生产工具。**产品视频可直接重出，不�
 ## 用法
 
 ```bash
-NODE=/Users/chaojiphonekuang/.workbuddy/binaries/node/versions/22.22.2-3/bin/node
+NODE=node
 
 # 1. 后端需常驻（用 run_in_background，nohup 会被回收）
 cd packages/server && node node_modules/tsx/dist/cli.mjs src/app.ts

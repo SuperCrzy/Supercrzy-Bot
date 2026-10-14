@@ -287,7 +287,7 @@ class QQBotInstance {
         token: `QQBot ${this.token}`,
         intents: INTENTS,
         shard: [0, 1] as [number, number],
-        properties: { os: 'macOS', browser: 'supercrzy-agent' },
+        properties: { os: 'macOS', browser: 'SupercrzyBot' },
       },
     }
     this.ws?.send(JSON.stringify(payload))

@@ -56,8 +56,8 @@
 ### 方式二:一键脚本
 
 ```bash
-git clone https://github.com/SuperCrzy/supercrzy-agent.git
-cd supercrzy-agent
+git clone https://github.com/SuperCrzy/Supercrzy-Bot.git
+cd Supercrzy-Bot
 ./start.sh          # 自动检查环境 → 装依赖 → 构建前端 → 启动 → 自动打开浏览器
 ```
 
@@ -118,7 +118,7 @@ pnpm cli
 ## 🏗️ 架构
 
 ```
-supercrzy-agent/
+Supercrzy-Bot/
 ├── packages/
 │   ├── client/          # Vue3 + NaiveUI + Monaco 前端
 │   │   └── src/views/   # 聊天/工作台/技能/记忆/模型/用量等页面
