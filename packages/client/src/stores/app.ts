@@ -2,6 +2,8 @@ import { defineStore } from 'pinia'
 import i18n from '@/i18n'
 import { ref, computed, shallowRef } from 'vue'
 import { getModelSelectOptions, getModelShortName } from '@/data/models'
+import { normalizeTone, normalizeVolume } from '@/utils/sound'
+import { DEFAULT_AUTO_READ_MODE, normalizeAutoReadMode, type AutoReadMode } from '@/utils/auto-read'
 import type { CustomModel } from '@/types'
 
 export const useAppStore = defineStore('app', () => {
@@ -48,6 +50,17 @@ export const useAppStore = defineStore('app', () => {
   function setPreviewImage(data: string, isUrl: boolean, title: string) {
     previewImage.value = { data, isUrl, title, ts: Date.now() }
   }
+  /**
+   * 清掉图片预览（2026-09-29）。
+   *
+   * 为什么需要它：DetailPanel 的 preview tab 里 `<div v-if="previewImage">` **排在**
+   * 文本预览 `v-else-if="previewContent"` **前面**，而 `previewImage` 此前只写不清
+   * ⇒ 只要生过一次图，之后点任何文件都还是那张图，文本预览形同失效。
+   * 打开文件预览（`openFilePreview`）时必须先清掉它，两种预览模式互斥。
+   */
+  function clearPreviewImage() {
+    previewImage.value = null
+  }
 
   // 文件变更（变更 tab 数据源：SSE file_changed 事件写入，含改前/改后内容）
   const fileChanges = ref<Array<{ path: string; name: string; oldContent: string; newContent: string; ts: number }>>([])
@@ -73,14 +86,31 @@ export const useAppStore = defineStore('app', () => {
   // 显示设置（从 settings API 加载）
   const showReasoning = ref(true)
   const completionSound = ref(true)
+  /** 完成提示音音色（内置合成音效 id，2026-09-27 起可选） */
+  const completionSoundTone = ref('classic')
+  /** 完成提示音音量（峰值增益 0.05~0.4，默认 0.15 = 历史值） */
+  const completionSoundVolume = ref(0.15)
   /** 授权弹窗自动允许等待秒数（0=关闭；后端 waitForToolConfirmation 超时自动放行） */
   const toolAutoApproveSeconds = ref(0)
   const compactMode = ref(false)
   const showCost = ref(false)
   const busyInputMode = ref(true)
   const streamingEnabled = ref(true)
-  // 文件预览
-  const previewFilePath = ref('')
+  /** 朗读音色（Edge TTS voice id，2026-09-27） */
+  const ttsVoice = ref('zh-CN-XiaoxiaoNeural')
+  /** 朗读语速百分比（-50~50，0=正常，映射到 Edge TTS 的 '+N%'） */
+  const ttsRate = ref(0)
+  /** 自动朗读档位（2026-09-27）：off / background（仅窗口不在前台时，默认）/ always */
+  const autoReadMode = ref<AutoReadMode>(DEFAULT_AUTO_READ_MODE)
+  /**
+   * 边生成边朗读（2026-09-28）：回复还在流式输出时就开始读，不等整条完成。
+   *
+   * **正交于 autoReadMode**，不是第 4 个档位 —— 档位管"这轮读不读"，它管"什么时候开始读"。
+   * 拆开是为了不改掉 2026-09-27 拍板的档位语义（新增档位会让 always 的含义静默变化）。
+   * 默认 true：配合默认档 background，效果是"切走了才边生成边读、盯着屏幕时不出声"，
+   * 即本来就不出声的场景行为完全未变。
+   */
+  const streamRead = ref(true)
   // 个人资料（用户昵称 + 头像）
   const userName = ref('')
   const userAvatar = ref('')
@@ -104,10 +134,19 @@ export const useAppStore = defineStore('app', () => {
         if (data.toolAutoApproveSeconds !== undefined) toolAutoApproveSeconds.value = Number(data.toolAutoApproveSeconds) || 0
         if (data.showReasoning !== undefined) showReasoning.value = data.showReasoning
         if (data.completionSound !== undefined) completionSound.value = data.completionSound
+        // 音色/音量走白名单归一（服务端可能存了历史脏值）
+        if (data.completionSoundTone) completionSoundTone.value = normalizeTone(data.completionSoundTone)
+        if (data.completionSoundVolume !== undefined) completionSoundVolume.value = normalizeVolume(data.completionSoundVolume)
         if (data.compactMode !== undefined) compactMode.value = data.compactMode
         if (data.showCost !== undefined) showCost.value = data.showCost
         if (data.busyInputMode !== undefined) busyInputMode.value = data.busyInputMode
         if (data.streamingEnabled !== undefined) streamingEnabled.value = data.streamingEnabled
+        if (data.ttsVoice) ttsVoice.value = String(data.ttsVoice)
+        if (data.ttsRate !== undefined) ttsRate.value = Number(data.ttsRate) || 0
+        // 自动朗读档位走白名单归一（老库无此键 → 默认档；脏值不静默变成 off 或 always）
+        if (data.autoReadMode !== undefined) autoReadMode.value = normalizeAutoReadMode(data.autoReadMode)
+        // 边生成边朗读（老库无此键 → 保持默认）
+        if (data.streamRead !== undefined) streamRead.value = data.streamRead === true || data.streamRead === 'true'
         // 恢复主题（侧边栏切换已持久化到 settings 表，启动时从后端恢复）
         if (data.theme) darkMode.value = data.theme === 'dark'
         applyThemeClass()
@@ -335,12 +374,17 @@ export const useAppStore = defineStore('app', () => {
     // 显示设置
     showReasoning,
     completionSound,
+    completionSoundTone,
+    completionSoundVolume,
     toolAutoApproveSeconds,
     compactMode,
     showCost,
     busyInputMode,
     streamingEnabled,
-    previewFilePath,
+    ttsVoice,
+    ttsRate,
+    autoReadMode,
+    streamRead,
     // 个人资料
     userName,
     userAvatar,
@@ -354,5 +398,6 @@ export const useAppStore = defineStore('app', () => {
     focusMessageTs,
     previewImage,
     setPreviewImage,
+    clearPreviewImage,
   }
 })

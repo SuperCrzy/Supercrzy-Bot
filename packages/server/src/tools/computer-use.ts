@@ -8,7 +8,7 @@ const tool: ToolDef = {
     name: 'computer_use',
     description: '操控用户电脑（截屏/点击/输入/按键/滚动/打开应用）。仅 full 权限可用，调用前需用户确认。action 可选：screenshot(截屏)/click(点击 x,y)/type(输入文本)/key(按键 combo)/scroll(滚动)/move(移动鼠标)/open(打开应用)。',
     category: 'system',
-    dangerous: true,
+    requiresApproval: true,
     parameters: {
       type: 'object',
       properties: {

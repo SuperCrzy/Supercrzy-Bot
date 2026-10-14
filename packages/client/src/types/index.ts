@@ -359,6 +359,37 @@ export type ToolStatus =
   | 'cancelled'
   | 'destroyed'
 
+/**
+ * 工具结构化进度（对齐 server `tools/types.ts` 的同名接口，两处须同步改）。
+ * 由工具在运行中经 `ctx.onProgress` 主动上报，经 `tool_progress` SSE 事件落到前端。
+ * 契约要点：**进度只上报数值，文案由前端本地化渲染** —— 历史实现靠正则解析后端中文文案
+ * （`/写入\s*(\d+)\s*\/\s*(\d+)\s*行/`），后端一改文案前端静默失效。
+ */
+export interface ToolProgress {
+  /** 累计新增行数 */
+  added?: number
+  /** 累计删除行数 */
+  deleted?: number
+  /**
+   * 客户端生成期估算标记（2026-09-25）：diffArgsLive 从 args 流式前缀估出 ± 行数时写入。
+   * server 落盘后的结构化 tool_progress（真值）到达即清除；拒绝/失败收尾时连同估算值一起剥离，
+   * 避免假数字残留在历史里。⚠️ 只许本文件机制读写，消费端不许依赖它做分支。
+   */
+  live?: boolean
+  /** 总量（如待写入总行数） */
+  total?: number
+  /** 已完成量（如已写入行数、已应用编辑处数） */
+  done?: number
+  /** 计数型总量（如本次 multi_edit 的编辑处数） */
+  count?: number
+  /**
+   * 阶段**机器标识**（不是展示文案）：`'create'` 新建文件 / `'edit'` 修改已有文件。
+   * 前端据此本地化「创建 / 编辑」——对齐 WorkBuddy `tool.writeFile.{creating,create,editing,edit}`
+   * 的动词动态推导。⚠️ 禁止往这里塞任何给人看的文案。
+   */
+  phase?: 'create' | 'edit'
+}
+
 export interface ToolCallEvent {
   id: string
   name: string
@@ -373,6 +404,8 @@ export interface ToolCallEvent {
   createTime?: number
   /** 工具流式输出（执行中实时追加） */
   streamOutput?: string
+  /** 工具结构化进度（tool_progress 事件，执行中实时覆盖） */
+  progress?: ToolProgress
 }
 
 export interface ApiRequest {

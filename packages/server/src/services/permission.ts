@@ -99,3 +99,71 @@ export function resolveApprovalMode(
   // 都没有 → 从会话权限档推导
   return tierToLegacyMode(resolvePermissionTier(null, permissionLevel))
 }
+
+// =============================================================
+// 授权决策（**唯一实现**，2026-09-24/I14 收敛）
+//
+// 修掉的 bug：`agent.ts` 里四档各写一遍分支，其中
+//   ① `auto` 档**完全不读**会话白名单 → 点过「本会话全部允许」照样逐个弹窗（老板报的正是这个）
+//   ② `accept-edits` 档 `loadSessionApprovals()` 调了但**从不使用**返回值（死调用）
+//   ③ 只有 `prompt` 档读白名单 → 同一个按钮在不同档位行为不一致
+// ⇒ 收敛成一个纯函数 + 一张真值表（`tool-auto-permission.test.ts` 逐格断言）。
+// =============================================================
+
+export type ApprovalAction = 'allow' | 'confirm' | 'deny'
+
+/** 工具分类结果（= services/tools.ts 的 classifySensitiveTool 返回值，注入以免循环依赖） */
+export type ToolRisk = 'allow' | 'ask' | 'block'
+
+export interface ApprovalContext {
+  /** 生效内部档位 */
+  mode: LegacyApprovalMode
+  /** 会话权限档（workspace-only / sandbox / full） */
+  permissionLevel?: string | null
+  /** 本会话是否已点过「本会话全部允许」 */
+  sessionApproved: boolean
+  /**
+   * 本会话是否已对某个 block 类工具**显式允许过**（"拦一次后记住"，老板 2026-09-24 17:57 裁决）。
+   * 只在用户对 block 类点了「允许」时记录；点「拒绝」不记。
+   */
+  sessionBlockApproved?: boolean
+  /** 工具分类器（注入） */
+  classify: (toolName: string, args: string) => ToolRisk
+}
+
+/**
+ * 敏感工具的授权决策（纯函数，可逐格单测）。
+ *
+ * 判定顺序（顺序本身是承诺，改动前先看断言）：
+ *   1. `deny`（= 仅查看档）→ 一律拒绝，任何记住/白名单都不能推翻
+ *   2. `block` 已被本会话**显式允许过一次** → 放行（"拦一次后记住"）
+ *   3. `block`（不可逆/高危：删除、磁盘、凭据、系统路径写入…）→ 一律**确认**
+ *      —— 普通会话白名单（「本会话全部允许」）**不**覆盖 block
+ *   4. 会话白名单 → **放行**（这是「本会话全部允许」的语义：除 block 外全放行）
+ *   5. `auto` 档 / `full` 权限 → 放行
+ *   6. `accept-edits` 档 → 文件编辑放行，其余确认
+ *   7. 其余（`prompt` = 执行前询问档）→ 确认
+ *
+ * ⚠️ `mode === 'auto'` 下 `ask` 类**直接放行**（"除删除外全放行"）；想要"未知命令也问"，
+ *    请把档位调回 ask（执行前询问）—— 那才是该档的承诺。
+ */
+export function decideToolApproval(
+  toolName: string,
+  args: string,
+  ctx: ApprovalContext,
+): ApprovalAction {
+  if (ctx.mode === 'deny') return 'deny'
+
+  const risk = ctx.classify(toolName, args)
+  // "拦一次后记住"：本会话已对 block 类显式允许过 → 不再拦（deny 档除外，见上）
+  if (ctx.sessionBlockApproved) return 'allow'
+  // block 恒拦：**放在普通白名单之前**，会话级"全部允许"不能推翻不可逆操作
+  if (risk === 'block') return 'confirm'
+
+  if (ctx.sessionApproved) return 'allow'
+  if (ctx.mode === 'auto') return 'allow'
+  if (ctx.permissionLevel === 'full') return 'allow'
+  if (ctx.mode === 'accept-edits' && (toolName === 'file_write' || toolName === 'multi_edit')) return 'allow'
+  return 'confirm'
+}
+

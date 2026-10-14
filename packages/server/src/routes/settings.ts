@@ -11,10 +11,10 @@ export function maskSecret(value: string, headLen: number): string {
 }
 
 // Numeric keys that should be parsed as float
-const FLOAT_KEYS = ['temperature', 'maxTokens', 'maxTurns', 'gatewayTimeout', 'memoryCharLimit', 'idleTimeout']
+const FLOAT_KEYS = ['temperature', 'maxTokens', 'maxTurns', 'gatewayTimeout', 'memoryCharLimit', 'idleTimeout', 'ttsRate', 'completionSoundVolume']
 
 // Boolean keys that should be parsed as boolean
-const BOOL_KEYS = ['streamingEnabled', 'compactMode', 'showReasoning', 'showCost', 'completionSound', 'busyInputMode', 'memoryEnabled', 'piiMaskingEnabled', 'memoryAutoConsolidate']
+const BOOL_KEYS = ['streamingEnabled', 'compactMode', 'showReasoning', 'showCost', 'completionSound', 'busyInputMode', 'memoryEnabled', 'piiMaskingEnabled', 'memoryAutoConsolidate', 'streamRead']
 
 // Get all settings
 settingsRouter.get('/', (ctx: Context) => {
@@ -95,6 +95,13 @@ settingsRouter.post('/', (ctx: Context) => {
       'imageProvider', 'imageApiKey', 'doubaoModel', 'geminiImageModel', 'openaiImageModel', 'replicateModel',
       // 账户 Account
       'username', 'userName', 'userAvatar', 'accessToken',
+      // 朗读 TTS（2026-09-27）：音色 id + 语速百分比（-50~50，0=正常）+ 自动朗读档位
+      // 自动朗读档位 autoReadMode：off / background（仅窗口不在前台时，默认）/ always
+      // streamRead：边生成边朗读（2026-09-28，正交开关，非档位）—— 必须登记在这里，
+      // 否则前端存了也落不了库（本路由是白名单写入，未登记 key 静默丢弃）
+      'ttsVoice', 'ttsRate', 'autoReadMode', 'streamRead',
+      // 完成提示音（2026-09-27）：音色 id（内置合成音效）+ 音量（0.05~0.4）
+      'completionSoundTone', 'completionSoundVolume',
     ]
     const stmt = db.prepare("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))")
 

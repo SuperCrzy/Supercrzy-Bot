@@ -13,7 +13,7 @@ const tool: ToolDef = {
   name: 'shell_exec',
   description: '执行 Shell 命令并获取输出。仅限只读/查询类命令（查看、搜索、测试、构建）。**严禁用 echo/cat/heredoc 等命令写文件或改文件**——写文件请用 file_write 工具。输出限制 8000 字符。**必须提供 description 参数**：用一句话说明本命令要做什么（如"运行查看 deeplink.ts 实际位置"），前端用它作为命令卡片标题。',
   category: 'system',
-  dangerous: true,
+  requiresApproval: true,
   parameters: {
     type: 'object',
     properties: {

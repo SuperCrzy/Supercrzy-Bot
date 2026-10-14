@@ -384,6 +384,14 @@ export async function handleAgentChat(ctx: Context) {
   } catch (err: any) {
     safeWriteSse(ctx, `event: error\ndata: ${JSON.stringify({ message: err.message })}\n\n`)
     endSseStream(ctx)
+  } finally {
+    // 任务结束清理（2026-09-23 老板要求）：把本会话的 AI 浏览器实例连同临时 profile 一起释放。
+    // 此前只在闲置 10 分钟后兜底回收、且 default 桶永不回收 → 任务跑完一个无头 Chrome 会一直挂着。
+    // 不 await 之外的副作用：清理失败不能影响已结束的响应流。
+    try {
+      const { closeBrowserForSession } = await import('./ai-browser')
+      await closeBrowserForSession((body as any).sessionId)
+    } catch { /* 清理失败不影响主流程 */ }
   }
 }
 

@@ -13,11 +13,15 @@ export default defineConfig({
     '/api': {
       target: 'http://localhost:3000',
       changeOrigin: true,
-      // 关键：禁用 SSE 响应缓冲，否则开发环境下流式输出会变成一次性到达
+      // 关键：禁用响应缓冲，否则开发环境下"流"会被攒成"一次性到达"。
+      //   · text/event-stream → SSE（正文流式转发）
+      //   · audio/*          → TTS 朗读音频（2026-09-28 起 /api/tts/stream 边合成边下发）。
+      //     **漏掉这一条会让"边收边播"在 dev 下完全失效**，而生产（不经过 vite）却是好的 ——
+      //     典型的"只有开发环境有问题"，所以两个一起列在这里。
       configure: (proxy) => {
         proxy.on('proxyRes', (proxyRes) => {
           const ct = proxyRes.headers['content-type'] || ''
-          if (ct.includes('text/event-stream')) {
+          if (ct.includes('text/event-stream') || ct.startsWith('audio/')) {
             delete proxyRes.headers['content-length']
             proxyRes.headers['cache-control'] = 'no-cache, no-transform'
             proxyRes.headers['x-accel-buffering'] = 'no'

@@ -25,11 +25,10 @@
           class="expand-earlier"
           @click="revealEarlier"
         >{{ t('chat.expandEarlier', { n: hiddenCount }) }}</div>
-        <!-- text 段：正文原位显示。2026-08-25 13:5x 老板反馈"正式结果出来了上面的过程还平铺"——
-             中间说明（"我先搜索/搜到几条候选"这类工具间叙述）是 text 段，旧规则"永不折叠"导致它们永远平铺在结果上方。
-             改为：折叠态只显示最后一个 text 段（最终正文），中间说明收进折叠条；流式/展开态全部显示。 -->
+        <!-- text 段：正文原位显示。完成态**只出结果**（最后一段），过程旁白随折叠条收起；
+             流式态/用户展开态全部平铺。判据见 shouldShowText。 -->
         <div
-          v-if="seg.kind === 'text' && shouldShowText(seg, si)"
+          v-if="seg.kind === 'text' && shouldShowText(seg)"
           class="message-content"
           v-html="renderMarkdown(stripSourceLinks(seg.node.text).replace(SVG_CODE_BLOCK_RE, '').replace(SVG_BARE_RE, ''))"
         ></div>
@@ -47,7 +46,7 @@
           @click="openFlowDiagram(seg.node as any)"
         >
           <div v-if="seg.node.title || (seg.node as any).pending" class="flow-diagram-title">{{ (seg.node as any).pending ? t('chatui.webSummarizing') : seg.node.title }}</div>
-          <div class="flow-diagram-body" v-html="seg.node.svg"></div>
+          <div class="flow-diagram-body" v-html="sanitizeSvg(seg.node.svg)"></div>
         </div>
         <!-- image 段：AI 生成图片，始终显示（交付产物），点击放大 + 右下角下载 -->
         <div
@@ -62,19 +61,51 @@
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           </button>
         </div>
-        <!-- process 段：连续思考/工具聚合，默认折叠成摘要条（WorkBuddy MetaFold），点击展开该段 -->
+        <!-- process 段：连续思考/工具聚合。三种渲染态（I13，2026-09-24）：
+             ① collapsed —— 收尾/历史：摘要条（保持现状，老板定稿"收尾折叠保持现状"）
+             ② live      —— 流式：**单行原地演进**（过程不再逐条平铺下来）
+             ③ detail    —— 用户点开"就地弹层"：完整过程卡片平铺（"展开即全部"） -->
         <template v-else-if="seg.kind === 'process'">
-          <!-- 折叠条常驻（对齐 WorkBuddy MetaFold：header 始终存在，点击切换展开/收起）——
-               展开态显示 open 样式（箭头朝上），过程节点在下方平铺；不再 v-if 消失导致无收起入口（老板 2026-08-21） -->
-          <div class="process-collapse-bar" :class="{ open: !segCollapsed(si) }" @click="toggleSegment(si)">
+          <!-- 折叠条：折叠态与详情态常驻（详情态 open 样式，可点击收起）；流式态由状态行承担，不重复出现 -->
+          <div
+            v-if="segMode(si) !== 'live'"
+            class="process-collapse-bar"
+            :class="{ open: segMode(si) === 'detail' }"
+            @click="toggleSegment(si)"
+          >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-            <span class="pc-label">{{ t('chat.processCollapsed') }}</span>
-            <span class="pc-summary">{{ segSummary(seg) }}</span>
+            <!-- 2026-09-26 老板：收尾条臃肿 → 对齐 WorkBuddy fold.completedWithDuration（:249472 取证）：
+                 收尾只显「已完成 27s」，统计（阶段画像/轮数/±）下移进展开态头部 -->
+            <span class="pc-label">{{ foldLabel(si) }}</span>
+            <span v-if="segSummary(seg)" class="pc-summary">{{ segSummary(seg) }}</span>
             <span v-if="foldElapsedText && si === lastProcessIndex" class="pc-duration">{{ foldElapsedText }}</span>
-            <svg class="pc-arrow" :class="{ down: !segCollapsed(si) }" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+            <svg class="pc-arrow" :class="{ down: segMode(si) === 'detail' }" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
           </div>
-          <!-- 段展开：段内节点按原顺序平铺（执行中/用户展开态） -->
-          <template v-if="!segCollapsed(si)">
+
+          <!-- ② 流式态：单行原地演进（动作变化 → 旧滑出 + 新滑入 + 扫光）+ 实时 ± 数字 -->
+          <template v-if="segMode(si) === 'live'">
+            <ProcessStatusLine :nodes="seg.nodes" @toggle="toggleSegment(si)" />
+            <!-- 待审批必须**脱出状态行**：30px 的单行塞不下 allow / allow-session / deny 三按钮 + 倒计时
+                 + 风险标签 + 权限档标签，而这些标签是安全可感知性的一部分，塞进弹层等于降级。
+                 这里直接用完整 ToolCallBlock（零重复实现、零倒计时竞态）。 -->
+            <ToolErrorBoundary
+              v-for="(pn, pi) in pendingToolNodes(seg)"
+              :key="'pa-' + si + '-' + (pn.tool.id || pi)"
+              :tool-name="pn.tool.name"
+            >
+              <ToolCallBlock
+                v-bind="toolBlockAttrs(pn)"
+                @allow="emit('allow', pn.tool)"
+                @deny="emit('deny', pn.tool)"
+                @allow-session="emit('allow-session', pn.tool)"
+              />
+            </ToolErrorBoundary>
+          </template>
+
+          <!-- ③ 详情态：段内节点按原顺序平铺（就地弹层 / 用户展开） -->
+          <div v-else-if="segMode(si) === 'detail'" class="process-detail">
+            <!-- 统计头（从收尾条下移，2026-09-26）：阶段画像 · 轮数 · ± 总账 · 性能指标 -->
+            <div v-if="detailStatsText(si, seg)" class="process-detail-stats">{{ detailStatsText(si, seg) }}</div>
             <template v-for="(node, ni) in segmentVisibleNodes(si, seg)" :key="'sn-' + si + '-' + ni">
               <ThinkingGroup
                 v-if="showReasoning && node.kind === 'thinking-group'"
@@ -89,23 +120,14 @@
               />
               <ToolErrorBoundary v-else-if="node.kind === 'tool'" :tool-name="node.tool.name">
                 <ToolCallBlock
-                  :tool-name="node.tool.name"
-                  :args="node.tool.arguments"
-                  :result="node.tool.result"
-                  :status="node.tool.status"
-                  :duration="node.tool.duration"
-                  :stream-output="node.tool.streamOutput"
-                  :started-at="node.tool.startedAt"
-                  :file-diff="(node.tool as any).fileDiff"
-                  :permission="permission"
-                  :auto-approve-seconds="autoApproveSeconds"
+                  v-bind="toolBlockAttrs(node)"
                   @allow="emit('allow', node.tool)"
                   @deny="emit('deny', node.tool)"
                   @allow-session="emit('allow-session', node.tool)"
                 />
               </ToolErrorBoundary>
             </template>
-          </template>
+          </div>
         </template>
       </template>
     </template>
@@ -135,14 +157,17 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js/lib/common'
 import 'highlight.js/styles/github-dark.css'
 import type { ChatMessage, ChatFlowNode } from '@/types'
 import { composeFoldSummary, formatDurationMs } from '@/utils/tool-summary'
+import { useSecondTick } from '@/composables/useSecondTick'
 import { stageOfTool, stageBreakdown, formatStageBreakdown, STAGE_I18N } from '@/utils/stage'
+// I3：AI 产出的 SVG 走 v-html 前必须清洗（见 utils/sanitize-svg.ts 的威胁模型）
+import { sanitizeSvg } from '@/utils/sanitize-svg'
 import { openFilePreview } from '@/utils/file-preview'
 import { useAppStore } from '@/stores/app'
 import ThinkingGroup from './ThinkingGroup.vue'
@@ -150,6 +175,7 @@ import SourceCards from './SourceCards.vue'
 import ThinkingBlock from './ThinkingBlock.vue'
 import ToolCallBlock from './ToolCallBlock.vue'
 import ToolErrorBoundary from './ToolErrorBoundary.vue'
+import ProcessStatusLine from './ProcessStatusLine.vue'
 
 const props = defineProps<{
   msg: ChatMessage
@@ -465,18 +491,56 @@ function segCollapsed(si: number): boolean {
 }
 
 /**
- * 折叠态下 text 段是否显示：只保留最后一个 text 段（最终正文），
- * 中间的"工具间说明"text 段（"我先搜索/搜到几条候选"这类模型叙述）收进折叠条。
- * 流式/展开态（processCollapsed 非 true）全部显示（保持现有交互）。
+ * text 段是否渲染（**完成态只出结果**）。
+ *
+ * 数据模型（`utils/flow-reconcile.ts` 不变量）：`msg.content` = 本轮**最终答案**，
+ * flow 里最后一个 text 段承载它，它之前的 text 段是**过程旁白**（"我先看一下…"）。
+ * ⇒ 收尾/历史折叠态只渲染最后一段（= 结果）；旁白随过程一起收起，不再平铺成"过程小回复"。
+ *
+ * 流式态（`shouldCollapse` false）**照常全部平铺**：此刻旁白就是实时进度，藏掉会让长任务看起来卡住。
+ * 用户手动展开（`processCollapsed === false`）同样全部显示 —— 主动展开就是要看过程，旁白没丢。
  */
-function shouldShowText(seg: FlowSegment, si: number): boolean {
+function shouldShowText(seg: FlowSegment): boolean {
   if (seg.kind !== 'text') return false
-  if (props.msg.processCollapsed !== true) return true
-  let lastTextIdx = -1
-  for (let i = 0; i < segments.value.length; i++) {
-    if (segments.value[i].kind === 'text') lastTextIdx = i
+  if (!shouldCollapse(props.msg)) return true
+  return seg.node.id === lastTextNodeId.value
+}
+
+/**
+ * 过程段的渲染态（I13）：
+ * - `collapsed`：收尾/历史 —— 摘要条（**保持现状**，老板定稿"收尾折叠保持现状"）
+ * - `live`：流式自动态 —— 单行原地演进，过程不再逐条平铺
+ * - `detail`：用户点开（就地弹层）/ 消息级"展开全部" —— 完整过程卡片平铺（"展开即全部"原则）
+ */
+function segMode(si: number): 'collapsed' | 'live' | 'detail' {
+  if (segOpen[si] || props.msg.processCollapsed === false) return 'detail'
+  return segCollapsed(si) ? 'collapsed' : 'live'
+}
+
+/** 段内待审批工具节点（脱出状态行 → 用完整卡片渲染，见模板注释） */
+function pendingToolNodes(seg: FlowSegment): Array<Extract<FlowDisplayNode, { kind: 'tool' }>> {
+  if (seg.kind !== 'process') return []
+  return seg.nodes.filter(
+    (n): n is Extract<FlowDisplayNode, { kind: 'tool' }> => n.kind === 'tool' && n.tool.status === 'pending',
+  )
+}
+
+/** ToolCallBlock 的 props 映射（**单一来源**）：状态行旁的待审批卡片与详情平铺共用，
+ *  避免两处各写一遍时漏传字段（`progress` 就是这样接上结构化进度的）。 */
+function toolBlockAttrs(node: Extract<FlowDisplayNode, { kind: 'tool' }>) {
+  return {
+    toolName: node.tool.name,
+    args: node.tool.arguments,
+    result: node.tool.result,
+    status: node.tool.status,
+    duration: node.tool.duration,
+    streamOutput: node.tool.streamOutput,
+    startedAt: node.tool.startedAt,
+    fileDiff: (node.tool as any).fileDiff,
+    permission: props.permission,
+    autoApproveSeconds: props.autoApproveSeconds,
+    progress: node.tool.progress,
   }
-  return si >= lastTextIdx
 }
 
 /** 点击过程段折叠条：展开/收起该段 */
@@ -495,52 +559,91 @@ function isToolRunning(n: FlowDisplayNode): n is Extract<FlowDisplayNode, { kind
   return n.kind === 'tool' && !['done', 'error', 'denied', 'cancelled', 'skipped'].includes(n.tool.status)
 }
 
-/** 写文件行数进度（复用 ToolCallBlock liveLines 同款正则，匹配后端"📝 写入 N / M 行"）：
- *  折叠条上实时滚动显示，执行过程收拢后进度仍可见 */
+/** 写文件/改多处的实时数字（折叠条摘要用）：数据源 = **结构化 `tool.progress`**。
+ *  ⚠️ 旧实现用 `/写入\s*(\d+)\s*\/\s*(\d+)\s*行/` 正则解析后端塞进流式输出的中文文案 `📝 写入 N/M 行`
+ *  —— 后端改一个字即静默失效（G5 已改：后端只发数值，文案全部前端本地化，正则不再参与）。 */
 function runningLines(n: Extract<FlowDisplayNode, { kind: 'tool' }>): string {
-  const s = n.tool.streamOutput || ''
-  const m = s.match(/写入\s*(\d+)\s*\/\s*(\d+)\s*行/)
-  if (m) return `+${m[1]} 行`
-  const m2 = s.match(/wrote\s*(\d+)\s*\/\s*(\d+)\s*lines/i)
-  if (m2) return `+${m2[1]} lines`
-  return ''
+  const p = n.tool.progress
+  if (!p) return ''
+  // 多处编辑形状（count+done）→ 只显处数：± 是每处 old_str→new_str 的**局部** diff 累加，
+  // 一次纯插入会算成 +N+1/−1，会被读成整文件净变化（同 ProcessStatusLine.resolveCounter）
+  if (p.count != null && p.done != null) return t('chat.procEdits', { done: p.done, count: p.count })
+  const parts: string[] = []
+  if (p.added) parts.push(`+${p.added}`)
+  if (p.deleted) parts.push(`−${p.deleted}`)
+  if (p.total != null && p.done != null) parts.push(t('chat.procLines', { done: p.done, total: p.total }))
+  return parts.join(' ')
 }
 
-/** 段摘要：流式中显示当前活动动作（"正在思考" / "正在读取 src/utils.ts"，写文件带实时行数），完成显示静态统计 */
+/** 段摘要（**只服务收尾条**）：流式中的历史段显示阶段画像，收尾返回空（条上只留状态词+耗时，
+ *  对齐 WorkBuddy fold.completedWithDuration —— 2026-09-26 老板"收尾条臃肿"） */
 function segSummary(seg: FlowSegment): string {
   if (seg.kind !== 'process') return ''
-  if (isMsgStreaming(props.msg)) {
-    const nodes = seg.nodes
-    // ①未完成的思考 → "正在思考"
-    for (let i = nodes.length - 1; i >= 0; i--) {
-      const n = nodes[i]
-      if (props.showReasoning && n.kind === 'thinking' && !n.completed) {
-        return t('chat.processRunning', { action: t('chat.thinking') })
-      }
-    }
-    // ②运行中的工具 → 动作+宾语（"读取 src/utils.ts"）；写文件追加实时行数（"+42 行"）
-    for (let i = nodes.length - 1; i >= 0; i--) {
-      const n = nodes[i]
-      if (isToolRunning(n)) {
-        const atom = composeFoldSummary([n] as ChatFlowNode[], (key: string) => t(key) || key)
-        const lines = runningLines(n)
-        // P1-02：拿不到宾语时退到「阶段名」，绝不把内部工具名(browser/shell_exec)抛给用户
-        const fallback = t(STAGE_I18N[stageOfTool(n.tool.name)]) || t('chat.statusWorking')
-        return t('chat.processRunning', { action: atom || fallback }) + (lines ? ` · ${lines}` : '')
-      }
+  if (!isMsgStreaming(props.msg)) return ''
+  const nodes = seg.nodes
+  // ①未完成的思考 → "正在思考"
+  for (let i = nodes.length - 1; i >= 0; i--) {
+    const n = nodes[i]
+    if (props.showReasoning && n.kind === 'thinking' && !n.completed) {
+      return t('chat.processRunning', { action: t('chat.thinking') })
     }
   }
-  // P1-02：完成态改为「阶段画像」（读取 3 · 编辑 2 · 验证 1），替代原来的"N 次工具调用"——
-  // 同样紧凑，但用户看得懂这次到底做了什么。无工具时退回原有计数。
+  // ②运行中的工具 → 动作+宾语（"读取 src/utils.ts"）；写文件追加实时行数（"+42 行"）
+  for (let i = nodes.length - 1; i >= 0; i--) {
+    const n = nodes[i]
+    if (isToolRunning(n)) {
+      const atom = composeFoldSummary([n] as ChatFlowNode[], (key: string) => t(key) || key)
+      const lines = runningLines(n)
+      // P1-02：拿不到宾语时退到「阶段名」，绝不把内部工具名(browser/shell_exec)抛给用户
+      const fallback = t(STAGE_I18N[stageOfTool(n.tool.name)]) || t('chat.statusWorking')
+      return t('chat.processRunning', { action: atom || fallback }) + (lines ? ` · ${lines}` : '')
+    }
+  }
+  // ③ 流式中的历史段：只留阶段画像（轮数/± 下移展开态，收尾条不堆统计）
+  const tt = t as unknown as (k: string, p?: Record<string, unknown>) => string
+  return formatStageBreakdown(stageBreakdown(seg.nodes), tt) || ''
+}
+
+/** 段统计（**只服务展开态头部**）：阶段画像 · 思考轮数 · 写文件 ± 总账。
+ *  2026-09-26 从收尾条 segSummary 下移——条上只留「已完成 Ns」，统计点开才见（对齐 WorkBuddy）。 */
+function segStatsSummary(seg: FlowSegment): string {
+  if (seg.kind !== 'process') return ''
   const parts: string[] = []
   const tt = t as unknown as (k: string, p?: Record<string, unknown>) => string
   const stages = formatStageBreakdown(stageBreakdown(seg.nodes), tt)
   if (stages) parts.push(stages)
   else if (seg.tools) parts.push(t('chat.processTools', { n: seg.tools }))
   if (props.showReasoning && seg.thinks) parts.push(t('chat.processThinking', { n: seg.thinks }))
-  // 纯说明文本段（无工具无思考）兜底：显示"执行过程"，避免空摘要
-  if (!parts.length) return t('chat.processCollapsed')
+  // 2026-09-25 老板定稿：写文件/编辑的最终 ± 增删**写完不消失**——展开态统计头承接总账
+  // （数据源 = 工具节点上的最终 progress；PSL 数字写完会收走）
+  let wAdded = 0
+  let wDeleted = 0
+  for (const n of seg.nodes) {
+    if (n.kind !== 'tool' || !n.tool?.progress) continue
+    const nm = n.tool.name
+    if (nm !== 'file_write' && nm !== 'multi_edit') continue
+    wAdded += n.tool.progress.added || 0
+    wDeleted += n.tool.progress.deleted || 0
+  }
+  if (wAdded || wDeleted) parts.push(`+${wAdded} −${wDeleted}`)
   return parts.join(' · ')
+}
+
+/** 展开态头部统计行：段统计 + （最后一段追加）TTFT / 打字速度（原收尾条性能指标，2026-09-26 下移） */
+function detailStatsText(si: number, seg: FlowSegment): string {
+  if (seg.kind !== 'process') return ''
+  const parts = [segStatsSummary(seg)]
+  if (si === lastProcessIndex.value && perfMetricsText.value) parts.push(perfMetricsText.value)
+  return parts.filter(Boolean).join(' · ')
+}
+
+/** 折叠条状态词：收尾 → 「已完成 / 已停止」（stopReason 存在=中断/轮次超限/出错）；
+ *  流式中的历史段 → 「执行过程」（对齐 WorkBuddy fold.process / fold.completed 两族 title） */
+function foldLabel(si: number): string {
+  if (isMsgStreaming(props.msg)) return t('chat.processCollapsed')
+  const reason = props.msg.stopReason?.reason
+  if (reason) return t('chat.foldStopped')
+  return t('chat.turnCompleted')
 }
 
 /** 最后一个过程段的 index（折叠条上的总耗时只显示一次） */
@@ -553,41 +656,41 @@ const lastProcessIndex = computed(() => {
 })
 
 // ============ 折叠条实时计时（执行中"已用时 Xs"每秒增长；完成后"已完成 Xs"静态） ============
-const foldNow = ref(Date.now())
-let foldTimer: ReturnType<typeof setInterval> | null = null
-watch(
-  () => [props.isLoading, props.isLastMessage],
-  ([loading, last]) => {
-    if (loading && last) {
-      foldNow.value = Date.now()
-      if (!foldTimer) foldTimer = setInterval(() => { foldNow.value = Date.now() }, 1000)
-    } else if (foldTimer) {
-      clearInterval(foldTimer)
-      foldTimer = null
-    }
-  },
+// 与底部耗时徽标（ElapsedBadge）共用 useSecondTick，锚定同一个 msg.startedAt + k×1s
+// ⇒ 两处在同一时刻跳秒、数字恒等（此前各用 setInterval 相位不同，会出现 12s / 11s 并存）
+const foldNow = useSecondTick(
+  () => !!props.isLoading && !!props.isLastMessage && !props.msg.elapsedMs,
+  () => props.msg.startedAt,
 )
-onUnmounted(() => { if (foldTimer) clearInterval(foldTimer) })
 
-/** 折叠条耗时文案：流式中"已用时 Xs"（实时，复用 footer 同款 i18n）；完成后"已完成 Xs + 性能指标" */
+/** 折叠条耗时文案：流式中"已用时 Xs"（实时，复用 footer 同款 i18n）；完成后**只留时长**——
+ *  状态词由 pc-label（foldLabel）承载，这里再带"已完成"会出现「已完成 已完成 1m19s」重复。
+ *  2026-09-26 老板"收尾条臃肿"：TTFT/打字速度下移展开态统计头（perfMetricsText） */
 const foldElapsedText = computed(() => {
   const msg = props.msg
   if (msg.elapsedMs) {
-    // 完成态：已完成 Xs · 首字 X.Xs · 打字 XX 字符/s（对齐 Harness turn-metrics 性能指标）
-    let text = `${t('chat.turnCompleted')} ${formatDurationMs(msg.elapsedMs)}`
-    if (msg.firstTokenMs) text += ` · ${t('chatui.ttft', { n: (msg.firstTokenMs / 1000).toFixed(1) })}`
-    const chars = msg.streamChars || 0
-    const elapsedSec = msg.elapsedMs / 1000
-    if (chars > 50 && elapsedSec > 0.5) {
-      const cps = Math.round(chars / elapsedSec)
-      text += ` · ${t('chatui.charPerSec', { n: cps })}`
-    }
-    return text
+    return formatDurationMs(msg.elapsedMs)
   }
   if (msg.startedAt && props.isLoading && props.isLastMessage) {
-    return t('chatui.timingInProgress', { n: formatDurationMs(foldNow.value - msg.startedAt) })
+    // 与底部徽标同规则：最少按 1s 展示，避免 "0s"
+    const live = Math.max(1000, foldNow.value - msg.startedAt)
+    return t('chatui.timingInProgress', { n: formatDurationMs(live) })
   }
   return ''
+})
+
+/** 性能指标（TTFT / 打字速度）：原折叠条常驻 → 下移展开态统计头（2026-09-26） */
+const perfMetricsText = computed(() => {
+  const msg = props.msg
+  if (!msg.elapsedMs) return ''
+  const parts: string[] = []
+  if (msg.firstTokenMs) parts.push(t('chatui.ttft', { n: (msg.firstTokenMs / 1000).toFixed(1) }))
+  const chars = msg.streamChars || 0
+  const elapsedSec = msg.elapsedMs / 1000
+  if (chars > 50 && elapsedSec > 0.5) {
+    parts.push(t('chatui.charPerSec', { n: Math.round(chars / elapsedSec) }))
+  }
+  return parts.join(' · ')
 })
 
 // ============ 过程展开（用户主动展开 = 想看全部 → 一次全出；超长会话自动分批兜底性能） ============
@@ -916,6 +1019,23 @@ function shouldCollapse(msg: ChatMessage): boolean {
 .process-collapse-bar .pc-arrow { transition: transform 0.2s ease; }
 .process-collapse-bar .pc-arrow.down { transform: rotate(180deg); }
 
+/* 展开态统计头（2026-09-26 从收尾条下移）：阶段画像 · 轮数 · ± 总账 · 性能指标 */
+.process-detail-stats {
+  margin: 0 0 8px;
+  padding: 0 2px;
+  font-size: 11px;
+  color: var(--text-muted, var(--text-secondary));
+  font-variant-numeric: tabular-nums;
+}
+
+/* 过程详情（I13 "就地弹层"）：左侧竖线把它与上方状态行/折叠条绑成一体，
+   既区别于正文、又不像浮层那样遮挡内容（老板定稿：chip 详情走就地弹层） */
+.process-detail {
+  margin: 2px 0 8px;
+  padding-left: 10px;
+  border-left: 2px solid var(--border-color);
+}
+
 /* 结构化停止原因横幅（轮次超限等） */
 .stop-reason-banner {
   display: flex;
@@ -962,6 +1082,40 @@ function shouldCollapse(msg: ChatMessage): boolean {
 <!-- 全局样式：复制按钮由 ChatView enhanceCodeBlocks 动态创建（无 scope 属性），scoped 匹配不到——
      必须用非 scoped 样式才能让按钮浮在代码块右上角（否则退化成代码下方一行普通文本，老板 2026-08-21） -->
 <style>
+/* ===== 长内容不撑破气泡（2026-09-24 老板实测：`Agent/Bash/PowerShell/.../NotebookEdit` 撑出气泡）=====
+   三类超宽来源，这里一次性兜底（此前是"逐个元素打补丁"，只修了 <a> 的长 URL）：
+
+   ① 无断行点的长 token —— `/` 在 UAX#14 里是 SY 类，不构成断行机会，所以
+      `Agent/Bash/PowerShell/Monitor/...` 整串是一个不可断的长词。段落/列表/行内 code 同理。
+   ② 宽表格 —— table-layout:auto 时表格的 min-content 宽度由"最长不可断内容"决定，
+      单元格里一个长 token 就能把 4 列表格顶出气泡。
+   ③ 代码块 —— hljs 给 code 设了 `white-space: pre`，且**生效的 pre 规则漏了 overflow-x**
+      （带 overflow-x:auto 的那份在 ChatView.vue:4794 是死代码，见下方"死样式"说明）。
+
+   ⚠️ 必须用 `overflow-wrap: anywhere` 而不是 `break-word`：只有 anywhere 会**参与 min-content
+   尺寸计算**（CSS Text 3），才能真正把表格和 flex 子项压住；break-word 不参与，表格照样撑破。 */
+.message-content {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+/* 代码块：横向滚动，不折行（折行会破坏代码缩进可读性） */
+.message-content pre {
+  overflow-x: auto;
+  max-width: 100%;
+}
+/* 宽表格：横向滚动而不是被压扁（GitHub markdown-body 同款做法） */
+.message-content table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+}
+/* 表格单元格内不做任意断字——靠上面的横向滚动保证可读性 */
+.message-content table th,
+.message-content table td {
+  overflow-wrap: normal;
+}
+
 /* 正文链接样式（2026-08-28 加固：markdown <a> 用 var(--accent) 自动适应浅色/深色——浅色靛蓝高对比、
    深色亮紫蓝；加下划线+粗体，明显可点。双选择器确保 `.dark` 加在 body/.app-layout 任一都生效） */
 .message-content a {
@@ -998,6 +1152,17 @@ body.dark .message-content a:hover,
 .message.user .message-content a:hover {
   color: #e0e7ff;
   text-decoration-color: #ffffff;
+}
+/* 路径链接（.msg-path-link）同款问题补修（2026-09-26 老板报"用户气泡里路径显示不清楚"）：
+   8-28 只修了 <a>，漏了可点击路径 span——它继承全局 accent 靛蓝色，靛蓝气泡底上蓝字蓝底。
+   同法改白字白虚线，hover 浅白底。 */
+.message.user .message-content .msg-path-link {
+  color: #ffffff;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.65);
+}
+.message.user .message-content .msg-path-link:hover {
+  background: rgba(255, 255, 255, 0.18);
+  border-bottom-style: solid;
 }
 .message-content pre {
   position: relative;

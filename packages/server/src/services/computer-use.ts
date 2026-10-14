@@ -6,8 +6,12 @@
  * - 本模块负责：spawn 子进程 + MCP 客户端连接 + 工具调用包装
  * - 安全：仅在 permissionLevel = 'full' 时可用（工具确认机制在 tools.ts 层）
  *
- * 工具面（computer-use-mcp 提供）：screenshot / click / double_click / type /
- * key / scroll / move / clipboard_read / clipboard_write / app_launch 等
+ * 工具面（computer-use-mcp@1.8.0 的【真实】action 枚举，实测命令：
+ *   node scripts/_probe_mcp.mjs）：
+ *   key | type | mouse_move | left_click | left_click_drag | right_click |
+ *   middle_click | double_click | scroll | get_screenshot | get_cursor_position
+ * 注意：该 MCP【没有】 app_launch / clipboard_* action（旧注释写错了）。
+ *       “打开应用”由下方的 Spotlight 组合键序列实现，见 openApplication()。
  */
 import { spawn, type ChildProcess } from 'child_process'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
@@ -68,7 +72,10 @@ export async function getComputerUseClient(): Promise<Client> {
   }
 }
 
-/** Agent 侧 action → computer-use-mcp 真实 action 映射 */
+/**
+ * Agent 侧 action → computer-use-mcp 真实 action 映射
+ * （只允许映射到上面枚举里真实存在的 action；open 不走本表，见 openApplication）
+ */
 const ACTION_MAP: Record<string, string> = {
   screenshot: 'get_screenshot',
   click: 'left_click',
@@ -80,7 +87,35 @@ const ACTION_MAP: Record<string, string> = {
   scroll: 'scroll',
   move: 'mouse_move',
   cursor: 'get_cursor_position',
-  open: 'key', // 打开应用走 cmd+space Spotlight 输入，或由用户手动；此处保留 key 通道
+}
+
+/** 简单的异步等待（组合键之间需要给系统留出响应时间） */
+const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+
+/**
+ * 打开应用（macOS Spotlight 组合键序列）
+ *
+ * 背景：computer-use-mcp 没有 app_launch action，无法一步唤起 App。
+ * 因此用系统快捷键组合出“Spotlight 搜索 → 输入名称 → 回车”三步：
+ *   1) key  text="cmd+space"   （打开 Spotlight；keyMap 里 cmd=LeftSuper, space=Space）
+ *   2) type text="<应用名>"      （把名称打进搜索框）
+ *   3) key  text="enter"        （回车启动顶层命中；enter 映射到 Key.Return）
+ */
+async function openApplication(c: Client, name: string): Promise<string> {
+  await rawCall(c, { action: 'key', text: 'cmd+space' })
+  await delay(700) // 等 Spotlight 弹出
+  await rawCall(c, { action: 'type', text: name })
+  await delay(900) // 等搜索结果刷新
+  await rawCall(c, { action: 'key', text: 'enter' })
+  await delay(400)
+  return `✅ 已通过 Spotlight 打开应用：${name}（若未出现窗口，请看一张截图确认）`
+}
+
+/** 直接透传调用 MCP computer 工具，返回原始文本 */
+async function rawCall(c: Client, callArgs: Record<string, unknown>): Promise<string> {
+  const result = await c.callTool({ name: 'computer', arguments: callArgs })
+  const contents = (result?.content || []) as Array<{ type: string; text?: string }>
+  return contents.map((i) => (i.type === 'text' ? i.text || '' : `[${i.type}]`)).join('\n')
 }
 
 /**
@@ -93,6 +128,18 @@ export async function callComputerUse(
   args: Record<string, unknown> = {},
 ): Promise<string> {
   const c = await getComputerUseClient()
+
+  // open：该 MCP 无 app_launch action，改用 Spotlight 组合键序列
+  if (action === 'open' || action === 'app_launch') {
+    const name = String(args.name ?? args.text ?? '').trim()
+    if (!name) return '❌ computer_use open 需要提供应用名（name / text）'
+    try {
+      return await openApplication(c, name)
+    } catch (err: any) {
+      return `❌ computer_use open(${name}) 调用失败: ${err.message}`
+    }
+  }
+
   const realAction = ACTION_MAP[action] || action
   const callArgs: Record<string, unknown> = { action: realAction }
   // 参数转换：Agent 用 {x,y} 坐标，MCP 用 coordinate: [x, y]
@@ -102,7 +149,6 @@ export async function callComputerUse(
   if (args.text !== undefined) callArgs.text = args.text
   if (args.combo !== undefined) callArgs.text = args.combo // key 组合键走 text
   if (args.clicks !== undefined) callArgs.text = String(args.clicks) // scroll 方向
-  if (args.name !== undefined) callArgs.text = args.name // open 应用名 → Spotlight
   try {
     const result = await c.callTool({ name: 'computer', arguments: callArgs })
     // MCP 结果可能是 text 数组

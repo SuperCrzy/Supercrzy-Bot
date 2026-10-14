@@ -11,7 +11,7 @@ const tool: ToolDef = {
   name: 'file_write',
   description: '写入/创建文件到本地磁盘（支持流式行数进度显示）。**写文件必须使用本工具**——不要用 shell_exec 通过 echo/cat/heredoc 等命令写文件；shell_exec 只用于执行命令。',
   category: 'file',
-  dangerous: true,
+  requiresApproval: true,
   parameters: {
     type: 'object',
     properties: {
@@ -44,23 +44,50 @@ const tool: ToolDef = {
       // 块数多则块间快（不拖慢大文件），块数少则块间慢（小文件肉眼可见逐块滚动）
       const numBlocks = Math.max(1, Math.ceil(totalLines / CHUNK))
       const blockDelay = Math.min(200, Math.max(45, Math.round(1400 / numBlocks)))
-      // 推送一块代码（带进度头），模拟 ChatGPT 边写边显示
-      const emitChunk = (chunkLines: string[], written: number, isFirst: boolean, isLast: boolean) => {
+      // 净变化量：**开始时一次算好**（old 已在上面读出、new 已完整到达）——
+      // 过程里随分块缓动展示，不必等写完（G5：原本只在返回值里算，过程里一个数字都没有）
+      const { added: addedFinal, deleted } = diffLines(oldContent, toWriteStr)
+      // 实时「新增行数」计数器：把 oldContent 的行做成**可消耗的多重集**，按写入顺序逐行匹配，
+      // 没匹配上的行即"这一版新增的行"。全程 O(N)，且**单调不减**（diffLines 是"行多重集交集"
+      // 算法，|b| - common 随 b 前缀增长恒不减），末尾恒等于 addedFinal。
+      // 为什么不逐块直接调 diffLines(old, prefix)：那是 O(N²/CHUNK)，5000 行文件 ≈ 200 万次 Map 操作。
+      // ⚠️ deleted 与 added 不对称（deleted 全程显示终值）：|old| - common 是**单调递减**的，
+      //    逐块展示会先跳出"−351"再缩到"−12"，看着像在撤销。宁可不"动"也不误导。
+      const oldLinePool = new Map<string, number>()
+      for (const l of oldContent ? oldContent.split('\n') : []) oldLinePool.set(l, (oldLinePool.get(l) || 0) + 1)
+      let addedSoFar = 0
+      const countAdded = (lines: string[]): number => {
+        for (const l of lines) {
+          const c = oldLinePool.get(l) || 0
+          if (c > 0) oldLinePool.set(l, c - 1)
+          else addedSoFar++
+        }
+        return addedSoFar
+      }
+      // 推送一块：结构化进度 + 代码块流式输出，两条通道各自独立判断。
+      // ⚠️ 不再往数据流里塞 "📝 写入 N/M 行" 这类中文文案 —— 前端改读 onProgress，
+      //    老路是"前端正则解析中文"，后端改一个字即静默失效（G5/I13，2026-09-24）
+      const emitChunk = (chunkLines: string[], written: number) => {
+        ctx?.onProgress?.('', {
+          added: countAdded(chunkLines),
+          deleted,
+          done: written,
+          total: totalLines,
+          // 动词机器标识（不是文案）：新建 → 前端本地化成"创建"，改已有文件 → "编辑"。
+          // 对齐 WorkBuddy tool.writeFile.{creating,create} / {editing,edit} 的动态动词推导
+          phase: oldContent ? 'edit' : 'create',
+        })
         if (!ctx?.onOutput) return
-        const head = `📝 写入 ${written}/${totalLines} 行\n`
-        // 代码块格式：进度行 + ``` 代码块（前端按行渲染）
-        ctx.onOutput('', `${head}\`\`\`\n${chunkLines.join('\n')}\n\`\`\`\n`)
-        void isFirst
-        void isLast
+        ctx.onOutput('', `\`\`\`\n${chunkLines.join('\n')}\n\`\`\`\n`)
       }
       if (linesArr.length <= CHUNK) {
         await writeFile(path, toWriteStr, 'utf-8')
-        if (ctx?.onOutput && totalLines > 1) emitChunk(linesArr, totalLines, true, true)
+        if (totalLines > 1) emitChunk(linesArr, totalLines)
       } else {
         // 首块：writeFile
         const first = linesArr.slice(0, CHUNK)
         await writeFile(path, first.join('\n'), 'utf-8')
-        emitChunk(first, CHUNK, true, false)
+        emitChunk(first, CHUNK)
         await sleep(blockDelay)
         let idx = CHUNK
         while (idx < linesArr.length) {
@@ -68,7 +95,7 @@ const tool: ToolDef = {
           await appendFile(path, '\n' + chunk, 'utf-8')
           idx += CHUNK
           const written = Math.min(idx, totalLines)
-          emitChunk(linesArr.slice(Math.max(0, idx - CHUNK), idx), written, false, written >= totalLines)
+          emitChunk(linesArr.slice(Math.max(0, idx - CHUNK), idx), written)
           if (written < totalLines) await sleep(blockDelay)
         }
       }
@@ -81,10 +108,11 @@ const tool: ToolDef = {
         ctx.onFileChange(path, oldContent, String(args.content || ''))
       }
       // 行数统计（WorkBuddy addedLines/deletedLines 同款）：diff 新增/删除行
-      const { added, deleted } = diffLines(oldContent, String(args.content || ''))
+      // ⚠️ addedFinal/deleted 已在流式推送前算好，此处直接复用，不重复计算；
+      //    过程里 countAdded 累出来的 addedSoFar 末尾恒等于 addedFinal
       return oldContent
-        ? `✅ 文件已更新：${path} (${args.content.length} 字符, +${added}/-${deleted} 行)`
-        : `✅ 文件已创建：${path} (${args.content.length} 字符, ${added} 行)`
+        ? `✅ 文件已更新：${path} (${args.content.length} 字符, +${addedFinal}/-${deleted} 行)`
+        : `✅ 文件已创建：${path} (${args.content.length} 字符, ${addedFinal} 行)`
     } catch (err: any) {
       return `❌ 写入文件失败：${err.message}`
     }

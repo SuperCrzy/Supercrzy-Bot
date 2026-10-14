@@ -25,39 +25,41 @@ const tool: ToolDef = {
   async execute(args, ctx) {
     const a = String(args.action || '').trim()
     try {
-      const { browserNavigate, browserScreenshot, browserReadText,
-        browserClickText, browserClickAt, browserTypeText, browserPressKey, browserBack, browserScroll, browserListInteractive } = await import('../services/ai-browser')
+      // 2026-09-23：改用会话级实例（此前走便捷导出的硬编码 'default'，
+      // 与右栏 X-Browser-Key 的 'wb:<sid>' 永不相交 → 右栏看不到 AI 的动作画面）
+      const { browserSession, browserKey } = await import('../services/ai-browser')
+      const h = browserSession(browserKey(ctx?.sessionId))
       let out: unknown = ''
       if (a === 'navigate') {
         const url = String(args.url || '').trim()
         if (!url) return '❌ browser navigate 需要 url'
-        const s = await browserNavigate(url); out = `已打开 ${s.url}（${s.title || ''}）`
+        const s = await h.navigate(url); out = `已打开 ${s.url}（${s.title || ''}）`
       } else if (a === 'look') {
-        const items = await browserListInteractive().catch(() => [])
+        const items = await h.interactive().catch(() => [])
         out = '当前页可交互元素:\n' + (items.length ? items.join('\n') : '(无可点击简单页)')
-        try { const t = await browserReadText(12000); if (t.text) out += `\n文本预览: ${t.text.slice(0, 400)}` } catch {}
+        try { const t = await h.read(12000); if (t.text) out += `\n文本预览: ${t.text.slice(0, 400)}` } catch {}
       } else if (a === 'click') {
-        const r = args.text ? await browserClickText(String(args.text)) : args.x != null ? await browserClickAt(Number(args.x), Number(args.y)) : null
+        const r = args.text ? await h.clickText(String(args.text)) : args.x != null ? await h.clickAt(Number(args.x), Number(args.y)) : null
         out = r ? `已点击${r.ok ? '' : '失败: ' + r.error}${r.ok && r.url ? ' → ' + r.url : ''}` : '❌ click 需 text 或 x/y'
       } else if (a === 'type') {
-        const r = await browserTypeText(String(args.text || ''), args.into ? String(args.into) : undefined)
+        const r = await h.typeText(String(args.text || ''), args.into ? String(args.into) : undefined)
         out = r.ok ? '已输入' : '输入失败'
       } else if (a === 'press') {
-        out = (await browserPressKey(String(args.key || ''))).ok ? `已按 ${args.key}` : '按键失败'
+        out = (await h.press(String(args.key || ''))).ok ? `已按 ${args.key}` : '按键失败'
       } else if (a === 'back') {
-        out = (await browserBack()).ok ? '已后退' : '后退失败'
+        out = (await h.goBack()).ok ? '已后退' : '后退失败'
       } else if (a === 'scroll') {
-        out = (await browserScroll(Number(args.deltaY) || 300)).ok ? '已滚动' : '滚动失败'
+        out = (await h.wheel(Number(args.deltaY) || 300)).ok ? '已滚动' : '滚动失败'
       } else if (a === 'url') {
-        const s = await browserScreenshot(); out = `当前: ${s.url}`
+        const s = await h.screenshot(); out = `当前: ${s.url}`
       } else if (a === 'snapshot') {
-        const s = await browserScreenshot(); return `📄 ${s.url}\n标题: ${s.title || ''}`
+        const s = await h.screenshot(); return `📄 ${s.url}\n标题: ${s.title || ''}`
       } else return '❌ browser 未知 action: ' + a
       // 动作后带回一屏缩略文本，便于 AI 自读是不是要到目标
-      try { const t = await browserReadText(2000); if (t.text) out += `\n[现页可见] ${t.text.slice(0, 200)}` } catch {}
+      try { const t = await h.read(2000); if (t.text) out += `\n[现页可见] ${t.text.slice(0, 200)}` } catch {}
       // 页面已变化动作后补一帧截图 → 更新 lastFrame，右栏 /browser/latest 轮询即见跳转(2026-09-04)
       if (a === 'navigate' || a === 'click' || a === 'back' || a === 'scroll' || a === 'press' || a === 'type') {
-        try { await browserScreenshot() } catch { /* 忽略，read 类已自带 */ }
+        try { await h.screenshot() } catch { /* 忽略，read 类已自带 */ }
       }
       return String(out)
     } catch (e: any) {

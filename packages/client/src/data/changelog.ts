@@ -14,7 +14,18 @@ export interface ChangelogEntry {
   fixesEn: string[]
 }
 
-export const APP_VERSION = '0.3.0'
+/**
+ * 引擎（代码仓库）版本 —— 必须与根 / packages/client / packages/server 三个
+ * package.json 的 `version` 保持一致（当前 0.3.0）。
+ *
+ * ⚠️ 这**不是** App 二进制版本。App 版本请走 `window.supercrzyDesktop.app.getInfo()`
+ * （主进程 `app.getVersion()`：打包读 Info.plist、dev 读 packages/desktop/package.json）。
+ *
+ * 2026-10-12 改名由来：此前叫 `APP_VERSION` 且被渲染成「SUPERCRZY BOT v0.3.0」，
+ * 与 App 的真实版本（1.0.5/1.0.6）并排出现时口径打架 —— 数字本身没错，标签错了。
+ * CHANGELOG 记录的就是**引擎**的版本变更，与上面的 ENGINE_VERSION 同体系。
+ */
+export const ENGINE_VERSION = '0.3.0'
 
 export const CHANGELOG: ChangelogEntry[] = [
   {

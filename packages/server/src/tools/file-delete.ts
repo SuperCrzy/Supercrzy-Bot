@@ -11,6 +11,8 @@ const tool: ToolDef = {
   name: 'file_delete',
   description: '删除文件或空目录（危险工具：删除前会弹授权确认）。目录仅支持删除空目录，非空拒绝。',
   category: 'file',
+  // I2：原本只在 agent.ts 的 SENSITIVE_TOOLS 里被拦，ToolDef 侧无声明 —— 补上，对齐单一来源
+  requiresApproval: true,
   parameters: {
     type: 'object',
     properties: {

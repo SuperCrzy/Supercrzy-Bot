@@ -89,16 +89,23 @@
       <span class="trh-text">{{ runningHint }}</span>
     </div>
 
-    <!-- 写文件行数实时滚动（折叠态，代码不展开只显数据）：文件图标+文件名 + 大数字 CountUp + 进度 + 最近增量标签（老板 2026-08-21 / 2026-08-27 补文件名栏） -->
-    <div v-if="!expanded && writeProgress && (status === 'running' || status === 'stream_executing')" class="write-progress-bar">
+    <!-- 写文件行数实时滚动（折叠态，代码不展开只显数据）：文件图标+文件名 + 大数字 CountUp + 进度 + 最近增量标签（老板 2026-08-21 / 2026-08-27 补文件名栏）
+         2026-09-25 老板定稿：完成后**保留最终 ± 增删**不再消失（此前只在执行中显示，写完即无，观感"没做实时显示"） -->
+    <div v-if="!expanded && writeProgress && (isWriteRunning || status === 'done')" class="write-progress-bar">
       <span class="wp-file">
         <span class="wp-file-icon">{{ isWriteNew ? '+' : '~' }}</span>
         <span class="wp-file-name" :title="fileName" @click.stop="toggle">{{ fileName || friendlyName }}</span>
       </span>
-      <span class="wp-count">+{{ displayedLines }}</span>
-      <span class="wp-detail">行</span>
-      <span class="wp-progress">写入 {{ writeProgress.written }}/{{ writeProgress.total }} 行</span>
-      <span v-for="(d, i) in recentDeltas" :key="i" class="wp-delta">{{ d > 0 ? '+' + d : d }}</span>
+      <template v-if="status === 'done'">
+        <span class="wp-count">+{{ progress?.added || 0 }}</span>
+        <span v-if="(progress?.deleted || 0) > 0" class="wp-progress wp-del">−{{ progress?.deleted }}</span>
+      </template>
+      <template v-else>
+        <span class="wp-count">+{{ displayedLines }}</span>
+        <span class="wp-detail">行</span>
+        <span class="wp-progress">写入 {{ writeProgress.written }}/{{ writeProgress.total }} 行</span>
+      </template>
+      <span v-for="(d, i) in (isWriteRunning ? recentDeltas : [])" :key="i" class="wp-delta">{{ d > 0 ? '+' + d : d }}</span>
     </div>
 
     <!-- Body -->
@@ -153,6 +160,8 @@
 import { ref, computed, watch, nextTick, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { resolveToolMeta } from '@/utils/tool-meta'
+import { formatDurationMs } from '@/utils/tool-summary'
+import { useSecondTick } from '@/composables/useSecondTick'
 import { openFilePreview } from '@/utils/file-preview'
 import {
   resolveToolRendererKey,
@@ -166,6 +175,7 @@ import FileOpRenderer from '@/components/chat/renderers/FileOpRenderer.vue'
 import PlanCard from '@/components/chat/PlanCard.vue'
 import VisualizerReadMeCard from '@/components/chat/VisualizerReadMeCard.vue'
 import WebFetchCard from '@/components/chat/WebFetchCard.vue'
+import type { ToolProgress } from '@/types'
 
 const { t } = useI18n({ useScope: 'global' })
 const props = withDefaults(defineProps<{
@@ -180,6 +190,8 @@ const props = withDefaults(defineProps<{
   autoApproveSeconds?: number
   /** 工具流式输出（执行中实时追加，WorkBuddy streamOutput 同款） */
   streamOutput?: string
+  /** 工具结构化进度（tool_progress 事件，执行中实时覆盖）——写文件行数/编辑处数的**唯一数据源** */
+  progress?: ToolProgress
   /** 工具开始执行时刻（执行中实时耗时显示用） */
   startedAt?: number
   /** 写文件 diff（file_changed 事件挂载，对齐 WorkBuddy WriteFileRenderer DiffViewer） */
@@ -256,19 +268,29 @@ const lineStat = computed(() => {
 // ===== 执行中数字滚动徽标（三合一：ChatGPT 行数滚动 + WorkBuddy 徽标 + 我们进度流）=====
 const isFileWrite = computed(() => isWriteFileTool(props.toolName))
 
-/** 从流式输出提取当前写入行数（"📝 写入 200/351 行..." → 200） */
+/** 从结构化进度提取当前写入行数（tool_progress 的 done）。
+ *  ⚠️ 2026-09-24（G5/I13）：后端不再往流式输出里塞 "📝 写入 N/M 行" 中文文案 —— 旧实现靠
+ *     `/写入\s*(\d+)\s*\/\s*(\d+)\s*行/` 正则解析这句中文，后端改一个字即静默失效。
+ *     现以 `progress` 为唯一数据源；正则仅作**历史消息**回放兜底（老消息里存着旧文案）。 */
 const liveLines = computed<number | null>(() => {
+  if (props.progress?.done != null) return props.progress.done
   if (!props.streamOutput) return null
   const m = props.streamOutput.match(/写入\s*(\d+)\s*\/\s*(\d+)\s*行/)
   return m ? Number(m[1]) : null
 })
 
-/** 写文件进度（written/total，折叠态滚动区数据源） */
+/** 写文件进度（written/total，折叠态滚动区数据源）——数据源同 liveLines */
 const writeProgress = computed<{ written: number; total: number } | null>(() => {
+  if (props.progress?.total != null && props.progress?.done != null) {
+    return { written: props.progress.done, total: props.progress.total }
+  }
   if (!props.streamOutput) return null
   const m = props.streamOutput.match(/写入\s*(\d+)\s*\/\s*(\d+)\s*行/)
   return m ? { written: Number(m[1]), total: Number(m[2]) } : null
 })
+
+/** 写入进度条的阶段：执行中显滚动行数，完成后保留最终 ± 增删（2026-09-25 老板定稿） */
+const isWriteRunning = computed(() => props.status === 'running' || props.status === 'stream_executing')
 
 /** 最近行数增量（每块 +N/-N，限最近 6 个——折叠态"数据实时滚动"效果，代码不展开；删除行预留 -N） */
 const recentDeltas = ref<number[]>([])
@@ -320,31 +342,15 @@ const runningHint = computed(() => {
 })
 
 // ============ 运行中实时耗时（执行中 header 显示"已运行 Xs"每秒增长；完成后用 tool_duration 静态值） ============
-const toolNow = ref(Date.now())
-let toolTimer: ReturnType<typeof setInterval> | null = null
-watch(
-  () => [props.status, props.startedAt],
-  ([s]) => {
-    const running = s === 'running' || s === 'stream_executing'
-    if (running && props.startedAt) {
-      toolNow.value = Date.now()
-      if (!toolTimer) toolTimer = setInterval(() => { toolNow.value = Date.now() }, 1000)
-    } else if (toolTimer) {
-      clearInterval(toolTimer)
-      toolTimer = null
-    }
-  },
-)
-onUnmounted(() => { if (toolTimer) clearInterval(toolTimer) })
+// 与轮次计时器共用 useSecondTick（锚定 props.startedAt），避免三处各自 setInterval 相位不一
+const toolRunning = () => (props.status === 'running' || props.status === 'stream_executing') && !!props.startedAt
+const toolNow = useSecondTick(toolRunning, () => props.startedAt)
 
-/** 运行中实时耗时文案（"Xs" / "1m 5s"）；非运行态返回空（走 duration 静态值） */
+/** 运行中实时耗时；非运行态返回空（走 duration 静态值）。格式化统一走 formatDurationMs */
 const runningElapsed = computed(() => {
-  if ((props.status === 'running' || props.status === 'stream_executing') && props.startedAt) {
-    const sec = Math.floor((toolNow.value - props.startedAt) / 1000)
-    if (sec < 60) return `${sec}s`
-    return `${Math.floor(sec / 60)}m ${sec % 60}s`
-  }
-  return ''
+  if (!toolRunning()) return ''
+  const live = Math.max(1000, toolNow.value - (props.startedAt ?? toolNow.value))
+  return formatDurationMs(live)
 })
 
 const justCompleted = ref(false)
@@ -1447,6 +1453,12 @@ function toggle() {
 .write-progress-bar .wp-progress {
   color: var(--text-muted, var(--text-secondary));
   font-size: 11px;
+}
+/* 完成态保留的最终删除数（红，对齐 PSL .psl-del） */
+.write-progress-bar .wp-del {
+  color: #dc2626;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 .write-progress-bar .wp-delta {
   font-family: var(--font-mono, ui-monospace, monospace);

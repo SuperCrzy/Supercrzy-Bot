@@ -147,19 +147,34 @@ export async function fetchSupercrzyNews(): Promise<SupercrzyNewsItem[]> {
  * - category：按分类过滤（Models/Business/Hardware/Agents/Open Source/Research）
  * - limit：返回条数
  */
+/**
+ * 纯函数：按 query / category 过滤 + 按日期倒序 + limit 切片。
+ *
+ * 2026-09-20 从 searchSupercrzyNews 里抽出来：原实现把「过滤排序」和「网络拉取」焊在一起，
+ * 导致这段逻辑只能靠打真源站来测（测试里写成 `expect(Array.isArray(r)).toBe(true)` 这种恒真断言，
+ * 既给不出任何保障，又让单测依赖网络）。抽出来后可离线断言。
+ */
+export function filterNews(
+  items: SupercrzyNewsItem[],
+  opts: { query?: string; category?: string; limit?: number }
+): SupercrzyNewsItem[] {
+  let out = items.slice() // 不改调用方的数组
+  const q = (opts.query || '').trim().toLowerCase()
+  if (q) out = out.filter((n) => n.title.toLowerCase().includes(q) || n.summary.toLowerCase().includes(q))
+  if (opts.category && opts.category !== 'all' && opts.category !== 'News') {
+    const target = opts.category.toLowerCase()
+    out = out.filter((n) => n.category.toLowerCase() === target || n.title.toLowerCase().includes(target))
+  }
+  // 按日期倒序（最新在前）
+  out.sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+  return out.slice(0, opts.limit || 10)
+}
+
 export async function searchSupercrzyNews(opts: {
   query?: string
   category?: string
   limit?: number
 }): Promise<SupercrzyNewsItem[]> {
-  let items = await fetchSupercrzyNews()
-  const q = (opts.query || '').trim().toLowerCase()
-  if (q) items = items.filter((n) => n.title.toLowerCase().includes(q) || n.summary.toLowerCase().includes(q))
-  if (opts.category && opts.category !== 'all' && opts.category !== 'News') {
-    const target = opts.category.toLowerCase()
-    items = items.filter((n) => n.category.toLowerCase() === target || n.title.toLowerCase().includes(target))
-  }
-  // 按日期倒序（最新在前）
-  items.sort((a, b) => (b.date || '').localeCompare(a.date || ''))
-  return items.slice(0, opts.limit || 10)
+  const items = await fetchSupercrzyNews()
+  return filterNews(items, opts)
 }

@@ -9,6 +9,7 @@ import { readdir, readFile, stat } from 'fs/promises'
 import { join, resolve } from 'path'
 import { config } from '../config'
 import { getDB } from '../services/database'
+import { mediaMimeOf, isNonPreviewableBinary } from '../services/file-kind'
 
 export const workspaceRouter = new Router({ prefix: '/api/workspace' })
 
@@ -166,8 +167,24 @@ workspaceRouter.get('/files/content', async (ctx: Context) => {
   }
 
   try {
+    // 二进制不能当 utf-8 读（2026-09-29，与 /api/filesystem/read 同一处根因）。
+    // 这条链路的唯一客户端调用方（DetailPanel 的非 html 分支）已改走 /api/filesystem/read，
+    // 但 API 面对外，仍要堵住"把几 MB 乱码 JSON 吐回去"。
+    if (mediaMimeOf(filePath)) {
+      ctx.body = {
+        path: filePath,
+        kind: 'media',
+        mime: mediaMimeOf(filePath),
+        url: `/api/filesystem/raw?path=${encodeURIComponent(filePath)}`,
+      }
+      return
+    }
+    if (isNonPreviewableBinary(filePath)) {
+      ctx.body = { path: filePath, kind: 'binary', message: '二进制文件不支持文本预览' }
+      return
+    }
     const content = await readFile(filePath, 'utf-8')
-    ctx.body = { content: content.slice(0, 100000), path: filePath }
+    ctx.body = { content: content.slice(0, 100000), path: filePath, kind: 'text' }
   } catch (err: any) {
     ctx.status = 500
     ctx.body = { error: err.message }

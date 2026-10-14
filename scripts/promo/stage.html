@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>SUPERCRZY BOT promo renderer</title>
+<style>
+  @font-face { font-family: 'Stencil'; src: url('/fonts/SairaStencilOne.ttf') format('truetype'); font-display: block; }
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script type="module">
+import { Muxer, ArrayBufferTarget } from '/mp4-muxer.mjs'
+
+const W = 1920, H = 1080, FPS = 30
+
+const C = {
+  stage: '#08080c',
+  accent: '#818cf8',
+  white: '#ffffff',
+  dim: 'rgba(255,255,255,0.80)',
+  faint: 'rgba(255,255,255,0.44)',
+  track: 'rgba(255,255,255,0.16)',
+}
+
+const SCENES = [
+  { kind: 'intro', dur: 4.0 },
+  { kind: 'ui', dur: 5.0, img: 'hero', n: '01', of: '05', accent: '#818cf8',
+    title: '多轮推理，工具执行',
+    sub: '同一个大脑调度 43 个工具\n每一步思考与调用实时可见' },
+  { kind: 'ui', dur: 5.0, img: '02-gateway', n: '02', of: '05', accent: '#22d3ee',
+    title: '8 个渠道，同一个它',
+    sub: '微信 / 企微 / 钉钉 / 飞书 / QQ\nTelegram / Discord / Slack\n共用同一套记忆、会话与技能' },
+  { kind: 'ui', dur: 4.5, img: '03-memory', n: '03', of: '05', accent: '#a78bfa',
+    title: '长期记忆，越用越懂你',
+    sub: '自动提炼要点，按权重注入上下文\n定期去重合并，聊完不会就忘' },
+  { kind: 'ui', dur: 4.0, img: '04-skills', n: '04', of: '05', accent: '#f59e0b',
+    title: '技能与自动化',
+    sub: '内置技能按需匹配加载\n定时任务跑完主动推结果到你手机' },
+  { kind: 'ui', dur: 3.5, img: '06-models', n: '05', of: '05', accent: '#34d399',
+    title: '200+ 模型，一处切换',
+    sub: 'DeepSeek / OpenAI / Claude / Gemini\n通义千问 / 本地 Ollama\n一个界面全部管起来' },
+  { kind: 'outro', dur: 4.0 },
+]
+const TOTAL = SCENES.reduce((s, x) => s + x.dur, 0)
+
+const cv = document.getElementById('c')
+const ctx = cv.getContext('2d', { alpha: false })
+ctx.imageSmoothingEnabled = true
+ctx.imageSmoothingQuality = 'high'
+
+const CJK = '"PingFang SC", "Hiragino Sans GB", "Heiti SC", "Microsoft YaHei", sans-serif'
+const assets = {}
+function loadImg(src) {
+  return new Promise((res) => {
+    const im = new Image()
+    im.onload = () => res(im)
+    im.onerror = () => res(null)
+    im.src = src
+  })
+}
+
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v))
+const easeOut = (x) => 1 - Math.pow(1 - clamp(x, 0, 1), 3)
+const easeInOut = (x) => { x = clamp(x, 0, 1); return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2 }
+const seg = (t, a, b) => clamp((t - a) / (b - a), 0, 1)
+
+function text(str, x, y, font, fill, alpha, align, shadow) {
+  ctx.globalAlpha = clamp(alpha, 0, 1)
+  ctx.font = font
+  ctx.fillStyle = fill
+  ctx.textAlign = align || 'left'
+  if (shadow) { ctx.shadowColor = 'rgba(0,0,0,0.55)'; ctx.shadowBlur = 20; ctx.shadowOffsetY = 2 }
+  ctx.fillText(str, x, y)
+  ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0
+  ctx.globalAlpha = 1
+  ctx.textAlign = 'left'
+}
+
+function wrap(str, maxW, font) {
+  ctx.font = font
+  const out = []
+  for (const para of str.split('\n')) {
+    const toks = para.match(/[A-Za-z0-9+.\-/]+|\s+|[^\s]/g) || []
+    let line = ''
+    for (const tk of toks) {
+      const test = line + tk
+      if (ctx.measureText(test).width > maxW && line.trim()) { out.push(line.replace(/\s+$/, '')); line = tk.replace(/^\s+/, '') }
+      else line = test
+    }
+    if (line.trim()) out.push(line.replace(/\s+$/, ''))
+  }
+  return out
+}
+
+function coverDraw(im, alpha, zoom, ox, oy) {
+  if (!im) return
+  const s = Math.max(W / im.width, H / im.height) * zoom
+  const dw = im.width * s, dh = im.height * s
+  ctx.globalAlpha = alpha
+  ctx.drawImage(im, (W - dw) / 2 + ox, (H - dh) / 2 + oy, dw, dh)
+  ctx.globalAlpha = 1
+}
+
+function leftPanel(strength) {
+  ctx.fillStyle = `rgba(9,9,14,${0.96 * strength})`
+  ctx.fillRect(0, 0, 700, H)
+  const g = ctx.createLinearGradient(700, 0, 920, 0)
+  g.addColorStop(0, `rgba(9,9,14,${0.96 * strength})`)
+  g.addColorStop(0.5, `rgba(9,9,14,${0.55 * strength})`)
+  g.addColorStop(1, 'rgba(9,9,14,0)')
+  ctx.fillStyle = g
+  ctx.fillRect(700, 0, 220, H)
+}
+
+function glow(cx, cy, r, color, alpha) {
+  const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r)
+  g.addColorStop(0, color)
+  g.addColorStop(1, 'rgba(0,0,0,0)')
+  ctx.globalAlpha = clamp(alpha, 0, 1)
+  ctx.fillStyle = g
+  ctx.fillRect(cx - r, cy - r, r * 2, r * 2)
+  ctx.globalAlpha = 1
+}
+
+function progressBar(t) {
+  const p = clamp(t / TOTAL, 0, 1)
+  ctx.fillStyle = C.track
+  ctx.fillRect(0, H - 4, W, 4)
+  ctx.fillStyle = C.accent
+  ctx.fillRect(0, H - 4, W * p, 4)
+}
+
+function frame(t) {
+  ctx.fillStyle = C.stage
+  ctx.fillRect(0, 0, W, H)
+
+  let acc = 0, cur = null, local = 0
+  for (const s of SCENES) {
+    if (t < acc + s.dur) { cur = s; local = t - acc; break }
+    acc += s.dur
+  }
+  if (!cur) { cur = SCENES[SCENES.length - 1]; local = cur.dur }
+
+  if (cur.kind === 'intro') {
+    glow(W / 2, 470, 640, 'rgba(129,140,248,0.30)', easeInOut(seg(local, 0.1, 2.2)) * 0.95)
+    const li = easeOut(seg(local, 0.25, 1.6))
+    if (assets.logo) {
+      const size = 200 * (0.84 + 0.16 * li)
+      ctx.globalAlpha = li
+      ctx.drawImage(assets.logo, W / 2 - size / 2, 360 - size / 2 + (1 - li) * 24, size, size)
+      ctx.globalAlpha = 1
+    }
+    text('SUPERCRZY BOT', W / 2, 560 + (1 - easeOut(seg(local, 1.15, 2.15))) * 16,
+      '500 84px Stencil, ' + CJK, C.white, easeOut(seg(local, 1.15, 2.15)), 'center')
+    text('自带内容源的 AI Agent 工作台', W / 2, 628 + (1 - easeOut(seg(local, 1.9, 2.9))) * 12,
+      '400 30px ' + CJK, C.dim, easeOut(seg(local, 1.9, 2.9)), 'center')
+    const lw = easeInOut(seg(local, 2.5, 3.3))
+    ctx.fillStyle = C.accent
+    ctx.fillRect(W / 2 - 120 * lw, 668, 240 * lw, 4)
+    text('43 个工具 · 8 个渠道 · 长期记忆 · 本地部署', W / 2, 732,
+      '400 24px ' + CJK, C.faint, easeOut(seg(local, 2.9, 3.8)), 'center')
+  } else if (cur.kind === 'ui') {
+    const a = easeOut(seg(local, 0, 0.45)) * (1 - easeInOut(seg(local, cur.dur - 0.4, cur.dur)))
+    const p = clamp(local / cur.dur, 0, 1)
+    const zoom = 1.065 - 0.065 * easeOut(p)
+
+    coverDraw(assets[cur.img], a, zoom, -50 * easeOut(p), -8 * easeOut(p))
+    leftPanel(a)
+
+    const tIn = easeOut(seg(local, 0.35, 1.05))
+    const slide = (1 - tIn) * 44
+    text(`${cur.n} / ${cur.of}`, 148 + slide, 340, '500 22px ' + CJK, cur.accent, a * tIn)
+    ctx.fillStyle = cur.accent
+    ctx.globalAlpha = a * tIn
+    ctx.fillRect(148 + slide, 368, 64, 5)
+    ctx.globalAlpha = 1
+    text(cur.title, 148 + slide, 462, '500 52px ' + CJK, C.white, a * tIn, 'left', true)
+
+    const lines = wrap(cur.sub, 500, '400 26px ' + CJK)
+    const sIn = easeOut(seg(local, 0.6, 1.3))
+    lines.forEach((ln, i) => {
+      text(ln, 148 + (1 - sIn) * 28, 536 + i * 42, '400 26px ' + CJK, C.dim, a * sIn, 'left', true)
+    })
+
+    text('SUPERCRZY BOT', 148, 1010, '500 22px Stencil, ' + CJK, C.faint, a * easeOut(seg(local, 0.8, 1.6)) * 0.9)
+    progressBar(t)
+  } else {
+    const a = easeOut(seg(local, 0, 0.7)) * (1 - easeInOut(seg(local, cur.dur - 0.9, cur.dur)))
+    glow(W / 2, 460, 660, 'rgba(129,140,248,0.26)', a * 0.95)
+    const li = easeInOut(seg(local, 0.1, 1.1))
+    if (assets.logo) {
+      const size = 160
+      ctx.globalAlpha = a * li
+      ctx.drawImage(assets.logo, W / 2 - size / 2, 352 - size / 2, size, size)
+      ctx.globalAlpha = 1
+    }
+    text('SUPERCRZY BOT', W / 2, 500, '500 76px Stencil, ' + CJK, C.white,
+      a * easeOut(seg(local, 0.7, 1.5)), 'center')
+    text('本地部署 · 数据在自己机器上', W / 2, 572, '400 30px ' + CJK, C.dim,
+      a * easeOut(seg(local, 1.1, 1.9)), 'center')
+    const lw = easeInOut(seg(local, 1.4, 2.2))
+    ctx.fillStyle = C.accent
+    ctx.globalAlpha = a
+    ctx.fillRect(W / 2 - 130 * lw, 612, 260 * lw, 4)
+    ctx.globalAlpha = 1
+    text('MIT 开源  ·  supercrzy.com', W / 2, 676, '400 26px ' + CJK, C.faint,
+      a * easeOut(seg(local, 1.7, 2.5)), 'center')
+  }
+}
+
+window.__drawAt = (t) => frame(t)
+
+window.__ready = (async () => {
+  await new FontFace('Stencil', 'url(/fonts/SairaStencilOne.ttf)').load()
+    .then((x) => document.fonts.add(x)).catch(() => {})
+  assets.logo = await loadImg('/logo.png')
+  const heroChain = ['/hero/final.png', '/hero/65s.png', '/hero/45s.png', '/hero/30s.png', '/hero/20s.png', '/hero/12s.png', '/hero/07s.png', '/hero/03s.png', '/ui/01-chat.png']
+  for (const s of SCENES) {
+    if (s.kind !== 'ui') continue
+    if (s.img === 'hero') {
+      for (const src of heroChain) {
+        const im = await loadImg(src)
+        if (im) { assets.hero = im; s.src = src; break }
+      }
+    } else {
+      assets[s.img] = await loadImg(`/ui/${s.img}.png`)
+    }
+  }
+  return {
+    scenes: SCENES.map((s) => ({ kind: s.kind, dur: s.dur, img: s.img || null, src: s.src || null })),
+    total: TOTAL, fps: FPS, frames: Math.round(TOTAL * FPS),
+    loaded: Object.keys(assets).filter((k) => assets[k]),
+  }
+})()
+
+window.__encodeRaw = async (onProgress) => {
+  const totalFrames = Math.round(TOTAL * FPS)
+  const muxer = new Muxer({
+    target: new ArrayBufferTarget(),
+    video: { codec: 'avc', width: W, height: H },
+    fastStart: 'in-memory',
+  })
+  let encErr = null
+  const enc = new VideoEncoder({
+    output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+    error: (e) => { encErr = e },
+  })
+  enc.configure({ codec: 'avc1.640028', width: W, height: H, bitrate: 14_000_000, framerate: FPS, latencyMode: 'quality' })
+
+  for (let i = 0; i < totalFrames; i++) {
+    frame(i / FPS)
+    const vf = new VideoFrame(cv, { timestamp: Math.round((i * 1e6) / FPS), duration: Math.round(1e6 / FPS) })
+    enc.encode(vf, { keyFrame: i % (FPS * 2) === 0 })
+    vf.close()
+    if (i % 30 === 0) {
+      if (onProgress) onProgress(i, totalFrames)
+      await new Promise((r) => setTimeout(r, 0))
+    }
+    if (encErr) throw encErr
+  }
+  await enc.flush()
+  enc.close()
+  muxer.finalize()
+  return { bytes: new Uint8Array(muxer.target.buffer), frames: totalFrames }
+}
+
+window.__encodeAndDownload = async (onProgress) => {
+  const { bytes, frames } = await window.__encodeRaw(onProgress)
+  const blob = new Blob([bytes], { type: 'video/mp4' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'SUPERCRZY_BOT_PROMO_30s_1080p.mp4'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  return { size: bytes.length, frames }
+}
+</script>
+</body>
+</html>

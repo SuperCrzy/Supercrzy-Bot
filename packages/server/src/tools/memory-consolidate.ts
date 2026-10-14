@@ -17,7 +17,7 @@ const tool: ToolDef = {
   name: 'memory_consolidate',
   description: '整理长期记忆：合并同主题的近似重复记忆，并按分类上限淘汰低价值旧记忆。用户要求"整理记忆/清理记忆/合并记忆"时使用。',
   category: 'memory',
-  dangerous: true,
+  requiresApproval: true,
   parameters: {
     type: 'object',
     properties: {

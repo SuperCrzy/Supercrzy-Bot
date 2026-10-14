@@ -17,8 +17,25 @@ if (!ipcMain) {
 const { spawn } = require('child_process')
 const path = require('path')
 const fs = require('fs')
+const os = require('os')
 const { fileURLToPath } = require('url')
 const { autoUpdater } = require('electron-updater')
+const cdp = require('./cdp-endpoint.cjs')
+const { wireBrowserView } = require('./browser-view-wiring.cjs')
+
+// ---- AI 浏览器：CDP 端口 + 原生视图（2026-09-23）----
+// 让内嵌后端能 `connectOverCDP` 接管窗口里的**真网页** → 人和 AI 变成同一个页面上的两个操作者。
+//
+// BOOT_TS 取在这里（模块加载的第一时间）而不是 whenReady 之后：
+// Chromium 写 DevToolsActivePort 的时机与我们无关，可能早于这段脚本执行 ——
+// 「比 BOOT_TS 早 5 秒以内」的文件仍视为本次启动写的（见 cdp-endpoint.cjs 的 FRESH_MARGIN_MS）。
+const BOOT_TS = Date.now()
+if (!cdp.cdpDisabled()) {
+  // 端口交给 Chromium 自己挑（0 = 自动），避免固定端口撞上别人的调试实例
+  app.commandLine.appendSwitch('remote-debugging-port', '0')
+  // 只监听回环。CDP 拿到手 = 整个 App 的 JS 执行权，绝不能对外
+  app.commandLine.appendSwitch('remote-debugging-address', '127.0.0.1')
+}
 
 // ---- 路径解析：支持 dev（pnpm workspace 根）与打包（extraResources 内）两种形态 ----
 const DEV = process.argv.includes('--dev') || !app.isPackaged
@@ -37,6 +54,37 @@ const SERVER_DIR = DEV
   : path.join(process.resourcesPath, 'backend', 'packages', 'server')
 const SERVER_ENTRY = path.join(SERVER_DIR, 'src', 'app.ts')
 
+/**
+ * 用户工作区（2026-09-21）：
+ * 后端大量运行时数据是按 workspaceDir(= process.cwd()) 落的 —— data/skills、data/checkpoints、
+ * data/ilink-credentials.json 全在里面。之前 cwd 直接指向 .app 包体（resources/backend/packages/server），
+ * 后果有两层：
+ *   1) 运行时把「老板自己的微信凭据 / 检查点 / DB」写进 .app；打包时还可能被一起打进 dmg 发给别人
+ *   2) 数据落在只读或会被覆盖的位置，升级/重装即丢
+ * 现在显式把 WORKSPACE_DIR 指到 ~/.supercrzy —— 与 SQLite（~/.supercrzy/data/supercrzy.db）同处，
+ * 包体里不再有任何用户数据。
+ */
+const USER_WORKSPACE = path.join(os.homedir(), '.supercrzy')
+
+/**
+ * 首次运行播种技能：包体只自带「示例技能」（只读），
+ * 用户工作区为空时拷一份过去，之后所有增删改都发生在用户目录。
+ */
+function seedWorkspace() {
+  try {
+    const target = path.join(USER_WORKSPACE, 'data', 'skills')
+    const hasContent = fs.existsSync(target) && fs.readdirSync(target).length > 0
+    if (hasContent) return
+    const bundled = path.join(SERVER_DIR, 'data', 'skills')
+    if (!fs.existsSync(bundled)) return
+    fs.mkdirSync(path.dirname(target), { recursive: true })
+    fs.cpSync(bundled, target, { recursive: true })
+    console.log(`[Desktop] Seeded bundled skills → ${target}`)
+  } catch (e) {
+    console.warn('[Desktop] Seed skills failed:', e && e.message)
+  }
+}
+
 const PORT = Number(process.env.PORT || 3000)
 const BACKEND_URL = `http://localhost:${PORT}`
 // 当前前端源（dev 模式可能切到 vite dev 5173 实现 HMR 实时同步）
@@ -47,6 +95,8 @@ let mainWindow = null
 let backendReady = false
 const backendWaiters = []
 let isQuitting = false
+// AI 浏览器原生视图管理器（wireBrowserView 的返回值，仅为退出时清理）
+let browserViewManager = null
 // 后端崩溃自动重启次数（指数退避，最多 5 次）
 let backendRestartAttempt = 0
 
@@ -97,9 +147,23 @@ async function startBackend() {
   const tsxCli = path.join(SERVER_DIR, 'node_modules', 'tsx', 'dist', 'cli.mjs')
   const cmd = process.execPath
   const args = [tsxCli, entry]
+  seedWorkspace()
+  // AI 浏览器的接管端点：把"窗口里的真网页"告诉内嵌后端（读 CDP 端口，见 cdp-endpoint.cjs）。
+  // 读不到就显式回落 launch —— 宁可退回"截图监控器"，也不要每次操作都报"找不到可接管页面"。
+  const attach = await cdp.resolveAttachEnv({ userDataDir: app.getPath('userData'), sinceMs: BOOT_TS })
+  console.log(attach.ok
+    ? `[Desktop] AI 浏览器：attach 模式（CDP ${attach.endpoint}）`
+    : `[Desktop] AI 浏览器：回落 launch（${attach.reason}）`)
   backendProc = spawn(cmd, args, {
     cwd: SERVER_DIR,
-    env: { ...process.env, PORT: String(PORT), ELECTRON_RUN_AS_NODE: '1' },
+    // WORKSPACE_DIR 显式指向用户目录：运行时数据（skills/checkpoints/凭据）不写进 .app 包体
+    env: {
+      ...process.env,
+      PORT: String(PORT),
+      WORKSPACE_DIR: USER_WORKSPACE,
+      ELECTRON_RUN_AS_NODE: '1',
+      ...attach.env,
+    },
     stdio: ['ignore', 'pipe', 'pipe'],
     shell: false,
   })
@@ -264,9 +328,29 @@ ipcMain.on('theme:set', (_e, theme) => {
   }
 })
 
-// ---- App 自动更新（electron-updater）：启动静默检测 → 有新版弹窗询问 → 用户确认才下载安装 ----
+// ---- App 自动更新（electron-updater）----
 // 更新源：打包形态读 electron-builder 生成的 app-update.yml（publish 配置）；dev 形态读 dev-app-update.yml（可指向本地发版源）
+//
+// 2026-10-12 改：状态全部走 IPC 推给窗口内横幅（AppUpdateBanner.vue），不再用系统 dialog。
+// 起因：实测「点完立即更新后界面毫无反馈」—— 旧实现里 download-progress 只有一行 console.log，
+// 主进程从未把它发给渲染进程；而「发现新版本」走的是 electron.dialog（系统原生窗，不在窗口内），
+// 且渲染进程压根没订阅 preload 已暴露的 onAppUpdate。⇒ 现在 main→renderer 单向推 'app-update-state'，
+// renderer→main 用 'update:download' | 'update:install' | 'update:dismiss' 操作。
 let updateCheckedOnce = false
+/** 最近一次更新状态（渲染进程挂载晚于事件时会漏收，用 update:state 补拉） */
+let lastUpdateState = { status: 'idle' }
+
+function pushUpdateState(payload) {
+  lastUpdateState = { ...lastUpdateState, ...payload }
+  console.log(`[Updater] state=${lastUpdateState.status}${lastUpdateState.percent != null ? ` ${Math.round(lastUpdateState.percent)}%` : ''}`)
+  try {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('app-update-state', lastUpdateState)
+  } catch { /* 窗口已销毁，忽略 */ }
+  // macOS Dock 图标进度：下载中显示，其余传 -1 清除
+  try {
+    if (app.dock) app.dock.setProgressBar(lastUpdateState.status === 'downloading' ? (lastUpdateState.percent || 0) / 100 : -1)
+  } catch { /* 非 mac / Dock 不可用 */ }
+}
 function setupAutoUpdater() {
   if (DEV) {
     // 未打包（dev）形态：强制读 dev-app-update.yml，便于本地测试检测+下载流程
@@ -276,70 +360,89 @@ function setupAutoUpdater() {
   autoUpdater.autoInstallOnAppQuit = false // 退出时也不强制装，等用户点"重启并安装"
 
   autoUpdater.on('checking-for-update', () => {
-    console.log('[Updater] Checking for update...')
+    pushUpdateState({ status: 'checking' })
   })
 
+  // 不再弹系统对话框：交给窗口内横幅（带「立即更新」按钮）
   autoUpdater.on('update-available', (info) => {
-    console.log(`[Updater] Update available: v${info.version}`)
-    if (!mainWindow || mainWindow.isDestroyed()) return
-    // 手动确认式更新：弹窗询问，用户点"立即更新"才下载
-    electron.dialog.showMessageBox(mainWindow, {
-      type: 'info',
-      title: '发现新版本',
-      message: `SUPERCRZY BOT 有新版本 v${info.version} 可用`,
-      detail: '当前版本会先下载更新，下载完成后重启即可完成安装。',
-      buttons: ['立即更新', '稍后再说'],
-      defaultId: 0,
-      cancelId: 1,
-    }).then(({ response }) => {
-      if (response === 0) {
-        autoUpdater.downloadUpdate()
-      }
-    }).catch(() => {})
+    pushUpdateState({ status: 'available', version: info.version, percent: undefined })
   })
 
+  // 启动静默检测无更新：清状态，不打扰用户
+  // 语义区分（2026-10-12 口径统一）：
+  //   'latest' = 已检查且确认无新版（设置面板显示「已是最新版本」）
+  //   'idle'   = 尚未检查 / 用户手动关掉了提示（设置面板不显示状态胶囊）
+  // 以前两者都推 'idle'，导致「已是最新」无法与「还没查」区分。
   autoUpdater.on('update-not-available', () => {
-    console.log('[Updater] Already up to date')
-    // 启动静默检测无更新：不打扰用户
+    pushUpdateState({ status: 'latest', version: undefined })
   })
 
+  // 进度必须到界面 —— 这是本次修复的核心（旧实现只有一行 console.log）
   autoUpdater.on('download-progress', (p) => {
-    console.log(`[Updater] Download ${Math.round(p.percent)}%`)
+    pushUpdateState({
+      status: 'downloading',
+      percent: p.percent,
+      transferred: p.transferred,
+      total: p.total,
+      bytesPerSecond: p.bytesPerSecond,
+    })
   })
 
   autoUpdater.on('update-downloaded', (info) => {
-    console.log(`[Updater] Downloaded v${info.version}`)
-    if (!mainWindow || mainWindow.isDestroyed()) return
-    electron.dialog.showMessageBox(mainWindow, {
-      type: 'info',
-      title: '更新已就绪',
-      message: `v${info.version} 已下载完成`,
-      detail: '重启应用即可完成更新（重启会短暂关闭窗口）。',
-      buttons: ['重启并安装', '稍后再说'],
-      defaultId: 0,
-      cancelId: 1,
-    }).then(({ response }) => {
-      if (response === 0) {
-        try {
-          autoUpdater.quitAndInstall(false, true)
-        } catch (e) {
-          console.error('[Updater] quitAndInstall failed:', e.message)
-          // 未打包 dev 形态无安装器：提示用户手动换新包
-          electron.dialog.showMessageBox(mainWindow, {
-            type: 'warning',
-            title: '无法自动安装',
-            message: '开发模式下无法自动安装更新，请手动安装新版安装包。',
-          }).catch(() => {})
-        }
-      }
-    }).catch(() => {})
+    pushUpdateState({ status: 'downloaded', version: info.version, percent: 100 })
   })
 
   autoUpdater.on('error', (err) => {
-    // 网络不通/源未配置时静默（不打扰日常使用），仅记录日志
-    console.error('[Updater] error:', err && err.message ? err.message : err)
+    const message = err && err.message ? err.message : String(err)
+    console.error('[Updater] error:', message)
+    // 以前这里完全静默 ⇒ 失败也没任何反馈；现在横幅给一条轻提示，用户可关掉
+    pushUpdateState({ status: 'error', message })
   })
 }
+
+// ---- 渲染进程的操作入口（窗口内横幅的按钮走这里）----
+// 注意：必须注册在模块顶层，不能放进 setupAutoUpdater（否则随调用次数重复注册）。
+ipcMain.handle('update:state', () => lastUpdateState)
+ipcMain.handle('update:download', () => {
+  // 先切到 downloading，避免「点了按钮 → 首个 progress 事件」之间界面没有反馈
+  pushUpdateState({ status: 'downloading', percent: 0 })
+  return autoUpdater.downloadUpdate()
+    .then(() => ({ ok: true }))
+    .catch((e) => {
+      const message = e && e.message ? e.message : String(e)
+      pushUpdateState({ status: 'error', message })
+      return { ok: false, message }
+    })
+})
+ipcMain.handle('update:install', () => {
+  try {
+    autoUpdater.quitAndInstall(false, true)
+    return { ok: true }
+  } catch (e) {
+    const message = e && e.message ? e.message : String(e)
+    // 缺开发者签名（adhoc）时 Squirrel.Mac 会拒绝安装，把真实原因带回界面
+    console.error('[Updater] quitAndInstall failed:', message)
+    pushUpdateState({ status: 'error', message })
+    return { ok: false, message }
+  }
+})
+ipcMain.handle('update:dismiss', () => {
+  pushUpdateState({ status: 'idle', version: undefined, percent: undefined, message: undefined })
+  return { ok: true }
+})
+
+// ---- 版本口径（2026-10-12 统一）----
+// 「应用版本」的唯一权威 = app.getVersion()：打包形态读 .app/Contents/Info.plist
+// （electron-builder 从 packages/desktop/package.json 的 version 写入），dev 形态读同一个
+// package.json —— 两种形态天然一致，无需再靠环境变量注入。
+//
+// 历史问题：设置「关于」面板把前端硬编码的 APP_VERSION('0.3.0'，那其实是**引擎/代码仓库**版本)
+// 当成 App 版本渲染，于是出现「关于说 v0.3.0 已是最新」与「横幅说发现新版本 v1.0.6」并排打架。
+// packaged 一并回传，供界面判断是否还有「源码」语境（打包形态无 .git，源码检查恒为误报）。
+ipcMain.handle('app:info', () => ({
+  version: app.getVersion(),
+  packaged: app.isPackaged,
+}))
 
 /** 启动后延迟检查一次（不阻塞窗口/后端启动）；非 dev 才检查，dev 下也允许（本地测试） */
 function checkForAppUpdate(delayMs = 6000) {
@@ -347,7 +450,10 @@ function checkForAppUpdate(delayMs = 6000) {
   updateCheckedOnce = true
   setTimeout(() => {
     autoUpdater.checkForUpdates().catch((e) => {
-      console.error('[Updater] check failed:', e && e.message ? e.message : e)
+      const message = e && e.message ? e.message : String(e)
+      console.error('[Updater] check failed:', message)
+      // checkForUpdates 失败只 reject promise、不触发 'error' 事件，必须在这里补状态
+      pushUpdateState({ status: 'error', message })
     })
   }, delayMs)
 }
@@ -380,6 +486,15 @@ const ctx = {
   },
   /** 检查后端版本是否有更新（复用 /api/system/check-update；manual=true 时即使无更新也提示） */
   async checkUpdate(manual = false) {
+    // 打包形态没有源码仓库（.app 内无 .git），git 检查必然走到 catch 兜底 ⇒ 恒报「已是最新」。
+    // 那是假信号（2026-10-12 实测：git rev-parse 返回 fatal: not a git repository），
+    // 会与 App 二进制更新的真实结论冲突，所以打包形态直接不检查源码。
+    if (app.isPackaged) {
+      if (manual && mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('app-update', { hasUpdate: false, reason: 'packaged-no-source' })
+      }
+      return
+    }
     try {
       const res = await fetch(`http://localhost:${PORT}/api/system/check-update`)
       if (!res.ok) return
@@ -419,6 +534,13 @@ if (!gotLock) {
     app.commandLine.appendSwitch('disable-http-cache')
     setupAutoUpdater()
     startBackend()
+    // AI 浏览器原生视图接线（只注册一次；视图本身由渲染进程首次进入浏览器 tab 时惰性创建）
+    browserViewManager = wireBrowserView({
+      Electron: electron,
+      ipcMain,
+      getHostWindow: () => mainWindow,
+      log: (m) => console.log(m),
+    })
     createWindow()
     // ---- BrowserView 最小技术样衣(仅 SUPERCRZY_BV_DEMO=1 触发, 验证"真实共用可drive") 2026-09-04 ----
     if (process.env.SUPERCRZY_BV_DEMO === '1') {
@@ -448,6 +570,8 @@ if (!gotLock) {
 
   app.on('before-quit', () => {
     isQuitting = true
+    // 先拆原生视图：它的 webContents 是独立进程，不显式关会拖住退出
+    try { if (browserViewManager) browserViewManager.destroy() } catch { /* 忽略 */ }
     stopBackend()
   })
 

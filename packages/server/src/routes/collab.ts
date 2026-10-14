@@ -6,18 +6,22 @@
 import Router from 'koa-router'
 import type { Context } from 'koa'
 import { createCollabTask, getCollabTask, listCollabTasks, stopCollabTask, decideCollabTask, promoteCollabTask } from '../services/collab-engine'
-import { browserSession } from '../services/ai-browser'
+import { browserSession, browserKey, closeBrowserForSession, activeBrowserKeys, browserMode, attachEndpoint, getAttachReport, browserStartPageUrl, browserSessionPages } from '../services/ai-browser'
 import { createAuditTask, getAuditTask, listAuditTasks } from '../services/collab-audit'
 
 export const collabRouter = new Router({ prefix: '/api/collab' })
 
-/** 按请求解析浏览器实例 key(网页各会话隔离): 优先 X-Browser-Key / body.sessionId / query.sid */
+/**
+ * 按请求解析浏览器实例 key(网页各会话隔离): 优先 X-Browser-Key / body.sessionId / query.sid
+ * 2026-09-23：改走 browserKey() 唯一构造入口 —— 此前这里拼 'wb:' 而 AI 工具侧硬编码 'default'，
+ * 两套命名空间不相交，右栏永远看不到 AI 的动作画面。
+ */
 function browserKeyOf(ctx: Context): string {
   const h = ctx.get?.('x-browser-key') || ''
-  if (h) return 'wb:' + h
+  if (h) return browserKey(h)
   const b = (ctx.request.body || {}) as { sessionId?: string }
   const q = ctx.query as { sid?: string }
-  return 'wb:' + String(b.sessionId || q.sid || 'default').slice(0, 64)
+  return browserKey(b.sessionId || q.sid || 'default')
 }
 function bs(ctx: Context) { return browserSession(browserKeyOf(ctx)) }
 
@@ -135,9 +139,29 @@ collabRouter.get('/browser/latest', async (ctx: Context) => {
   } catch (e: any) { ctx.status = 500; ctx.body = { error: e?.message || String(e) } }
 })
 
-// POST /api/collab/browser/close → 释放该会话浏览器实例
+// POST /api/collab/browser/close → 释放该会话浏览器实例（browserKey 幂等，直接传全量 key 即可）
 collabRouter.post('/browser/close', async (ctx: Context) => {
-  await bs(ctx).close(); ctx.body = { closed: true }
+  await closeBrowserForSession(browserKeyOf(ctx)); ctx.body = { closed: true }
+})
+
+// GET /api/collab/browser/sessions → 当前持有浏览器实例的 key（排查"任务跑完 Chrome 不退"用）
+// 2026-09-23 增补 mode / attach：attach 模式下"接错了哪一页"是最难查的一类故障，
+// 把决策过程（候选、跳过原因、最终选中）直接摊开，省掉一轮猜。
+collabRouter.get('/browser/sessions', (ctx: Context) => {
+  const mode = browserMode()
+  ctx.body = {
+    keys: activeBrowserKeys(),
+    count: activeBrowserKeys().length,
+    mode,
+    endpoint: mode === 'attach' ? attachEndpoint() : null,
+    // desktop 侧的原生视图要 loadURL 的地址。必须由后端给（而不是 desktop 自己拼），
+    // 否则「起始页路径」和「宿主排除规则」两处会各写一份、悄悄漂开。
+    startPageUrl: mode === 'attach' ? browserStartPageUrl() : null,
+    // 每个活会话**此刻**在哪一页（区别于 attach.adopted 的"最后一次采纳决策"——
+    // 视图导航后 adopted 不会更新，只看它会得到会说谎的诊断）
+    pages: browserSessionPages(),
+    attach: mode === 'attach' ? getAttachReport() : null,
+  }
 })
 
 // ---- AI 浏览器动作层 L2 (经单会话实例: 人点画面/AI动统一) ----

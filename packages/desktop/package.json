@@ -1,6 +1,6 @@
 {
   "name": "@supercrzy/desktop",
-  "version": "1.0.1",
+  "version": "1.0.8",
   "private": true,
   "description": "SUPERCRZY BOT desktop shell (Electron)",
   "main": "main.cjs",

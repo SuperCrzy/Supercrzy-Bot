@@ -10,9 +10,13 @@ directories:
   output: dist
   buildResources: build
 files:
-  - main.cjs
-  - preload.cjs
-  - tray.cjs
+  # 2026-10-09 修：原白名单只列 main/preload/tray/package.json 四个文件，
+  # 但 main.cjs 顶层 require 了 ./cdp-endpoint.cjs 与 ./browser-view-wiring.cjs
+  # （后者又 require ./browser-view.cjs）。这三个不在白名单里 ⇒ asar 里没有它们
+  # ⇒ 主进程 require 直接抛错，窗口与内嵌后端都起不来（表现为「打开就崩」）。
+  # 旧 1.0.4 用的是 09-23 18:30 那版 main.cjs（还没这两行），所以一直没暴雷。
+  # 用 "*.cjs" 全量收本地主进程模块，以后再加模块不会又漏一条。
+  - "*.cjs"
   - package.json
 extraResources:
   # 后端（server 部署目录：依赖已展开为真实文件，规避 pnpm workspace 软链在打包时断链）
@@ -42,4 +46,6 @@ linux:
   category: Development
 npmRebuild: false
 electronDownload:
-  mirror: https://npmmirror.com/mirrors/electron/
+  # 2026-10-09 实测换源：npmmirror 只有 11.6 KB/s（下 100MB 要 2.4 小时，等于打不出包），
+  # huaweicloud 313 KB/s（约 5.5 分钟）。两者同一个 zip，只是 CDN 不同。
+  mirror: https://mirrors.huaweicloud.com/electron/

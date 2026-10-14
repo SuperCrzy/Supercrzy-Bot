@@ -52,7 +52,7 @@
             </div>
           </n-tab-pane>
 
-          <!-- Tab 2: 显示 -->
+          <!-- Tab 2: 界面（2026-09-27 更名：原「显示」，只留界面/呈现类；音频类已拆到「语音与声音」） -->
           <n-tab-pane name="display" :tab="$t('settings.tabDisplay')">
             <div class="tab-content">
               <!-- 主题已移除：由侧边栏底部"黑白切换"按钮统一管理（已持久化到 settings 表） -->
@@ -102,11 +102,6 @@
                 <n-switch v-model:value="form.showCost" size="small" />
               </div>
               <div class="setting-row">
-                <span class="setting-label">{{ $t('settings.completionSound') }}</span>
-                <span class="setting-desc">{{ $t('settings.completionSoundDesc') }}</span>
-                <n-switch v-model:value="form.completionSound" size="small" />
-              </div>
-              <div class="setting-row">
                 <span class="setting-label">{{ $t('settings.busyInputMode') }}</span>
                 <span class="setting-desc">{{ $t('settings.busyInputModeDesc') }}</span>
                 <n-switch v-model:value="form.busyInputMode" size="small" />
@@ -114,7 +109,100 @@
             </div>
           </n-tab-pane>
 
-          <!-- Tab 3: 代理 -->
+          <!-- Tab: 语音与声音（2026-09-27 从「显示」拆出：完成提示音 + 朗读音色/语速归一处，
+               原来音频类设置与显示类混在同一个 tab 里） -->
+          <n-tab-pane name="speech" :tab="$t('settings.tabSpeech')">
+            <div class="tab-content">
+              <div class="setting-row">
+                <span class="setting-label">{{ $t('settings.completionSound') }}</span>
+                <span class="setting-desc">{{ $t('settings.completionSoundDesc') }}</span>
+                <n-switch v-model:value="form.completionSound" size="small" />
+              </div>
+              <!-- 提示音音色（2026-09-27：提示音由写死双音改为内置音效可选）。
+                   试听按钮**内嵌在下拉每项右侧**（点喇叭只试听、点名字才确认），选中即自动试听。
+                   关闭提示音时收起下面两行，避免塞满无效设置项 -->
+              <div v-if="form.completionSound" class="setting-row">
+                <span class="setting-label">{{ $t('settings.completionSoundTone') }}</span>
+                <span class="setting-desc">{{ $t('settings.completionSoundToneDesc') }}</span>
+                <n-select
+                  v-model:value="form.completionSoundTone"
+                  :options="soundToneOptions"
+                  :render-option="renderToneOption"
+                  :consistent-menu-width="false"
+                  size="small"
+                  style="width: 170px"
+                  @update:value="onTonePicked"
+                />
+              </div>
+              <div v-if="form.completionSound" class="setting-row">
+                <span class="setting-label">{{ $t('settings.completionSoundVolume') }}</span>
+                <span class="setting-desc">{{ $t('settings.completionSoundVolumeDesc') }}</span>
+                <div class="setting-range">
+                  <n-slider
+                    v-model:value="form.completionSoundVolume"
+                    :min="MIN_SOUND_VOLUME"
+                    :max="MAX_SOUND_VOLUME"
+                    :step="0.05"
+                    style="width: 130px"
+                  />
+                  <span class="setting-range-val">{{ soundVolumeLabel }}</span>
+                </div>
+              </div>
+              <!-- 朗读音色 + 语速。改完即时生效（watch 同步 appStore）；
+                   音色下拉每项内嵌试听按钮：点喇叭听该音色的自我介绍（不改变选择），点名字确认选择并自动试听 -->
+              <div class="setting-row">
+                <span class="setting-label">{{ $t('settings.ttsVoice') }}</span>
+                <span class="setting-desc">{{ $t('settings.ttsVoiceDesc') }}</span>
+                <n-select
+                  v-model:value="form.ttsVoice"
+                  :options="ttsVoiceOptions"
+                  :render-option="renderVoiceOption"
+                  :consistent-menu-width="false"
+                  size="small"
+                  style="width: 190px"
+                  @update:value="onVoicePicked"
+                />
+              </div>
+              <div class="setting-row">
+                <span class="setting-label">{{ $t('settings.ttsRate') }}</span>
+                <span class="setting-desc">{{ $t('settings.ttsRateDesc') }}</span>
+                <div class="setting-range">
+                  <n-slider
+                    v-model:value="form.ttsRate"
+                    :min="-50"
+                    :max="50"
+                    :step="10"
+                    style="width: 130px"
+                  />
+                  <span class="setting-range-val">{{ ttsRateLabel }}</span>
+                </div>
+              </div>
+              <!-- 自动朗读档位（2026-09-27）：回复完成 → 按档位自动读出来。
+                   默认「仅窗口不在前台时」—— 老板盯着屏幕时不出声（他已经在读了），
+                   Agent 长任务切走去干活时自动念，是真正省心的档位。 -->
+              <div class="setting-row">
+                <span class="setting-label">{{ $t('settings.autoRead') }}</span>
+                <span class="setting-desc">{{ $t('settings.autoReadDesc') }}</span>
+                <n-select
+                  v-model:value="form.autoReadMode"
+                  :options="autoReadOptions"
+                  size="small"
+                  style="width: 190px"
+                />
+              </div>
+              <!-- 边生成边朗读（2026-09-28）：与上方档位**正交** —— 档位管"这轮读不读"，
+                   它管"什么时候开始读"。拆成两个控件而不是加第 4 个档位，
+                   是为了不改掉 09-27 拍板的档位语义。 -->
+              <div class="setting-row">
+                <span class="setting-label">{{ $t('settings.streamRead') }}</span>
+                <span class="setting-desc">{{ $t('settings.streamReadDesc') }}</span>
+                <n-switch v-model:value="form.streamRead" size="small" />
+              </div>
+            </div>
+          </n-tab-pane>
+
+          <!-- Tab 3: AI 与安全（2026-09-27 更名：原「权限管理」名实不符——一半是权限、一半是思考深度/轮次；
+               同时并入原「隐私」tab 的 PII 脱敏，两者同属"AI 的行为边界"） -->
           <n-tab-pane name="agent" :tab="$t('settings.tabAgent')">
             <div class="tab-content">
               <div class="form-group">
@@ -148,6 +236,13 @@
                 </n-radio-group>
               </div>
 
+              <!-- 隐私：PII 脱敏（2026-09-27 从「隐私」tab 并入——与权限同属 AI 行为边界） -->
+              <div class="form-group">
+                <label>{{ $t('settings.piiMaskingEnabled') }}</label>
+                <p class="input-desc">{{ $t('settings.piiMaskingEnabledDesc') }}</p>
+                <n-switch v-model:value="form.piiMaskingEnabled" size="small" />
+              </div>
+
               <!-- P2-01 高级入口分区：网关超时 / 自动放行秒数这类"平时不碰"的参数默认收起，
                    避免新手在常用项里被迫面对不理解的配置（此前与常用项平铺） -->
               <n-collapse class="settings-advanced" :default-expanded-names="[]">
@@ -176,18 +271,9 @@
 
           <!-- Tab 4: 记忆管理已合并到「管理 → 记忆管理」（/memory，含记忆开关+列表+导入+删除，避免双入口） -->
 
-          <!-- Tab 5: 隐私 -->
-          <n-tab-pane name="privacy" :tab="$t('settings.tabPrivacy')">
-            <div class="tab-content">
-              <div class="setting-row">
-                <span class="setting-label">{{ $t('settings.piiMaskingEnabled') }}</span>
-                <span class="setting-desc">{{ $t('settings.piiMaskingEnabledDesc') }}</span>
-                <n-switch v-model:value="form.piiMaskingEnabled" size="small" />
-              </div>
-            </div>
-          </n-tab-pane>
+          <!-- 隐私已并入「AI 与安全」（2026-09-27：原隐私 tab 只有 PII 脱敏 1 项，与权限同属"AI 行为边界"） -->
 
-          <!-- Tab 6: MCP 连接器 -->
+          <!-- Tab: MCP 连接器 -->
           <n-tab-pane name="mcp" :tab="$t('settings.tabMcp')">
             <div class="tab-content">
               <p class="tab-desc">{{ $t('settings.mcpDesc') }}</p>
@@ -351,9 +437,9 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, onMounted, computed, watch } from 'vue'
+import { reactive, ref, onMounted, computed, watch, h } from 'vue'
 import { useRouter } from 'vue-router'
-import { useMessage } from 'naive-ui'
+import { useMessage, NButton } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { detectLocale } from '@/utils/locale'
 import { PERMISSION_TIERS, TIER_I18N, isPermissionTier, resolvePermissionTier } from '@/utils/permission'
@@ -363,6 +449,17 @@ import { getModelSelectOptions } from '@/data/models'
 import ProfileAvatar from '@/components/ui/ProfileAvatar.vue'
 import SvgIcon from '@/components/ui/SvgIcon.vue'
 import UpdatePanel from '@/components/settings/UpdatePanel.vue'
+import {
+  SOUND_TONES,
+  MIN_VOLUME as MIN_SOUND_VOLUME,
+  MAX_VOLUME as MAX_SOUND_VOLUME,
+  normalizeTone as normalizeSoundTone,
+  normalizeVolume as normalizeSoundVolume,
+  previewCompletionTone,
+} from '@/utils/sound'
+import { useSpeechPreview, formatTtsRate } from '@/composables/useSpeechPreview'
+import { DEFAULT_TTS_VOICES, fallbackVoiceSample, toVoiceOptions, type TtsVoiceEntry } from '@/utils/tts-voices'
+import { AUTO_READ_MODES, DEFAULT_AUTO_READ_MODE, normalizeAutoReadMode } from '@/utils/auto-read'
 
 const router = useRouter()
 const appStore = useAppStore()
@@ -578,6 +675,13 @@ const manageGroups = computed(() => [
 
 const hasAccessToken = ref(false)
 const accessTokenMasked = ref('')
+
+// ---- 朗读（Edge TTS）：音色清单从后端拉（单一来源），失败用内置兜底 ----
+// 选项整形（含"sample 缺失时补试听台词"）在 utils/tts-voices.ts，有单测钉死"台词必提到自己名字"
+const ttsVoices = ref<TtsVoiceEntry[]>([...DEFAULT_TTS_VOICES])
+const ttsVoiceOptions = computed(() => toVoiceOptions(ttsVoices.value))
+/** 音色试听状态（'loading' 与 'playing' 合并：都显示停止按钮，点了就取消） */
+const { previewingId: previewingVoiceId, preview: previewVoice, stop: stopVoicePreview } = useSpeechPreview()
 const regenerating = ref(false)
 
 interface SettingsForm {
@@ -593,6 +697,9 @@ interface SettingsForm {
   showReasoning: boolean
   showCost: boolean
   completionSound: boolean
+  // 完成提示音音色（内置合成音效 id）+ 音量（峰值增益）
+  completionSoundTone: string
+  completionSoundVolume: number
   busyInputMode: boolean
   // Agent
   maxTurns: number
@@ -613,6 +720,13 @@ interface SettingsForm {
   memoryCharLimit: number
   // Privacy
   piiMaskingEnabled: boolean
+  // 朗读（Edge TTS）
+  ttsVoice: string
+  ttsRate: number
+  /** 自动朗读档位：off / background / always */
+  autoReadMode: string
+  /** 边生成边朗读（正交开关，非档位） */
+  streamRead: boolean
   // Profile
   userName: string
   userAvatar: string
@@ -629,7 +743,12 @@ const form = reactive<SettingsForm>({
   compactMode: false,
   showReasoning: true,
   showCost: false,
-  completionSound: false,
+  // ⚠️ 初值必须是 true：appStore 的默认值就是 true（`stores/app.ts` 的 completionSound），
+  // 这里写 false 会让设置页开关在"后端没有该键的老库"上显示"关"，而实际提示音会响
+  // —— 用户看到的开关状态与真实行为不一致（2026-09-29 修正）。
+  completionSound: true,
+  completionSoundTone: 'classic',
+  completionSoundVolume: 0.15,
   busyInputMode: true,
   maxTurns: 10,
   gatewayTimeout: 120,
@@ -644,9 +763,134 @@ const form = reactive<SettingsForm>({
   memoryEnabled: true,
   memoryCharLimit: 50000,
   piiMaskingEnabled: false,
+  ttsVoice: 'zh-CN-XiaoxiaoNeural',
+  ttsRate: 0,
+  autoReadMode: DEFAULT_AUTO_READ_MODE,
+  streamRead: true,
   userName: '',
   userAvatar: '',
 })
+
+// 朗读语速显示 + 改动即时同步（依赖 form，必须在其定义之后 —— 放前面会 TDZ 白屏，vue-tsc 不报）
+const ttsRateLabel = computed(() => {
+  const v = Number(form.ttsRate) || 0
+  return v === 0 ? t('settings.ttsRateNormal') : `${v > 0 ? '+' : ''}${v}%`
+})
+// 设置页改动即时同步到 appStore（朗读按钮读的是 appStore，无需刷新页面）
+watch(() => form.ttsVoice, (v) => { if (v) appStore.ttsVoice = v })
+watch(() => form.ttsRate, (v) => { appStore.ttsRate = Number(v) || 0 })
+
+// ===== 自动朗读档位（2026-09-27）=====
+/** 档位 id → i18n key（拼字符串 key 容易漏，显式映射） */
+const AUTO_READ_I18N: Record<string, string> = {
+  off: 'settings.autoReadOff',
+  background: 'settings.autoReadBackground',
+  always: 'settings.autoReadAlways',
+}
+const autoReadOptions = computed(() => AUTO_READ_MODES.map((m) => ({
+  value: m,
+  label: t(AUTO_READ_I18N[m] || m),
+})))
+watch(() => form.autoReadMode, (v) => { appStore.autoReadMode = normalizeAutoReadMode(v) })
+// 边生成边朗读：改动即时同步（朗读链路读的是 appStore，不必等保存）
+watch(() => form.streamRead, (v) => { appStore.streamRead = v !== false })
+
+// ===== 完成提示音音色/音量（2026-09-27）=====
+/** 音色 id → i18n key（与 permission 的 TIER_I18N 同风格，避免拼字符串 key） */
+const SOUND_TONE_I18N: Record<string, string> = {
+  classic: 'settings.toneClassic',
+  single: 'settings.toneSingle',
+  chord: 'settings.toneChord',
+  down: 'settings.toneDown',
+}
+const soundToneOptions = computed(() => SOUND_TONES.map((tone) => ({
+  value: tone.id,
+  label: t(SOUND_TONE_I18N[tone.id] || tone.id),
+})))
+const soundVolumeLabel = computed(() => `${Math.round(normalizeSoundVolume(form.completionSoundVolume) * 100)}%`)
+watch(() => form.completionSoundTone, (v) => { if (v) appStore.completionSoundTone = normalizeSoundTone(v) })
+watch(() => form.completionSoundVolume, (v) => { appStore.completionSoundVolume = normalizeSoundVolume(v) })
+// 完成提示音开关：与 tone/volume 同款实时同步。
+// 原来只在 saveSettings 里写 localStorage、**从不更新 appStore**，而真正的开关判据是
+// `ChatView.vue` 的 `if (ok && appStore.completionSound)` ⇒ 拨了开关要重载页面才生效
+// （2026-09-29 修正：与音色/音量统一成"改了就生效"）。
+watch(() => form.completionSound, (v) => { appStore.completionSound = v !== false })
+
+// ===== 下拉选项内嵌「试听」按钮（2026-09-27）=====
+// 为什么用 h() 现渲染：naive-ui 的下拉面板是 teleport 到 body 的，本组件的 scoped 样式打不到，
+// 所以按钮用 naive 自己的 NButton（自带 hover/圆角），布局用内联 style，避免为它开全局样式。
+// 「点喇叭 = 只试听不选中」依赖 stopPropagation 把事件拦在选项行之外（mousedown/up 也拦，防 naive 用它们选中）。
+
+/** 播放图标（三角）/ 停止图标（方块）——内联 SVG，遵循"不用 emoji 当图标" */
+const PlayGlyph = () => h('svg', { viewBox: '0 0 24 24', width: 13, height: 13, fill: 'currentColor' }, [
+  h('path', { d: 'M8 5.2v13.6L19 12z' }),
+])
+const StopGlyph = () => h('svg', { viewBox: '0 0 24 24', width: 13, height: 13, fill: 'currentColor' }, [
+  h('rect', { x: 7, y: 7, width: 10, height: 10, rx: 1.5 }),
+])
+
+/** 一行选项 = 默认标签节点 + 右侧试听按钮（width:100% 让整行都可点选）
+ *
+ * ⚠️ naive-ui 的 `render-option` 是**包裹**而不是**替换**：传进来的 `node` 就是那个
+ * `.n-base-select-option` 元素，返回的节点会把它装在里面 —— 所以播放按钮是 `.n-base-select-option`
+ * 的**兄弟**节点，不是它的子节点（写验收脚本的选择器时必须知道这一点，否则永远找不到按钮）。
+ * `sc-sound-opt` 这个类就是给"整行"一个稳定标识用的。
+ */
+function optionWithPlay(label: unknown, playing: boolean, onPlay: () => void, onStop: () => void) {
+  const btn = h(NButton, {
+    size: 'tiny',
+    quaternary: true,
+    circle: true,
+    title: t('settings.soundPreview'),
+    onClick: (e: MouseEvent) => {
+      e.stopPropagation()
+      e.preventDefault()
+      playing ? onStop() : onPlay()
+    },
+    onMousedown: (e: MouseEvent) => e.stopPropagation(),
+    onMouseup: (e: MouseEvent) => e.stopPropagation(),
+  }, { icon: () => (playing ? StopGlyph() : PlayGlyph()) })
+  return h('div', { class: 'sc-sound-opt', style: 'display:flex;align-items:center;gap:10px;width:100%' }, [
+    h('span', { style: 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis' }, [label as any]),
+    btn,
+  ])
+}
+
+/** 提示音下拉的每项：喇叭 → 试听该音效（同步合成，无 loading 态，故恒显示播放图标） */
+function renderToneOption({ node, option }: { node: unknown; option: any }) {
+  return optionWithPlay(node, false, () => playTone(option.value), () => {})
+}
+/** 音色下拉的每项：喇叭 → 播该音色的自我介绍（异步合成，播放中显示停止） */
+function renderVoiceOption({ node, option }: { node: unknown; option: any }) {
+  return optionWithPlay(
+    node,
+    previewingVoiceId.value === option.value,
+    () => { void previewVoiceById(option.value, option.sample) },
+    () => stopVoicePreview(),
+  )
+}
+
+/** 播放提示音效（试听与聊天里的完成提示音同一函数） */
+function playTone(toneId: string) {
+  previewCompletionTone(toneId, form.completionSoundVolume)
+}
+
+/** 试听某音色：优先用后端下发的 sample 台词（含"中英文读"），失败如实提示（不拿系统音色冒充） */
+async function previewVoiceById(voiceId: string, sample?: string) {
+  const text = sample || ttsVoiceOptions.value.find((v) => v.value === voiceId)?.sample
+    || fallbackVoiceSample(ttsVoices.value.find((v) => v.id === voiceId)?.label || voiceId)
+  const ok = await previewVoice(voiceId, text, { voice: voiceId, rate: formatTtsRate(form.ttsRate) })
+  if (!ok) nMessage.warning(t('settings.previewFailed'))
+}
+
+/** 点名字确认选择 → 自动试听（老板要的"选中即听"；试听按钮仍可单独点） */
+function onVoicePicked(id: string) {
+  const sample = ttsVoiceOptions.value.find((v) => v.value === id)?.sample
+  void previewVoiceById(id, sample)
+}
+function onTonePicked(id: string) {
+  playTone(id)
+}
 
 const PRESET_AVATARS = ['a1', 'a2', 'a3', 'a4', 'a5', 'a6', 'a7', 'a8']
 /** 生图 Provider 选项（设置里供用户选择） */
@@ -758,6 +1002,17 @@ onMounted(async () => {
     if (data.completionSound !== undefined) {
       localStorage.setItem('supercrzy:completionSound', String(data.completionSound))
     }
+    // ⚠️ 回填开关本身（2026-09-29 修）：原来这里只写了 localStorage，**没回填 form**，
+    // 于是设置页那个开关永远显示 form 初值，与 appStore/后端真相脱钩。后端无此键（老库）
+    // 一律按 appStore 默认 true 处理。
+    form.completionSound = data.completionSound === undefined ? true : !!data.completionSound
+    // 提示音音色/音量归一（历史值或脏值一律夹到合法区间，避免开页就静音/过度吵）
+    form.completionSoundTone = normalizeSoundTone(data.completionSoundTone)
+    form.completionSoundVolume = normalizeSoundVolume(data.completionSoundVolume)
+    // 自动朗读档位归一（老库无此键 → 默认「仅窗口不在前台时」；脏值不会意外变成 always）
+    form.autoReadMode = normalizeAutoReadMode(data.autoReadMode)
+    // 边生成边朗读：老库无此键 → 保持默认开（与 appStore 默认一致）
+    if (data.streamRead !== undefined) form.streamRead = data.streamRead !== false && data.streamRead !== 'false'
     loaded = true
   } catch (err) {
     console.error('[SettingsView] Failed to load settings:', err)
@@ -765,6 +1020,14 @@ onMounted(async () => {
   }
   loadMcp()
   loadPresets()
+  // 朗读音色清单（失败保持内置兜底）
+  try {
+    const vres = await fetch('/api/tts/voices')
+    if (vres.ok) {
+      const vdata = await vres.json()
+      if (Array.isArray(vdata?.voices) && vdata.voices.length) ttsVoices.value = vdata.voices
+    }
+  } catch { /* ignore */ }
 })
 
 /** 语言切换：即时生效（无需点保存），同时写入 localStorage 保证刷新后一致；自动保存由 watch 统一触发 */
@@ -924,6 +1187,10 @@ async function saveSettings() {
 .setting-row:last-child { border-bottom: none; }
 .setting-label { font-size: 13px; font-weight: 500; color: var(--text-primary); white-space: nowrap; }
 .setting-desc { font-size: 12px; color: var(--text-muted); flex: 1; text-align: right; }
+/* 朗读语速：滑块 + 数值（2026-09-27） */
+/* 带数值回显的滑杆（朗读语速 / 提示音音量共用） */
+.setting-range { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.setting-range-val { font-size: 12px; color: var(--text-muted); min-width: 42px; text-align: right; font-family: var(--font-mono, monospace); }
 .setting-info { display: flex; align-items: center; gap: 8px; }
 
 /* Token row */

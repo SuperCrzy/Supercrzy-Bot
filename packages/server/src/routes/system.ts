@@ -60,7 +60,10 @@ systemRouter.get('/version', async (ctx: Context) => {
   } catch { /* 非 git 目录/命令不可用 → 保持 unknown */ }
 
   ctx.body = {
-    version: process.env.APP_VERSION || '0.3.0',
+    // 引擎（代码仓库）版本 —— 供前端显示「引擎 vX.Y.Z」。
+    // 注意：这**不是** App 二进制版本；App 版本在桌面主进程 app.getVersion()（见 desktop/main.cjs 的 app:info）。
+    // 环境变量优先 ENGINE_VERSION，保留 APP_VERSION 兼容旧部署。
+    version: process.env.ENGINE_VERSION || process.env.APP_VERSION || '0.3.0',
     gitHead: await getGitHead(),
     branch,
   }

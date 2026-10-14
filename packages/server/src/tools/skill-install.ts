@@ -9,7 +9,7 @@ const tool: ToolDef = {
     name: 'skill_install',
     description: '从 GitHub 安装第三方技能。传入包含 SKILL.md 的 GitHub 仓库 URL。',
     category: 'system',
-    dangerous: true,
+    requiresApproval: true,
     parameters: {
       type: 'object',
       properties: {

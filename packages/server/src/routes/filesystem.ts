@@ -1,9 +1,10 @@
 import Router from 'koa-router'
-import { readdirSync, existsSync } from 'fs'
+import { readdirSync, existsSync, createReadStream } from 'fs'
 import { readFile, stat } from 'fs/promises'
 import { join, resolve, dirname } from 'path'
 import { homedir } from 'os'
 import { assertSafeFilePath } from '../services/sandbox'
+import { mediaMimeOf, isNonPreviewableBinary } from '../services/file-kind'
 
 /**
  * 文件内容预览的单文件上限。
@@ -117,6 +118,30 @@ fsRouter.get('/read', async (ctx) => {
     }
     return
   }
+  // ⚠️ 二进制不能当 utf-8 读（2026-09-29：这正是"AI 截屏在右栏预览成乱码"的根因）。
+  // 真机实测：旧代码对 152 KB 的 PNG 返回 200 + 353525 字节 JSON，content 全是 \ufffd 替换字符。
+  const mediaMime = mediaMimeOf(safePath)
+  if (mediaMime) {
+    ctx.body = {
+      path: safePath,
+      kind: 'media',
+      mime: mediaMime,
+      size: fileStat.size,
+      // 前端 `<img src>` 不能带自定义请求头 ⇒ 用同源 GET 直出原始字节（同一套沙箱校验）
+      url: `/api/filesystem/raw?path=${encodeURIComponent(safePath)}`,
+    }
+    return
+  }
+  if (isNonPreviewableBinary(safePath)) {
+    ctx.body = {
+      path: safePath,
+      kind: 'binary',
+      mime: 'application/octet-stream',
+      size: fileStat.size,
+      message: `二进制文件（${(fileStat.size / 1024).toFixed(1)} KB）不支持文本预览`,
+    }
+    return
+  }
   try {
     // 异步读：大文件不再同步占住事件循环（本路由只做预览，异步读完全够用）
     const allLines = (await readFile(safePath, 'utf-8')).split('\n')
@@ -126,6 +151,7 @@ fsRouter.get('/read', async (ctx) => {
     const lines = allLines.slice(s - 1, e)
     ctx.body = {
       path: safePath,
+      kind: 'text',
       totalLines,
       startLine: s,
       endLine: e,
@@ -136,4 +162,48 @@ fsRouter.get('/read', async (ctx) => {
   } catch (err: any) {
     ctx.body = { error: err.message }
   }
+})
+
+/**
+ * 原始字节直出（2026-09-29 新增）：图片 / PDF 等媒体交给浏览器自己渲染。
+ *
+ * 为什么**必须**新增这条：历史上没有任何"工作区文件直出"的链路 —— koa-static 只挂了
+ * `client/dist`，实测 `GET /uploads/screenshots/screen-*.png` 拿到的是 SPA 的 index.html
+ * （200 + text/html + 2330 字节），所以前端根本拿不到可用的 `<img src>`。
+ *
+ * 安全边界（三条都要，缺一条就变成漏洞）：
+ *   ① 与 `/read` **同一套** `assertSafeFilePath` 沙箱校验（含凭据文件/敏感目录拦截）；
+ *   ② 只放行 `file-kind` 里白名单的媒体类型 —— 不让本路由变成"任意文件下载"通道；
+ *   ③ 大小上限与文本预览一致 + `nosniff` + 图片加 CSP（媒体不需要脚本能力）。
+ */
+fsRouter.get('/raw', async (ctx) => {
+  const raw = String(ctx.query.path || '').trim()
+  if (!raw) { ctx.status = 400; ctx.body = { error: '缺少 path 参数' }; return }
+  const pathErr = assertSafeFilePath(raw)
+  if (pathErr) { ctx.status = 403; ctx.body = { error: `路径不在白名单内：${pathErr}` }; return }
+  const safePath = resolve(raw)
+  const mime = mediaMimeOf(safePath)
+  if (!mime) { ctx.status = 415; ctx.body = { error: '该类型不支持内嵌预览' }; return }
+  let st: Awaited<ReturnType<typeof stat>>
+  try {
+    st = await stat(safePath)
+  } catch {
+    ctx.status = 404
+    ctx.body = { error: '文件不存在' }
+    return
+  }
+  if (!st.isFile()) { ctx.status = 404; ctx.body = { error: '文件不存在' }; return }
+  if (st.size > MAX_PREVIEW_BYTES) {
+    ctx.status = 413
+    ctx.body = { error: `文件过大（${(st.size / 1024 / 1024).toFixed(1)} MB），预览上限 ${MAX_PREVIEW_BYTES / 1024 / 1024} MB` }
+    return
+  }
+  ctx.set('Content-Type', mime)
+  ctx.set('Content-Length', String(st.size))
+  ctx.set('Cache-Control', 'no-store')
+  ctx.set('X-Content-Type-Options', 'nosniff')
+  // 只对图片收紧 CSP：PDF 走浏览器内置阅读器，加 CSP 有概率把它打坏（收益也低）
+  if (mime.startsWith('image/')) ctx.set('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'")
+  // 流式直出（与 upload.ts 的 /files/:id 同款）；不用 readFile 是为了不把整个文件读进内存
+  ctx.body = createReadStream(safePath)
 })

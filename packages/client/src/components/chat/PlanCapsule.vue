@@ -101,16 +101,32 @@ async function loadPlanHistory() {
       }),
     )
     planStore.setPlanHistory(withSteps.filter((p) => p.steps.length > 0))
+
+    // ---- 恢复胶囊（bug 修复 2026-09-26：刷新/切会话后胶囊消失）----
+    // 胶囊主显示吃 planProgress（原只由 SSE plan_update 写入，刷新即空）。
+    // 这里从任务历史里找 status='in_progress' 的根任务回填——进行中的计划恢复显示，
+    // 已完成的计划不回填（只在弹窗时间线），避免完成态悬挂。
+    // 注意：恢复的就是模型 task_update 声明的真实状态（进度已智能化，无轮次盲推）。
+    const activeRoot = roots.find((root: any) => root.status === 'in_progress')
+    if (activeRoot) {
+      const match = withSteps.find((p) => p.planId === activeRoot.id)
+      if (match && match.steps.length > 0) {
+        planStore.setPlanUpdate({ planId: match.planId, title: match.title, steps: match.steps })
+      }
+    } else {
+      planStore.clearPlan()
+    }
   } catch {
     planStore.setPlanHistory([])
   }
 }
 
-// 切会话：关闭弹窗并重新拉取该会话的任务历史
+// 切会话：关闭弹窗并重新拉取该会话的任务历史。
+// immediate: 首次挂载（刷新页面）也执行——否则刷新后胶囊和历史都不恢复（bug 2026-09-26）
 watch(() => chatStore.currentSessionId, () => {
   popoverOpen.value = false
   loadPlanHistory()
-})
+}, { immediate: true })
 </script>
 
 <style scoped>

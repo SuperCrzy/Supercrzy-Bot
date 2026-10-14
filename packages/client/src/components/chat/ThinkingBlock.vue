@@ -98,7 +98,8 @@ function toggleLive() {
 const liveSummary = computed(() => {
   const lines = (props.reasoning || '').split('\n').filter((l) => l.trim())
   const line = (lines[lines.length - 1] || '').trim()
-  return line.slice(0, 42)
+  // 2026-09-24：42 字符截断太狠（老板报"思考框被截断"），提到 80；剩余宽度由 CSS ellipsis 兜底
+  return line.slice(0, 80)
 })
 
 // ============ 推理容器自动跟随最新（思考流式时滚到底部，用户上滑则暂停跟随） ============
@@ -132,7 +133,8 @@ function toggleReasoning() {
 const reasoningFirstLine = computed(() => {
   const text = props.reasoning || ''
   const line = text.trim().split('\n')[0] || ''
-  return line.slice(0, 42)
+  // 2026-09-24：42 字符截断太狠（老板报"思考框被截断"），提到 80；剩余宽度由 CSS ellipsis 兜底
+  return line.slice(0, 80)
 })
 
 /**
@@ -220,7 +222,9 @@ function cleanReasoning(text: string | undefined): string {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 420px;
+  /* 2026-09-24：原 max-width: 420px 固定上限在窄容器里吃不满行宽、宽容器里又过早截断 → flex 吃满剩余行宽 */
+  flex: 1;
+  min-width: 0;
   opacity: 0.8;
 }
 
@@ -340,7 +344,8 @@ function cleanReasoning(text: string | undefined): string {
   line-height: 1.6;
   color: var(--text-secondary);
   word-break: break-word;
-  max-height: 240px;
+  /* 2026-09-24：240px 限高截掉大半内容（老板报"思考框被截断"）→ 提到 min(60vh, 400px)，保滚动防刷屏 */
+  max-height: min(60vh, 400px);
   overflow-y: auto;
 }
 /* 推理内 markdown 元素（对齐 WorkBuddy reasoning theme：弱化紧凑、代码框整洁） */
@@ -372,11 +377,11 @@ function cleanReasoning(text: string | undefined): string {
 }
 .thinking-reasoning :deep(a) { color: var(--accent); }
 .thinking-reasoning :deep(strong) { color: var(--text-primary); }
-/* 流式中（live）：推理实时流式可见（不折叠）；限高 360px 滚动，防止超长推理把页面撑爆（老板 2026-08-21：思考时可展开） */
+/* 流式中（live）：推理实时流式可见（不折叠）；限高滚动，防止超长推理把页面撑爆（老板 2026-08-21：思考时可展开；2026-09-24 360px → min(60vh, 520px)） */
 .thinking-reasoning.live {
   border-left-color: var(--accent);
   opacity: 0.92;
-  max-height: 360px;
+  max-height: min(60vh, 520px);
   overflow-y: auto;
 }
 </style>

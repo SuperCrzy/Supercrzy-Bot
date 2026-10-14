@@ -2,6 +2,10 @@ import { defineStore } from 'pinia'
 import i18n from '@/i18n'
 import { ref, computed } from 'vue'
 import type { ChatSession, ChatMessage, ContentBlock, TextBlock, ChatFlowNode } from '@/types'
+import { reconcileAnswerText } from '@/utils/flow-reconcile'
+
+/** 加载端对账补建的正文节点 id 序号（避免同毫秒内重复） */
+let restoreSeq = 0
 
 /** 将旧格式字符串 content 转为 ContentBlock[] */
 function normalizeContent(content: any): ContentBlock[] {
@@ -24,6 +28,38 @@ function normalizeContent(content: any): ContentBlock[] {
     return content ? [{ type: 'text', text: content }] : []
   }
   return []
+}
+
+/**
+ * 空回复判定（2026-09-29 归因 #6）。
+ *
+ * ## 归因结论（真实运行库 `~/.supercrzy/data/supercrzy.db`，只读查证）
+ *
+ * 160 条 assistant 中 9 条（**5.6%**）content 为空。逐条比对后确认：
+ * **这 9 条的 `created_at` 与它前面那条 user 消息精确到"同一秒"、`elapsed_ms` 为 NULL**
+ * ⇒ 行是**轮次开始时**就建好的占位，随后这一轮始终没写入正文。
+ * 按日分布：08-28 ×1 / 09-04 ×1 / **09-18 ×2（都在长会话 `3fc4d08f`，正是已知的
+ * `reasoning_content` 400 那个会话）** / 09-25 ×4 / 09-26 ×1；**09-29 为 0/20**。
+ * 且 9 条里有 7 条连 `attachments` 都是空的 ⇒ **不是"内容丢失"，是"这一轮没产出"**。
+ *
+ * ## 为什么仍要标注
+ *
+ * `stopReason` 只在内存里（`messages` 表**没有**该列）⇒ 刷新之后这条消息只剩一个
+ * **空白气泡、没有任何解释**，看起来像"AI 坏了"。这里在历史加载时把"被中断"补回去，
+ * 复用既有 stop-reason 横幅（`MessageFlowRenderer` 的 `.stop-reason-banner`），
+ * **不新增 UI、不新增文案**（`chat.stopReasonDefault` 已存在且语义正好）。
+ *
+ * 判据刻意收紧到"连过程都没有"（无正文 **且** flow 里没有 text/tool 节点）——
+ * 只有思考节点的行仍会显示思考块，不算空白，不该被标成中断。
+ */
+export function isBlankAssistantTurn(m: any, flow: ChatFlowNode[] | undefined): boolean {
+  if (m?.role !== 'assistant') return false
+  const text = normalizeContent(m.content)
+    .filter((b: any) => b.type === 'text')
+    .map((b: any) => String(b.text))
+    .join('')
+  if (text.trim()) return false
+  return !(flow || []).some((n) => n.kind === 'text' || n.kind === 'tool')
 }
 
 /** 人性化时间显示 — 兼容多种日期格式 */
@@ -202,15 +238,13 @@ export const useChatStore = defineStore('chat', () => {
           // 兼容旧数据：将字符串 content 转为 ContentBlock[]；attachments.flow 还原执行过程（历史折叠条可展开）
           const normalized = data.messages.map((m: any) => {
             let flow = parseFlowFromAttachments(m.attachments)
-            // 兜底：flow 正文与 content 对账（content 是完整真相）——
-            // ①flow text 与 content 严重不一致（打字机错乱/旧数据）→ 丢弃 flow text 节点，用 content 重建正文
-            // ②flow text 缺失在末尾 → 用 content 补尾；③flow 完全无 text → 补建
+            // 兜底：flow 正文与 content 对账（content 是完整真相）。
+            // 2026-09-24 收敛：唯一实现 = utils/flow-reconcile.ts（判据是「末段是不是 content 前缀」，
+            // **不是长度**）。旧实现两处按长度切片：先算「全部 text 段拼接长度」当偏移再 slice，
+            // 把过程旁白长度也算进偏移 → 答案中间被挖洞（真实库 80 条中 59 条命中，其中 51 条长度还相等）。
             if (flow && flow.length > 0) {
-              const flowTexts = flow.filter((n) => n.kind === 'text')
-              const flowTextLen = flowTexts.reduce((s, n) => s + String(n.text).length, 0)
-              const flowJoined = flowTexts.map((n) => String(n.text)).join('')
               // 注意：content 可能含 ```svg 代码块（draw_diagram 前模型兜底输出），flow text 不含——
-              // 必须先剥离 SVG 代码块再比较，否则误判"缺内容"把 SVG 中段补进正文（导致乱码）
+              // 必须先剥离 SVG 代码块再比较，否则会把 SVG 中段当成"缺失内容"补进正文（乱码）
               const rawText = normalizeContent(m.content)
                 .filter((b: any) => b.type === 'text')
                 .map((b: any) => String(b.text))
@@ -218,25 +252,8 @@ export const useChatStore = defineStore('chat', () => {
               const contentText = rawText
                 .replace(/```(?:svg|xml)\s*[\s\S]*?```/g, '')
                 .replace(/<svg[\s\S]*?<\/svg>/g, '')
-              // 公共前缀判定：flow 正文与 content 严重不一致（<50%）→ flow text 已错乱
-              let cp = 0
-              const minLen = Math.min(flowJoined.length, contentText.length)
-              while (cp < minLen && flowJoined[cp] === contentText[cp]) cp++
-              const flowBroken = flowJoined.length > 0 && cp < minLen * 0.5
-              if (flowBroken) {
-                // 保留过程节点（thinking/tool/diagram），正文用 content 重建（放末尾=最终报告位置）
-                flow = flow.filter((n) => n.kind !== 'text')
-                if (contentText.trim()) flow.push({ id: `restored-${Date.now()}`, kind: 'text', text: contentText })
-              } else if (contentText.length > flowTextLen + 50) {
-                const missing = contentText.slice(flowTextLen)
-                const lastText = [...flow].reverse().find((n) => n.kind === 'text')
-                if (lastText) {
-                  lastText.text += missing
-                } else {
-                  // flow 无任何 text 节点：补建（放末尾 = 最终报告位置），恢复 markdown 排版
-                  flow.push({ id: `restored-${Date.now()}`, kind: 'text', text: missing })
-                }
-              }
+              const reconciled = reconcileAnswerText(flow, contentText, () => `restored-${Date.now().toString(36)}-${restoreSeq++}`)
+              flow = reconciled.flow
             }
             // P0-7 耗时订正（WorkBuddy correctAssistantCreateTimeFromTools 同款）：
             // 历史消息 elapsed_ms 缺失时，用 flow 内工具节点的最大 createTime 与 startedAt 之差兜底
@@ -261,6 +278,10 @@ export const useChatStore = defineStore('chat', () => {
               flow,
               // 2026-08-26：从 attachments 还原 deliverySummary，AI 回复底部"本会话产物"刷新后不丢
               deliverySummary: parseDeliveryFromAttachments(m.attachments),
+              // 2026-09-29：空回复（被中断/失败且无任何产出）刷新后只剩空白气泡 ⇒ 补回"中断"横幅
+              ...(isBlankAssistantTurn(m, flow)
+                ? { stopReason: { reason: 'interrupted' as const, message: '', checkpointId: '' } }
+                : {}),
             }
           })
           messages.value.set(sessionId, normalized)

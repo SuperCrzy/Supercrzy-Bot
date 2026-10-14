@@ -8,10 +8,21 @@ const wsRoot = mkdtempSync(join(tmpdir(), 'supercrzy-ws-test-'))
 process.env.WORKSPACE_DIR = wsRoot
 
 let safePath: (input: string) => string | null
+/**
+ * ⚠️ 必须给这个 hook 显式超时（默认 `hookTimeout` 只有 10s）。
+ *
+ * 2026-09-28 实测：本文件单跑时 import 约 2.2s，但**全量并行**下会超过 10s
+ * ⇒ `Hook timed out in 10000ms`，**整个文件的 9 条用例全部被记成 skipped、文件记成 failed**。
+ * 症状很有欺骗性：单跑永远绿，只有 `pnpm verify` 全量时才时红时绿，失败信息也只说"Hook timed out"。
+ *
+ * 根因是**本机模块加载本身就很贵**（同一台机器上 `require('jsdom')` 实测 **46.7s**，
+ * 而 `new JSDOM()` 只要 42ms —— 贵在解析/加载，不在实例化）。所以
+ * "**动态 import 重模块**"的 hook 必须给显式超时，别再吃 10s 的默认值。
+ */
 beforeAll(async () => {
   const mod = await import('../routes/workspace')
   safePath = mod.safePath
-})
+}, 60_000)
 
 describe('safePath 路径白名单（防目录穿越）', () => {
   it('合法相对路径可解析', () => {

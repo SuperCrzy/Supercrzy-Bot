@@ -103,7 +103,8 @@ function cleanReasoning(text: string | undefined): string {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  max-height: 300px;
+  /* 2026-09-24：300px → min(60vh, 520px)，对齐 ThinkingBlock 展开态限高（老板报"思考框被截断"） */
+  max-height: min(60vh, 520px);
   overflow-y: auto;
 }
 .tg-turn-label {

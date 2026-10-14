@@ -6,6 +6,7 @@ import { getUpdates, sendMessage, loadCredentials, clearCredentials, notifyStart
 // @ts-ignore - StreamingMarkdownFilter 无类型声明，但运行时有效
 import { StreamingMarkdownFilter } from '@tencent-weixin/openclaw-weixin/dist/src/messaging/markdown-filter.js'
 import { randomBytes } from 'crypto'
+import { resolveFfmpeg } from './ffmpeg'
 
 // ---- 延迟导入文件解析库（避免服务器启动时报错） ----
 async function tryParsePdf(buffer: Buffer): Promise<string | null> {
@@ -65,13 +66,17 @@ async function tryTranscribeAudio(
     await fs.writeFile(tmpPath, df.buffer)
     
     // 3. 转换为 mp3 (使用 ffmpeg)
+    // 2026-09-20：原来写死 `ffmpeg`（依赖 PATH）。本机 arm64 既无 brew 也无 PATH 里的 ffmpeg，
+    // 这条链路一直是死的，只是被 catch 静默降级成「直接转写」而没人发现。改用统一解析。
+    const ffBin = (await resolveFfmpeg(process.env.FFMPEG_PATH)).path
     const mp3Path = `/tmp/wechat-voice-${Date.now()}.mp3`
     try {
+      if (!ffBin) throw new Error('ffmpeg 不可用')
       // 异步执行：execSync 会在 ffmpeg 转码全程（此处 timeout 上限 30s）冻住事件循环，
       // 把同后端上所有并发 SSE 流一起冻住。语音转码本来就在等外部进程，没有理由同步等。
       const { exec } = await import('child_process')
       const { promisify } = await import('util')
-      await promisify(exec)(`ffmpeg -y -i "${tmpPath}" -acodec libmp3lame "${mp3Path}" 2>/dev/null`, { timeout: 30000 })
+      await promisify(exec)(`"${ffBin}" -y -i "${tmpPath}" -acodec libmp3lame "${mp3Path}" 2>/dev/null`, { timeout: 30000 })
       console.log(`[WeChat ASR] Converted to MP3: ${mp3Path}`)
     } catch {
       // ffmpeg 不可用，尝试直接使用原始文件

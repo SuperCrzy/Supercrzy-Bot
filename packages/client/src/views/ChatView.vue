@@ -470,7 +470,7 @@
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35M11 8v6M8 11h6"/></svg>
                   </span>
                 </div>
-                <div class="diagram-body" v-html="d.svg"></div>
+                <div class="diagram-body" v-html="sanitizeSvg(d.svg)"></div>
               </div>
             </div>
 
@@ -489,12 +489,14 @@
               </div>
             </div>
 
-            <!-- 任务总计时：AI 回复开始（startedAt）即显示"已用时 Xs"实时增长；done 后显示"已完成 Xs" -->
+            <!-- 任务总计时：运行中"已用时 Xs"实时增长；done 后"已完成 Xs"。
+                 计时器封装在 ElapsedBadge 内部（整秒边界对齐），不再用页面级 nowTs —— 见该组件注释。 -->
             <div v-if="msg.role === 'assistant' && (msg.elapsedMs || (msg.startedAt && chatStore.isLoading))" class="message-tokens">
-              <span class="elapsed-badge">
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                {{ msg.elapsedMs ? formatElapsed(msg.elapsedMs) : $t('chatui.timingInProgress', { n: formatElapsed(Math.max(0, nowTs - (msg.startedAt || nowTs))) }) }}
-              </span>
+              <ElapsedBadge
+                :started-at="msg.startedAt"
+                :elapsed-ms="msg.elapsedMs"
+                :running="chatStore.isLoading"
+              />
             </div>
 
             <!-- Token usage（受设置"显示成本"控制） -->
@@ -531,17 +533,33 @@
                 <span>{{ $t('chat.resend') }}</span>
               </button>
             </template>
-            <!-- AI 消息：点赞/点踩 + 重新生成 + 更多（复制消息/复制请求 ID/删除） -->
+            <!-- AI 消息：朗读 + 重新生成 + 更多（复制消息/复制请求 ID/删除） -->
             <template v-else>
+              <!-- 朗读（2026-09-26）：仅回复完成后可用（流式中内容未定稿）；三态 朗读→暂停→继续
+                   2026-09-28 加第四态「正在合成语音」：点下去到出声之间有一段 0.3~3s 的合成窗口，
+                   这段时间按钮必须**禁用并改名** —— 否则用户以为没反应去重复点击（旧实现下第二次
+                   点击会被判成"暂停"，直接导致永久静音）。 -->
+              <button
+                v-if="speechSupported && !chatStore.isLoading && msg.content"
+                class="msg-action"
+                :class="{ active: speakingMsgId === msg.id }"
+                :disabled="speakingMsgId === msg.id && speechSynthesizing"
+                :title="speakingMsgId === msg.id ? (speechSynthesizing ? $t('chat.speakingSynthesizing') : (speechPaused ? $t('chat.speakResume') : $t('chat.speakPause'))) : $t('chat.speak')"
+                @click="toggleSpeak(msg)"
+              >
+                <!-- 未播放：喇叭 -->
+                <svg v-if="speakingMsgId !== msg.id" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+                <!-- 合成中：环形（还没出声，暂停按钮此刻无意义） -->
+                <svg v-else-if="speechSynthesizing" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a9 9 0 1 0 9 9"/></svg>
+                <!-- 播放中：暂停 -->
+                <svg v-else-if="!speechPaused" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>
+                <!-- 已暂停：继续 -->
+                <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                <span>{{ speakingMsgId === msg.id ? (speechSynthesizing ? $t('chat.speakingSynthesizing') : (speechPaused ? $t('chat.speakResume') : $t('chat.speakPause'))) : $t('chat.speak') }}</span>
+              </button>
               <button class="msg-action" :title="$t('chat.regenerate')" @click="regenerateMessage(msg)">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
                 <span>{{ $t('chat.regenerate') }}</span>
-              </button>
-              <button class="msg-action" :class="{ active: msg.feedback === 'up' }" :title="$t('chat.like')" @click="setFeedback(msg, 'up')">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"/></svg>
-              </button>
-              <button class="msg-action" :class="{ active: msg.feedback === 'down' }" :title="$t('chat.dislike')" @click="setFeedback(msg, 'down')">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3z"/><path d="M17 2h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3"/></svg>
               </button>
               <!-- 更多菜单 -->
               <div class="msg-more-wrap">
@@ -620,19 +638,10 @@
         :actions="[{ label: $t('chat.errorBannerGoConfig'), variant: 'primary', onClick: () => router.push('/models') }]"
         @dismiss="noKeyBannerDismissed = true"
       />
-      <!-- 全局执行状态条：AI 当前动作（对齐 WorkBuddy progress.phase——正在思考/执行命令/获取网页/生成回复，随阶段切换） -->
-      <div v-if="aiStatus" class="ai-status-bar">
-        <svg class="ai-status-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <template v-if="aiStatus === 'chat.statusRunningCmd'"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></template>
-          <template v-else-if="aiStatus === 'chat.statusEditingFile' || aiStatus === 'chat.statusWriting'"><path d="M17 3a2.83 2.83 0 0 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></template>
-          <template v-else-if="aiStatus === 'chat.statusSearchingWeb' || aiStatus === 'chat.statusFetchingWeb'"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></template>
-          <template v-else-if="aiStatus === 'chat.statusReadingFile' || aiStatus === 'chat.statusSearchingFiles'"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></template>
-          <template v-else-if="aiStatus === 'chat.statusGenerating'"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></template>
-          <template v-else><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></template>
-        </svg>
-        <span class="ai-status-label">{{ t(aiStatus) }}<span v-if="aiStatusTarget" class="ai-status-target"> {{ aiStatusTarget }}</span></span>
-        <span class="ai-status-dots"><i></i><i></i><i></i></span>
-      </div>
+      <!-- 全局执行状态条已移除（2026-09-26 老板裁决）：真机逐帧审计证实它与消息流内 PSL
+           高度重复且滞后一拍（两个不同步的"当前状态"同屏打架，观感臃肿）。
+           执行状态统一由两处承载：消息流内 PSL（动作级）+ 顶栏 PlanCapsule（任务级）。
+           aiStatus 的赋值链路保留未删（数据流零改动，后续若需恢复渲染有现成数据）。 -->
       <div class="composer-card">
         <!-- 文件预览列表（上传后但发送前） -->
         <div v-if="uploadedFiles.length > 0" class="file-preview-list">
@@ -719,6 +728,17 @@
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
             </button>
           </div>
+        </div>
+
+        <!-- 朗读浮条（2026-09-27）：自动/手动朗读时在输入框上方现身（要一眼看到"还在念"+能一键停，所以必须比消息操作栏按钮更显眼） -->
+        <div v-if="speakingMsgId" class="speak-bar">
+          <span class="speak-bar-text">{{ speechSynthesizing ? $t('chat.speakingSynthesizing') : (speechPaused ? $t('chat.speakingPaused') : $t('chat.speaking')) }}</span>
+          <span v-if="speechProDegraded" class="speak-bar-hint">{{ $t('chat.speakDegraded') }}</span>
+          <span class="speak-bar-spacer"></span>
+          <button class="speak-bar-btn" :disabled="speechSynthesizing" @click="toggleSpeech(speakingMsgId, '')">
+            {{ speechPaused ? $t('chat.speakResume') : $t('chat.speakPause') }}
+          </button>
+          <button class="speak-bar-btn speak-bar-stop" @click="stopSpeech()">{{ $t('chat.speakStop') }}</button>
         </div>
 
         <div class="input-row">
@@ -909,7 +929,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, nextTick, watch, onMounted, onUnmounted, h } from 'vue'
+import { ref, computed, nextTick, watch, onMounted, onUnmounted, h } from 'vue'
 import { useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useChatStore, isDefaultTitle } from '@/stores/chat'
@@ -919,18 +939,19 @@ import { usePlanStore } from '@/stores/plan'
 import ProfileAvatar from '@/components/ui/ProfileAvatar.vue'
 import { getModelShortName } from '@/data/models'
 import type { ChatMessage, Attachment, ToolCallEvent, ChatFlowNode } from '@/types'
-import { extractText, normalizeContent } from '@/types'
-import { applyToolArgsChunk, applyToolDuration, applyToolOutput, applyToolResult, toolStatusLabel, extractToolTarget, nextNodeId } from '@/utils/agent-flow'
+import { applyToolArgsChunk, applyToolDuration, applyToolOutput, applyToolProgress, applyToolResult, toolStatusLabel, extractToolTarget, nextNodeId } from '@/utils/agent-flow'
 import { errMsg } from '@/utils/i18n-error'
 import { l10n } from '@/utils/i18n-field'
-import { playCompletionSound } from '@/utils/sound'
+import { playCompletionTone } from '@/utils/sound'
 // P1-04：以下纯逻辑从本文件下沉到 utils（原先堆在 6500 行里且无测试）
 import { isImageType, isPdfType, isDocType, isSheetType, formatFileSize, formatArtifactSize } from '@/utils/attachment'
 import { hasDelivery, deliveryHeadClass, fmtDeliveryDuration, fmtDeliveryCost } from '@/utils/delivery'
-import { textOf, messagePlainText, searchContent } from '@/utils/message-text'
+import { textOf, searchContent } from '@/utils/message-text'
 import { parseTrigger } from '@/utils/trigger'
 import { copyRichText, copyToClipboard, stripMarkdown } from '@/utils/clipboard'
 import MarkdownIt from 'markdown-it'
+// I3：AI 产出的 SVG 走 v-html 前必须清洗（见 utils/sanitize-svg.ts 的威胁模型）
+import { sanitizeSvg } from '@/utils/sanitize-svg'
 import { parseDeepLinkFromURL, registerDeepLinkListener } from '@/utils/deeplink'
 // P1-04 拆分（2026-09-18）：交付页判定与对话导出下沉为纯模块，组件只留副作用
 import {
@@ -938,11 +959,26 @@ import {
   deliverySummaryArtifacts, deliverySummaryExpanded, toggleDeliverySummary,
   deliveryStatusKey, formatArtifactTime as formatArtifactTimeRaw,
 } from '@/utils/artifact-kind'
-import {
-  safeFileName, buildConversationMarkdown as buildConversationMarkdownRaw,
-  computeShareBlocks, computeShareImageHeight, drawShareImage,
-} from '@/utils/share-export'
+// 分享 / 导出：纯逻辑（布局、Markdown 序列化）在 utils/share-export，副作用收在 useShareExport
+// I10 低风险批（2026-09-24）：状态型逻辑下沉为 composable，组件只留接线
+import { useInputHistory } from '@/composables/useInputHistory'
+import { useInputHeight } from '@/composables/useInputHeight'
+import { createChatText, actorMeta } from '@/utils/chat-text'
+import { useQuote } from '@/composables/useQuote'
+import { useMessageWindow } from '@/composables/useMessageWindow'
+import { useCodeBlocks } from '@/composables/useCodeBlocks'
+import { useAttachments } from '@/composables/useAttachments'
+import { autoExtractDiagrams, flowDiagramSet } from '@/utils/svg-extract'
+import { useInputTrigger } from '@/composables/useInputTrigger'
+import { useArtifacts, type ArtifactItem } from '@/composables/useArtifacts'
+import { useHistorySearch } from '@/composables/useHistorySearch'
+import { useShareExport } from '@/composables/useShareExport'
+import { useAskQuestion } from '@/composables/useAskQuestion'
+import { useChatSpeech } from '@/composables/useChatSpeech'
+import { formatTtsRate } from '@/composables/useSpeechPreview'
+import { useWelcomePanel } from '@/composables/useWelcomePanel'
 import ContextUsageRing from '@/components/chat/ContextUsageRing.vue'
+import ElapsedBadge from '@/components/chat/ElapsedBadge.vue'
 import PlanCapsule from '@/components/chat/PlanCapsule.vue'
 import MessageFlowRenderer from '@/components/chat/MessageFlowRenderer.vue'
 import ToolApprovalFloating from '@/components/chat/ToolApprovalFloating.vue'
@@ -959,124 +995,25 @@ const planStore = usePlanStore()
 const appStore = useAppStore()
 const router = useRouter()
 
-// ---- 历史消息搜索（右上角放大镜：跨会话全文搜索消息内容）----
-const searchOpen = ref(false)
-const searchQuery = ref('')
-const searchResults = ref<any[]>([])
-const searchSearched = ref(false)
+// ---- 历史消息搜索（右上角放大镜）→ composables/useHistorySearch.ts ----
+const {
+  searchOpen, searchQuery, searchResults, searchSearched,
+  openSearch, onSearchQueryChange, doSearch, openSearchResult,
+} = useHistorySearch({
+  selectSession: (id: string) => chatStore.selectSession(id),
+  afterOpen: () => router.push('/'),
+})
 
-function openSearch() {
-  searchOpen.value = true
-  searchQuery.value = ''
-  searchResults.value = []
-  searchSearched.value = false
-  setTimeout(() => { (document.querySelector('.search-modal input') as HTMLInputElement | null)?.focus() }, 120)
-}
-
-/** 跨会话全文搜索消息内容（含提问与 AI 回复；q 为空 = 清空结果） */
-async function searchHistoryMessages(q: string) {
-  try {
-    const url = `/api/history/search?q=${encodeURIComponent(q)}`
-    const res = await fetch(url)
-    if (res.ok) searchResults.value = await res.json()
-  } catch {}
-  searchSearched.value = true
-}
-
-/** 输入变化：空 → 清空结果；有字 → 即输即搜（防抖） */
-let searchDebounce: ReturnType<typeof setTimeout> | null = null
-function onSearchQueryChange(v: string) {
-  if (searchDebounce) clearTimeout(searchDebounce)
-  searchDebounce = setTimeout(() => {
-    const q = v.trim()
-    if (q) searchHistoryMessages(q)
-    else { searchResults.value = []; searchSearched.value = false }
-  }, 250)
-}
-
-async function doSearch() {
-  const q = searchQuery.value.trim()
-  if (!q) { searchResults.value = []; searchSearched.value = false; return }
-  searchHistoryMessages(q)
-}
-
-/** 搜索结果内容展示：兼容纯文本 / ContentBlock[] / 双重序列化 */
-
-/** 点击结果：打开对应会话 */
-async function openSearchResult(r: any) {
-  searchOpen.value = false
-  if (!r.session_id) return
-  await chatStore.selectSession(r.session_id)
-  router.push('/')
-}
-
-// ============ 对话分享 / 导出（Grok 式传播杠杆：Markdown 复制/下载 + 分享图） ============
-const shareMenuOpen = ref(false)
-
-/** 提取单条消息纯文本（兼容 string / ContentBlock[] 两种 content 形态） */
-
-/** 把整个对话转成 Markdown（纯逻辑在 utils/share-export，此处只供标题与文案） */
-function buildConversationMarkdown(): string {
-  return buildConversationMarkdownRaw({
-    title: currentSession.value?.title || t('nav.newTask'),
-    messages: messages.value,
-    plainText: messagePlainText,
-    meLabel: t('chat.me'),
-    assistantLabel: 'SUPERCRZY',
+// ============ 对话分享 / 导出 → composables/useShareExport.ts ============
+const { shareMenuOpen, copyConversationMarkdown, downloadConversationMarkdown, generateShareImage } =
+  useShareExport({
+    title: () => currentSession.value?.title,
+    messages: () => messages.value as any[],
+    t: (k: string) => t(k),
+    onWarn: (msg: string) => nMessage.warning(msg),
+    onInfo: (msg: string) => nMessage.info(msg),
+    onError: (msg: string) => nMessage.error(msg),
   })
-}
-
-/** 复制为 Markdown */
-async function copyConversationMarkdown() {
-  shareMenuOpen.value = false
-  const md = buildConversationMarkdown()
-  if (!md.trim()) { nMessage.warning(t('chat.shareEmpty')); return }
-  try {
-    await navigator.clipboard.writeText(md)
-    nMessage.success(t('chat.shareCopied'))
-  } catch {
-    nMessage.error(t('chat.shareCopyFail'))
-  }
-}
-
-/** 下载 Markdown 文件 */
-function downloadConversationMarkdown() {
-  shareMenuOpen.value = false
-  const md = buildConversationMarkdown()
-  if (!md.trim()) { nMessage.warning(t('chat.shareEmpty')); return }
-  const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `${safeFileName(currentSession.value?.title)}.md`
-  a.click()
-  URL.revokeObjectURL(url)
-}
-
-/** 生成分享图（canvas 绘制对话卡片 → 下载 PNG）；布局与绘制在 utils/share-export */
-function generateShareImage() {
-  shareMenuOpen.value = false
-  const msgs = messages.value.filter((m) => m.role === 'user' || m.role === 'assistant')
-  if (!msgs.length) { nMessage.warning(t('chat.shareEmpty')); return }
-  nMessage.info(t('chat.shareImageGenerating'))
-  const canvas = document.createElement('canvas')
-  const ctx = canvas.getContext('2d')!
-  ctx.font = '15px system-ui, sans-serif'
-  const blocks = computeShareBlocks(msgs, ctx, { plainText: messagePlainText, maxMessages: 6 })
-  if (!blocks.length) { nMessage.warning(t('chat.shareEmpty')); return }
-  canvas.width = 1080
-  canvas.height = computeShareImageHeight(blocks)
-  drawShareImage(ctx, blocks, {
-    title: currentSession.value?.title || '',
-    dateText: new Date().toLocaleDateString(),
-    meLabel: t('chat.me'),
-    assistantLabel: 'SUPERCRZY',
-  })
-  const a = document.createElement('a')
-  a.href = canvas.toDataURL('image/png')
-  a.download = `${safeFileName(currentSession.value?.title)}.png`
-  a.click()
-}
 
 // ---- 模型选择器选项(与侧边栏同源)----
 type ModelSelectOption =
@@ -1091,98 +1028,14 @@ const nMessage = useMessage()
 const { locale, t } = useI18n({ useScope: 'global' })
 const inputText = ref('')
 
-// ============ 输入历史（对齐 WorkBuddy use-input-history：↑ 找回上一条，↓ 回下一条，终端习惯） ============
-const INPUT_HISTORY_MAX = 50
-const inputHistory = ref<string[]>([])
-const historyIdx = ref(-1) // -1 = 不在浏览历史
-
-/** 发送成功时记录进历史（去重：最新相同不重复记） */
-function pushInputHistory(text: string) {
-  const trimmed = text.trim()
-  if (!trimmed) return
-  if (inputHistory.value[0] === trimmed) return
-  inputHistory.value.unshift(trimmed)
-  if (inputHistory.value.length > INPUT_HISTORY_MAX) inputHistory.value.pop()
-  historyIdx.value = -1
-}
-
-/** ↑：找回上一条（输入为空或已在浏览历史时接管；有内容且未浏览 → 放行光标） */
-function historyPrev(e?: KeyboardEvent) {
-  if (triggerState.value) return // 触发菜单激活时 ↑ 用于候选导航
-  if (inputText.value && historyIdx.value < 0) return
-  e?.preventDefault()
-  if (inputHistory.value.length === 0) return
-  historyIdx.value = historyIdx.value < 0 ? 0 : Math.min(historyIdx.value + 1, inputHistory.value.length - 1)
-  inputText.value = inputHistory.value[historyIdx.value]
-  nextTick(() => {
-    const el = inputRef.value as any
-    const ta = el?.textareaElRef ?? el?.$el?.querySelector?.('textarea')
-    if (ta) {
-      ta.focus()
-      ta.setSelectionRange(ta.value.length, ta.value.length)
-    } else {
-      el?.focus?.()
-    }
-  })
-}
-
-/** ↓：回下一条（历史最旧之后 → 清空） */
-function historyNext(e?: KeyboardEvent) {
-  if (triggerState.value) return // 触发菜单激活时 ↓ 用于候选导航
-  if (inputText.value && historyIdx.value < 0) return
-  e?.preventDefault()
-  if (historyIdx.value <= 0) {
-    historyIdx.value = -1
-    inputText.value = ''
-    return
-  }
-  historyIdx.value--
-  inputText.value = inputHistory.value[historyIdx.value]
-  nextTick(() => {
-    const el = inputRef.value as any
-    const ta = el?.textareaElRef ?? el?.$el?.querySelector?.('textarea')
-    if (ta) {
-      ta.focus()
-      ta.setSelectionRange(ta.value.length, ta.value.length)
-    }
-  })
-}
-
-// ============ 输入高度记忆（对齐 WorkBuddy ChatInput：拖拽调高 + localStorage 记忆，刷新保持） ============
-const INPUT_HEIGHT_KEY = 'supercrzy:inputHeight'
-const INPUT_HEIGHT_MIN = 60
-const INPUT_HEIGHT_MAX = 260
-const inputHeight = ref(0) // 0 = 自动（autosize）
-try {
-  const saved = Number(localStorage.getItem(INPUT_HEIGHT_KEY))
-  if (saved >= INPUT_HEIGHT_MIN && saved <= INPUT_HEIGHT_MAX) inputHeight.value = saved
-} catch {}
-
-let resizeState: { startY: number; startH: number } | null = null
-
-/** 拖拽开始（手柄 mousedown） */
-function startHeightResize(e: MouseEvent) {
-  e.preventDefault()
-  resizeState = { startY: e.clientY, startH: inputHeight.value > 0 ? inputHeight.value : 90 }
-  document.addEventListener('mousemove', onHeightDrag)
-  document.addEventListener('mouseup', stopHeightResize)
-}
-function onHeightDrag(e: MouseEvent) {
-  if (!resizeState) return
-  const h = Math.min(INPUT_HEIGHT_MAX, Math.max(INPUT_HEIGHT_MIN, resizeState.startH + (e.clientY - resizeState.startY)))
-  inputHeight.value = h
-}
-function stopHeightResize() {
-  document.removeEventListener('mousemove', onHeightDrag)
-  document.removeEventListener('mouseup', stopHeightResize)
-  resizeState = null
-  if (inputHeight.value > 0) {
-    try {
-      localStorage.setItem(INPUT_HEIGHT_KEY, String(inputHeight.value))
-    } catch {}
-  }
-}
-onUnmounted(stopHeightResize)
+// ============ 输入历史 / 输入高度（抽到 composables，见 useInputHistory / useInputHeight）============
+const { pushInputHistory, historyPrev, historyNext } = useInputHistory({
+  inputText,
+  inputRef: () => inputRef.value,
+  // 触发菜单激活时 ↑↓ 归候选导航所有
+  isTriggerActive: () => !!triggerState.value,
+})
+const { inputHeight, startHeightResize } = useInputHeight()
 
 /** 全局执行状态条（输入框上方）：AI 当前动作（对齐 WorkBuddy progress.phase 体验） */
 const aiStatus = ref<string | null>(null)
@@ -1208,9 +1061,8 @@ onMounted(() => document.addEventListener('mousedown', onGlobalMousedown))
 onUnmounted(() => document.removeEventListener('mousedown', onGlobalMousedown))
 onUnmounted(() => window.removeEventListener('mouseup', handleQuoteMouseUp))
 onUnmounted(() => { window.removeEventListener('resize', checkMobile) })
-// 卸载清理定时器（流式中切会话/路由跳转时防泄漏：nowTs tick + 复制提示复位）
+// 卸载清理定时器（流式中切会话/路由跳转时防泄漏：复制提示复位；耗时 tick 已下沉到 ElapsedBadge 自清理）
 onUnmounted(() => {
-  if (timerInterval) { clearInterval(timerInterval); timerInterval = null }
   if (copyResetTimer) { clearTimeout(copyResetTimer); copyResetTimer = null }
 })
 
@@ -1313,30 +1165,18 @@ function onPlusMenu(key: string) {
     openComparePicker()
   }
 }
-/** 输入框插入 @ 并触发候选管线（直接改 value 不触发 @input，需手动调 onInputTrigger） */
+/** 输入框插入 @ 并触发候选管线（直接改 value 不触发 @input，故由 composable 手动置态 + 拉候选） */
 function injectAtTrigger(mode: 'all' | 'skill' | 'reference' = 'all') {
-  const val = inputText.value + '@'
-  inputText.value = val
   // 互斥：开触发候选时关闭产物选择面板（两面板同一锚点，避免重叠）
   artifactPickerOpen.value = false
-  nextTick(() => {
-    inputRef.value?.focus()
-    const el = (inputRef.value as any)?.$el?.querySelector?.('textarea') || (inputRef.value as any)
-    const native = el instanceof HTMLTextAreaElement ? el : el?.querySelector?.('textarea')
-    triggerState.value = { char: '@', query: '', mode }
-    triggerSel.value = 0
-    void loadTriggerCandidates('@', '')
-    void native
-  })
+  openTriggerFromMenu(mode)
 }
 
 /** 点击面板/候选框外部任意处关闭（两面板共用锚点，互斥逻辑在各自打开函数里） */
 function onGlobalMousedown(e: MouseEvent) {
   const t = e.target as HTMLElement
   if (t.closest('.trigger-menu') || t.closest('.artifact-picker')) return
-  triggerState.value = null
-  triggerCandidates.value = []
-  triggerSearch.value = ''
+  closeTrigger()
   artifactPickerOpen.value = false
 }
 
@@ -1348,9 +1188,7 @@ const artifactPickerOpen = ref(false)
 
 async function openArtifactPicker() {
   // 互斥：开产物面板时关闭触发候选（两面板同一锚点，避免重叠）
-  triggerState.value = null
-  triggerCandidates.value = []
-  triggerSearch.value = ''
+  closeTrigger()
   await loadArtifacts()
   artifactPickerOpen.value = true
 }
@@ -1438,7 +1276,6 @@ function parseCompareContent(content: any): any {
   try { return JSON.parse(content) } catch { return { results: [] } }
 }
 const uploadedFiles = ref<Attachment[]>([])
-const uploading = ref(false)
 /** 当前会话已绑定的工作目录（欢迎页"工作文件夹"显示与弹窗初始定位用） */
 const currentWorkspaceDir = computed(() => chatStore.currentSession?.workspaceDir || wsCurrent.value)
 
@@ -1452,86 +1289,16 @@ function syncSessionUI() {
 }
 watch(() => chatStore.currentSessionId, syncSessionUI)
 
-// ============ 会话产物（AI 生成的文件，会话级持久化） ============
-interface ArtifactItem {
-  id: string
-  session_id: string
-  name: string
-  path: string
-  mime: string
-  size: number
-  action: 'created' | 'updated'
-  created_at: string
-}
-const sessionArtifacts = ref<ArtifactItem[]>([])
-const artifactsPopoverOpen = ref(false)
-const previewArtifact = ref<ArtifactItem & { content?: string } | null>(null)
-const previewFail = ref(false)
-
-/** 拉取当前会话的产物列表 */
-async function loadArtifacts() {
-  const sid = chatStore.currentSessionId
-  if (!sid) {
-    sessionArtifacts.value = []
-    return
-  }
-  try {
-    const r = await fetch(`/api/sessions/${sid}/artifacts`)
-    sessionArtifacts.value = await r.json()
-  } catch {
-    sessionArtifacts.value = []
-  }
-}
-
-/** 文本文件预览 */
-async function previewArtifactFile(a: ArtifactItem) {
-  previewFail.value = false
-  try {
-    const r = await fetch(`/api/sessions/${a.session_id}/artifacts/${a.id}/content`)
-    const d = await r.json()
-    if (d.content !== undefined) {
-      previewArtifact.value = { ...a, content: d.content }
-    } else {
-      previewFail.value = true
-      previewArtifact.value = a
-    }
-  } catch {
-    previewFail.value = true
-    previewArtifact.value = a
-  }
-}
-
-/** 打开产物：HTML/图片等浏览器直接渲染；PPT/文档等调本地系统程序打开（产物在本机，无需下载） */
-function openArtifactFile(a: ArtifactItem) {
-  const mime = a.mime || ''
-  const browserOpenable = mime.startsWith('text/html') || mime.startsWith('image/')
-  if (browserOpenable) {
-    window.open(`/api/sessions/${a.session_id}/artifacts/${a.id}/file`, '_blank')
-  } else {
-    fetch(`/api/sessions/${a.session_id}/artifacts/${a.id}/open`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
-      .then((r) => r.json())
-      .then((d) => {
-        if (!d.success) nMessage.warning(d.error || t('chat.artifactOpenFail'))
-      })
-      .catch(() => nMessage.warning(t('chat.artifactOpenFail')))
-  }
-}
-
-/** 在文件管理器中显示产物所在文件夹 */
-function openArtifactFolder(a: ArtifactItem) {
-  fetch(`/api/sessions/${a.session_id}/artifacts/${a.id}/open`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ reveal: true }),
-  })
-    .then((r) => r.json())
-    .then((d) => {
-      if (!d.success) nMessage.warning(d.error || t('chat.artifactOpenFail'))
-    })
-    .catch(() => nMessage.warning(t('chat.artifactOpenFail')))
-}
-
-/** 文件大小格式化 */
+// ============ 会话产物（AI 生成的文件）→ composables/useArtifacts.ts ============
+// sessionArtifacts 仍以同一 ref 暴露：handleAgentEvent 的 file_write 分支会 unshift 进去。
+const {
+  sessionArtifacts, artifactsPopoverOpen, previewArtifact, previewFail,
+  loadArtifacts, previewArtifactFile, openArtifactFile, openArtifactFolder,
+} = useArtifacts({
+  sessionId: () => chatStore.currentSessionId,
+  t: (k: string) => t(k),
+  onWarning: (msg: string) => nMessage.warning(msg),
+})
 
 // ---- P1-05 任务交付页辅助 ----
 /** 是否渲染交付页：有产物 / 有改动 / 有结论，三者任一即渲染（此前只看产物） */
@@ -1558,377 +1325,57 @@ function formatArtifactTime(s: string) {
 
 /** 按扩展名取文件图标类型 */
 
-// ============ 欢迎页中央输入框 ============
-const welcomeInputRef = ref<HTMLTextAreaElement>()
-
-/**
- * 任务模板被点击 → 填进输入框并聚焦。
- * 刻意**不直接发送**：让用户先看见将要发出去的话、可以改（首用引导不该替用户做决定），
- * 也避免模板文案跟用户真实需求有偏差时白烧一次模型调用。
- */
-function onTemplatePick(prompt: string) {
-  inputText.value = prompt
-  nextTick(() => welcomeInputRef.value?.focus())
-}
-
-/** 欢迎页输入框自动增高（对齐 WorkBuddy ChatInput autosize：文字多时输入框长高，操作栏独立在底部不重叠） */
-watch(inputText, () => {
-  const el = welcomeInputRef.value
-  if (!el) return
-  el.style.height = 'auto'
-  const h = Math.min(168, Math.max(68, el.scrollHeight))
-  el.style.height = h + 'px'
+// ============ 欢迎页面板 → composables/useWelcomePanel.ts ============
+// currentSession 传 getter：其声明在本块之后，直接传 ref 会撞 TDZ。
+const {
+  welcomeInputRef, onTemplatePick,
+  welcomePlusOpen, skillPickerOpen, welcomeSkills, skillList,
+  welcomePerm, welcomeSettingsOpen, permShortLabel, imageInputRef,
+  fsPickerOpen, openFsPicker, selectWorkspace,
+  pickFile, pickImage, openSkillPicker, toggleSkill, removeSkill,
+  isListening, toggleVoice, applyWelcomePerm,
+} = useWelcomePanel({
+  inputText,
+  t: (k: string, params?: Record<string, unknown>) => (params ? t(k, params) : t(k)),
+  locale: () => locale.value,
+  currentSession: () => chatStore.currentSession,
+  setSessionWorkspace: (id: string, path: string) => chatStore.setSessionWorkspace(id, path),
+  setSessionPermission: (id: string, tier: 'workspace-only' | 'sandbox' | 'full') => chatStore.setSessionPermission(id, tier),
+  fileInputEl: () => fileInputRef.value,
+  onInfo: (msg: string) => nMessage.info(msg),
+  onError: (msg: string) => nMessage.error(msg),
+  onSuccess: (msg: string) => nMessage.success(msg),
 })
-const welcomePlusOpen = ref(false)
-const skillPickerOpen = ref(false)
-/** 用户显式选择要使用的技能（发送时注入消息，AI 优先使用） */
-const welcomeSkills = ref<Array<{ name: string; displayName?: string; description: string }>>([])
-const skillList = ref<Array<{ id: string; name: string; name_en?: string; description: string; description_en?: string }>>([])
-/** 欢迎页默认权限档位（当前会话，默认 sandbox） */
-const welcomePerm = ref<'workspace-only' | 'sandbox' | 'full'>('sandbox')
-/** 任务设置抽屉是否展开（欢迎页折叠：工作文件夹+权限默认收起，减少首屏密度） */
-const welcomeSettingsOpen = ref(false)
-/** 权限短标签（任务设置摘要行显示） */
-const permShortLabel = computed(() => {
-  const map: Record<string, string> = { 'workspace-only': t('chat.permWorkspaceOnly'), sandbox: t('chat.permSandbox'), full: t('chat.permFull') }
-  return map[welcomePerm.value] || welcomePerm.value
-})
-/** 图片专用文件选择器（添加图片菜单项） */
-const imageInputRef = ref<HTMLInputElement>()
-
-// ============ 文件夹选择弹窗（公共组件 WorkspacePickerModal；欢迎页"工作文件夹"入口） ============
-const fsPickerOpen = ref(false)
-
-/** 打开文件夹选择弹窗（欢迎页"工作文件夹"入口） */
-function openFsPicker() {
-  fsPickerOpen.value = true
-}
-
-/** 选中文件夹 → 绑定为会话工作目录 */
-async function selectWorkspace(path: string) {
-  const session = chatStore.currentSession
-  if (!session) return
-  await chatStore.setSessionWorkspace(session.id, path)
-  nMessage.success(t('chat.workspaceSaved', { dir: path }))
-}
-
-/** 添加文件（通用类型） */
-function pickFile() {
-  welcomePlusOpen.value = false
-  fileInputRef.value?.click()
-}
-/** 添加图片 */
-function pickImage() {
-  welcomePlusOpen.value = false
-  imageInputRef.value?.click()
-}
-/** 打开技能库选择 */
-async function openSkillPicker() {
-  welcomePlusOpen.value = false
-  skillPickerOpen.value = !skillPickerOpen.value
-  if (skillPickerOpen.value && skillList.value.length === 0) {
-    try {
-      const r = await fetch('/api/skills')
-      skillList.value = await r.json()
-    } catch {}
-  }
-}
-/** 勾选/取消技能 */
-function toggleSkill(sk: { id: string; name: string; name_en?: string; description: string; description_en?: string }) {
-  const i = welcomeSkills.value.findIndex((s) => s.name === sk.name)
-  if (i >= 0) welcomeSkills.value.splice(i, 1)
-  else welcomeSkills.value.push({ name: sk.name, displayName: l10n(sk.name, sk.name_en), description: sk.description })
-}
-function removeSkill(name: string) {
-  welcomeSkills.value = welcomeSkills.value.filter((s) => s.name !== name)
-}
-/** 语音输入：Web Speech API（浏览器原生识别，语言跟随界面） */
-let recognition: any = null
-const isListening = ref(false)
-
-function toggleVoice() {
-  const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
-  if (!SR) {
-    nMessage.info(t('chat.wcVoiceUnsupported'))
-    return
-  }
-  if (isListening.value) {
-    recognition?.stop()
-    return
-  }
-  recognition = new SR()
-  recognition.lang = locale.value.startsWith('zh') ? 'zh-CN' : 'en-US'
-  recognition.interimResults = false
-  recognition.continuous = false
-  recognition.onresult = (e: any) => {
-    const text = e.results?.[0]?.[0]?.transcript || ''
-    if (text) inputText.value = (inputText.value ? inputText.value + ' ' : '') + text
-  }
-  recognition.onend = () => { isListening.value = false }
-  recognition.onerror = (e: any) => {
-    isListening.value = false
-    if (e.error && e.error !== 'aborted') nMessage.error(t('chat.wcVoiceError') + (e.error || ''))
-  }
-  isListening.value = true
-  try {
-    recognition.start()
-  } catch {
-    isListening.value = false
-  }
-}
-/** 应用欢迎页默认权限到当前会话 */
-async function applyWelcomePerm() {
-  const session = chatStore.currentSession
-  if (!session) return
-  await chatStore.setSessionPermission(session.id, welcomePerm.value)
-}
 
 /** 待发送队列：AI 回复中发送的内容先排队，回复完成后自动发布 */
 interface PendingQueueItem { id: string; text: string }
 const pendingQueue = ref<PendingQueueItem[]>([])
 
-// ===== 输入触发管线（/ 与 @ 统一：对齐 harness ui-input-trigger）=====
-interface TriggerCandidate {
-  key: string
-  label: string
-  desc?: string
-  section: string
-  kind: 'command' | 'file' | 'skill' | 'session'
-  value?: string
-}
-const triggerState = ref<{ char: '/' | '@'; query: string; mode: 'all' | 'skill' | 'reference' } | null>(null)
-const triggerCandidates = ref<TriggerCandidate[]>([])
-const triggerSel = ref(0)
-const triggerSearch = ref('')
-let triggerDebounce: ReturnType<typeof setTimeout> | null = null
-
-/** 展示候选（搜索框本地过滤；空关键词显示全部） */
-const displayedCandidates = computed<TriggerCandidate[]>(() => {
-  const q = triggerSearch.value.trim().toLowerCase()
-  if (!q) return triggerCandidates.value
-  return triggerCandidates.value.filter(
-    (c) => c.label.toLowerCase().includes(q) || (c.desc || '').toLowerCase().includes(q),
-  )
+// ===== 输入触发管线（/ 与 @）→ composables/useInputTrigger.ts =====
+// currentSessionId 传 getter：currentSession 的声明在本块之后（L2047），直接传 ref 会撞 TDZ。
+const {
+  triggerState, triggerCandidates, triggerSel, triggerSearch, displayedCandidates,
+  onInputTrigger, onTriggerKeydown, onInputEnter, applyTrigger,
+  closeTrigger, openTriggerFromMenu,
+} = useInputTrigger({
+  inputText,
+  inputRef,
+  t: (k: string, params?: Record<string, unknown>) => (params ? t(k, params) : t(k)),
+  sessions: () => chatStore.sessions,
+  currentSessionId: () => currentSession.value?.id,
+  currentWorkspaceDir: () => currentWorkspaceDir.value,
+  welcomePlusOpen,
+  onNewChat: () => handleNewChat(),
+  onSend: () => handleSend(),
+  onInfo: (msg: string) => nMessage.info(msg),
 })
 
-/** 输入检测：光标前的 / 或 @ token（行首或行内） */
-function onInputTrigger(value: string, meta?: any) {
-  if (triggerDebounce) clearTimeout(triggerDebounce)
-  const caretPos = meta?.e?.target?.selectionStart ?? (meta?.e?.target?.value?.length ?? value.length)
-  triggerDebounce = setTimeout(() => detectTrigger(value, caretPos), 60)
-}
-
-function detectTrigger(text: string, caretPos: number) {
-  // P1-04：纯解析下沉到 utils/trigger.ts（此前这段唯一有点复杂度的字符串处理零测试覆盖）
-  const hit = parseTrigger(text, caretPos)
-  if (hit) {
-    triggerState.value = { char: hit.char, query: hit.query, mode: 'all' }
-    triggerSel.value = 0
-    triggerSearch.value = ''
-    void loadTriggerCandidates(hit.char, hit.query)
-  } else {
-    triggerState.value = null
-    triggerCandidates.value = []
-    triggerSearch.value = ''
-  }
-}
-
-/** 候选：/ = 命令集；@ = 文件 + 技能 + 会话（分组）
- *  mode='skill'（➕选择技能）：只加载技能组
- *  mode='reference'（➕@引用）：只加载会话 + 文件（不带技能）
- *  mode='all'（手动输入 @）：技能 + 会话 + 文件 */
-async function loadTriggerCandidates(char: '/' | '@', query: string) {
-  const q = query.toLowerCase()
-  if (char === '/') {
-    const all: TriggerCandidate[] = [
-      { key: 'new', label: '/new', desc: t('chat.trigger.newDesc'), section: t('chat.trigger.secCommands'), kind: 'command' },
-      { key: 'search', label: '/search', desc: t('chat.trigger.searchDesc'), section: t('chat.trigger.secCommands'), kind: 'command' },
-      { key: 'help', label: '/help', desc: t('chat.trigger.helpDesc'), section: t('chat.trigger.secCommands'), kind: 'command' },
-      { key: 'skill', label: '/skill', desc: t('chat.trigger.skillDesc'), section: t('chat.trigger.secCommands'), kind: 'command' },
-    ]
-    triggerCandidates.value = all.filter((c) => c.label.toLowerCase().includes(q) || (c.desc || '').toLowerCase().includes(q))
-    return
-  }
-  const mode = triggerState.value?.mode || 'all'
-  const out: TriggerCandidate[] = []
-  // @ 技能（已安装；mode='reference' 时跳过）
-  if (mode !== 'reference') {
-    try {
-      const res = await fetch('/api/skills')
-      if (res.ok) {
-        const skills: any[] = await res.json()
-        out.push(...skills.filter((s) => !s.name_en || true).map((s) => ({
-          key: `skill-${s.name}`, label: s.name, desc: s.description || '', section: t('chat.trigger.secSkills'), kind: 'skill' as const, value: s.name,
-        })).filter((c) => c.label.toLowerCase().includes(q)))
-      }
-    } catch { /* ignore */ }
-  }
-  // @ 会话（mode='skill' 时跳过）
-  if (mode !== 'skill') {
-    out.push(...chatStore.sessions.slice(0, 5).map((s) => ({
-      key: `session-${s.id}`, label: s.title, desc: s.workspaceDir || '', section: t('chat.trigger.secSessions'), kind: 'session' as const, value: s.id,
-    })).filter((c) => c.label.toLowerCase().includes(q) || (c.desc || '').toLowerCase().includes(q)))
-  }
-  // @ 文件（reference 模式 = 本会话产物;all 模式 = 工作区文件）
-  if (mode === 'reference') {
-    const sid = currentSession.value?.id
-    if (sid) {
-      try {
-        const res = await fetch(`/api/sessions/${sid}/artifacts`)
-        if (res.ok) {
-          const arts: any[] = await res.json()
-          out.push(...arts.slice(0, 10).map((a) => ({
-            key: `file-${a.path}`, label: a.name, desc: `${a.path} · ${a.action}`, section: t('chat.trigger.secArtifacts'), kind: 'file' as const, value: a.path,
-          })).filter((c) => c.label.toLowerCase().includes(q) || (c.desc || '').toLowerCase().includes(q)))
-        }
-      } catch { /* ignore */ }
-    }
-  } else if (currentWorkspaceDir.value) {
-    try {
-      const res = await fetch(`/api/workspace/files?dir=${encodeURIComponent(currentWorkspaceDir.value)}`)
-      if (res.ok) {
-        const data = await res.json()
-        const files: any[] = data.files || []
-        out.push(...files.filter((f) => f.type !== 'directory').slice(0, 10).map((f) => ({
-          key: `file-${f.path}`, label: f.name, desc: f.path, section: t('chat.trigger.secFiles'), kind: 'file' as const, value: f.path,
-        })).filter((c) => c.label.toLowerCase().includes(q) || (c.desc || '').toLowerCase().includes(q)))
-      }
-    } catch { /* ignore */ }
-  }
-  triggerCandidates.value = out
-}
-
-/** 触发菜单：键盘导航 + 选择 */
-function onTriggerKeydown(e: KeyboardEvent) {
-  if (!triggerState.value || displayedCandidates.value.length === 0) return
-  if (e.key === 'ArrowDown') { e.preventDefault(); triggerSel.value = (triggerSel.value + 1) % displayedCandidates.value.length }
-  else if (e.key === 'ArrowUp') { e.preventDefault(); triggerSel.value = (triggerSel.value - 1 + displayedCandidates.value.length) % displayedCandidates.value.length }
-  else if (e.key === 'Enter' || e.key === 'Tab') {
-    const c = displayedCandidates.value[triggerSel.value]
-    if (c) { e.preventDefault(); applyTrigger(c) }
-  } else if (e.key === 'Escape') {
-    triggerState.value = null
-    triggerCandidates.value = []
-    triggerSearch.value = ''
-  }
-}
-
-/** 回车统一入口：触发菜单激活时选候选，否则正常发送 */
-function onInputEnter() {
-  if (triggerState.value && displayedCandidates.value.length > 0) {
-    const c = displayedCandidates.value[triggerSel.value]
-    if (c) applyTrigger(c)
-    return
-  }
-  handleSend()
-}
-
-/** 应用触发选择：替换 token + 动作 */
-function applyTrigger(c: TriggerCandidate) {
-  const ta = inputRef.value?.textareaElRef ?? inputRef.value?.$el?.querySelector?.('textarea')
-  const caret = ta?.selectionStart ?? inputText.value.length
-  const before = inputText.value.slice(0, caret)
-  const m = before.match(/(?:^|\s)([\/@])([^\s\/@]*)$/)
-  let replaced = inputText.value
-  if (m && m.index != null) {
-    replaced = inputText.value.slice(0, m.index) + (m[0].startsWith(' ') ? ' ' : '') + inputText.value.slice(caret)
-  }
-  triggerState.value = null
-  triggerCandidates.value = []
-  if (c.kind === 'command') {
-    if (c.key === 'new') {
-      handleNewChat()
-    } else if (c.key === 'search') {
-      // /search → 插入占位并聚焦（用户补查询词）
-      replaced = replaced.trimEnd()
-      inputText.value = replaced ? `${replaced} ` : ''
-      nextTick(() => ta?.focus())
-    } else if (c.key === 'skill') {
-      inputText.value = `${replaced}`
-      welcomePlusOpen.value = true
-      nextTick(() => ta?.focus())
-    } else if (c.key === 'help') {
-      nMessage.info(t('chat.trigger.helpHint'))
-    }
-    return
-  }
-  // @ 引用：替换 token 后插入标记
-  if (c.kind === 'file') {
-    inputText.value = `${replaced}@${c.label}（路径:${c.value}）`.trimStart()
-  } else if (c.kind === 'skill') {
-    inputText.value = `${replaced}@技能:${c.label}`.trimStart()
-  } else if (c.kind === 'session') {
-    inputText.value = `${replaced}@会话:${c.label}`.trimStart()
-  }
-  triggerState.value = null
-  triggerCandidates.value = []
-  triggerSearch.value = ''
-  nextTick(() => {
-    const t2 = inputRef.value?.textareaElRef ?? inputRef.value?.$el?.querySelector?.('textarea')
-    t2?.focus()
-  })
-}
-
-// ===== 输入触发管线（结束）=====
-
-// ===== 对话内一键引用（对齐飞书引用回复 + harness reference insert）=====
-interface QuoteRef { msgId: string; role: string; excerpt: string }
-const quoteRef = ref<QuoteRef | null>(null)
-/** 消息 hover 引用按钮：整条消息引用（取正文前 200 字）
- *  2026-08-25 17:1x 修复：原 extractText(msg.content) 在 content 为 string（markdown）时抛
- *  "filter is not a function" → 点击无反应；改用 messagePlainText 兼容 string/ContentBlock[] 两种形态 */
-function quoteMessage(msg: ChatMessage) {
-  const text = messagePlainText(msg).trim() || (msg.flow || []).filter((n) => n.kind === 'text').map((n: any) => n.text).join('\n').trim()
-  if (!text) return
-  quoteRef.value = { msgId: msg.id, role: msg.role, excerpt: text.slice(0, 200) }
-  focusInput()
-}
-/** 选中文本引用：消息区 mouseup 检测选区 → 浮动按钮 → 引用选中段落 */
-const selQuoteMsgId = ref('')
-const selQuoteVisible = ref(false)
-const selQuotePos = ref({ x: 0, y: 0 })
-function handleQuoteMouseUp() {
-  // 延迟检测：mouseup 后选区才稳定
-  setTimeout(() => {
-    const sel = window.getSelection()
-    const text = sel ? sel.toString().trim() : ''
-    const wrapper = sel && sel.anchorNode ? (sel.anchorNode as HTMLElement).closest?.('.message-wrapper') : null
-    if (text && text.length <= 500 && wrapper && wrapper.querySelector('.message')) {
-      selQuoteMsgId.value = wrapper.getAttribute('data-msg-id') || ''
-      try {
-        const rect = sel!.getRangeAt(0).getBoundingClientRect()
-        selQuotePos.value = { x: Math.min(rect.left, window.innerWidth - 140), y: Math.max(8, rect.bottom + 6) }
-      } catch { /* ignore */ }
-      selQuoteVisible.value = true
-    } else {
-      selQuoteVisible.value = false
-    }
-  }, 10)
-}
-function quoteSelection() {
-  const sel = window.getSelection()
-  const text = sel ? sel.toString().trim() : ''
-  if (!text) return
-  const msg = messages.value.find((m) => m.id === selQuoteMsgId.value)
-  if (!msg) return
-  quoteRef.value = { msgId: msg.id, role: msg.role, excerpt: text.slice(0, 500) }
-  selQuoteVisible.value = false
-  sel?.removeAllRanges()
-  focusInput()
-}
-function focusInput() {
-  nextTick(() => {
-    const ta = inputRef.value?.textareaElRef ?? inputRef.value?.$el?.querySelector?.('textarea')
-    ta?.focus()
-  })
-}
-/** 发送时把引用拼进用户消息文本（后端据此注入 AI 上下文） */
-function injectQuote(text: string): string {
-  if (!quoteRef.value) return text
-  const q = quoteRef.value
-  const prefix = `${text.trim() ? text.trim() + '\n\n' : ''}> ${q.role === 'user' ? t('chat.quoteOfUser') : t('chat.quoteOfAssistant')}：${q.excerpt}`
-  return prefix
-}
+// ===== 对话内一键引用（抽到 composables/useQuote）=====
+// messages 以 getter 传入：它的声明在本块之后，直接传 ref 会在 setup 阶段撞 TDZ。
+const {
+  quoteRef, selQuoteMsgId, selQuoteVisible, selQuotePos,
+  quoteMessage, handleQuoteMouseUp, quoteSelection, focusInput, injectQuote,
+} = useQuote({ messages: () => messages.value, inputRef, t: (k: string) => t(k) })
 
 /** 编辑队列条目：内容回填输入框并出队（可修改后重新发送） */
 function editQueued(id: string) {
@@ -2023,6 +1470,7 @@ watch(() => chatStore.isLoading, (loading) => {
 // =================================================================
 import { createChatStream, type ChatStream } from '@/stores/chat-stream'
 import { DEFAULT_TYPING_CONFIG, advanceReveal, createTypewriterState } from '@/utils/typewriter'
+import { reconcileAnswerText } from '@/utils/flow-reconcile'
 let stream: ChatStream | null = null
 let streamTarget: ChatMessage | null = null
 /** 2026-08-29 超级协作平台：config 事件下发的发言人标识，等待应用到当前 assistant 消息 */
@@ -2061,11 +1509,24 @@ function bindStream(msg: ChatMessage) {
   streamTarget = msg
 }
 
-/** 流结束/内容收尾时强制清空残留 pending（不等限速，保证内容完整） */
-function flushAllPending() {
-  stream?.finish()
+/** 流结束/内容收尾时强制清空残留 pending（不等限速，保证内容完整）。
+ *  返回 Promise：在打字机把缓冲真正写进 flow 之后 resolve —— 调用方若随后要基于 flow
+ *  写 `msg.content`（如失败分支），必须等它，否则会拿到半截文本。 */
+function flushAllPending(): Promise<void> {
+  const p = stream ? stream.finish() : Promise.resolve()
   stream = null
   streamTarget = null
+  return p
+}
+
+/** flow 中最后一段正文文本（= 答案所在节点；无则空串） */
+function lastAnswerText(flow?: ChatFlowNode[]): string {
+  if (!flow) return ''
+  for (let i = flow.length - 1; i >= 0; i--) {
+    const n = flow[i]
+    if (n.kind === 'text') return String((n as Extract<ChatFlowNode, { kind: 'text' }>).text || '')
+  }
+  return ''
 }
 
 // =================================================================
@@ -2167,12 +1628,6 @@ function markAllThinkingDone(msg: ChatMessage) {
 // =================================================================
 
 
-/** 消息是否有过程节点（思考/工具）→ 决定是否显示折叠条 */
-
-/** 过程统计：工具调用次数 / 思考轮数（思考仅在显示推理时计入） */
-  let tools = 0
-const acceptTypes = '.jpg,.jpeg,.png,.gif,.webp,.svg,.bmp,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.html,.css,.js,.json,.md,.xml,.yaml,.yml,.zip,.tar.gz,.gz'
-
 const currentSession = computed(() => chatStore.currentSession)
 const messages = computed(() => chatStore.currentMessages)
 
@@ -2216,79 +1671,18 @@ function retryErrorBanner() {
 const noKeyBannerDismissed = ref(false)
 const showNoKeyBanner = computed(() => !appStore.hasApiKey && !noKeyBannerDismissed.value)
 
-// ---- 文件类型判断 ----
+// ---- 文件上传处理（抽到 composables/useAttachments；uploadedFiles 本体仍留组件内，发送管线要读它）----
+const { handleFileSelect, removeFile, openAttachment } = useAttachments({
+  uploadedFiles,
+  sessionId: () => chatStore.currentSession?.id,
+  fileInputRef,
+  t: (k: string, params?: Record<string, unknown>) => (params ? t(k, params) : t(k)),
+  onError: (msg: string) => nMessage.error(msg),
+})
 
-// ---- 文件上传处理 ----
-async function handleFileSelect(event: Event) {
-  const input = event.target as HTMLInputElement
-  const rawFiles = input.files
-  if (!rawFiles || rawFiles.length === 0) return
-
-  uploading.value = true
-  const formData = new FormData()
-
-  // Add session_id for association
-  if (chatStore.currentSession?.id) {
-    formData.append('session_id', chatStore.currentSession.id)
-  }
-
-  for (let i = 0; i < rawFiles.length; i++) {
-    formData.append('files', rawFiles[i])
-  }
-
-  try {
-    const res = await fetch('/api/upload', {
-      method: 'POST',
-      body: formData,
-    })
-
-    if (!res.ok) {
-      const err = await res.json()
-      throw new Error(errMsg(err.code, err.error || t('chat.uploadFailed')))
-    }
-
-    const data = await res.json()
-    uploadedFiles.value.push(...data.files)
-    // 自动 OCR：图片上传后本地识别文字（RapidOCR，免费开源）→ 发消息时注入对话
-    for (const f of data.files) {
-      if (f.type?.startsWith('image/') && f.url) {
-        fetch('/api/ocr', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ path: f.url }),
-        })
-          .then((r) => (r.ok ? r.json() : null))
-          .then((res) => {
-            if (res && Array.isArray(res.texts) && res.texts.length > 0) {
-              const att = uploadedFiles.value.find((a) => a.id === f.id)
-              if (att) att.ocrTexts = res.texts
-            }
-          })
-          .catch(() => { /* OCR 失败不影响发送 */ })
-      }
-    }
-  } catch (err: any) {
-    nMessage.error(t('chat.uploadFailMsg', { msg: err.message }))
-  } finally {
-    uploading.value = false
-    // Reset input so same file can be re-selected
-    if (fileInputRef.value) fileInputRef.value.value = ''
-  }
-}
-
-function removeFile(index: number) {
-  uploadedFiles.value.splice(index, 1)
-}
-
-function openAttachment(att: Attachment) {
-  window.open(att.url, '_blank')
-}
-
-// ---- Markdown / Utility ----
-
-/** SVG 提取正则：任意代码块内的 <svg>（``` 带或不带语言标注），或正文中的裸 <svg> */
-
-/** 从文本中提取所有 SVG（代码块内 + 裸标签），正文渲染时全部隐藏 */
+// ---- 图卡片 / 代码块 ----
+// 提取逻辑（纯函数）走 utils/svg-extract；代码块复制按钮注入（带 DOM 副作用）走 useCodeBlocks。
+const { enhanceCodeBlocks } = useCodeBlocks({ messagesRef, t: (k: string) => t(k) })
 
 /** 点击图卡片 → 右侧面板全尺寸预览 + 可下载/复制（复用 setPreview 机制） */
 function openDiagram(d: { title?: string; svg: string }) {
@@ -2299,106 +1693,6 @@ function openDiagram(d: { title?: string; svg: string }) {
   appStore.previewTs = Date.now()
   appStore.detailPanelVisible = true
   appStore.setDetailPanelTab('preview')
-}
-
-/** 从消息内容/flow 文本中提取 SVG → msg.diagrams（模型不调 draw_diagram 也能出图） */
-function autoExtractDiagrams(msg: ChatMessage) {
-  const texts: string[] = []
-  if (typeof msg.content === 'string') {
-    texts.push(normalizeContent(msg.content))
-  } else if (Array.isArray(msg.content)) {
-    // 历史消息经 store normalizeContent 转成 ContentBlock[]（{type:'text', text}）——逐个提取并解开 JSON 转义
-    for (const b of msg.content) {
-      if (b && typeof b === 'object' && (b as any).type === 'text' && typeof (b as any).text === 'string') {
-        texts.push(normalizeContent((b as any).text))
-      }
-    }
-  }
-  if (msg.flow) {
-    for (const n of msg.flow) if (n.kind === 'text' && typeof n.text === 'string') texts.push(n.text)
-  }
-  if (!texts.some((t) => t.includes('<svg'))) return
-  // flow 里已有的图（diagram 节点）不重复提取——图按 flow 顺序渲染，diagrams 只收无位置兜底图
-  const flowSvgSet = new Set<string>()
-  if (msg.flow) for (const n of msg.flow) if (n.kind === 'diagram') flowSvgSet.add(n.svg)
-  if (!msg.diagrams) msg.diagrams = []
-  for (const text of texts) {
-    for (const svg of extractSvgs(text)) {
-      if (flowSvgSet.has(svg)) continue
-      if (!msg.diagrams.some((d) => d.svg === svg)) {
-        msg.diagrams.push({ title: '', svg })
-      }
-    }
-  }
-}
-
-/** 消息 flow 中已有的图（diagram 节点）svg 集合——diagram-list 兜底渲染时过滤，避免与 flow 内联图重复 */
-function flowDiagramSet(msg: ChatMessage): Set<string> {
-  const s = new Set<string>()
-  if (msg.flow) for (const n of msg.flow) if (n.kind === 'diagram') s.add(n.svg)
-  return s
-}
-
-/** SVG 提取正则：```svg/```xml 语言代码块整体（不要求含 <svg> 标签——模型输出可能缺起始标签），或正文中的裸 <svg> */
-const SVG_CODE_BLOCK_RE = /```(?:svg|xml)\s*[\s\S]*?```/g
-const SVG_BARE_RE = /<svg[\s\S]*?<\/svg>/g
-
-/** 从文本中提取所有 SVG（代码块内 + 裸标签），图卡片渲染用 */
-function extractSvgs(text: string): string[] {
-  const svgs: string[] = []
-  for (const block of text.match(SVG_CODE_BLOCK_RE) || []) {
-    const inner = block.replace(/^```(?:svg|xml)\s*\n?/, '').replace(/```$/, '').trim()
-    // 完整 <svg>...</svg> 直接取
-    const full = inner.match(/<svg[\s\S]*?<\/svg>/)
-    if (full) svgs.push(full[0])
-    // 缺 <svg> 起始标签（模型输出截断/不规范）→ 补头尝试渲染，避免裸露
-    else if (inner.startsWith('<') && inner.includes('</')) {
-      svgs.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 470" width="100%">${inner}</svg>`)
-    }
-  }
-  for (const svg of text.replace(SVG_CODE_BLOCK_RE, '').match(SVG_BARE_RE) || []) {
-    svgs.push(svg)
-  }
-  return svgs
-}
-
-/** 正文渲染文本：去掉所有 SVG（代码块 + 裸标签），只留图卡片 */
-
-/** 给渲染后的代码块注入复制按钮（v-html 渲染后调用，事件委托避免重复绑定） */
-let codeBlockClickHandler: ((e: MouseEvent) => void) | null = null
-function enhanceCodeBlocks() {
-  nextTick(() => {
-    const root = messagesRef.value
-    if (!root) return
-    // 事件委托：一次绑定，处理所有 .code-copy-btn 点击
-    if (!codeBlockClickHandler) {
-      codeBlockClickHandler = async (e: MouseEvent) => {
-        const btn = (e.target as HTMLElement).closest('.code-copy-btn') as HTMLElement | null
-        if (!btn) return
-        // 新结构（cr-code-like-box：按钮在 header，code 在 content）与旧结构（按钮在 pre 内）兼容
-        const box = btn.closest('.cr-code-like-box')
-        const code = box
-          ? (box.querySelector('pre code')?.textContent ?? '')
-          : (btn.parentElement?.querySelector('code')?.textContent ?? '')
-        const ok = await copyToClipboard(code)
-        if (ok) {
-          btn.classList.add('copied')
-          btn.textContent = '✓'
-          setTimeout(() => { btn.classList.remove('copied'); btn.textContent = t('chat.copy') }, 2000)
-        }
-      }
-      root.addEventListener('click', codeBlockClickHandler)
-    }
-    // 为尚未有按钮的 pre 添加按钮
-    root.querySelectorAll('pre:not(.has-copy)').forEach((pre) => {
-      pre.classList.add('has-copy')
-      const btn = document.createElement('button')
-      btn.type = 'button'
-      btn.className = 'code-copy-btn'
-      btn.textContent = t('chat.copy')
-      pre.appendChild(btn)
-    })
-  })
 }
 
 /** 统一 content 取值：兼容 string（流式）与 ContentBlock[]（历史消息） */
@@ -2465,61 +1759,49 @@ async function deleteMessage(msg: ChatMessage) {
   }
 }
 
-/** 点赞/点踩 */
-async function setFeedback(msg: ChatMessage, fb: 'up' | 'down') {
-  const next = msg.feedback === fb ? null : fb
-  msg.feedback = next || undefined // 乐观更新
-  try {
-    await fetch(`/api/sessions/messages/${msg.id}/feedback`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ feedback: next }),
-    })
-  } catch {
-    // 失败回滚
-    msg.feedback = msg.feedback === fb ? undefined : msg.feedback
-  }
+/** 点赞/点踩已删除（2026-09-26：messages.feedback 字段全后端零读取，dead data；
+ *  后端接口保留不删以兼容已有库，类型 ChatMessage.feedback 字段保留供历史消息渲染不报错） */
+
+// ---- AI 回复朗读 → composables/useChatSpeech.ts（判定逻辑全在里面，可单测）----
+const {
+  supported: speechSupported,
+  speakingId: speakingMsgId,
+  paused: speechPaused,
+  proDegraded: speechProDegraded,
+  synthesizing: speechSynthesizing,
+  toggleSpeak,
+  feedStream: feedSpeechStream,
+  turnEnd: speechTurnEnd,
+  stop: stopSpeech,
+  toggle: toggleSpeech,
+} = useChatSpeech({
+  // 音色/语速读设置（设置页可改）：rate 串的格式化与设置页试听共用一处（formatTtsRate）
+  voice: () => appStore.ttsVoice,
+  rate: () => formatTtsRate(appStore.ttsRate),
+  mode: () => appStore.autoReadMode,
+  streamRead: () => appStore.streamRead,
+})
+
+/** 「本轮结束」的唯一出口 —— 完成提示音 + 自动朗读都走这里。
+ *  三条结束路径（Agent 流式 / 简单流式 / 非流式）必须收敛成一处，否则早晚有第四条漏掉，
+ *  或三处判定渐渐分叉（"某些情况下不响"这类 bug 最难查）。
+ *  只有 ok === true（本轮真正成功结束）才出声：手动停止 / SSE 失败时念半截内容是负价值。 */
+function finishTurn(msg: ChatMessage, ok: boolean) {
+  speechTurnEnd(msg, ok)
+  if (ok && appStore.completionSound) playCompletionTone(appStore.completionSoundTone, appStore.completionSoundVolume)
 }
 
-// ---- Agent 结构化提问（ask_question 工具）----
-/** 各提问的自由输入值（按 questionId 存） */
-const questionInputs = reactive<Record<string, string>>({})
-/** 答复提问：提交给后端 resolveQuestion，清除面板 */
-async function answerQuestion(msg: ChatMessage, answer: string) {
-  if (!msg.pendingQuestion || !answer.trim()) return
-  const qid = msg.pendingQuestion.id
-  try {
-    await fetch('/api/chat/question-answer', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ questionId: qid, answer: answer.trim() }),
-    })
-  } catch { /* 失败不阻塞 UI */ }
-  delete questionInputs[qid]
-  msg.pendingQuestion = undefined
-}
+// 朗读生命周期：切换会话 / 新一轮开始（回复流式中）→ 立即停，避免串音
+watch(() => chatStore.currentSessionId, () => stopSpeech())
+watch(() => chatStore.isLoading, (loading) => {
+  if (loading) stopSpeech()
+})
 
-/** 浮层答复：定位消息后复用 answerQuestion（对齐 WorkBuddy QuestionFloating onSelect） */
-async function answerQuestionFromFloating(q: { id: string; question: string; options: string[] }, answer: string) {
-  const msg = messages.value.find((m) => m.pendingQuestion?.id === q.id)
-  if (!msg) return
-  await answerQuestion(msg, answer)
-}
-
-/** 浮层跳过：发空答复让 AI 自己决定（对齐 WorkBuddy onSkip） */
-async function skipQuestion(q: { id: string; question: string; options: string[] }) {
-  const msg = messages.value.find((m) => m.pendingQuestion?.id === q.id)
-  if (!msg) return
-  try {
-    await fetch('/api/chat/question-answer', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ questionId: q.id, answer: '' }),
-    })
-  } catch { /* 失败不阻塞 UI */ }
-  delete questionInputs[q.id]
-  msg.pendingQuestion = undefined
-}
+// ---- Agent 结构化提问（ask_question 工具）→ composables/useAskQuestion.ts ----
+// messages 传 getter：其声明在本块之后，直接传 ref 会撞 TDZ。
+const { answerQuestionFromFloating, skipQuestion } = useAskQuestion({
+  messages: () => messages.value,
+})
 
 /** 编辑：回填输入框，替换原消息重发 */
 function startEditMessage(msg: ChatMessage) {
@@ -2598,118 +1880,18 @@ function closeMsgMenu() {
   openMsgMenuId.value = null
 }
 
-/** 从 id 中提取内嵌时间戳（WorkBuddy resolveRealTime 同款：部分 id 内嵌 13 位毫秒时间戳，取小值防污染） */
-function resolveRealTime(dateStr: string, id?: string): Date | null {
-  let t = 0
-  if (dateStr) {
-    // 兼容 SQLite UTC 格式 "2026-05-07 06:44:42"（无时区标记 → 按 UTC 解析，否则差 8 小时）
-    const normalized = dateStr.includes(' ') && !dateStr.includes('T') && !dateStr.endsWith('Z')
-      ? dateStr.replace(' ', 'T') + 'Z'
-      : dateStr
-    const d = new Date(normalized)
-    if (!isNaN(d.getTime())) t = d.getTime()
-  }
-  // id 内嵌 13 位时间戳（如 "msg_1724...123"）：比 dateStr 小则采用（防错误时间污染）
-  if (id && /(?:^|_|-)(\d{13})(?:$|_|-)/.test(id)) {
-    const m = id.match(/(\d{13})/)
-    if (m) {
-      const idT = Number(m[1])
-      if (!isNaN(idT) && idT > 0 && (t === 0 || idT < t)) t = idT
-    }
-  }
-  return t ? new Date(t) : null
-}
+// 消息文本格式化（发言人外观 / 时间 / 货币 / 按天分隔线）抽到 utils/chat-text：
+// locale 与 visibleMessages 都以 getter 注入 —— 不把组件级响应式源塞进模块级变量（"抽出来就坏"的头号来源）。
+const {
+  messageRoleLabel, formatTime, formatCurrency, msgDayKey, showDayDivider, dayLabel,
+} = createChatText({
+  isZh: () => locale.value === 'zh-CN',
+  visibleMessages: () => visibleMessages.value as any[],
+  t: (k: string) => t(k),
+})
 
-/** 消息时间显示（对齐 WorkBuddy message-time）：今天 HH:MM / 昨天 / 今年 M月D日 / 往年带年 */
-/**
- * 2026-08-29 超级协作平台：发言人元数据（名字/图标/颜色）。单 AI（无 actor）= SUPERCRZY 原样。
- * 多 AI 场景按 actor 区分身份，渲染不同头像与名字。
- */
-const ACTOR_META: Record<string, { label: string; icon: string; color: string; bg: string }> = {
-  '执行AI':   { label: '执行 AI',   icon: '执', color: '#374151', bg: '#e5e7eb' },
-  '质检AI':   { label: '质检 AI',   icon: '检', color: '#b45309', bg: '#fffbeb' },
-  '议院':     { label: '议院',     icon: '院', color: '#6d28d9', bg: '#f5f3ff' },
-  '你':       { label: '你',       icon: '你', color: '#1d4ed8', bg: '#eff6ff' },
-}
-function actorMeta(actor?: string) {
-  return actor ? (ACTOR_META[actor] || { label: actor, icon: (actor || '').slice(0, 1), color: '#374151', bg: '#e5e7eb' }) : null
-}
-function messageRoleLabel(msg: { role: string; actor?: string }): string {
-  if (msg.role === 'user') return t('chat.roleUser')
-  const m = actorMeta(msg.actor)
-  return m ? m.label : t('chat.roleAssistant')
-}
-
-function formatTime(dateStr: string, id?: string) {
-  const d = resolveRealTime(dateStr, id)
-  if (!d) return ''
-  const now = new Date()
-  const zh = locale.value === 'zh-CN'
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
-  const day = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
-  const diffDays = Math.round((today - day) / 86400000)
-  const hm = d.toLocaleTimeString(zh ? 'zh-CN' : 'en-US', { hour: '2-digit', minute: '2-digit' })
-  if (diffDays === 0) return hm
-  if (diffDays === 1) return zh ? `昨天 ${hm}` : `Yesterday ${hm}`
-  if (d.getFullYear() === now.getFullYear()) {
-    return zh
-      ? `${d.getMonth() + 1}月${d.getDate()}日 ${hm}`
-      : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' ' + hm
-  }
-  return zh
-    ? `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`
-    : d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
-}
-
-/** 货币格式化：中文界面 ¥，英文界面 $（按当前语言） */
-function formatCurrency(amount: number): string {
-  return (locale.value === 'zh-CN' ? '¥' : '$') + amount.toFixed(2)
-}
-
-// ===== 历史消息体系：按天分隔线（2026-08-27 加，会话长消息按日期分组） =====
-/** 取消息的日期 key（YYYY-MM-DD，用于判断是否跨天） */
-function msgDayKey(m: any): string {
-  const d = resolveRealTime(m?.timestamp || m?.createdAt, m?.id)
-  if (!d) return 'the-same-day'
-  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`
-}
-/** 在消息列表该位置是否应显示日期分隔线（与上一条跨天则显示） */
-function showDayDivider(idx: number): boolean {
-  if (idx <= 0) return false
-  const msgs = visibleMessages.value as any[]
-  if (idx >= msgs.length) return false
-  return msgDayKey(msgs[idx]) !== msgDayKey(msgs[idx - 1])
-}
-/** 日期分隔线文案：/ 昨天 / 2026年8月27日 */
-function dayLabel(idx: number): string {
-  const msgs = visibleMessages.value as any[]
-  const m = msgs[idx]
-  const d = resolveRealTime(m?.timestamp || m?.createdAt, m?.id)
-  if (!d) return ''
-  const zh = locale.value === 'zh-CN'
-  const now = new Date()
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
-  const day = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
-  const diff = Math.round((today - day) / 86400000)
-  if (diff === 0) return zh ? '今天' : 'Today'
-  if (diff === 1) return zh ? '昨天' : 'Yesterday'
-  if (d.getFullYear() === now.getFullYear()) {
-    return zh ? `${d.getMonth() + 1}月${d.getDate()}日` : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-  }
-  return zh
-    ? `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`
-    : d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
-}
-
-/** 任务完成耗时格式化：<60s → "23.4s"，≥60s → "1m 24s" */
-function formatElapsed(ms: number) {
-  const sec = ms / 1000
-  if (sec < 60) return sec.toFixed(1) + 's'
-  const m = Math.floor(sec / 60)
-  const s = Math.round(sec % 60)
-  return `${m}m ${s}s`
-}
-
+// 任务完成耗时格式化统一走 utils/tool-summary 的 formatDurationMs（与折叠条同一函数），
+// 原先这里的本地 formatElapsed 会输出 "1m 3s" 而折叠条输出 "1m3s"，同一条回复两处显示不一致。
 /** Routine 推荐：保存为例程（AI 主动建议，学 Grok"演示一次就学会"） */
 const savingRoutine = ref(false)
 async function saveRoutineSuggestion(msg: { routineSuggestion?: { sessionId: string; title: string } }) {
@@ -2739,120 +1921,13 @@ function dismissRoutineSuggestion(msg: any) {
   msg.routineSuggestion = undefined
 }
 
-/** 是否吸附底部（用户手动上滚时暂停自动滚动，回到底部恢复） */
-const stickToBottom = ref(true)
-/** 内容是否可滚动（超出容器才显示回底按钮；不溢出时按钮隐藏） */
-const canScroll = ref(false)
-
-// ===== 总计时（WorkBuddy turnDurationMs 同款但流式可见）：AI 回复开始即显示"已用时 Xs"，完成后"已完成 Xs" =====
-/** 每秒 tick 的墙钟（驱动流式中"已用时 Xs"实时刷新；完成态用静态 elapsedMs） */
-const nowTs = ref(Date.now())
-let timerInterval: ReturnType<typeof setInterval> | null = null
-watch(() => chatStore.isLoading, (loading) => {
-  if (loading) {
-    nowTs.value = Date.now()
-    if (!timerInterval) timerInterval = setInterval(() => { nowTs.value = Date.now() }, 1000)
-  } else if (timerInterval) {
-    clearInterval(timerInterval)
-    timerInterval = null
-  }
-})
-
-function updateCanScroll() {
-  const el = messagesRef.value
-  if (!el) return
-  canScroll.value = el.scrollHeight > el.clientHeight + 20
-}
-
-/** 当前滚动位置对应的提问索引（历史提问导航条高亮用：= 视口顶部最近 user 消息在全会话 user 消息中的序号） */
-const activeQuestionIndex = ref(0)
-
-/** 滚动时更新：找视口内最靠近顶部的那条 user 消息，返回它的提问序号 */
-function updateActiveQuestion() {
-  const el = messagesRef.value
-  if (!el) return
-  const wrappers = el.querySelectorAll('.message-wrapper[data-msg-id]')
-  let bestId = ''
-  let bestDist = Infinity
-  wrappers.forEach((w) => {
-    const top = (w as HTMLElement).offsetTop
-    const dist = Math.abs(top - el.scrollTop)
-    if (dist < bestDist) {
-      bestDist = dist
-      bestId = (w as HTMLElement).dataset.msgId || ''
-    }
-  })
-  if (!bestId) return
-  // 统计该消息之前有多少条 user 消息（含自己）= 提问序号
-  let qIdx = 0
-  for (const m of messages.value) {
-    if (m.id === bestId) break
-    if (m.role === 'user') qIdx++
-  }
-  activeQuestionIndex.value = qIdx
-}
-
-function onScroll() {
-  const el = messagesRef.value
-  if (!el) return
-  // 流式中也尊重用户滚动位置（WorkBuddy useMessageScroll 同款：用户上滑 → 暂停自动跟随）：
-  // 内容增长不触发 scroll 事件，但用户主动滚动会触发 → stickToBottom 状态可靠
-  // "贴底"容差收紧到 20px：只要不在最底部（含顶部/中间），回底按钮高亮
-  stickToBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < 20
-  // 渐进渲染：接近顶部 → 加载更早一批消息（滚动位置补偿，防跳动）
-  if (el.scrollTop < 600 && renderStart.value > 0) loadEarlier()
-  updateActiveQuestion()
-  updateCanScroll()
-}
-
-// ============ 消息级渐进渲染（WorkBuddy react-virtuoso 同款思路：只渲染视口附近，长会话不卡） ============
-/** 单批渲染预算：消息条数（首屏/每批） */
-const RENDER_CHUNK = 40
-/** 窗口起点（0 = 从最早消息开始；尾部优先 → 初始 = len - CHUNK） */
-const renderStart = ref(0)
-/** 窗口内可见消息（尾部优先 slice） */
-const visibleMessages = computed(() => messages.value.slice(renderStart.value))
-/** 加载更早防重入 */
-let loadingMore = false
-
-/** 相邻 AI 消息判断（窗口切片后 msgIdx 不再映射全局 index → 按 id 定位，防止工具条错位） */
-function nextIsAssistant(msg: ChatMessage): boolean {
-  const list = messages.value
-  const i = list.findIndex((m) => m.id === msg.id)
-  return i >= 0 && list[i + 1]?.role === 'assistant'
-}
-
-/** 向上加载更早一批：renderStart 前移 + 滚动位置补偿（新增内容在顶部，scrollTop 需 + 高度差） */
-function loadEarlier() {
-  if (renderStart.value <= 0 || loadingMore) return
-  const el = messagesRef.value
-  const prevH = el?.scrollHeight || 0
-  loadingMore = true
-  renderStart.value = Math.max(0, renderStart.value - RENDER_CHUNK)
-  requestAnimationFrame(() => {
-    if (el) el.scrollTop += el.scrollHeight - prevH
-    loadingMore = false
-  })
-}
-
-/** 流式完成（done）后：窗口保持尾部（若用户停留在底部）；加载更早的窗口不被打扰 */
-function resetRenderWindow() {
-  renderStart.value = Math.max(0, messages.value.length - RENDER_CHUNK)
-}
-
-function scrollToBottom(force = false) {
-  // 流式期间遵循用户滚动位置：stickToBottom（onScroll 维护）为 false（用户上滑查看历史）时不强制拉回，
-  // 用户回到底部自动恢复跟随；force 仅用于切换会话/新消息等明确场景。
-  // （原实现 isLoading 期间无条件滚动 → 用户上滑被强制拉回，界面划不上去）
-  if (!force && !stickToBottom.value) return
-  // rAF 双保险：DOM 高度（v-html/打字机）稳定后再滚，避免滚动位置被内容变化顶回
-  requestAnimationFrame(() => {
-    const el = messagesRef.value
-    if (!el) return
-    el.scrollTop = el.scrollHeight
-    updateCanScroll()
-  })
-}
+// ============ 消息区滚动跟随 + 消息级渐进渲染（抽到 composables/useMessageWindow）============
+// 两块逻辑本是一件事（onScroll 同时驱动"吸附底部"与"加载更早"），拆开要互相回指，故整体下沉。
+const {
+  renderStart, visibleMessages, stickToBottom, canScroll, activeQuestionIndex,
+  nextIsAssistant, updateCanScroll, updateActiveQuestion, scrollToBottom, onScroll,
+  resetRenderWindow, loadEarlier,
+} = useMessageWindow({ messages: () => messages.value, messagesRef })
 
 // 消息数量变化（新消息 / 切换会话）→ 重置渲染窗口（尾部优先）+ 强制滚到底部
 watch(() => messages.value.length, () => {
@@ -3472,27 +2547,27 @@ async function sendAgentMessage(assistantMsg: ChatMessage, apiMessages: Array<{ 
     return false
   }
 
-  await attemptStream(2)
+  const streamOk = await attemptStream(2)
   // 注意：此处不强制 flushAllPending —— 让限速定时器自然播完剩余，
   // 保证打字机效果完整（done/content 事件也不会打断）。
-  // 流自然结束（非用户手动停止）→ 播放完成提示音（若已开启）
-  if (appStore.completionSound) playCompletionSound()
+  // 流自然结束（非用户手动停止）→ 提示音 + 自动朗读（见 finishTurn）
+  finishTurn(assistantMsg, streamOk)
 }
 
-/** done 时同步 content → flow：打字机（chat-stream appendText）尚未消费的正文尾部补成 text 节点，
- *  保证持久化时 flow 完整（P0-2：不再依赖加载端 content 兜底猜补） */
+/**
+ * 以 content 为准收敛 flow 的结果正文（唯一实现见 utils/flow-reconcile.ts）。
+ *
+ * 判据**不是**长度，而是「最后一个 text 段是不是 content 的前缀」——
+ * 过程旁白不在 content 里，旧实现用「全部 text 段拼接长度」当偏移，
+ * 把旁白长度也算进去，`content.slice()` 起点越界 → 答案被静默挖洞。
+ * 详见 flow-reconcile.ts 顶部不变量说明。
+ *
+ * 幂等：正常情况下 `finish(content)` 播完后末段已等于 content，这里退化为 noop（只兜底）。
+ */
 function syncTextToFlow(msg: ChatMessage) {
-  if (!msg.flow || typeof msg.content !== 'string') return
-  const flowText = msg.flow
-    .filter((n): n is Extract<ChatFlowNode, { kind: 'text' }> => n.kind === 'text')
-    .map((n) => n.text)
-    .join('')
-  if (msg.content.length > flowText.length) {
-    const tail = msg.content.slice(flowText.length)
-    const last = msg.flow[msg.flow.length - 1]
-    if (last && last.kind === 'text') last.text += tail
-    else msg.flow.push({ id: nextNodeId(), kind: 'text', text: tail })
-  }
+  if (!msg.flow || msg.flow.length === 0 || typeof msg.content !== 'string') return
+  const res = reconcileAnswerText(msg.flow, msg.content)
+  if (res.action !== 'noop') msg.flow = res.flow
 }
 
 function handleAgentEvent(event: string, data: any, msg: ChatMessage, sessionId?: string) {
@@ -3531,6 +2606,10 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage, sessionId?
       markToolSignal(msg)
       // 先刷完剩余正文（防止打字机限速导致正文被工具卡片从中间劈开：正文前半→工具→正文后半）
       stream?.flushTextNow()
+      // 工具真的被调用 = 当前正文段到此为止（P0 2026-09-29）：**必须在 flushTextNow 之后**，
+      // 否则剩余正文会被留到下一个段里。不加这一行，模型"工具后在续写同一句"的尾片
+      // 会和下一段旁白粘成一个节点；加了这一行，参数增量阶段的尾片仍会回收到原段（见 chat-stream.ts）。
+      stream?.closeTextSegment()
       aiStatus.value = toolStatusLabel(data.name)
       aiStatusTarget.value = extractToolTarget(data.name, data.arguments)
       // 增量参数占位节点已存在（tool_args_chunk 边生成边创建）→ 轮末完整参数覆盖更新；否则新建。
@@ -3577,6 +2656,11 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage, sessionId?
     case 'tool_output': {
       // 工具流式输出：按 toolCallId 找到对应卡片，实时追加（边跑边显示）
       applyToolOutput(msg, data)
+      break
+    }
+    case 'tool_progress': {
+      // 结构化进度（数值型）：file_write 的 ±行数 / multi_edit 的处数，驱动状态行实时数字
+      applyToolProgress(msg, data)
       break
     }
     case 'tool_result': {
@@ -3656,6 +2740,9 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage, sessionId?
       // 累积 + 统一打字机 tick，逐段呈现（防一次性出结果）
       streamTarget = msg
       stream?.pushText(text)
+      // 边生成边朗读（设置项 streamRead）：攒够一块且"本轮本来就会读"时才真的出声，
+      // 判定与收尾全在 useChatSpeech 里，这里只负责把增量递进去
+      feedSpeechStream(msg, text)
       break
     }
     case 'content': {
@@ -3793,6 +2880,8 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage, sessionId?
         if (cur) {
           if (!cur.flow) cur.flow = []
           cur.flow.push({ id: nextNodeId(), kind: 'image', data: data.data, isUrl: !!data.isUrl, title: String(data.title || '').slice(0, 60) })
+          // 图节点是非正文块 ⇒ 封口当前正文段，图后的正文另起节点（顺序不乱）
+          stream?.closeTextSegment()
         }
         appStore.setPreviewImage(String(data.data), !!data.isUrl, String(data.title || '').slice(0, 60))
       }
@@ -3865,13 +2954,22 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage, sessionId?
       // 2026-08-27 保险：本轮 done 时若仍有未答提问，清掉（避免询问窗在任务结束后残留）
       if (msg.pendingQuestion) msg.pendingQuestion = undefined
       // 2026-08-25 修复"结果一次性出来"：done 时不再 flushTextNow 瞬间刷完正文，
-      // 改为 finish() 加速收尾播完（24ms/16字符，保留打字机动感）→ 再 syncTextToFlow 差量补全兜底（幂等）。
-      stream?.finish()          // ①加速收尾播完正文（不瞬间全出）
-      syncTextToFlow(msg)       // ②content 差量补全（finish 后 flow 已完整，幂等 no-op）
+      // 改为 finish() 加速收尾播完（24ms/16字符，保留打字机动感）。
+      // 2026-09-24 定序修复：finish 现在是**异步到播完才 resolve**，并以 content 为基准重算待播；
+      // 对账 + 落盘必须挂在它后面 —— 旧实现 `finish(); syncTextToFlow()` 是同步连写，
+      // 此刻打字机还没把缓冲播进 flow，"已达偏移"用的是半截长度 → 答案被挖洞（实测 73.8% 命中）。
+      const streamRef = stream
+      const answerText = typeof msg.content === 'string' ? msg.content : undefined
+      const finishing = streamRef ? streamRef.finish(answerText) : Promise.resolve()
+      stream = null
+      streamTarget = null
+      void finishing.then(() => {
+        // 兜底对账（正常路径 finish 已让末段 == content，此处退化为 noop）+ received 态落盘
+        syncTextToFlow(msg)
+        if (sessionId) void chatStore.persistLastMessage(sessionId)
+      })
       aiStatus.value = null
       aiStatusTarget.value = ''
-      // received 态立即持久化：done 时 flow 即完整（顺序修复后无重复无遗漏）
-      if (sessionId) void chatStore.persistLastMessage(sessionId)
       // 轮次完成 → 折叠已由 markEnd 状态机处理（WorkBuddy turnFold 语义；用户手动展开过则 userOverride 优先不覆盖）
       // ①移除末尾"收尾确认"思考节点（纯思考轮收尾）
       // 注意：不做"text 统一置底"——交替式下中间说明文本保持原位（WorkBuddy 时序：说明→工具→说明→工具→最终报告）
@@ -3898,7 +2996,7 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage, sessionId?
     case 'error': {
       // 出错：强制补全残留，避免内容缺失（状态机：取消延迟确认，保持当前折叠态不强制折叠）
       markToolSignal(msg)
-      flushAllPending()
+      const flushed = flushAllPending()
       // 2026-08-27 保险：出错也清未答提问，避免询问窗残留
       if (msg.pendingQuestion) msg.pendingQuestion = undefined
       if (data.paused) {
@@ -3912,10 +3010,23 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage, sessionId?
         msg.retrying = data.message || t('chat.retrying')
         aiStatus.value = 'chat.statusRetrying'
       } else {
-        msg.content = `❌ ${data.message}`
+        // 2026-09-24 修复：**不再用错误文本覆盖 content**。
+        // content 是对外唯一真相（复制/导出/搜索/重载对账都读它），覆盖成 `❌ …` 会把
+        // "本轮已经产出的答案"在重载时整体顶掉（永久数据丢失）。有正文时错误改挂 stopReason 横幅。
+        const hadText = !!lastAnswerText(msg.flow).trim()
         markAllThinkingDone(msg)
         aiStatus.value = null
-      aiStatusTarget.value = ''
+        aiStatusTarget.value = ''
+        if (!hadText) {
+          msg.content = `❌ ${data.message}`
+        } else {
+          msg.stopReason = { reason: 'error', message: data.message || t('chat.stopReasonDefault') }
+          void flushed.then(() => {
+            // 等打字机刷完再取：保持 content == flow 末段（对账不变量）
+            const tail = lastAnswerText(msg.flow)
+            msg.content = tail.trim() ? tail : `❌ ${data.message}`
+          })
+        }
       }
       break
     }
@@ -3968,8 +3079,8 @@ async function sendSimpleStream(assistantMsg: ChatMessage, apiMessages: Array<{ 
     const data = await res.json()
     const cur = messages.value.find((m) => m.id === assistantMsg.id)
     if (cur && data.content) cur.content = data.content
-    // 非流式完成 → 播放提示音（若已开启）
-    if (appStore.completionSound) playCompletionSound()
+    // 非流式拿到完整回复 → 提示音 + 自动朗读（走到这里即 HTTP 2xx，视为成功）
+    finishTurn(assistantMsg, true)
     return
   }
 
@@ -4041,8 +3152,8 @@ async function sendSimpleStream(assistantMsg: ChatMessage, apiMessages: Array<{ 
     if (cur) cur.content += pendingSimple
     pendingSimple = ''
   }
-  // 流自然结束 → 播放完成提示音（若已开启）
-  if (appStore.completionSound) playCompletionSound()
+  // 流读完（未抛异常即未中断）→ 提示音 + 自动朗读
+  finishTurn(assistantMsg, true)
 }
 
 onMounted(async () => {
@@ -5405,6 +4516,10 @@ onMounted(async () => {
 .message.assistant .message-body {
   padding: 2px 6px;              /* 平铺：仅保留极窄水平留白，无气泡底/无边框/无圆角 */
   max-width: 100%;
+  /* 2026-09-25 修：父 .message.assistant 是 flex column + align-items:flex-start ⇒ 子项 shrink-to-fit，
+     流式开始时正文还没内容，第一个框（骨架屏/过程状态条）被收缩成内容宽（实测 78~92px），
+     视觉上"思考框只显示一半"（老板报障）。AI 平铺消息本就该全宽 → 显式撑满。 */
+  width: 100%;
   background: transparent;
   border: none;
   border-radius: 0;
@@ -5766,80 +4881,21 @@ onMounted(async () => {
   pointer-events: none;
 }
 
-.message-content {
-  font-size: 14px;
-  line-height: 1.75;
-  color: var(--text-primary);
-}
-
-.message-content :deep(pre) {
-  margin: 12px 0;
-  border-radius: 10px;
-  overflow-x: auto;
-  background: #1e1e2e;
-  padding: 16px;
-  font-size: 13px;
-  border: 1px solid var(--border-color);
-}
-
-.message-content :deep(code) {
-  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
-  font-size: 13px;
-}
-
-.message-content :deep(p code) {
-  background: var(--bg-secondary);
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 13px;
-  border: 1px solid var(--border-color);
-}
-
-.message-content :deep(blockquote) {
-  border-left: 3px solid var(--accent);
-  margin: 12px 0;
-  padding: 4px 16px;
-  color: var(--text-secondary);
-}
-
-.message-content :deep(ul), .message-content :deep(ol) {
-  padding-left: 24px;
-}
-
-.message-content :deep(table) {
-  border-collapse: collapse;
-  width: 100%;
-  margin: 12px 0;
-}
-
-.message-content :deep(th), .message-content :deep(td) {
-  border: 1px solid var(--border-color);
-  padding: 8px 12px;
-  text-align: left;
-}
-
-.message-content :deep(th) {
-  background: var(--bg-secondary);
-}
+/* ===== 已删除：55 行 `.message-content*` 死样式（2026-09-24）=====
+   组件化后正文由 MessageFlowRenderer 渲染，`class="message-content"` 全仓只出现在该组件模板里
+   （MessageFlowRenderer.vue:33 / :114），**不在 ChatView 模板中** → 选择器 `.message-content[data-v-<ChatView>]`
+   永不匹配，故这 55 行为死代码（Vue scoped 样式不会作用到子组件内部元素；子组件只有**根元素**会继承父 scope id，
+   而根元素是 `.msg-flow-renderer`）。
+   正文样式（pre / code / table / blockquote / 列表）一律改 MessageFlowRenderer.vue 的**全局** style 块。
+   教训：留死样式 = 改一处不生效。本次"长 token 撑破气泡"正是这个结构的产物 ——
+   生效的 pre 规则漏了 `overflow-x`，而带 `overflow-x: auto` 的那份（原此处 :4794）是死的。 */
 
 .message-tokens {
   font-size: 11px;
   color: var(--text-muted);
   margin-top: 8px;
 }
-/* 任务完成耗时徽标 */
-.elapsed-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: rgba(16, 185, 129, 0.12);
-  color: #0f766e;
-  font-size: 11px;
-  font-weight: 500;
-}
-.elapsed-badge svg { color: #0f766e; }
+/* 任务完成耗时徽标样式已随组件迁入 ElapsedBadge.vue（scoped） */
 
 /* 多步骤计划卡片 */
 /* 消息操作工具栏 */
@@ -5853,6 +4909,10 @@ onMounted(async () => {
   min-height: 22px;
 }
 .message:hover .message-actions { opacity: 1; }
+/* AI 消息操作条常显（2026-09-26 老板要求 + WB 取证对齐：lib-chat-ui.css:21701
+   ._assistantFeedback_ { visibility: visible }——AI 侧复制/点赞/更多全显不藏，
+   用户消息侧 WB 实测仍是 hover 显，保持一致） */
+.message.assistant .message-actions { opacity: 1; }
 .msg-action {
   display: inline-flex;
   align-items: center;
@@ -5934,10 +4994,6 @@ onMounted(async () => {
   /* v4：去掉顶部分割线（输入卡直接浮在页面上，对齐 WorkBuddy） */
   background: var(--bg-primary);
   flex-shrink: 0;
-  /* 2026-08-26：为 ai-status-bar 绝对定位提供基准，让它在 AI 回复时叠加显示而非挤占消息区
-     （老板反馈"AI 回复外框随回复长度反复伸缩"——实测根因：ai-status-bar 27px 常规流入把 flex:1 的
-      messages-area 挤出 410→382px，回复结束又弹回，外框反复伸缩） */
-  position: relative;
 }
 
 /* 输入高度记忆（对齐 WorkBuddy resize-handle）：自定义高度时固定 textarea 高度（仅 chat-input-fixed 生效，不破坏 autosize；textarea 是 n-input 深层元素需 :deep） */
@@ -5967,63 +5023,6 @@ onMounted(async () => {
 }
 .chat-resize-handle:hover::after {
   background: var(--accent, #4f8cff);
-}
-
-/* 全局执行状态条（输入框上方）：对齐 WorkBuddy 的 progress 指示 —— 文本 + 三点跳动。
-   2026-08-26 改为绝对定位叠加：AI 回复时显示在输入卡上方一条细浮层，不占布局高度，
-   外框（.messages-area）据此保持恒定高度、不再随回复伸缩。 */
-.ai-status-bar {
-  position: absolute;
-  bottom: calc(100% + 6px); /* 悬浮在输入卡正上方，不挤 flex 布局 */
-  left: 0;
-  right: 0;
-  z-index: 20;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 4px 10px;
-  max-width: 800px;
-  width: fit-content;
-  margin: 0 auto;
-  font-size: var(--text-sm, 13px);
-  color: var(--text-secondary, var(--text-color));
-  background: color-mix(in srgb, var(--bg-primary) 85%, transparent);
-  border: 1px solid var(--border-color);
-  border-radius: 999px;
-  user-select: none;
-  pointer-events: none;
-}
-.ai-status-label {
-  font-family: var(--font-mono, monospace);
-}
-.ai-status-dots {
-  display: inline-flex;
-  gap: 3px;
-}
-.ai-status-dots i {
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: var(--text-secondary, var(--text-color));
-  opacity: 0.6;
-  animation: ai-status-bounce 1.4s infinite both;
-}
-.ai-status-dots i:nth-child(2) { animation-delay: -0.32s; }
-.ai-status-dots i:nth-child(3) { animation-delay: -0.64s; }
-@keyframes ai-status-bounce {
-  0%, 80%, 100% { transform: scale(0.5); opacity: 0.3; }
-  40% { transform: scale(1); opacity: 1; }
-}
-.ai-status-icon {
-  color: var(--accent, var(--text-color));
-  flex-shrink: 0;
-}
-.ai-status-target {
-  color: var(--text-muted, var(--text-color));
-  font-family: var(--font-mono, monospace);
-  font-size: 12px;
-  opacity: 0.8;
 }
 
 .composer-card {
@@ -6088,6 +5087,52 @@ onMounted(async () => {
 }
 .chat-input :deep(textarea::placeholder) {
   color: var(--text-tertiary) !important;
+}
+
+/* ===== 朗读浮条（2026-09-27）===== 与"待发送队列"同一套视觉语言，不引入新视觉元素 */
+.speak-bar {
+  margin-bottom: 8px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 6px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+.speak-bar-text {
+  color: var(--text-secondary);
+}
+/* Pro 音色降级提示：不是错误，但必须让用户知道"现在听到的是系统音色" */
+.speak-bar-hint { color: var(--warning, #d97706); white-space: nowrap; }
+.speak-bar-spacer {
+  flex: 1;
+}
+.speak-bar-btn {
+  background: none;
+  border: none;
+  padding: 2px 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 6px;
+}
+.speak-bar-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-primary);
+}
+.speak-bar-stop {
+  color: var(--accent);
+}
+/* 合成期（还没出声）暂停无意义 —— 灰掉它，避免"点了没反应"被误读成坏掉 */
+.speak-bar-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.speak-bar-btn:disabled:hover {
+  color: var(--text-muted);
+  background: none;
 }
 
 /* ===== 待发送队列 ===== */

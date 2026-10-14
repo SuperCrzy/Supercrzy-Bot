@@ -1,5 +1,5 @@
 <template>
-  <aside class="detail-panel" :class="{ visible, maximized, wide: isWideTab }">
+  <aside class="detail-panel" :class="{ visible, maximized }">
     <!-- Tab 头部 -->
     <div class="panel-tabs">
       <button
@@ -79,7 +79,7 @@
             <div
               v-if="g.items.some((i) => i.svg && expandedDiagramSvg === i.svg)"
               class="deliverable-diagram-preview"
-              v-html="expandedDiagramSvg"
+              v-html="sanitizeSvg(expandedDiagramSvg)"
             ></div>
           </div>
         </div>
@@ -203,59 +203,23 @@
         />
       </div>
 
-      <!-- AI 浏览器 Tab（Playwright 实接，实时显示 AI 操作画面） -->
-      <div v-if="activeTab === 'browser'" class="tab-content browser-tab">
-        <div class="browser-live">
-          <span class="browser-live-dot" :class="{ active: browserStatus === '导航中' }" />
-          <span class="browser-live-text">{{ browserStatus }}</span>
-        </div>
-        <div class="browser-url-row">
-          <input
-            v-model="browserUrlInput"
-            class="browser-url-input"
-            placeholder="输入网址，AI 浏览器打开…"
-            @keyup.enter="goToUrl"
-          />
-          <button class="browser-ico" @click="goToUrl" title="打开">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
-          </button>
-          <button class="browser-ico" @click="refreshPage" title="刷新">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-          </button>
-          <button class="browser-ico" @click="browserGoBack" title="后退">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
-          </button>
-          <button class="browser-maxbtn" @click="maximized = !maximized" :title="maximized ? '还原侧栏' : '放大看浏览器画面'">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
-          </button>
-        </div>
-        <div class="browser-view">
-          <div class="browser-chrome-bar">
-            <span class="bc-dot" style="background:#ef4444" /><span class="bc-dot" style="background:#f59e0b" /><span class="bc-dot" style="background:#22c55e" />
-            <span class="bc-url">{{ browserUrl || 'about:blank' }}</span>
-          </div>
-          <div class="browser-canvas">
-            <div v-if="browserScreenshotBase64" class="browser-shot-wrap">
-              <img :src="'data:image/jpeg;base64,' + browserScreenshotBase64" class="browser-shot clickable" @click="clickPage" alt="浏览器画面 (点击可操作)" />
-              <div class="browser-hit-hint" v-if="browserScreenshotBase64">点击画面 = AI 浏览器替你点击</div>
-            </div>
-            <span v-else class="browser-placeholder" :class="{ loading: browserLoading }">
-              {{ browserLoading ? 'AI 浏览器导航中…' : 'AI 浏览器就绪，输入网址打开（或等 AI 操作）' }}
-            </span>
-            <p class="browser-fail" v-if="browserFailHint">{{ browserFailHint }}</p>
-          </div>
-        </div>
-        <div class="browser-console">
-          <div v-for="(l, i) in browserLog" :key="i" class="browser-log-line">&gt; {{ l }}</div>
-          <div v-if="browserLog.length === 0" class="browser-log-line muted">无操作记录</div>
-        </div>
-      </div>
+      <!-- AI 浏览器 Tab（Playwright 实接，实时显示 AI 操作画面）
+           2026-09-24 抽离为独立组件 AiBrowserPanel：逻辑 331 行 + 模板 100 行 + 样式 48 行一并搬走。
+           契约只有 3 个入参。为什么 active 要显式传而不靠 v-if 挂载：组件内部用 v-show 保住
+           状态（截图 / 操作日志 / 地址），切到别的 tab 再切回来不清空；长轮询与原生视图同步
+           由 active 的 watcher 停火（原生视图是盖在 App 之上的一层，离开 tab 必须收起）。 -->
+      <AiBrowserPanel
+        :session-id="chatStore.currentSessionId"
+        :active="visible && activeTab === 'browser'"
+        :maximized="maximized"
+        @update:maximized="maximized = $event"
+      />
     </div>
   </aside>
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed, nextTick, onUnmounted, onMounted } from 'vue'
+import { ref, watch, computed, nextTick } from 'vue'
 import { NEmpty } from 'naive-ui'
 import { useAppStore } from '@/stores/app'
 import { useChatStore } from '@/stores/chat'
@@ -264,6 +228,9 @@ import { extractFiles } from '@/types'
 import type { ChatFlowNode } from '@/types'
 import TimelinePanel from '@/components/chat/TimelinePanel.vue'
 import HtmlPreview from '@/components/chat/HtmlPreview.vue'
+import AiBrowserPanel from '@/components/layout/AiBrowserPanel.vue'
+import { sanitizeSvg } from '@/utils/sanitize-svg'
+import { openFilePreview } from '@/utils/file-preview'
 import type { FileBlock } from '@/types'
 import * as monaco from 'monaco-editor'
 
@@ -291,7 +258,6 @@ const chatStore = useChatStore()
 // ===== L1/L2 实时预览：store 数据 + 800ms 防抖 + 配套 css/js 内联 =====
 const maximized = ref(false)
 /** 宽内容 Tab：仅预览/变更 diff(内容型默认宽)。浏览器默认窄像产物列，点放大才 92%(老板定) */
-const isWideTab = computed(() => !maximized.value && (props.activeTab === 'preview' || props.activeTab === 'changes'))
 const livePreviewPath = ref('')
 
 // ===== SVG 预览操作：下载 / 复制代码 =====
@@ -600,28 +566,37 @@ function showDiff() {
   })
 }
 
+/**
+ * 右栏文件预览入口（文件树 / 产物列表 / 时间线点击都走这里）。
+ *
+ * 2026-09-29 收敛：原先非 html 一律走 `/api/workspace/files/content` 取文本 —— 这是
+ * `openFilePreview` **之外的第二份重复实现**，而且图片在这条链路上同样会被
+ * `readFile(p,'utf-8')` 解成乱码（老板报的"截屏预览是乱码"有两条触发路径，这是其中一条）。
+ * 现在只保留 html 的 iframe 分支（它需要喂给 `HtmlPreview`，不是纯文本场景），
+ * 其余全部交给 `openFilePreview`，由它按 `kind`（text / media / binary）分流。
+ */
 async function loadAndPreviewFile(filePath: string) {
-  try {
-    const res = await fetch(`/api/workspace/files/content?path=${encodeURIComponent(filePath)}`)
-    if (res.ok) {
-      const data = await res.json()
-      const content = data.content.substring(0, 100000)
-      previewFileName.value = filePath
-      previewContent.value = ''
-      previewHtml.value = ''
-
-      // HTML 文件 → iframe 预览
-      if (filePath.endsWith('.html') || filePath.endsWith('.htm')) {
-        previewHtml.value = content
-      } else {
-        previewContent.value = content
+  // HTML 走 iframe 渲染（当纯文本看没有意义），单独保留
+  if (/\.html?$/i.test(filePath)) {
+    try {
+      const res = await fetch(`/api/workspace/files/content?path=${encodeURIComponent(filePath)}`)
+      if (res.ok) {
+        const data = await res.json()
+        previewFileName.value = filePath
+        previewContent.value = ''
+        appStore.clearPreviewImage()          // 三种预览模式互斥（图 / html / 文本）
+        livePreviewContent.value = ''         // 否则 HtmlPreview 会继续显示上一次的内容
+        livePreviewPath.value = ''
+        previewHtml.value = String(data.content || '').substring(0, 100000)
+        emit('update:tab', 'preview')
       }
-      // switch to preview tab
-      emit('update:tab', 'preview')
+    } catch (e) {
+      console.error('Failed to load file:', e)
     }
-  } catch (e) {
-    console.error('Failed to load file:', e)
+    return
   }
+  // 文本 / 图片 / 二进制：唯一实现走 openFilePreview（图片不会再被当文本读）
+  await openFilePreview(filePath)
 }
 
 // Load files when panel becomes visible
@@ -629,13 +604,9 @@ watch(() => ({ visible: true }), () => {
   // no-op for now
 })
 
-// 监听外部触发的文件预览请求（从 ChatView 点击文件产出）
-watch(() => appStore.previewFilePath, (path) => {
-  if (path) {
-    loadAndPreviewFile(path)
-    appStore.previewFilePath = ''  // 消费后清空
-  }
-})
+// 2026-09-29 删除：`appStore.previewFilePath` 的 watcher。
+// 该 ref 在**整个客户端没有任何写入点**（只有这里消费），是死字段 —— 已一并从 store 移除；
+// 外部要触发预览请调 `loadAndPreviewFile()` / `openFilePreview()`。
 
 function switchTab(tab: 'deliverables' | 'files' | 'changes' | 'preview' | 'timeline' | 'browser') {
   emit('update:tab', tab)
@@ -658,111 +629,6 @@ function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
-// ---- AI 浏览器（Playwright 实接，2026-09-01）----
-const browserStatus = ref('待机')
-const browserFailHint = ref('')
-const browserUrl = ref('')
-const browserUrlInput = ref('')
-const browserScreenshotBase64 = ref('')
-const browserLoading = ref(false)
-const browserLog = ref<string[]>([])
-
-function bkHdr(extra?: Record<string, string>) { const e = extra || {}; try { const sid = chatStore.currentSessionId; if (sid) e['X-Browser-Key'] = sid } catch { /* ignore */ } return e }
-async function goToUrl() {
-  const url = browserUrlInput.value.trim()
-  if (!url) return
-  browserLoading.value = true
-  browserStatus.value = '导航中'
-  browserLog.value.push('导航 ' + url)
-  try {
-    const r = await fetch('/api/collab/browser/navigate', {
-      method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, bkHdr()), body: JSON.stringify({ url }),
-    })
-    if (r.ok) {
-      const d = await r.json()
-      browserUrl.value = d.url || url
-      browserScreenshotBase64.value = d.screenshot || ''
-      browserStatus.value = '实时'
-      browserFailHint.value = ''
-    } else { browserStatus.value = '失败'; browserFailHint.value = '后端返回错误 ' + r.status + '，无法打开网页' }
-  } catch {
-    browserStatus.value = '断开'
-    browserFailHint.value = '未能连到浏览器服务(后端 3000)。请先启动后端再打开网页'
-  }
-  browserLoading.value = false
-  // 自动滑动到最新
-  await nextTick()
-}
-
-async function refreshPage() {
-  browserLoading.value = true
-  browserStatus.value = '刷新中'
-  try {
-    const r = await fetch('/api/collab/browser/refresh', { method: 'POST', headers: bkHdr() })
-    if (r.ok) {
-      const d = await r.json()
-      browserUrl.value = d.url || browserUrl.value
-      browserScreenshotBase64.value = d.screenshot || ''
-      browserStatus.value = '实时'
-    } else { browserStatus.value = '失败' }
-  } catch { browserStatus.value = '断开' }
-  browserLoading.value = false
-}
-
-// AI 浏览器 L2：双击镜像发送坐标点击 / 滚轮 / 停止
-const browserClickMode = ref<'auto' | 'off'>('auto')
-async function clickPage(e: MouseEvent) {
-  const t = e.target as HTMLElement
-  const img = t.closest('img')
-  if (!img) return
-  const r = img.getBoundingClientRect()
-  const native = (img.naturalWidth || img.width)
-  // 镜像宽可能 > 实浏览器宽，但坐标应相对截图实际像素：click 用相对图位置*viewport比例
-  const X = ((e.clientX - r.left) / r.width) * img.naturalWidth
-  const Y = ((e.clientY - r.top) / r.height) * img.naturalHeight
-  // 后端 viewport(1000x700)相对图上自然像素比例，统一按 viewport 给
-  await doAct({ action: 'click_at', x: Math.round(X * 1000 / img.naturalWidth), y: Math.round(Y * 1000 / img.naturalHeight) })
-  browserLog.value.push(`点击 ${Math.round(X)},${Math.round(Y)}`)
-}
-async function browserGoBack() { await doAct({ action: 'back' }); browserLog.value.push('后退') }
-let lastFrameTs = 0
-let liveStop = false
-let livePolling = false
-// 画面实时(2026-09-04 长轮询): 服务端在 /browser/latest?after= 上较帧缓存至有新帧或~12s，
-// 前端只在 AI/人手动作产生新帧时收到 → 立即同步贴画面；无变化不空转(无周期轮询)
-async function pollLiveFrame() {
-  if (!props.visible || props.activeTab !== "browser" || liveStop || livePolling) return
-  livePolling = true
-  try {
-    const r = await fetch(`/api/collab/browser/latest?after=${lastFrameTs}`, { headers: bkHdr() })
-    if (!r.ok) return
-    const f = await r.json()
-    if (f?.ts) {
-      const changed = f.ts !== lastFrameTs
-      lastFrameTs = f.ts
-      if (changed && f.screenshot) { browserScreenshotBase64.value = f.screenshot; if (f.url) browserUrl.value = f.url }
-    }
-  } catch { /* 静默 */ }
-  finally {
-    livePolling = false
-    if (props.visible && props.activeTab === "browser" && !liveStop) pollLiveFrame()
-  }
-}
-onMounted(() => { lastFrameTs = 0; liveStop = false; pollLiveFrame() })
-onUnmounted(() => { liveStop = true })
-async function doAct(body: Record<string, unknown>) {
-  browserLoading.value = true
-  try {
-    const r = await fetch('/api/collab/browser/act', { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, bkHdr()), body: JSON.stringify(body) })
-    if (r.ok) {
-      const d = await r.json()
-      if (d?.snapshot?.screenshot) { browserScreenshotBase64.value = d.snapshot.screenshot; browserUrl.value = d.snapshot.url || browserUrl.value }
-      if (d?.result?.error) { browserStatus.value = '动作失败' }
-    } else { browserStatus.value = '失败' }
-  } catch { browserStatus.value = '断开' }
-  browserLoading.value = false
 }
 
 const tabs = [
@@ -791,16 +657,14 @@ const tabs = [
 }
 
 .detail-panel.visible {
-  width: 320px;
-  min-width: 320px;
+  width: 420px;
+  min-width: 420px;
   opacity: 1;
 }
 
-/* 宽内容 Tab（preview 预览/图、changes 变更 diff）自动加宽：长代码/表格/宽图不挤在 320px */
-.detail-panel.visible.wide {
-  width: 58%;
-  min-width: 480px;
-}
+/* 2026-09-25 修（老板报"预览宽度与其它不统一"）：旧设计 preview/changes 两 tab 自动加宽 58%、
+   其它 320px ⇒ 切 tab 面板 320↔800px 跳变，观感即"宽度不统一"。现在所有 tab 统一 420px，
+   预览/长代码需要更大走已有的"最大化"按钮（92%）。 */
 
 /* 预览最大化：展开覆盖聊天区，大屏查看（L1） */
 .detail-panel.visible.maximized {
@@ -1030,35 +894,6 @@ const tabs = [
 .tab-content { display: flex; flex-direction: column; gap: 8px; }
 .tab-hint { font-size: 11px; color: var(--text-muted); line-height: 1.4; }
 .tab-empty { margin-top: 24px; }
-
-/* ---- AI 浏览器 Tab（Playwright 实接）---- */
-.browser-live { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted); }
-.browser-live-dot { width: 6px; height: 6px; border-radius: 50%; background: #cbd5e1; }
-.browser-live-dot.active { background: #22c55e; animation: bdot 1s infinite; }
-@keyframes bdot { 0%,100%{opacity:1} 50%{opacity:.35} }
-.browser-url-row { display: flex; gap: 4px; align-items: center; }
-.browser-url-input { flex: 0 0 65%; width: 65%; max-width: 65%; min-width: 0; border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 6px 9px; font-size: 12.5px; background: var(--bg-tertiary); color: var(--text-primary); caret-color: var(--text-primary); }
-.browser-url-input::placeholder { color: var(--text-tertiary); }
-.browser-go, .browser-refresh { border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-primary); font-size: 11px; padding: 3px 8px; cursor: pointer; color: var(--text-secondary); }
-.browser-ico { border: none; background: transparent; cursor: pointer; color: var(--text-secondary); width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); flex-shrink: 0; }
-.browser-ico:hover { color: var(--text-primary); background: var(--bg-hover); }
-.browser-maxbtn { border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-primary); cursor: pointer; color: var(--text-secondary); display: inline-flex; align-items: center; justify-content: center; height: 20px; margin-left: 2px; padding: 0 5px; }
-.browser-maxbtn:hover { border-color: var(--border-strong); color: var(--text-primary); }
-.browser-view { border: 1px solid var(--border-color); border-radius: var(--radius-sm); overflow: hidden; }
-.browser-chrome-bar { display: flex; align-items: center; gap: 4px; padding: 4px 8px; background: #0f172a; }
-.bc-dot { width: 7px; height: 7px; border-radius: 50%; }
-.bc-url { margin-left: auto; font-size: 10px; color: #64748b; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.browser-canvas { min-height: 140px; display: flex; align-items: center; justify-content: center; background: var(--bg-tertiary); }
-.browser-shot-wrap { width: 100%; overflow-x: auto; }
-.browser-shot { display: block; width: 100%; height: auto; }
-.browser-shot.clickable { cursor: crosshair; }
-.browser-hit-hint { font-size: 10px; color: var(--text-tertiary); text-align: center; padding: 2px 0; }
-.browser-fail { font-size: 12px; color: var(--danger, #e24b4a); text-align: center; padding: 6px 10px; line-height: 1.5; }
-.browser-placeholder { font-size: 11px; color: var(--text-muted); padding: 10px; text-align: center; line-height: 1.5; }
-.browser-placeholder.loading { color: var(--text-secondary); }
-.browser-console { background: #0f172a; border-radius: var(--radius-sm); padding: 6px 8px; font-family: var(--font-mono, monospace); font-size: 10px; color: #6ee7a0; max-height: 90px; overflow-y: auto; }
-.browser-log-line { margin: 2px 0; }
-.browser-log-line.muted { color: #64748b; }
 
 /* File list */
 .file-list { display: flex; flex-direction: column; gap: 2px; }

@@ -18,6 +18,8 @@ import { startEventLoopMonitor, getEventLoopStats } from './services/event-loop-
 import { getSseStats } from './services/sse-health'
 import { createTerminalServer } from './services/terminal'
 import { startTunnel, stopTunnel, renderPreviewPage, getTunnelUrl, createPreviewLink } from './services/tunnel'
+// 文件「能不能当文本预览」的唯一判定（2026-09-29：图片乱码的根因收敛在这里）
+import { mediaMimeOf, isNonPreviewableBinary } from './services/file-kind'
 import { chatRouter } from './routes/chat'
 import { fsRouter } from './routes/filesystem'
 import { settingsRouter } from './routes/settings'
@@ -47,6 +49,7 @@ import { systemRouter } from './routes/system'
 import { collabRouter } from './routes/collab'
 import { recoverInterruptedTasks } from './services/collab-engine'
 import { newsRouter } from './routes/news'
+import { ttsRouter } from './routes/tts'
 import { terminalRouter } from './routes/terminal'
 import { startScheduler } from './services/scheduler'
 import { loadCredentials, sendMessage } from './services/wechat-ilink'
@@ -54,7 +57,7 @@ import { startBot, setMessageHandlerFull } from './services/wechat-bot-runner'
 import { QQBotRunner } from './services/qqbot-runner'
 import { getDB } from './services/database'
 import { randomUUID } from 'crypto'
-import { existsSync } from 'fs'
+import { existsSync, createReadStream } from 'fs'
 import { readFile, stat } from 'fs/promises'
 import { join, relative, dirname, resolve, sep } from 'path'
 import { fileURLToPath } from 'url'
@@ -72,6 +75,7 @@ import { routineRouter } from './routes/routines'
 import { taskStateRouter } from './routes/task-state'
 import { restoreFromDB } from './services/task-state'
 import { stopAllMcp } from './services/mcp-manager'
+import { BROWSER_START_PAGE_PATH, browserStartPageHtml } from './services/ai-browser-start-page'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -397,7 +401,10 @@ async function bootstrap() {
       const row = getDB().prepare("SELECT value FROM settings WHERE key = 'accessToken'").get() as { value: string } | undefined
       if (row?.value) API_TOKEN = row.value
     } catch { /* DB 未初始化时跳过 */ }
-    if (!API_TOKEN || !ctx.path.startsWith('/api/') || ctx.path === '/api/health') return next()
+    // `/api/tts/stream` 必须豁免：它由 <audio src> 直接请求，而 **<audio> 标签无法携带
+    // 自定义请求头**（带不上 Authorization），照原样判就会让非 localhost 的每次朗读直接 401。
+    // 鉴权改由该 URL 上的一次性 token 承担：48 位 hex、TTL 60s、限取 5 次（见 routes/tts.ts）。
+    if (!API_TOKEN || !ctx.path.startsWith('/api/') || ctx.path === '/api/health' || ctx.path === '/api/tts/stream') return next()
     const origin = ctx.request.header.origin || ''
     const isLocal = !origin || origin.includes('localhost') || origin.includes('127.0.0.1')
     if (isLocal) return next()
@@ -407,6 +414,16 @@ async function bootstrap() {
       return
     }
     return next()
+  })
+
+  // AI 浏览器起始页：desktop 的原生视图（WebContentsView）必须先 loadURL 一个**真实 http 页面**
+  // 才可能被 attach 模式接管（about:blank / data: 都会被 judgeUrl 挡掉）。
+  // 必须挂在 koa-static **之前**：否则会被 SPA 兜底吞掉，URL 是起始页、内容却是 App 界面。
+  app.use(async (ctx, next) => {
+    if (ctx.path !== BROWSER_START_PAGE_PATH || ctx.method !== 'GET') return next()
+    ctx.type = 'html'
+    ctx.set('Cache-Control', 'no-store')
+    ctx.body = browserStartPageHtml()
   })
 
   // 托管前端构建产物：dev 在 ../../client/dist；打包后（electron-builder extraResources）在 Resources/client-dist
@@ -421,7 +438,7 @@ async function bootstrap() {
   }
 
   // API Routes
-  const routers = [uploadRouter, chatRouter, fsRouter, settingsRouter, sessionRouter, historyRouter, statsRouter, memoryRouter, gatewayRouter, skillsRouter, tasksRouter, automationsRouter, modelsRouter, workspaceRouter, ocrRouter, checkpointsRouter, playbookRouter, rolesRouter, systemRouter, collabRouter, newsRouter, mcpRouter, routineRouter, terminalRouter, taskStateRouter]
+  const routers = [uploadRouter, chatRouter, fsRouter, settingsRouter, sessionRouter, historyRouter, statsRouter, memoryRouter, gatewayRouter, skillsRouter, tasksRouter, automationsRouter, modelsRouter, workspaceRouter, ocrRouter, checkpointsRouter, playbookRouter, rolesRouter, systemRouter, collabRouter, newsRouter, ttsRouter, mcpRouter, routineRouter, terminalRouter, taskStateRouter]
   // 统一任务状态机：回填历史任务（进程重启后仍可查询上次状态，幽灵任务自动收敛为 cancelled）
   try { const n = restoreFromDB(); if (n > 0) console.log(`[task-state] 已回填 ${n} 条历史任务`) } catch { /* 不影响启动 */ }
   for (const r of routers) {
@@ -470,6 +487,22 @@ async function bootstrap() {
       if (previewSize > PREVIEW_MAX_BYTES) {
         ctx.status = 413
         ctx.body = `File too large to preview: ${(previewSize / 1024 / 1024).toFixed(1)} MB (limit ${PREVIEW_MAX_BYTES / 1024 / 1024} MB)`
+        return
+      }
+      // ⚠️ 媒体直出（2026-09-29）：原来这里一律 `readFile(...,'utf-8')` 再塞进 HTML 页面，
+      // 图片/PDF 到了这一层同样是满屏 \ufffd 替换字符（与 /api/filesystem/read 同一个根因）。
+      const previewMime = mediaMimeOf(absPath)
+      if (previewMime) {
+        ctx.type = previewMime
+        ctx.set('Content-Length', String(previewSize))
+        ctx.set('X-Content-Type-Options', 'nosniff')
+        if (previewMime.startsWith('image/')) ctx.set('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'")
+        ctx.body = createReadStream(absPath)
+        return
+      }
+      if (isNonPreviewableBinary(absPath)) {
+        ctx.status = 415
+        ctx.body = `Binary file (not text-previewable): ${filePath}`
         return
       }
       const content = await readFile(absPath, 'utf-8')

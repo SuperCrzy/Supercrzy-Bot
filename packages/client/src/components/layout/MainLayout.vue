@@ -86,6 +86,10 @@
       </div>
     </div>
 
+    <!-- App 自身更新横幅（2026-10-12）：状态由主进程 electron-updater 经 IPC 推送。
+         放在红绿灯横条之下、app-body 之上 —— 不遮挡红绿灯拖拽区，出现时把内容区下推。 -->
+    <AppUpdateBanner />
+
     <div class="app-body">
     <!-- ========== LEFT SIDEBAR ========== -->
     <aside class="sidebar" :class="{ collapsed: sidebarCollapsed, 'mobile-open': mobileMenuOpen }">
@@ -320,6 +324,7 @@ import ProfileAvatar from '@/components/ui/ProfileAvatar.vue'
 import DetailPanel from '@/components/layout/DetailPanel.vue'
 import ContextUsageRing from '@/components/chat/ContextUsageRing.vue'
 import PlanCapsule from '@/components/chat/PlanCapsule.vue'
+import AppUpdateBanner from '@/components/layout/AppUpdateBanner.vue'
 import WorkspacePickerModal from '@/components/workspace/WorkspacePickerModal.vue'
 
 const router = useRouter()
