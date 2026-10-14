@@ -770,6 +770,63 @@ export function contentFactoryPromptLine(ffmpegState: boolean | null, hint: stri
     '（video_edit 需本机有可用的 ffmpeg；缺依赖时调用会返回安装指引）\n'
 }
 
+/**
+ * 「Your Setup」里**依赖真实状态**的能力声明（I11，2026-10-14）。
+ *
+ * 规则：每条都由真实表/真实注册表生成；表里 0 行 ⇒ 该条**整体不出现**，绝不写死。
+ *
+ * 反例（本轮修掉的）：`- 渠道接入：Web 聊天、Telegram、QQ、微信、钉钉、飞书、Slack、
+ * Discord、企业微信（多渠道收发消息）` —— 硬编码的九渠道清单，而实测本机 `channels` 表
+ * **0 行**。后果不是"少个功能"，而是模型据此对用户承诺"我可以发到你的飞书"，
+ * 做不到之后用户判定 BOT 在撒谎。同一批问题还有 `automations` / `routines` / `mcp_servers`
+ * 三表（均 0 行）却仍以"已有能力"口吻介绍。
+ *
+ * 返回的每条都是**当下为真**的陈述；不可断言的能力干脆不提（而不是写成"暂不可用"——
+ * 那会诱导模型去解释一个用户根本没问的东西）。
+ *
+ * 导出以便单测：这条断言必须能在"有人又写死清单"时变红。
+ */
+export function setupCapabilityLines(input: {
+  model?: string
+  memoryEnabled: boolean
+  memoriesCount: number
+  skillsCount: number
+  channels: Array<{ platform?: string; name?: string }>
+  automationsCount: number
+  mcpServersCount: number
+}): string[] {
+  const lines: string[] = [
+    `- Model: **${input.model || 'deepseek-v4-pro'}** | Platform: SUPERCRZY BOT`,
+  ]
+
+  lines.push(
+    input.memoryEnabled
+      ? `- 持久记忆系统：已启用，当前存有 ${input.memoriesCount} 条长期记忆（用户偏好、项目事实、经验教训），可跨对话存储与检索（memory_store/memory_recall）`
+      : '- 持久记忆系统：未启用',
+  )
+
+  if (input.skillsCount > 0) {
+    lines.push(`- 技能系统：${input.skillsCount} 个已启用技能（文档/搜索/开发/创意/办公等，按需自动触发）`)
+  }
+
+  // 🔴 渠道只在**真的接了**的时候出现，且名字取自表，不写死清单
+  if (input.channels.length > 0) {
+    const names = input.channels.map((c) => c.name || c.platform || '').filter(Boolean)
+    if (names.length > 0) {
+      lines.push(`- 已接入渠道：${names.join('、')}（共 ${names.length} 个，可多渠道收发消息）`)
+    }
+  }
+
+  if (input.automationsCount > 0) {
+    lines.push(`- 自动化任务：已配置 ${input.automationsCount} 条`)
+  }
+  if (input.mcpServersCount > 0) {
+    lines.push(`- MCP 服务：已接入 ${input.mcpServersCount} 个`)
+  }
+
+  return lines
+}
+
 function buildSystemPrompt(basePrompt: string, userMessage: string, model?: string, roleId?: string, sessionWorkspace?: string, uiLanguage?: string): { prompt: string; matchedSkills: Array<{ name: string; name_en: string }>; allowedTools: string[] } {
   const db = getDB()
 
@@ -872,6 +929,23 @@ ${contentFactoryLine}`
   let skillSection = ''
   let matchedSkills: Array<{ name: string; name_en: string }> = []
   let skillTools: string[] = []
+
+  // 🔴 I11（2026-10-14）：能力声明必须由**真实表**生成 —— 这三项计数为 0 时对应的声明整条不出现。
+  // 旧实现把九个渠道名写死在提示词里，而实测本机 channels 表 **0 行**
+  // ⇒ 模型据此承诺"我可以发到你的飞书"，做不到之后用户判定 BOT 在撒谎。
+  // 只统计 enabled=1 的：停用的渠道不构成"已接入"。
+  let realChannels: Array<{ platform?: string; name?: string }> = []
+  let realAutomationsCount = 0
+  let realMcpServersCount = 0
+  try {
+    realChannels = db.prepare('SELECT platform, name FROM channels WHERE enabled = 1').all() as any[]
+  } catch { realChannels = [] }
+  try {
+    realAutomationsCount = Number((db.prepare('SELECT COUNT(*) AS c FROM automations').get() as any)?.c || 0)
+  } catch { realAutomationsCount = 0 }
+  try {
+    realMcpServersCount = Number((db.prepare('SELECT COUNT(*) AS c FROM mcp_servers WHERE enabled = 1').get() as any)?.c || 0)
+  } catch { realMcpServersCount = 0 }
 
   let allSkills: any[] = []
   try {
@@ -985,11 +1059,16 @@ ${contentFactoryLine}`
 - 如需访问工作目录之外的文件，使用绝对路径（沙箱会校验权限）。
 
 ## Your Setup
-- Model: **${model || 'deepseek-v4-pro'}** | Platform: SUPERCRZY BOT
-- 持久记忆系统：${memoryEnabled ? `已启用，当前存有 ${memories.length} 条长期记忆（用户偏好、项目事实、经验教训），可跨对话存储与检索（memory_store/memory_recall）` : '未启用'}
-- 技能系统：${allSkills.length} 个已安装技能（文档/搜索/开发/创意/办公等，按需自动触发）
+${setupCapabilityLines({
+  model,
+  memoryEnabled,
+  memoriesCount: memories.length,
+  skillsCount: allSkills.length,
+  channels: realChannels,
+  automationsCount: realAutomationsCount,
+  mcpServersCount: realMcpServersCount,
+}).join('\n')}
 - 工具：文件读写、Shell 执行、网页搜索/抓取、记忆存取、技能管理
-- 渠道接入：Web 聊天、Telegram、QQ、微信、钉钉、飞书、Slack、Discord、企业微信（多渠道收发消息）
 - 交付能力：可真实执行任务并产出文件/数据/HTML 等可验证结果
 
 ## Core Principle
