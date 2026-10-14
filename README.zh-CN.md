@@ -43,11 +43,11 @@
 ### 方式一:双击启动(最简单,推荐)
 
 > **macOS**:
-> 1. 双击 **`scripts/install.command`**（安装器）→ 桌面自动出现「SUPERCRZY BOT」图标
+> 1. 双击 **`scripts/install.command`**（安装器）→ 生成 `SUPERCRZY BOT.app`,并在桌面创建「SUPERCRZY BOT」图标
 > 2. 双击桌面图标 → 浏览器自动打开 UI
-> 3. 也可以直接双击项目里的 **`SUPERCRZY BOT.app`**（品牌图标）或 `SUPERCRZY BOT.command`
+> 3. 也可不安装,直接双击项目里的 **`SUPERCRZY BOT.command`**
 > 首次若被系统拦截,右键 → 打开即可。
-> (App 需放在项目根目录,与 start.sh 同级;移动项目后重新运行安装器)
+> (`SUPERCRZY BOT.app` 是**生成物**,不随仓库分发;需放在项目根目录与 start.sh 同级,移动项目后重新运行安装器)
 >
 > **Windows**:双击 **`start.bat`**,浏览器会自动打开 UI。
 >
@@ -56,7 +56,7 @@
 ### 方式二:一键脚本
 
 ```bash
-git clone <你的仓库地址>
+git clone https://github.com/SuperCrzy/supercrzy-agent.git
 cd supercrzy-agent
 ./start.sh          # 自动检查环境 → 装依赖 → 构建前端 → 启动 → 自动打开浏览器
 ```
@@ -64,11 +64,11 @@ cd supercrzy-agent
 ### 方式三:手动(开发模式)
 
 ```bash
-# 1. 安装依赖(需 Node >= 20 与 pnpm)
+# 1. 安装依赖(需 Node 22.x 与 pnpm 10.x,详见 package.json 的 engines)
 pnpm install
 
 # 2. 配置(二选一)
-cp .env.example .env        # 然后编辑 .env 填 DEEPSEEK_API_KEY=sk-...
+cp .env.example .env        # 然后编辑 .env 填 OPENAI_KEY=sk-...
 # 或跳过此步,启动后在 Web UI → 模型 (/models) 页配置 API Key(推荐,免重启)
 
 # 3. 启动(生产单进程: http://localhost:3000)
@@ -84,7 +84,7 @@ pnpm --filter @supercrzy/server start
 
 | 命令 | 说明 |
 |------|------|
-| `SUPERCRZY BOT.app` | 双击启动(macOS 桌面 App,品牌图标) |
+| `SUPERCRZY BOT.app` | 双击启动(macOS 桌面 App)——**生成物**,由安装器生成,不随仓库分发 |
 | `SUPERCRZY BOT.command` | 双击启动(macOS 终端入口) |
 | `start.bat` | 双击启动(Windows 一键脚本) |
 | `./start.sh` | 一键启动(生产模式,自动开浏览器) |
@@ -93,7 +93,7 @@ pnpm --filter @supercrzy/server start
 | `pnpm build` | 生产构建(输出到 client/dist,由后端静态托管) |
 | `./scripts/install.command` | 安装器:在桌面创建启动图标 |
 | `./scripts/make-app.sh` | 重新生成 macOS 桌面 App(更新 logo 后执行) |
-| `pnpm test` | 运行测试(服务端 37 + 客户端 9) |
+| `pnpm test` | 运行全部测试(服务端 + 客户端) |
 
 ## 🎮 CLI 模式
 
@@ -107,7 +107,8 @@ pnpm cli
 | 变量 | 说明 | 默认 |
 |------|------|------|
 | `PORT` | 后端端口 | `3000` |
-| `DEEPSEEK_API_KEY` | DeepSeek API Key(兜底;UI 模型页配置后优先) | - |
+| `OPENAI_KEY` | 提供商 API Key(**服务端实际读取的变量**) | - |
+| `DEEPSEEK_API_KEY` | 遗留别名 —— 仅被搜索/工具层当作最后兜底读取 | - |
 | `DEEPSEEK_BASE_URL` | API 地址 | `https://api.deepseek.com` |
 | `DEEPSEEK_MODEL` | 默认模型 | `deepseek-v4-pro` |
 | `CORS_ORIGINS` | CORS 白名单(逗号分隔) | 仅 localhost |
@@ -126,6 +127,7 @@ supercrzy-agent/
 │           ├── routes/  # API 路由(chat/settings/session/memory/gateway...)
 │           ├── services/ # Agent 循环、工具、终端、网关
 │           └── gateway/  # 微信/QQ 平台适配
+├── docs/                # 公开文档目录(docs/internal/ 仅本地工作区,不随仓库分发)
 └── start.sh             # 一键启动
 ```
 
@@ -142,4 +144,9 @@ supercrzy-agent/
 
 ## 📄 License
 
-MIT License
+MIT License — 详见 [LICENSE](LICENSE)。第三方组件(随附二进制、技能库、字体)适用各自的
+许可条款,详见 [NOTICE](NOTICE)。
+
+## 🔐 安全披露
+
+漏洞请走私下渠道报告,详见 [SECURITY.md](SECURITY.md)。

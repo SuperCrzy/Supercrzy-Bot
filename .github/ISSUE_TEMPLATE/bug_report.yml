@@ -1,0 +1,98 @@
+name: Bug report
+description: Something is broken or behaves unexpectedly
+title: "[Bug] "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. **Do not paste API keys, tokens, or database dumps.**
+        Redact anything that looks like a credential before submitting.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: I am running the latest commit on `main`.
+          required: false
+        - label: I have removed all credentials / personal data from this report.
+          required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: Describe the actual behaviour, including the exact error text.
+      placeholder: |
+        e.g. Clicking "read aloud" shows a red banner and the audio never plays.
+        Console/network shows: 502 {"error":"..."}
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start with `pnpm dev`
+        2. Open http://localhost:5173
+        3. ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Which part?
+      multiple: true
+      options:
+        - Client (Vue UI)
+        - Server (Koa API)
+        - Desktop (Electron)
+        - Agent loop / tools
+        - Skills
+        - TTS / read-aloud
+        - Build / packaging
+        - Docs
+        - Not sure
+
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      description: Output of `git rev-parse --short HEAD`, and the App version if you are on the packaged build (Settings → About, or `CFBundleShortVersionString`).
+      placeholder: "e.g. f97054b / App 1.0.8"
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      value: |
+        - OS:
+        - Node: (`node -v`)
+        - pnpm: (`pnpm -v`)
+        - Browser (if client-side):
+        - Running via: `pnpm dev` / packaged App / Docker
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Server console output, browser console, or `~/.supercrzy/` logs. Redact secrets.
+      render: shell
+    validations:
+      required: false

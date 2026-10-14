@@ -1,0 +1,55 @@
+# Git attributes — https://git-scm.com/docs/gitattributes
+#
+# Purpose: normalise line endings in the repository so that contributors on
+# Windows (CRLF by default) do not produce whole-file diffs on every change.
+# Files are stored with LF in the repo; explicit overrides below cover the
+# handful of formats that genuinely need something else.
+
+* text=auto
+
+# --- Source / config / docs: LF ---
+*.ts    text
+*.tsx   text
+*.vue   text
+*.js    text
+*.cjs   text
+*.mjs   text
+*.mts   text
+*.json  text
+*.jsonc text
+*.yml   text
+*.yaml  text
+*.md    text
+*.css   text
+*.html  text
+*.svg   text
+*.sh    text eol=lf
+
+# Windows batch files must keep CRLF to run correctly.
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+
+# --- Binary: never touch ---
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.icns  binary
+*.ttf   binary
+*.otf   binary
+*.woff  binary
+*.woff2 binary
+*.mp3   binary
+*.mp4   binary
+*.pdf   binary
+*.zip   binary
+*.dmg   binary
+*.db    binary
+*.sqlite binary
+
+# --- Generated files: collapse in diffs / language stats ---
+pnpm-lock.yaml            -diff linguist-generated=true
+packages/client/dist/**   -diff linguist-generated=true
+packages/server/dist/**   -diff linguist-generated=true
+packages/desktop/dist/**  -diff linguist-generated=true

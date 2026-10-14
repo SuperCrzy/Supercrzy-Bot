@@ -1,0 +1,163 @@
+# Third-Party Notices
+
+SUPERCRZY BOT itself is licensed under the MIT License (see `LICENSE`).
+This file lists third-party components that are **distributed with** this repository
+and therefore carry their own terms. It is not a complete dependency inventory —
+the full tree and exact resolved versions are in `pnpm-lock.yaml`.
+
+**Maintainers: when you add a vendored binary, font, or copied content, add it here
+in the same pull request.** Adding an entry is not optional bookkeeping; for the
+components below it is a licence obligation.
+
+---
+
+## 1. FFmpeg — no longer bundled
+
+| | |
+|---|---|
+| Status | **Removed on 2026-10-14** |
+| Was | `packages/server/bin/ffmpeg` — FFmpeg 9.0.1, `tessus` static macOS build |
+| Licence of the removed file | **GNU General Public License** (built with `--enable-gpl --enable-version3`) |
+
+The file was deleted for two independent reasons:
+
+1. It was an **x86_64** binary. On Apple Silicon it fails with
+   `bad CPU type in executable`, so it was never a usable fallback on the platforms
+   this project targets.
+2. Shipping a GPL build triggers the GPL's redistribution conditions for that binary
+   (corresponding source, licence text travelling with it). That is a poor trade for
+   a fallback that does not work on the target platform in the first place.
+
+FFmpeg is now resolved at runtime from the user's own installation:
+`ffmpegPath` setting → `PATH` → `~/.supercrzy/bin` → common package-manager paths.
+The resolver and its install guidance live in
+`packages/server/src/services/ffmpeg.ts`; the regression guard is
+`packages/server/src/services/ffmpeg.test.ts`.
+
+**The licence of the user's own FFmpeg build is the user's choice and responsibility.**
+The install hint deliberately does not recommend any particular third-party prebuilt
+package for this reason.
+
+---
+
+## 2. Agent Skills — vendored from Anthropic
+
+Directory: `packages/server/.agents/skills/`
+Upstream: https://github.com/anthropics/skills — commit `f6656c12` (2026-08-13)
+
+### 2a. Document skills — removed (were proprietary)
+
+`docx`, `pdf`, `pptx` and `xlsx` were **removed on 2026-10-14**.
+
+Upstream marks these files `license: Proprietary. LICENSE.txt has complete terms`, and
+its README describes the set as *"source-available, not open source"*. The additional
+restrictions in their `LICENSE.txt` prohibit extracting the materials, reproducing
+them, creating derivative works from them, and distributing them to third parties —
+so they could not be vendored in this repository.
+
+Worth recording for anyone auditing history: the local copies had already lost
+upstream's `license:` field and never shipped the `scripts/` they reference, so they
+were simultaneously unauthorised **and** non-functional. The root cause was in this
+codebase rather than in the upstream files —
+
+- `installSkillFromGitHub` wrote only the `SKILL.md` text to the database and then
+  deleted the whole clone, so `scripts/`, `references/` and `LICENSE.txt` were lost;
+- `exportSkillToFile` rebuilt frontmatter from database columns, which have no
+  `license` field.
+
+Both are fixed: the installer now copies the entire skill directory, and the exporter
+preserves an existing `license:` line. Regression tests cover both.
+
+If you need document support, install such a skill from upstream yourself using the
+built-in installer — the licence terms then travel with the files into your own
+installation — or use an independent implementation. **Do not re-vendor these files
+into this repository.**
+
+### 2b. Apache-2.0 skills
+
+Twelve skills are vendored under the **Apache License 2.0**:
+
+`algorithmic-art`, `brand-guidelines`, `canvas-design`, `claude-api`,
+`frontend-design`, `internal-comms`, `mcp-builder`, `skill-creator`,
+`slack-gif-creator`, `theme-factory`, `web-artifacts-builder`, `webapp-testing`
+
+Each directory carries upstream's `LICENSE.txt` alongside its `SKILL.md`, satisfying
+Apache-2.0 §4(a). Both files are **byte-identical to upstream** (verified by md5), so
+no §4(b) modification notice is required.
+
+### 2c. Skills with no upstream licence file — removed
+
+`doc-coauthoring` and `template-skill` were **removed on 2026-10-14**. Upstream ships no
+`LICENSE.txt` for either, so their terms were unclear; `template-skill` was additionally
+still unfilled placeholder text (`Replace with description of the skill...`). Nothing here
+should be redistributed without clear terms, so both were dropped rather than shipped with
+an open question attached.
+
+As a result, **every** skill under `.agents/skills/` now has a determinate licence:
+12 under Apache-2.0 (see 2b) and 3 authored by this project (see 2d).
+
+### 2d. Project-authored skills
+
+`computer-use`, `content-pipeline` and `skill-finder` are written by this project and
+are covered by the MIT grant in `LICENSE`.
+
+---
+
+## 3. Saira Stencil One (font)
+
+| | |
+|---|---|
+| File | `packages/client/public/fonts/SairaStencilOne.ttf` |
+| Upstream | https://fonts.google.com/specimen/Saira+Stencil+One |
+| Designer / foundry | Omnibus-Type |
+| Licence | SIL Open Font License 1.1 — https://openfontlicense.org |
+
+Used in the app's wordmark. The OFL permits bundling and redistribution provided the
+copyright notice and licence are retained, the font is not sold on its own, and no
+Reserved Font Name is reused by a modified version. The file here is unmodified.
+
+---
+
+## 4. Runtime dependencies
+
+All npm packages installed from `pnpm-lock.yaml` remain under their own licences
+(predominantly MIT and Apache-2.0). Their licence texts ship inside each package under
+`node_modules/`. Notably:
+
+| Package | Purpose | Licence |
+|---|---|---|
+| Electron | desktop runtime | MIT |
+| Koa / koa-router / koa-bodyparser | HTTP server | MIT |
+| Vue 3 / Pinia | client framework and state | MIT |
+| Naive UI | component library | MIT |
+| better-sqlite3 | SQLite driver | MIT |
+| `ws` | WebSocket client | MIT |
+| `@tencent-weixin/openclaw-weixin` | WeChat channel integration | see package |
+
+Generate an authoritative list with a licence scanner before publishing:
+
+```bash
+pnpm dlx license-checker --summary
+```
+
+---
+
+## 5. Third-party services contacted at runtime
+
+This is not a licence grant, and it is recorded here because users should know what the
+software talks to on their behalf.
+
+**Speech synthesis (Pro voice).** The read-aloud feature does **not** use a documented,
+licensed public API. It calls an internal Microsoft Edge "Read Aloud" endpoint using the
+protocol the Edge browser itself uses. That endpoint is **not offered for third-party
+consumption**, has no terms permitting this use, and may change or stop working at any
+time. If you need speech synthesis you can depend on, use a commercial provider
+(for example Azure Speech, which serves the same neural voices under a real SLA) and
+treat the current implementation as a convenience fallback.
+
+Other network calls are made to the model providers you configure yourself, and to those
+providers' endpoints only.
+
+---
+
+Last updated: 2026-10-14

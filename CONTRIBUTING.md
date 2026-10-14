@@ -13,11 +13,11 @@ Thanks for your interest in contributing! We welcome bug reports, feature ideas,
 ## Getting started
 
 ```bash
-# 1. Install dependencies (Node >= 20, pnpm)
+# 1. Install dependencies (Node 22.x + pnpm 10.x — see package.json "engines")
 pnpm install
 
 # 2. Configure your API key
-cp .env.example .env        # fill DEEPSEEK_API_KEY=sk-...
+cp .env.example .env        # fill OPENAI_KEY=sk-...
 # or configure it later in the Web UI → Models page
 
 # 3. Run in dev mode

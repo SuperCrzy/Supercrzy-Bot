@@ -1,0 +1,105 @@
+# Dependabot — https://docs.github.com/code-security/dependabot
+#
+# Weekly, grouped, capped. The goal is a readable stream of PRs, not a pile:
+# patch/minor bumps arrive as a single grouped PR per ecosystem, and majors are
+# left to a human because they usually need code changes (see the ignore list).
+
+version: 2
+updates:
+  # --- Root workspace (pnpm) ---
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "03:00"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 5
+    versioning-strategy: increase
+    commit-message:
+      prefix: "chore(deps)"
+      prefix-development: "chore(dev-deps)"
+    groups:
+      root-minor-patch:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      # Node runtime is pinned to 22.x; majors are handled deliberately, not automatically.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      # Electron majors require an electron-rebuild of better-sqlite3 and a
+      # re-verification of the packaged App (see CONTRIBUTING).
+      - dependency-name: electron
+        update-types: ["version-update:semver-major"]
+      - dependency-name: electron-builder
+        update-types: ["version-update:semver-major"]
+
+  # --- Individual packages (own version ranges) ---
+  - package-ecosystem: npm
+    directory: /packages/client
+    schedule:
+      interval: weekly
+      day: monday
+      time: "03:00"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 3
+    versioning-strategy: increase
+    commit-message:
+      prefix: "chore(deps-client)"
+    groups:
+      client-minor-patch:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: npm
+    directory: /packages/server
+    schedule:
+      interval: weekly
+      day: monday
+      time: "03:00"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 3
+    versioning-strategy: increase
+    commit-message:
+      prefix: "chore(deps-server)"
+    groups:
+      server-minor-patch:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      # better-sqlite3 is a native module and must match the Electron ABI at
+      # packaging time — bump it manually and re-run `electron-rebuild`.
+      - dependency-name: better-sqlite3
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: npm
+    directory: /packages/desktop
+    schedule:
+      interval: weekly
+      day: monday
+      time: "03:00"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 3
+    versioning-strategy: increase
+    commit-message:
+      prefix: "chore(deps-desktop)"
+    groups:
+      desktop-minor-patch:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # --- GitHub Actions ---
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "chore(ci)"
+    groups:
+      actions:
+        patterns: ["*"]

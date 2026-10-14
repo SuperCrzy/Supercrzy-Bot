@@ -63,11 +63,13 @@ pnpm -v    # should print 10.x  (corepack enable  # if missing)
 ### Option 1: double-click launcher (easiest)
 
 > **macOS**:
-> 1. Double-click **`scripts/install.command`** — a "SUPERCRZY BOT" icon appears on your Desktop
+> 1. Double-click **`scripts/install.command`** — it generates `SUPERCRZY BOT.app` and puts a
+>    "SUPERCRZY BOT" icon on your Desktop
 > 2. Double-click the desktop icon → the UI opens in your browser
-> 3. Or double-click **`SUPERCRZY BOT.app`** (branded icon) or **`SUPERCRZY BOT.command`** inside the project
+> 3. Or, without installing anything, double-click **`SUPERCRZY BOT.command`** inside the project
 > If blocked on first run: right-click → Open.
-> (Keep the app at the project root, next to start.sh; re-run the installer after moving the project)
+> (`SUPERCRZY BOT.app` is **generated**, not shipped — keep it at the project root, next to
+> `start.sh`; re-run the installer after moving the project)
 >
 > **Windows**: double-click **`start.bat`** — the UI opens in your browser.
 >
@@ -76,7 +78,7 @@ pnpm -v    # should print 10.x  (corepack enable  # if missing)
 ### Option 2: one-liner script
 
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/SuperCrzy/supercrzy-agent.git
 cd supercrzy-agent
 ./start.sh          # checks env → installs deps → builds frontend → starts → opens browser
 ```
@@ -88,7 +90,7 @@ cd supercrzy-agent
 pnpm install
 
 # 2. Configure (choose one)
-cp .env.example .env        # edit .env, fill DEEPSEEK_API_KEY=sk-...
+cp .env.example .env        # edit .env, fill OPENAI_KEY=sk-...
 # or skip this — after startup, configure your key in Web UI → Models (/models) page (recommended, no restart)
 
 # 3. Start (production single process: http://localhost:3000)
@@ -104,7 +106,7 @@ Open **http://localhost:3000** (one port serves both the page and the API — no
 
 | Command | Description |
 |------|------|
-| `SUPERCRZY BOT.app` | double-click launch (macOS desktop app, branded icon) |
+| `SUPERCRZY BOT.app` | double-click launch (macOS desktop app) — **generated** by the installer, not shipped |
 | `SUPERCRZY BOT.command` | double-click launch (macOS terminal entry) |
 | `start.bat` | double-click launch (Windows one-click script) |
 | `./start.sh` | one-click start (production mode, opens browser) |
@@ -128,7 +130,8 @@ Chat with the agent directly in the terminal — streaming output and tool calls
 | Variable | Description | Default |
 |------|------|------|
 | `PORT` | backend port | `3000` |
-| `DEEPSEEK_API_KEY` | DeepSeek API key (fallback; takes precedence when configured in the UI Models page) | - |
+| `OPENAI_KEY` | provider API key (the variable the server actually reads) | - |
+| `DEEPSEEK_API_KEY` | legacy alias — only honoured as a last-resort fallback by the search/tool layer | - |
 | `DEEPSEEK_BASE_URL` | API base URL | `https://api.deepseek.com` |
 | `DEEPSEEK_MODEL` | default model | `deepseek-v4-pro` |
 | `CORS_ORIGINS` | CORS whitelist (comma-separated) | localhost only |
@@ -147,6 +150,7 @@ supercrzy-agent/
 │           ├── routes/  # API routes (chat/settings/session/memory/gateway...)
 │           ├── services/ # agent loop, tools, terminal, gateway
 │           └── gateway/  # WeChat / QQ platform adapters
+├── docs/                # (public docs live here; docs/internal/ is workspace-only and not shipped)
 └── start.sh             # one-click start
 ```
 
@@ -167,4 +171,9 @@ Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR.
 
 ## 📄 License
 
-MIT License — see [LICENSE](LICENSE).
+MIT License — see [LICENSE](LICENSE). Third-party components (bundled binaries, the skill
+library, fonts) carry their own terms — see [NOTICE](NOTICE).
+
+## 🔐 Security policy
+
+Please report vulnerabilities privately — see [SECURITY.md](SECURITY.md).
