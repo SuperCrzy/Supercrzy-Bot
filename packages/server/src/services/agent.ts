@@ -160,7 +160,7 @@ function approvalDenialText(kind: 'deny' | 'timeout', toolName: string): string 
     : `该操作未获授权：${toolName} 属于敏感操作，被当前授权档位或安全策略直接拒绝。`
 }
 
-// ---- AskQuestion：Agent 结构化提问（学 Grok AskQuestion 工具）----
+// ---- AskQuestion：Agent 结构化提问（结构化提问）----
 const pendingQuestions = new Map<string, (answer: string) => void>()
 
 /** 前端回复提问（chat.ts 路由调用） */
@@ -253,7 +253,7 @@ export function humanizeApiError(c: { reason: string; message: string }): string
  * 策略：发请求前扫描，若 assistant.tool_calls 中某 id 未被后续 tool 消息响应 → 剔除该 tool_calls（防 400）。
  */
 /**
- * 该工具是否属于"按需加载"类型（2026-08-29 两级加载对齐 WorkBuddy deferLoading）。
+ * 该工具是否属于"按需加载"类型（2026-08-29 两级加载对齐主流实现 deferLoading）。
  * 重型/少用工具默认不暴露在每轮请求的 tools 数组，模型先 tool_search 发现再调用。
  * 注意：tool_search 本身必须常驻（否则模型无从发现按需工具）。
  */
@@ -505,14 +505,14 @@ interface AgentCheckpoint {
 // ---- P0: 动态 maxTurns 配置 ----
 const TURN_CONFIG = {
   CHECKPOINT_INTERVAL: 5,       // 每 5 轮存一次检查点
-  BASE_MAX_TURNS: 100,          // 默认最大轮次（对齐 WorkBuddy：上限高到实际任务不触达）
+  BASE_MAX_TURNS: 100,          // 默认最大轮次（对齐主流实现：上限高到实际任务不触达）
   SIMPLE_TASK_TURNS: 50,        // 简单任务（问候/知识问答）
   COMPLEX_TASK_TURNS: 200,      // 复杂任务（全局诊断/代码重构）——放开，靠 ToolCallLoopDetector 防死循环
   PLANNER_OVERHEAD: 4,          // Planner 模式的规划轮次开销
 }
 
 /**
- * ---- ToolCallLoopDetector（WorkBuddy 同款）----
+ * ---- ToolCallLoopDetector（主流实现同款）----
  * 检测模型重复调用同一工具且参数几乎相同（连续 ≥ LOOP_THRESHOLD 次 → 命中）。
  * 防死循环：模型卡在"同一条命令反复试"时主动干预，而不是烧 token 到轮次上限。
  */
@@ -671,7 +671,7 @@ function registerStopSignal(ctx: any, runKey: string): void {
 }
 
 /**
- * 发送 SSE 事件给前端（带自增 seq 写入标准 id 行——断线重连去重/续传的基础，对齐 WorkBuddy eventId 机制）
+ * 发送 SSE 事件给前端（带自增 seq 写入标准 id 行——断线重连去重/续传的基础，对齐主流实现 eventId 机制）
  *
  * 走 safeWriteSse 而不是裸 res.write：客户端已断开时裸写会抛 ERR_STREAM_WRITE_AFTER_END，
  * 而 ctx.respond=false 后 Koa 不再接管该响应，未捕获异常会直接终止后端进程（2026-09-18 收口）。
@@ -1082,7 +1082,7 @@ If something blocks you, say so directly. Never fabricate results.
 3. Something fails → try a different way immediately.
 4. Stuck after 2 tries → tell the user what's blocking you.
 5. Be concise. Show results, not process.
-6. Alternate between brief reply notes and tool calls: before/after each tool call, write 1-2 short sentences in the reply explaining what you're doing (e.g. "Let me check the project structure first", "Found N issues, fixing the first one", "Tests passed, moving on"). This keeps the user informed like ChatGPT/WorkBuddy. Only skip the note for trivial steps.
+6. Alternate between brief reply notes and tool calls: before/after each tool call, write 1-2 short sentences in the reply explaining what you're doing (e.g. "Let me check the project structure first", "Found N issues, fixing the first one", "Tests passed, moving on"). This keeps the user informed. Only skip the note for trivial steps.
 7. Never stop early: keep calling tools until the task is truly complete (all sub-steps done and verified). Do not output a final answer or stop calling tools while work remains — e.g. if you found issues, fix and verify them all; if you only inspected, finish the actual work. A short "final report" before finishing the job is a failure.
 
 ## 目标保持（goal，必须遵守）
@@ -1094,7 +1094,7 @@ If something blocks you, say so directly. Never fabricate results.
 - **思考（reasoning/thinking）只用于内部推理**：分析、规划、拆解步骤。绝对禁止在思考中输出最终报告、结论、结果表格或总结性长文——思考是过程，不是交付物。
 - **思考中禁止输出任何结构化内容**：表格（| 分隔的行）、编号列表、步骤明细、"第 N 步…✅"式进度汇报、结果汇总——这些全部属于正文。思考只允许 1-2 句简短的过程性提示（如"检查环境后开始"），一旦出现结构化内容必须转移到正文。
 - **思考内容用户完全看不到**：最终报告如果写在思考里，等于没有输出。所有结论、表格、总结必须出现在正文（回复内容）里。
-- **每轮工具调用前后，在正文输出 1-2 句简短说明**（如"先检查项目结构"、"发现问题，开始修复"、"测试通过，继续下一步"），让用户像看 ChatGPT/WorkBuddy 一样实时看到进度。**最终完整报告/结论在所有工具执行完成后**，以正文输出。顺序必须是：简短说明 → 工具调用 → 简短说明 → 工具调用 → … → 最终完整报告。
+- **每轮工具调用前后，在正文输出 1-2 句简短说明**（如"先检查项目结构"、"发现问题，开始修复"、"测试通过，继续下一步"），让用户实时看到进度。**最终完整报告/结论在所有工具执行完成后**，以正文输出。顺序必须是：简短说明 → 工具调用 → 简短说明 → 工具调用 → … → 最终完整报告。
 - **报告必须与真实工具结果一致**：只陈述实际执行过的操作和真实返回的数据。不得声称未执行的操作、不得夸大执行细节（例如报告说"用生产链路 /api/ocr"但实际直接跑脚本）、不得编造工具输出。
 - **工具失败要如实说明**：如果某个工具/命令失败或跳过，在正文里向用户说明原因，不要静默跳过当作没发生。
 - 任务完成时，最后一轮正文必须给出明确的最终结论（不要只输出内部推理就结束）。
@@ -1136,7 +1136,7 @@ async function saveCheckpoint(checkpoint: AgentCheckpoint): Promise<string> {
  * 内容：时间 / 用户请求 / AI 摘要(截断) / 工具调用 / 轮数 / 模型。异步非阻塞，失败静默。
  */
 /** 任务日志目录：2026-08-26 老板选"用户数据目录"→ ~/.supercrzy/logs（开源后不进仓库，git 零污染）。
- *  WorkBuddy 同思路（日志放 OS 数据目录，不放源码仓库）。 */
+ *  主流实现 同思路（日志放 OS 数据目录，不放源码仓库）。 */
 function getTaskLogDir(): string {
   return join(os.homedir(), '.supercrzy', 'logs')
 }
@@ -1328,7 +1328,7 @@ export async function runAgentLoop(
     } catch { /* 计数失败不影响主流程 */ }
   }
 
-  // 工具两级加载（2026-08-29 对齐 WorkBuddy deferLoading）：
+  // 工具两级加载（2026-08-29 对齐主流实现 deferLoading）：
   // 默认只暴露核心常驻工具，重型/少用工具（生图/视频/终端/绘图等）按需 tool_search 发现，
   // 压缩每轮 prompt 体积。allowedTools 白名单仍可精确裁剪。
   let activeToolDefs = systemPrompt.allowedTools.length > 3
@@ -1622,7 +1622,7 @@ export async function runAgentLoop(
       })
 
       let response: Response
-      // 模型请求已发出、响应未到达（WorkBuddy model_requesting"等待模型响应"同款——消除"暂停几秒"的空白感）
+      // 模型请求已发出、响应未到达（主流实现 model_requesting"等待模型响应"同款——消除"暂停几秒"的空白感）
       emitSSE(ctx, 'model_requesting', { turn })
       try {
         response = await doFetch(requestBody)
@@ -1631,7 +1631,7 @@ export async function runAgentLoop(
           throw buildApiError(response.status, errorText, 'API error')
         }
       } catch (err: any) {
-        // P2-1 模型 fallback：主模型失败 → 切备用模型重试一次（WorkBuddy fallbackModel 同款）
+        // P2-1 模型 fallback：主模型失败 → 切备用模型重试一次（主流实现 fallbackModel 同款）
         // 2026-08-28：只对"换模型有意义"的错误 fallback。tool_sequence 是我们自己的消息序列问题
         // （换模型照样报），4xx 客户端错误（除 429 限流）换模型也不会变好——白烧一次贵请求。
         const preClassified = classifyApiError(err)
@@ -1697,7 +1697,7 @@ export async function runAgentLoop(
                   if (tc.function?.name) en.name += tc.function.name
                   if (tc.function?.arguments) {
                     en.args += tc.function.arguments
-                    // 参数增量流（WorkBuddy 工具参数流式解析同款）：边生成边推，前端增量渲染
+                    // 参数增量流（主流实现 工具参数流式解析同款）：边生成边推，前端增量渲染
                     if (en.name) emitSSE(ctx, 'tool_args_chunk', { toolCallId: en.id, name: en.name, chunk: tc.function.arguments })
                   }
                 }
@@ -1790,7 +1790,7 @@ export async function runAgentLoop(
         // 现在改成从工具定义派生（`services/tools.ts` 的 SENSITIVE_TOOLS），
         // 并由 `scripts/validate-tools.ts` 的契约断言保证"声明了就必须真的拦"。
 
-        // ---- ToolCallLoopDetector（WorkBuddy 同款）：同一工具 + 相似参数连续调用 ≥4 次 → 干预，防死循环烧 token ----
+        // ---- ToolCallLoopDetector（主流实现同款）：同一工具 + 相似参数连续调用 ≥4 次 → 干预，防死循环烧 token ----
         const loopHit = detectToolLoop(toolCalls)
         if (loopHit) {
           emitSSE(ctx, 'error', {
@@ -1966,7 +1966,7 @@ export async function runAgentLoop(
           onDiagram: (title, svg) => {
             emitSSE(ctx, 'diagram', { title, svg })
           },
-          // 画图流式块：SVG 标签边界切块推送（"先出画板再逐框绘制"，WorkBuddy 同款）
+          // 画图流式块：SVG 标签边界切块推送（"先出画板再逐框绘制"，主流实现同款）
           onDiagramChunk: (chunk) => {
             emitSSE(ctx, 'diagram_chunk', { chunk })
           },
@@ -2449,7 +2449,7 @@ export async function runAgentLoop(
     }).catch((e) => console.log(`[TaskLog] 异常: ${e?.message || e}`))
   }
 
-  // ---- Routine 推荐（学 Grok"演示一次就学会"）：复杂任务完成后主动建议保存为可复用流程 ----
+  // ---- Routine 推荐（"演示一次就学会"）：复杂任务完成后主动建议保存为可复用流程 ----
   // 条件：≥3 次工具调用 + ≥3 轮 + 任务正常完成；必须在 done 之前发送
   if (finished && turn >= 3 && totalToolCalls.length >= 3) {    try {
       const uniqueTools = [...new Set(totalToolCalls)].slice(0, 8)

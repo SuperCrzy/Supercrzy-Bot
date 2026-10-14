@@ -25,7 +25,7 @@ const tool: ToolDef = {
     if (/<script|on\w+=|javascript:|href=|<foreignObject/i.test(svg)) {
       return '❌ SVG 含不安全内容（script/事件/外链被禁止），请用纯图形元素'
     }
-    // 流式画图（WorkBuddy 同款）：SVG 按标签边界切块推送 → 前端元素逐个闭合逐个绘制（"先画框 A 再画框 B"）
+    // 流式画图（主流实现同款）：SVG 按标签边界切块推送 → 前端元素逐个闭合逐个绘制（"先画框 A 再画框 B"）
     // 先推空块让"画板"先出现，再逐块绘制
     if (ctx?.onDiagramChunk) {
       const chunks = chunkSvgByTag(svg, 140)

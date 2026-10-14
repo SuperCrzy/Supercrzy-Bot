@@ -1,6 +1,6 @@
 <template>
   <div class="command-renderer">
-    <!-- 命令卡片展开态：bash 标题 + 命令行 + 输出（对齐 WorkBuddy content-title "bash" + command-line + output） -->
+    <!-- 命令卡片展开态：bash 标题 + 命令行 + 输出（对齐主流实现 content-title "bash" + command-line + output） -->
     <div class="cmd-head">
       <span class="cmd-bash-title">bash</span>
       <span class="cmd-prompt">$</span>
@@ -9,7 +9,7 @@
     <div v-if="resultDisplay" class="tool-section">
       <div class="tool-result cmd-output">{{ truncatedOutput }}</div>
     </div>
-    <!-- 完成后空输出：显示成功提示（WorkBuddy run successfully ✓ 同款） -->
+    <!-- 完成后空输出：显示成功提示（主流实现 run successfully ✓ 同款） -->
     <div v-else-if="status === 'done'" class="tool-section">
       <div class="tool-result cmd-success">{{ $t('chatui.runSuccessfully') }}</div>
     </div>
@@ -20,7 +20,7 @@
 import { computed } from 'vue'
 
 /**
- * 命令执行渲染器（shell_exec 专属，WorkBuddy ExecuteCommandRenderer 同款）。
+ * 命令执行渲染器（shell_exec 专属，主流实现 ExecuteCommandRenderer 同款）。
  * header（状态/风险标签/授权）由 ToolCallBlock 外壳负责，这里只渲染命令正文与输出。
  */
 const props = withDefaults(defineProps<{
@@ -42,7 +42,7 @@ const commandText = computed(() => {
 
 const resultDisplay = computed(() => !!(props.result || '').trim())
 
-/** stdout 截断：保留尾部 500 行（学 WorkBuddy truncateByLines tail） */
+/** stdout 截断：保留尾部 500 行（学 主流实现 truncateByLines tail） */
 const truncatedOutput = computed(() => {
   const out = props.result || ''
   const lines = out.split('\n')
@@ -62,7 +62,7 @@ const truncatedOutput = computed(() => {
   margin-bottom: 8px;
   font-family: var(--font-mono, ui-monospace, monospace);
 }
-/* bash 语言标题（对齐 WorkBuddy execute-command-compact__content-title） */
+/* bash 语言标题（对齐主流实现 execute-command-compact__content-title） */
 .cmd-bash-title {
   font-size: 10px;
   font-weight: 600;
@@ -105,7 +105,7 @@ const truncatedOutput = computed(() => {
 .cmd-output {
   max-height: 320px;
 }
-/* 完成后空输出成功提示（WorkBuddy run successfully ✓ 同款） */
+/* 完成后空输出成功提示（主流实现 run successfully ✓ 同款） */
 .cmd-success {
   color: var(--success, #2ea043);
   font-size: 13px;

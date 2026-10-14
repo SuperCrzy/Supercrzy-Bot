@@ -1,5 +1,5 @@
 /**
- * Deep Links 深链接协议（学 Grok Bot deep links）
+ * Deep Links 深链接协议（URL 深链接）
  * Web 场景实现：URL 参数 + window message 事件两种唤起方式
  * 协议：supercrzy:// 等价于 http://host/?{query}
  * 支持：

@@ -491,7 +491,7 @@ async function uninstallSkill(c: MarketCard) {
   await refresh()
 }
 
-/** 批量导出为 SKILL.md（.agents/skills，Claude Code/Codex/Cursor 可读） */
+/** 批量导出为 SKILL.md（.agents/skills，主流编码代理/主流编码代理/主流编码代理 可读） */
 async function doExportAll() {
   exporting.value = true
   exportResult.value = ''

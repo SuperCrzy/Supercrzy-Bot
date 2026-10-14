@@ -466,7 +466,7 @@ function toggleTurn(turn: number) {
 }
 const expandedDiagramSvg = ref<string | null>(null)
 function onDeliverableClick(item: DeliverableItem) {
-  // C 2026-09-04 WorkBuddy: 点产物 → 右栏自动放大到近全屏看细节(而非仅缩略切换)
+  // C 2026-09-04 主流实现: 点产物 → 右栏自动放大到近全屏看细节(而非仅缩略切换)
   maximized.value = true
   if (item.kind === 'diagram' && item.svg) {
     expandedDiagramSvg.value = expandedDiagramSvg.value === item.svg ? null : item.svg
@@ -614,7 +614,7 @@ function switchTab(tab: 'deliverables' | 'files' | 'changes' | 'preview' | 'time
     loadFiles()
   }
 }
-// WorkBuddy 融合:顶行收敛——主频 产物/文件/预览/浏览器，变更+时间线收进「更多」(2026-09-04)
+// 主流实现 融合:顶行收敛——主频 产物/文件/预览/浏览器，变更+时间线收进「更多」(2026-09-04)
 const tabMoreOpen = ref(false)
 const MAIN_KEYS = ['deliverables', 'files', 'preview', 'browser'] as const
 const MORE_KEYS = ['changes', 'timeline'] as const

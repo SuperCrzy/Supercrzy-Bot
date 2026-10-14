@@ -11,17 +11,17 @@
       </div>
     </div>
 
-    <!-- 写文件 diff（对齐 WorkBuddy WriteFileRenderer：完成态展示改前/改后） -->
+    <!-- 写文件 diff（对齐主流实现 WriteFileRenderer：完成态展示改前/改后） -->
     <div v-if="fileDiff && status === 'done'" class="tool-section">
       <span class="tool-section-label">{{ $t('chat.diffTitle') }}</span>
       <FileDiffViewer :diff="fileDiff" />
     </div>
-    <!-- 多文件编辑（WorkBuddy MultiEditDiffViewer 同款：N 处修改 + 接受/拒绝） -->
+    <!-- 多文件编辑（主流实现 MultiEditDiffViewer 同款：N 处修改 + 接受/拒绝） -->
     <div v-if="isMultiEdit && multiEdits.length && status === 'done'" class="tool-section">
       <MultiEditDiffViewer :edits="multiEdits" @accept="emit('accept')" @reject="emit('reject')" />
     </div>
     <!-- Result -->
-    <!-- 写文件代码视图（ChatGPT CodeDiff 同款：执行中代码逐行"长出来"+自动吸底；完成后保留完整代码，限高滚动——老板 2026-08-21：展开要看得到写了什么） -->
+    <!-- 写文件代码视图（主流实现 CodeDiff 同款：执行中代码逐行"长出来"+自动吸底；完成后保留完整代码，限高滚动——老板 2026-08-21：展开要看得到写了什么） -->
     <div v-if="streamOutput && (status === 'running' || status === 'stream_executing' || status === 'done')" class="tool-section tool-stream">
       <template v-if="isFileWrite">
         <div v-if="status === 'done'" class="tool-section-label">{{ $t('chat.toolWrittenCode') }}</div>
@@ -109,7 +109,7 @@ const multiEdits = computed(() => {
 })
 
 /** 写文件流式区：从 streamOutput 提取代码内容（后端每块推送 `📝 写入 N/M 行\n```\n代码...\n````），按行渲染 */
-/** 结果渲染行数上限（WorkBuddy MAX_RENDER_LINES=500 同款：超长文件截断显示 + 总行数提示） */
+/** 结果渲染行数上限（主流实现 MAX_RENDER_LINES=500 同款：超长文件截断显示 + 总行数提示） */
 const MAX_RENDER_LINES = 500
 const streamCodeLines = computed<string[]>(() => {
   if (!props.streamOutput) return []
@@ -125,7 +125,7 @@ const streamCodeLines = computed<string[]>(() => {
 /** 是否截断（超 500 行） */
 const streamTruncated = computed(() => streamCodeLines.value.length >= MAX_RENDER_LINES)
 
-/** 自动吸底：代码逐行滚出时跟随到底部（ChatGPT 同款） */
+/** 自动吸底：代码逐行滚出时跟随到底部（主流实现同款） */
 const streamCodeEl = ref<HTMLElement | null>(null)
 watch(streamCodeLines, async () => {
   if (!streamCodeEl.value) return
@@ -151,7 +151,7 @@ const isResultLong = computed(() => (props.result || '').length > 400)
   border-top: 1px dashed var(--border-color);
 }
 
-/* 写文件流式区：行号代码视图（ChatGPT CodeDiff 同款——代码逐行"长出来"，自动吸底） */
+/* 写文件流式区：行号代码视图（主流实现 CodeDiff 同款——代码逐行"长出来"，自动吸底） */
 .stream-truncated-hint {
   padding: 4px 8px 6px;
   font-size: 11px;

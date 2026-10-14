@@ -27,7 +27,7 @@ const tool: ToolDef = {
     if (guard) return `❌ 已拦截（沙箱规则）: ${guard}`
     try {
       const content = await readFile(path, 'utf-8')
-      // 行号切片（WorkBuddy readFile 同款）：startLine/endLine 只需读指定行范围（省 token + 精确看某段）
+      // 行号切片（主流实现 readFile 同款）：startLine/endLine 只需读指定行范围（省 token + 精确看某段）
       // 返回带行号的文本（"489: ..."），前端据此显示 "已读取 xxx L489-末尾"（readLineRange 解析 startLine/endLine）
       const startLine = Number(args.startLine) || 0
       const endLine = Number(args.endLine) || 0

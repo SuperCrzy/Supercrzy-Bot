@@ -78,7 +78,7 @@ const tool: ToolDef = {
         if (spawnErr) {
           resolve(`❌ 命令启动失败: ${spawnErr.message}`)
         } else if (code !== 0) {
-          // 部分成功回传（WorkBuddy isPartial 同款）：失败也保留已产生的部分输出
+          // 部分成功回传（主流实现 isPartial 同款）：失败也保留已产生的部分输出
           resolve(`❌ 命令执行失败 (exit code ${code}):\n${stderrBuf || '无错误输出'}${stdoutBuf ? `\n--- 已产生的部分输出 ---\n${stdoutBuf.slice(0, 4000)}` : ''}`)
         } else {
           const output = stdoutBuf + (stderrBuf ? `\n[stderr]\n${stderrBuf}` : '')

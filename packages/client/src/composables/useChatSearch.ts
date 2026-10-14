@@ -1,6 +1,6 @@
 /**
  * useChatSearch — 聊天区 DOM 级搜索高亮 (TreeWalker)
- * 参考 WorkBuddy cb-chat-search 实现
+ * 参考 主流实现 cb-chat-search 实现
  */
 
 const SEARCH_HIT_CLASS = 'cb-search-hit'

@@ -178,7 +178,7 @@ export function startScheduler(): void {
   // Check every 60 seconds
   intervalId = setInterval(tick, 60000)
 
-  // 事件触发自动化：监听工作区文件变化（防抖 3s，学 Grok 文件事件触发）
+  // 事件触发自动化：监听工作区文件变化（防抖 3s）
   startFileEventWatcher()
   console.log('[Scheduler] Started (check interval: 60s)')
 }
@@ -195,7 +195,7 @@ export function stopScheduler(): void {
 }
 
 /**
- * 事件触发自动化（学 Grok runAutomationForEvent）
+ * 事件触发自动化（事件触发自动化）
  * 匹配 event_trigger 的自动化直接执行；不更新 next_run_at（区别于定时）
  * @param event 事件名：file-changed / message-received / manual
  * @param context 附加上下文（如变更文件路径），拼进 prompt

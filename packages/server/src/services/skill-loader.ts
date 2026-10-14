@@ -10,7 +10,7 @@ import { join, dirname, resolve, sep } from 'path'
 import { randomUUID } from 'crypto'
 import { getDB } from './database'
 
-/* ==================== 技能安全扫描（安装前审计，对齐 WorkBuddy skill-scan） ==================== */
+/* ==================== 技能安全扫描（安装前审计，对齐主流实现 skill-scan） ==================== */
 
 export interface SkillScanIssue {
   file: string
@@ -338,7 +338,7 @@ export function loadSkillFile(filePath: string): SkillData | null {
 
     const category = frontmatter.category || 'general'
     if (category === 'document-generation') {
-      // Map workbuddy-style categories
+      // Map 主流实现-style categories
       frontmatter.category = 'writing'
     }
 
@@ -478,7 +478,7 @@ export function installSkill(skill: SkillData): string {
 /**
  * Sync all file-based skills with the database
  * Call on startup to keep skills in sync with SKILL.md files
- * 扫描两个目录：data/skills（内部） + .agents/skills（Agent Skills 开放标准，与 Claude Code/Cursor 共享）
+ * 扫描两个目录：data/skills（内部） + .agents/skills（Agent Skills 开放标准，与 主流编码代理/主流编码代理 共享）
  */
 export function syncFileSkills(workspaceDir: string): { added: number; updated: number } {
   const skillsDir = join(workspaceDir, 'data', 'skills')

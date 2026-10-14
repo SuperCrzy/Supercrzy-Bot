@@ -243,7 +243,7 @@ function createWindow() {
     minHeight: 640,
     title: 'SUPERCRZY BOT',
     backgroundColor: '#ffffff',
-    // 沉浸式顶栏（对齐 WorkBuddy）：隐藏原生标题栏，红绿灯嵌入 52px 顶栏
+    // 沉浸式顶栏（对齐主流实现）：隐藏原生标题栏，红绿灯嵌入 52px 顶栏
     ...(process.platform === 'darwin' ? {
       titleBarStyle: 'hiddenInset',
       trafficLightPosition: { x: 21, y: 20 },

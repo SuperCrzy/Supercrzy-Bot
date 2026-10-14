@@ -1,5 +1,5 @@
 <template>
-  <!-- 授权浮层（对齐 WorkBuddy InterceptCard + tool-approval-floating-portal）：
+  <!-- 授权浮层（对齐主流实现 InterceptCard + tool-approval-floating-portal）：
        待授权工具浮在对话区顶部，醒目但不推挤消息流；header 按钮同时保留 -->
   <div class="tool-approval-floating">
     <div class="taf-card" :class="`taf-risk-${riskLevel}`">
@@ -42,7 +42,7 @@ defineEmits<{
   (e: 'allow-session', tool: ToolCallEvent): void
 }>()
 
-/** 风险等级：删除=高，写文件/命令=中（对齐 WorkBuddy riskTag level） */
+/** 风险等级：删除=高，写文件/命令=中（对齐主流实现 riskTag level） */
 const riskLevel = computed<'high' | 'medium'>(() => (props.tool.name === 'file_delete' ? 'high' : 'medium'))
 
 const riskLabel = computed(() =>

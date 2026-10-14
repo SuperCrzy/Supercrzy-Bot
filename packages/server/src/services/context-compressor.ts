@@ -91,7 +91,7 @@ export async function compressContext(
     return { messages, compressed: false, savedTokens: 0 }
   }
 
-  // 2. 保护头部（WorkBuddy contextSummary 同款：保留原始意图 + 前几轮）
+  // 2. 保护头部（主流实现 contextSummary 同款：保留原始意图 + 前几轮）
   const headCount = COMPRESSION_CONFIG.PROTECT_HEAD
   const headMsgs = nonSystemMsgs.slice(0, headCount)
   // 额外保护首条用户消息（原始意图 Primary Request），即使它在 PROTECT_HEAD 之外也强制保留
@@ -178,7 +178,7 @@ ${middleText.slice(0, 8000)}`
     }
 
     // 5. 组装压缩后的 messages
-    // 用 assistant 角色承载摘要（对齐 WorkBuddy compact agent 产出的 assistant 摘要消息），
+    // 用 assistant 角色承载摘要（对齐主流实现 compact agent 产出的 assistant 摘要消息），
     // 明确标注"以下已压缩完成，勿重做"，防止模型压缩后重复执行已做过的工作。
     const summaryMsg: AgentMessage = {
       role: 'system',

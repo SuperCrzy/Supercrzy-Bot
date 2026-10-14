@@ -13,7 +13,7 @@
 export interface ActorMeta { label: string; icon: string; color: string; bg: string }
 
 /**
- * 从 id 中提取内嵌时间戳（WorkBuddy resolveRealTime 同款：部分 id 内嵌 13 位毫秒时间戳，取小值防污染）。
+ * 从 id 中提取内嵌时间戳（主流实现 resolveRealTime 同款：部分 id 内嵌 13 位毫秒时间戳，取小值防污染）。
  *
  * 两个刻意的容错：
  *   · SQLite 存的是 UTC 但格式无时区标记（`2026-05-07 06:44:42`）→ 必须补 `Z`，否则整体差 8 小时
@@ -73,7 +73,7 @@ export function createChatText(deps: ChatTextDeps) {
     return m ? m.label : deps.t('chat.roleAssistant')
   }
 
-  /** 消息时间显示（对齐 WorkBuddy message-time）：今天 HH:MM / 昨天 HH:MM / 今年 M月D日 HH:MM / 往年带年 */
+  /** 消息时间显示（对齐主流实现 message-time）：今天 HH:MM / 昨天 HH:MM / 今年 M月D日 HH:MM / 往年带年 */
   function formatTime(dateStr: string, id?: string): string {
     const d = resolveRealTime(dateStr, id)
     if (!d) return ''

@@ -1,5 +1,5 @@
 /**
- * 例程（Routine）API — 把跑通的任务保存为可复用流程，一键重放（学 Grok"演示一次就学会"）
+ * 例程（Routine）API — 把跑通的任务保存为可复用流程，一键重放（"演示一次就学会"）
  */
 import Router from 'koa-router'
 import type { Context } from 'koa'

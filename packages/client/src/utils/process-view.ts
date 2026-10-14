@@ -64,7 +64,7 @@ function pickToolNode(nodes: readonly ProcessNodeLike[]): { node: ProcessNodeLik
   return fallback
 }
 
-/** 动词机器标识 → i18n（对齐 WorkBuddy `tool.writeFile.{creating,create,editing,edit}` 动词表） */
+/** 动词机器标识 → i18n（对齐主流实现 `tool.writeFile.{creating,create,editing,edit}` 动词表） */
 const PHASE_VERB_I18N: Record<string, string> = {
   create: 'chat.procVerbCreate',
   edit: 'chat.procVerbEdit',
@@ -137,7 +137,7 @@ export function shortTarget(name: string, raw: string): string {
  *   - 文件类：动词走 `phase`（创建/编辑），宾语走 **basename**；
  *   - 其他：动词走工具描述符（"读取 / 搜索代码 / 运行命令"），宾语走参数里的 URL/命令/查询词；
  *     拿不到宾语时退到**阶段名**（"执行 / 搜索"）——绝不把内部工具名（browser / shell_exec）抛给用户；
- *   - 执行中统一加"正在"前缀（对齐 WorkBuddy「生成中 / 修改中」的在途措辞）。
+ *   - 执行中统一加"正在"前缀（对齐主流实现「生成中 / 修改中」的在途措辞）。
  */
 export function resolveActiveAction(
   nodes: readonly ProcessNodeLike[],
@@ -277,8 +277,8 @@ export interface CounterView {
  *
  * ⚠️ 为什么多处编辑要藏 ±：那对数字是"每处 `old_str`→`new_str` 的**局部** diff"累加，
  * 一次纯插入（用锚点行换 锚点行+N 行）会算成 `+N+1 / −1`，读者会误当成整文件净变化。
- * WorkBuddy 同样对 multi_edit 只显 `{count} 处修改`、不给 ±
- * （取证：`docs/WORKBUDDY_TOOLCARD_MCP_SANDBOX_2026-09-24.md` §1.5）。
+ * 主流实现 同样对 multi_edit 只显 `{count} 处修改`、不给 ±
+ * （取证：`docs/主流实现_TOOLCARD_MCP_SANDBOX_2026-09-24.md` §1.5）。
  * 数字宁可不显，也不能显一个会被读错的。
  */
 export function resolveCounter(

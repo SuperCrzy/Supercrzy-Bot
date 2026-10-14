@@ -337,7 +337,7 @@ const messages = {
       viewDiagram: '点击查看大图',
       viewImage: '点击查看生成图片',
       plannerThinking: '正在规划执行步骤...',
-      /* 全局执行状态条（输入框上方，对齐 WorkBuddy progress.phase 体系） */
+      /* 全局执行状态条（输入框上方，对齐主流实现 progress.phase 体系） */
       statusPlanning: '正在规划执行步骤',
       statusThinking: '正在思考',
       statusWaitingModel: '等待模型响应',
@@ -370,7 +370,7 @@ const messages = {
       statusWorking: '正在处理',
       statusRetrying: '正在重试',
       statusPausing: '正在暂停，保存进度中',
-      /* 折叠条摘要动词（对齐 WorkBuddy metaFold.summary.action.*） */
+      /* 折叠条摘要动词（对齐主流实现 metaFold.summary.action.*） */
       sumCmd: '运行命令',
       sumRead: '读取',
       sumWrite: '写入',
@@ -394,9 +394,9 @@ const messages = {
       sumComputer: '操作桌面',
       sumFallback: '继续处理任务过程',
       sumCategoryCount: '{n} 类操作',
-      /* 轮次完成时长（对齐 WorkBuddy fold.completedWithDuration） */
+      /* 轮次完成时长（对齐主流实现 fold.completedWithDuration） */
       turnCompleted: '已完成',
-      /* 工具友好名称（对齐 WorkBuddy tool-name-map） */
+      /* 工具友好名称（对齐主流实现 tool-name-map） */
       toolCmd: '运行命令',
       toolRead: '读取文件',
       toolWrite: '写文件',
@@ -424,7 +424,7 @@ const messages = {
       toolPlan: '执行计划',
       toolComputer: '桌面操作',
       toolUnknown: '工具',
-      /* 写文件 diff 视图（对齐 WorkBuddy WriteFileRenderer） */
+      /* 写文件 diff 视图（对齐主流实现 WriteFileRenderer） */
       diffTitle: '文件变更',
       diffOmitted: '… 省略 {n} 行',
       multiEditCount: '{count} 处修改',
@@ -434,7 +434,7 @@ const messages = {
       diffReject: '拒绝',
       stopReasonDefault: '任务被中断，可能有未完成的部分。可继续发送消息让 AI 接着做。',
       continueFromCheckpoint: '继续',
-      /* 执行状态条俏皮提示语（WorkBuddy WITTY_TIPS 同款，我们原创风格） */
+      /* 执行状态条俏皮提示语（主流实现 WITTY_TIPS 同款，我们原创风格） */
       tips: [
         '正在把碎片拼成答案',
         '思路在路上，马上到',
@@ -462,7 +462,7 @@ const messages = {
       planHistoryTitle: '任务历史',
       planHistoryHint: '本会话任务进度 · 点击空白关闭',
       processCollapsed: '执行过程',
-      /* 收尾折叠条状态词（2026-09-26 对齐 WorkBuddy fold.completed/cancelled 两族 title） */
+      /* 收尾折叠条状态词（2026-09-26 对齐主流实现 fold.completed/cancelled 两族 title） */
       foldStopped: '已停止',
       /* pill 智能化（2026-09-26 老板拍板 1+3+4+5）：终态细分 + shell 意图转译 + 阅读动作聚合 */
       procError: '执行出错',
@@ -491,7 +491,7 @@ const messages = {
       procEdits: '{done}/{count} 处',
       procTrailTip: '已完成 {n} 个动作',
       procDetailTip: '点击查看过程详情',
-      /* 写文件的动词（随"新建/改已有"动态推导，对齐 WorkBuddy tool.writeFile 动词表） */
+      /* 写文件的动词（随"新建/改已有"动态推导，对齐主流实现 tool.writeFile 动词表） */
       procVerbCreate: '创建',
       procVerbEdit: '编辑',
       // P1-02 统一过程阶段（名词，用于"阶段画像"汇总）
@@ -1049,7 +1049,7 @@ const messages = {
     skills: {
       initBuiltin: '初始化内置技能',
       exportAll: '导出 SKILL.md',
-      exportHint: '导出为 Agent Skills 开放标准（.agents/skills），Claude Code / Cursor 可直接读取',
+      exportHint: '导出为 Agent Skills 开放标准（.agents/skills），主流编码代理可直接读取',
       title: '技能市场',
       desc: '浏览内置技能并管理已安装的 Agent 技能模块',
       searchPlaceholder: '搜索技能...',
@@ -1635,7 +1635,7 @@ const messages = {
       viewDiagram: 'Click to view larger',
       viewImage: 'Click to view generated image',
       plannerThinking: 'Planning steps...',
-      /* Global execution status bar (above composer, aligned with WorkBuddy progress.phase) */
+      /* Global execution status bar (above composer, aligned with 主流实现 progress.phase) */
       statusPlanning: 'Planning steps',
       statusThinking: 'Thinking',
       statusWaitingModel: 'Waiting for model response',
@@ -1668,7 +1668,7 @@ const messages = {
       statusWorking: 'Working',
       statusRetrying: 'Retrying',
       statusPausing: 'Pausing, saving progress',
-      /* Fold summary verbs (aligned with WorkBuddy metaFold.summary.action.*) */
+      /* Fold summary verbs (aligned with 主流实现 metaFold.summary.action.*) */
       sumCmd: 'Run command',
       sumRead: 'Read',
       sumWrite: 'Write',
@@ -1691,9 +1691,9 @@ const messages = {
       sumComputer: 'Control desktop',
       sumFallback: 'Continue working',
       sumCategoryCount: '{n} kinds of operations',
-      /* Turn completion duration (aligned with WorkBuddy fold.completedWithDuration) */
+      /* Turn completion duration (aligned with 主流实现 fold.completedWithDuration) */
       turnCompleted: 'Completed',
-      /* Tool friendly names (aligned with WorkBuddy tool-name-map) */
+      /* Tool friendly names (aligned with 主流实现 tool-name-map) */
       toolCmd: 'Run command',
       toolRead: 'Read file',
       toolWrite: 'Write file',
@@ -1721,7 +1721,7 @@ const messages = {
       toolPlan: 'Plan',
       toolComputer: 'Desktop',
       toolUnknown: 'Tool',
-      /* Write-file diff view (aligned with WorkBuddy WriteFileRenderer) */
+      /* Write-file diff view (aligned with 主流实现 WriteFileRenderer) */
       diffTitle: 'Changes',
       diffOmitted: '… {n} more lines omitted',
       multiEditCount: '{count} edits',
@@ -1731,7 +1731,7 @@ const messages = {
       diffReject: 'Reject',
       stopReasonDefault: 'The task was interrupted — some parts may be unfinished. Send another message to continue.',
       continueFromCheckpoint: 'Continue',
-      /* Playful status-bar tips (WorkBuddy WITTY_TIPS equivalent, original style) */
+      /* Playful status-bar tips (主流实现 WITTY_TIPS equivalent, original style) */
       tips: [
         'Assembling the answer',
         'Looking through the docs',
@@ -1758,7 +1758,7 @@ const messages = {
       planHistoryTitle: 'Task history',
       planHistoryHint: 'Session task progress · click outside to close',
       processCollapsed: 'Process',
-      /* Collapsed bar status word (2026-09-26, aligned with WorkBuddy fold.completed/cancelled) */
+      /* Collapsed bar status word (2026-09-26, aligned with 主流实现 fold.completed/cancelled) */
       foldStopped: 'Stopped',
       /* Pill intelligence (2026-09-26, boss-approved 1+3+4+5): terminal states + shell intent + read aggregation */
       procError: 'Failed',
@@ -1787,7 +1787,7 @@ const messages = {
       procEdits: '{done}/{count} edits',
       procTrailTip: '{n} actions completed',
       procDetailTip: 'Click to view process details',
-      /* Write-file verbs (derived from create/existing, mirrors WorkBuddy tool.writeFile) */
+      /* Write-file verbs (derived from create/existing, mirrors 主流实现 tool.writeFile) */
       procVerbCreate: 'Create',
       procVerbEdit: 'Edit',
       // P1-02 unified process stages (nouns, used for the stage breakdown)
@@ -2343,7 +2343,7 @@ const messages = {
     skills: {
       initBuiltin: 'Initialize built-in skills',
       exportAll: 'Export SKILL.md',
-      exportHint: 'Export to Agent Skills open standard (.agents/skills), readable by Claude Code / Cursor',
+      exportHint: 'Export to Agent Skills open standard (.agents/skills), readable by mainstream coding agents',
       title: 'Skill Market',
       desc: 'Browse built-in skills and manage installed Agent skill modules',
       searchPlaceholder: 'Search skills...',

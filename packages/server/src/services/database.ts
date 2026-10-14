@@ -47,7 +47,7 @@ export function initDatabase() {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
-    -- 工作区索引：最近打开的工作区（参考 WorkBuddy workspaces 表）
+    -- 工作区索引：最近打开的工作区（参考主流实现的 workspaces 表）
     CREATE TABLE IF NOT EXISTS workspaces (
       path TEXT PRIMARY KEY,
       last_opened_at INTEGER NOT NULL DEFAULT 0
@@ -175,7 +175,7 @@ export function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_automations_status ON automations(status);
     CREATE INDEX IF NOT EXISTS idx_automations_next_run ON automations(next_run_at);
 
-    -- 例程（Routine）：把一次跑通的任务保存为可复用流程，一键重放（学 Grok"演示一次就学会"）
+    -- 例程（Routine）：把一次跑通的任务保存为可复用流程，一键重放（"演示一次就学会"）
     CREATE TABLE IF NOT EXISTS routines (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -458,7 +458,7 @@ export function initDatabase() {
   try {
     db.exec("ALTER TABLE skills ADD COLUMN last_used TEXT")
   } catch { /* already exists */ }
-  // Migration: add globs/environments/scoped_to to skills（学 Grok AgentSkillMetadata）
+  // Migration: add globs/environments/scoped_to to skills（技能元数据）
   // globs=文件匹配模式（JSON 数组，命中当前工作区文件才激活）；environments=适用环境（node/python/all）；scoped_to=限定目录
   try {
     db.exec("ALTER TABLE skills ADD COLUMN globs TEXT NOT NULL DEFAULT '[]'")
@@ -494,7 +494,7 @@ export function initDatabase() {
         ELSE description_en END
       WHERE name_en = ''`)
   } catch { /* ignore */ }
-  // 旧库补内置技能 globs/environments（学 Grok AgentSkillMetadata：文件模式激活技能）
+  // 旧库补内置技能 globs/environments（文件模式激活技能）
   try {
     db.exec(`UPDATE skills SET
       globs = CASE name
@@ -508,7 +508,7 @@ export function initDatabase() {
       WHERE globs = '[]' OR globs = ''`)
   } catch { /* ignore */ }
 
-  // Migration: add event_trigger column to automations（事件触发自动化，学 Grok runAutomationForEvent）
+  // Migration: add event_trigger column to automations（事件触发自动化）
   try {
     db.exec("ALTER TABLE automations ADD COLUMN event_trigger TEXT NOT NULL DEFAULT ''")
   } catch { /* already exists */ }

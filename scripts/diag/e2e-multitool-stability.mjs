@@ -54,7 +54,7 @@ function parseSse(text) {
     else ev.other++
     // ⚠️ 只认真正的错误通道：error 事件 + 带 error:true 的 content 事件。
     // 绝不去扫原始文本——工具结果会把源码里 `reasoning_content` / `tool_sequence` 字样原样回显，
-    // 扫原文会产生假警报（本脚本第一版就踩了这个坑，见 .workbuddy/memory/2026-09-20.md）。
+    // 扫原文会产生假警报（本脚本第一版就踩了这个坑）。
     if (name === 'error' && d.message) errors.push(String(d.message).slice(0, 200))
     if (name === 'content' && d.error && d.content) errors.push(String(d.content).slice(0, 200))
     if (name === 'content' && d.content) content += d.content

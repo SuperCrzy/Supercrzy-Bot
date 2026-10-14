@@ -169,7 +169,7 @@ describe('shell_exec —— 不可逆模式 → block', () => {
 
 describe('shell_exec —— 真实会话命令不再被误问（I14 关键回归）', () => {
   // 老板实机反馈："9/13 条真实命令被弹窗"，全是构建/测试/脚本/提交。
-  // 对齐 WorkBuddy command-risk.ts：构建、管道、重定向、&& 链一律 low。
+  // 对齐主流实现 command-risk.ts：构建、管道、重定向、&& 链一律 low。
   const shouldAllow = [
     'npm run build',
     'npm test',

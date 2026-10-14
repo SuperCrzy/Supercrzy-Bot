@@ -8,7 +8,7 @@ import { randomUUID } from 'crypto'
 
 const tool: ToolDef = {
     name: 'create_plan',
-    description: '创建多步骤执行计划（学 Grok CreatePlan）。任务较复杂（>2 步）时先规划步骤再执行，前端展示计划卡片跟踪进度。',
+    description: '创建多步骤执行计划（多步计划）。任务较复杂（>2 步）时先规划步骤再执行，前端展示计划卡片跟踪进度。',
     category: 'system',
     parameters: {
       type: 'object',

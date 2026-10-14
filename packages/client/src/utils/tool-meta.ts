@@ -1,7 +1,7 @@
 /**
- * 工具图标 + 友好名称注册表（对齐 WorkBuddy tool-icon-registry / tool-name-map）
+ * 工具图标 + 友好名称注册表（对齐主流实现 tool-icon-registry / tool-name-map）
  *
- * WorkBuddy 原版：normalizeName（小写去下划线连字符）→ exactMatch → prefixMatch（按长度降序）→ FALLBACK
+ * 主流实现 原版：normalizeName（小写去下划线连字符）→ exactMatch → prefixMatch（按长度降序）→ FALLBACK
  * 图标集：Eye/Pencil/Terminal/Search/Folder/Globe/Trash/Wrench(FALLBACK) + Check/Clipboard/Cloud/Database/Debug/Grid/Image/Send/Sparkle
  * 我们：SVG 描边风格（项目设计语言），图标类型 → 组件内渲染
  */
@@ -18,7 +18,7 @@ export interface ToolMeta {
   nameKey: string
 }
 
-/** 精确匹配表（key 为归一化后形式：小写去下划线连字符）——对齐 WorkBuddy exactMatchMap */
+/** 精确匹配表（key 为归一化后形式：小写去下划线连字符）——对齐主流实现 exactMatchMap */
 const EXACT_MAP: Record<string, ToolMeta> = {
   // ── 读取（Eye）──
   read: { icon: 'read', nameKey: 'chat.toolRead' },
@@ -67,7 +67,7 @@ const EXACT_MAP: Record<string, ToolMeta> = {
   skilllist: { icon: 'skill', nameKey: 'chat.toolSkill' },
 }
 
-/** 前缀匹配（归一化后 startsWith，按长度降序——长前缀优先，对齐 WorkBuddy prefixEntries.sort） */
+/** 前缀匹配（归一化后 startsWith，按长度降序——长前缀优先，对齐主流实现 prefixEntries.sort） */
 const PREFIX_MAP: Array<{ prefix: string; meta: ToolMeta }> = ([
   { prefix: 'shellexec', meta: { icon: 'cmd', nameKey: 'chat.toolCmd' } },
   { prefix: 'filewrite', meta: { icon: 'write', nameKey: 'chat.toolWrite' } },
@@ -88,7 +88,7 @@ const PREFIX_MAP: Array<{ prefix: string; meta: ToolMeta }> = ([
   { prefix: 'plan', meta: { icon: 'plan', nameKey: 'chat.toolPlan' } },
 ] as Array<{ prefix: string; meta: ToolMeta }>).sort((a, b) => b.prefix.length - a.prefix.length)
 
-/** 兜底（WorkBuddy WrenchIcon 同款：工具图标=扳手） */
+/** 兜底（主流实现 WrenchIcon 同款：工具图标=扳手） */
 const FALLBACK: ToolMeta = { icon: 'default', nameKey: 'chat.toolUnknown' }
 
 /** 归一化：小写 + 去除下划线/连字符（"ToolSearch"/"tool_search"/"tool-search" → "toolsearch"） */

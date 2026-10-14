@@ -1,6 +1,6 @@
 <template>
   <div class="med-viewer">
-    <!-- 头部：N 处修改 徽标 + 接受/拒绝（WorkBuddy multiEditCount 同款） -->
+    <!-- 头部：N 处修改 徽标 + 接受/拒绝（主流实现 multiEditCount 同款） -->
     <div class="med-head">
       <span class="med-count">{{ t('chat.multiEditCount', { count: edits.length }) }}</span>
       <span class="med-actions">
@@ -38,7 +38,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{
-  /** edits 数组（WorkBuddy MultiEditDiffViewer 同款：{old_str, new_str} 列表） */
+  /** edits 数组（主流实现 MultiEditDiffViewer 同款：{old_str, new_str} 列表） */
   edits: Array<{ old_str: string; new_str: string; status?: string }>
   /** 截断显示每处片段长度 */
   maxLen?: number

@@ -35,7 +35,7 @@ import { useI18n } from 'vue-i18n'
 import { usePlanStore } from '@/stores/plan'
 
 /**
- * 内联任务列表卡（2026-08-27 加，对齐 WorkBuddy todo 卡）：
+ * 内联任务列表卡（2026-08-27 加，对齐主流实现 todo 卡）：
  * 挂在 create_plan / plan 工具卡处，实时显示当前计划进度（#N 标序 + 完成/进行中/待办）。
  * 数据源＝ planStore.planProgress（与横栏 PlanCapsule 同源），plan_update 事件自动刷新，后端零改动。
  */

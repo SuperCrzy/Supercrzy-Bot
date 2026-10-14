@@ -2,7 +2,7 @@
   <div class="file-diff-viewer">
     <div class="fdv-head">
       <span class="fdv-path">{{ diff.path }}</span>
-      <!-- ± 行数统计徽标（WorkBuddy addedLines/removedLines 同款） -->
+      <!-- ± 行数统计徽标（主流实现 addedLines/removedLines 同款） -->
       <span v-if="addedCount || removedCount" class="fdv-stat">
         <span class="fdv-stat-add">+{{ addedCount }}</span>
         <span class="fdv-stat-del">−{{ removedCount }}</span>
@@ -37,7 +37,7 @@ const props = defineProps<{
 
 const { t } = useI18n({ useScope: 'global' })
 
-/** 最大渲染行数（对齐 WorkBuddy MAX_RENDER_LINES 截断保护） */
+/** 最大渲染行数（对齐主流实现 MAX_RENDER_LINES 截断保护） */
 const MAX_LINES = 60
 
 const isNewFile = computed(() => !props.diff.oldContent.trim())
@@ -84,7 +84,7 @@ const diffRows = computed(() => {
 
 const diffTruncated = computed(() => diffRows.value.length > MAX_LINES)
 const omittedText = computed(() => t('chat.diffOmitted', { n: omittedNew.value || diffRows.value.length - MAX_LINES }))
-/** ± 行数统计（WorkBuddy addedLines/removedLines 同款） */
+/** ± 行数统计（主流实现 addedLines/removedLines 同款） */
 const addedCount = computed(() => diffRows.value.filter(r => r.type === 'add').length)
 const removedCount = computed(() => diffRows.value.filter(r => r.type === 'del').length)
 

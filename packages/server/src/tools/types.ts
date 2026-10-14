@@ -29,8 +29,8 @@ export interface ToolProgress {
    * 阶段**机器标识**（不是给人看的文案！）。
    *
    * 唯一合法取值：`'create'`（新建文件）| `'edit'`（修改已有文件）。
-   * 前端据此本地化「创建 / 编辑」——对齐 WorkBuddy `tool.writeFile.{creating,create,editing,edit}`
-   * 的"动词随新旧文件动态推导"（取证见 `docs/WORKBUDDY_TOOLCARD_MCP_SANDBOX_2026-09-24.md` §1.6）。
+   * 前端据此本地化「创建 / 编辑」——对齐主流实现 `tool.writeFile.{creating,create,editing,edit}`
+   * 的"动词随新旧文件动态推导"（取证见 `docs/主流实现_TOOLCARD_MCP_SANDBOX_2026-09-24.md` §1.6）。
    *
    * ⚠️ **禁止塞中文/英文展示文案**：数据流里出现"给人看的字"是本项目已付过代价的老路
    *    （前端正则解析后端中文，后端改一个字即静默失效）。

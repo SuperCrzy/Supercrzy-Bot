@@ -1,5 +1,5 @@
 /**
- * 剪贴板工具 — 复制文本到剪贴板，多级降级（参考 WorkBuddy copyToClipboard 设计）
+ * 剪贴板工具 — 复制文本到剪贴板，多级降级（参考 主流实现 copyToClipboard 设计）
  * ① navigator.clipboard.writeText（标准 API，需用户手势/页面 focus）
  * ② document.execCommand('copy')（Safari / 非安全上下文兜底，setSelectionRange 兼容 iOS）
  */
@@ -74,7 +74,7 @@ export function stripMarkdown(md: string): string {
 }
 
 /**
- * 富文本复制：同时写 text/plain + text/html（对齐 WorkBuddy 复制能力——粘贴到 Notion/Word 保留格式）。
+ * 富文本复制：同时写 text/plain + text/html（对齐主流实现 复制能力——粘贴到 Notion/Word 保留格式）。
  * 优先 ClipboardItem（标准 API，需要 focus/手势）；不支持或失败 → 降级纯文本。
  */
 export async function copyRichText(plain: string, html: string): Promise<boolean> {

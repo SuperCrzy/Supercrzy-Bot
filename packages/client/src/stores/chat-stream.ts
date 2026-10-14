@@ -2,7 +2,7 @@
  * 聊天流式处理核心（SSE 事件 → 消息 flow 更新 + 打字机引擎）。
  *
  * 目标（单轨化铺垫）：
- * 1. 打字机引擎（utils/typewriter.ts，WorkBuddy streaming-text 同款）从 ChatView 抽出，
+ * 1. 打字机引擎（utils/typewriter.ts，主流实现 streaming-text 同款）从 ChatView 抽出，
  *    正文/思考共用，可多实例（幽灵模式多 agent 并行流复用）。
  * 2. SSE 事件对消息的更新逻辑集中于此（flow 节点增改），ChatView 只留 UI 副作用。
  *
@@ -65,7 +65,7 @@ export interface ChatStream {
 export interface ChatStreamOptions {
   /** thinking 节点 message 文案 */
   thinkingMessage?: string
-  /** 打字机配置（默认 WorkBuddy 参数：40ms / 1-4 字符） */
+  /** 打字机配置（默认 主流实现 参数：40ms / 1-4 字符） */
   config?: typeof DEFAULT_TYPING_CONFIG
   /** 节点创建回调（新 thinking/text/diagram 节点时通知，如触发折叠 UI） */
   onNodeCreated?: (node: ChatFlowNode) => void
@@ -217,7 +217,7 @@ export function createChatStream(target: ChatMessage | null, options: ChatStream
     }
   }
 
-  /** 打字机 tick：正文/思考两通道各按 advanceReveal 吐字符（WorkBuddy streaming-text 同款 EMA 平滑） */
+  /** 打字机 tick：正文/思考两通道各按 advanceReveal 吐字符（主流实现 streaming-text 同款 EMA 平滑） */
   function tick() {
     timer = null
     if (!target) { pendingText = ''; pendingReasoning = ''; return }

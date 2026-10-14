@@ -124,7 +124,7 @@ export const useChatStore = defineStore('chat', () => {
   )
 
   /**
-   * 会话按工作区目录分组（对齐 WorkBuddy 空间结构）：
+   * 会话按工作区目录分组（对齐主流实现 空间结构）：
    * - 有 workspace_dir 的会话按目录归组（组标题 = 目录名）
    * - 无目录的会话归入「临时任务」组（isPlayground）
    * 返回 [{ key, title, sessions }]，目录组按最新会话排序，临时组放最后
@@ -255,7 +255,7 @@ export const useChatStore = defineStore('chat', () => {
               const reconciled = reconcileAnswerText(flow, contentText, () => `restored-${Date.now().toString(36)}-${restoreSeq++}`)
               flow = reconciled.flow
             }
-            // P0-7 耗时订正（WorkBuddy correctAssistantCreateTimeFromTools 同款）：
+            // P0-7 耗时订正（主流实现 correctAssistantCreateTimeFromTools 同款）：
             // 历史消息 elapsed_ms 缺失时，用 flow 内工具节点的最大 createTime 与 startedAt 之差兜底
             let elapsedMs = m.elapsed_ms
             if (!elapsedMs && Array.isArray(flow)) {

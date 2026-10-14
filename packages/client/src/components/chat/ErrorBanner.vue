@@ -1,5 +1,5 @@
 <template>
-  <!-- 错误横幅（对齐 WorkBuddy error-banner：对话区顶部 fixed，变体配色 + 标题行 + 详情行 + 动作区，可关闭） -->
+  <!-- 错误横幅（对齐主流实现 error-banner：对话区顶部 fixed，变体配色 + 标题行 + 详情行 + 动作区，可关闭） -->
   <div class="error-banner" :class="`error-banner--${variant}`">
     <button v-if="dismissible" type="button" class="error-banner__close" :title="labels.close" @click="emit('dismiss')">
       <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3.5 3.5L10.5 10.5M10.5 3.5L3.5 10.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
@@ -79,7 +79,7 @@ const labels = computed(() => ({
 
 const copied = ref(false)
 function handleCopy() {
-  // 对齐 WorkBuddy：结构化错误报告（用户友好信息 + 技术细节）
+  // 对齐主流实现：结构化错误报告（用户友好信息 + 技术细节）
   const d = props.details || {}
   const lines = [
     '=== Error Report ===',

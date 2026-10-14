@@ -11,7 +11,7 @@
 import { ref, onErrorCaptured } from 'vue'
 
 /**
- * 工具卡片错误边界（WorkBuddy ToolRendererErrorBoundary 同款）：
+ * 工具卡片错误边界（主流实现 ToolRendererErrorBoundary 同款）：
  * 单张卡片渲染异常（坏 result / 组件 bug）只降级为占位卡片，不炸掉整条消息。
  */
 const props = defineProps<{ toolName?: string }>()

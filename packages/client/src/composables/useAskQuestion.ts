@@ -43,14 +43,14 @@ export function useAskQuestion(opts: UseAskQuestionOptions) {
     msg.pendingQuestion = undefined
   }
 
-  /** 浮层答复：定位消息后复用 answerQuestion（对齐 WorkBuddy QuestionFloating onSelect） */
+  /** 浮层答复：定位消息后复用 answerQuestion（对齐主流实现 QuestionFloating onSelect） */
   async function answerQuestionFromFloating(q: FloatingQuestion, answer: string) {
     const msg = messages().find((m) => m.pendingQuestion?.id === q.id)
     if (!msg) return
     await answerQuestion(msg, answer)
   }
 
-  /** 浮层跳过：发空答复让 AI 自己决定（对齐 WorkBuddy onSkip） */
+  /** 浮层跳过：发空答复让 AI 自己决定（对齐主流实现 onSkip） */
   async function skipQuestion(q: FloatingQuestion) {
     const msg = messages().find((m) => m.pendingQuestion?.id === q.id)
     if (!msg) return

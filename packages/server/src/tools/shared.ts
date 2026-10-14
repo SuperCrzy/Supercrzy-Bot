@@ -99,7 +99,7 @@ export function resolvePath(p: string, cwd?: string): string {
 export const SENSITIVE_MEMORY_PATTERN =
   /(app[_-]?secret|client[_-]?secret|api[_-]?key|apikey|access[_-]?key|secret[_-]?key|password|passwd|passphrase|私钥|密钥|auth(?:orization)?\s*[:=]\s*bearer|BEGIN\s+[A-Z\s]*PRIVATE\s+KEY)/i
 
-/** 执行 git 命令（工作目录执行，输出截断防刷屏；学 Grok AgenticGitAction 的 git 工具封装） */
+/** 执行 git 命令（工作目录执行，输出截断防刷屏；git 工具封装） */
 export function runGit(cmd: string, cwd: string | undefined, label: string): Promise<string> {
   return new Promise((resolve) => {
     const dir = cwd || WORKSPACE_ROOT
@@ -193,7 +193,7 @@ export function lintContent(content: string, filePath: string): Array<{ severity
   return diags.slice(0, 50)
 }
 
-// 行数 diff：对比新旧文本，返回新增/删除行数（WorkBuddy addedLines/deletedLines 同款算法）
+// 行数 diff：对比新旧文本，返回新增/删除行数（主流实现 addedLines/deletedLines 同款算法）
 export function diffLines(oldTxt: string, newTxt: string): { added: number; deleted: number } {
   const a = oldTxt ? oldTxt.split('\n') : []
   const b = newTxt ? newTxt.split('\n') : []

@@ -1,4 +1,4 @@
-// Embedding 提供方抽象（2026-08-23，对齐 WorkBuddy"embedding 余弦 + BM25 融合"）
+// Embedding 提供方抽象（2026-08-23，对齐主流实现"embedding 余弦 + BM25 融合"）
 // 配置（settings 表，可选——不配则整个混合检索退化回纯 FTS5）：
 //   embeddingApiKey  必配才激活（也读 env EMBEDDING_API_KEY）
 //   embeddingBaseUrl 默认 https://api.siliconflow.cn/v1（硅基流动，BGE-M3 免费额度；OpenAI 兼容格式）

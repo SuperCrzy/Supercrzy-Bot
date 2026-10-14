@@ -120,7 +120,7 @@ chatRouter.post('/tool-confirm', async (ctx) => {
   if (!toolCallId || !['allow', 'deny', 'allow-session'].includes(decision)) {
     ctx.status = 400; ctx.body = { error: 'toolCallId and decision(allow|deny|allow-session) required' }; return
   }
-  // allow-session：本会话内该工具类别放行（按工具名记忆——对齐 WorkBuddy Always Allow 按工具类别；file_delete 仍每次确认）
+  // allow-session：本会话内该工具类别放行（按工具名记忆——对齐主流实现 Always Allow 按工具类别；file_delete 仍每次确认）
   if (decision === 'allow-session') {
     if (sessionId) approveSessionTools(sessionId, toolName)
     resolveToolConfirmation(toolCallId, 'allow')

@@ -69,7 +69,7 @@ export interface ToolExecCtx {
   permissionLevel?: 'workspace-only' | 'sandbox' | 'full'
   /** 产物上报回调：shell 命令产生/修改的文件（由 agent 持久化到 artifacts 表） */
   onArtifacts?: (files: Array<{ name: string; path: string; action: 'created' | 'updated'; size: number }>) => void
-  /** 工具流式输出回调：命令执行分片实时推送（WorkBuddy streamOutput 同款） */
+  /** 工具流式输出回调：命令执行分片实时推送（主流实现 streamOutput 同款） */
   onOutput?: (toolCallId: string, chunk: string) => void
   /**
    * 工具执行进度回调（结构化，G5/I13）。
@@ -80,7 +80,7 @@ export interface ToolExecCtx {
   onPreview?: (path: string, content: string) => void
   /** 画图回调：AI 生成 SVG 图表时触发（前端聊天内直接渲染） */
   onDiagram?: (title: string, svg: string) => void
-  /** 画图流式块回调：SVG 按标签边界切块实时推送（WorkBuddy 同款"先出画板再逐框绘制"——SVG 元素闭合即被浏览器绘制） */
+  /** 画图流式块回调：SVG 按标签边界切块实时推送（主流实现同款"先出画板再逐框绘制"——SVG 元素闭合即被浏览器绘制） */
   onDiagramChunk?: (chunk: string) => void
   /** 生图回调：AI 生成图片后推送（dataURL 或 URL + 标题），前端对话内 + 右侧预览展示 */
   onImage?: (data: string, isUrl: boolean, title: string) => void
@@ -275,9 +275,9 @@ export async function deepseekNativeSearch(query: string, limit = 8): Promise<{ 
 }
 
 // ============================================================
-// 敏感工具 Auto 授权分类器（2026-08-29 对齐 WorkBuddy PermissionMode.auto）
+// 敏感工具 Auto 授权分类器（2026-08-29 对齐主流实现 PermissionMode.auto）
 // ------------------------------------------------------------
-// WorkBuddy 的 auto 模式 = AI 分类器：显然安全的安全自动放行，危险动作拒绝，
+// 主流实现 的 auto 模式 = AI 分类器：显然安全的安全自动放行，危险动作拒绝，
 // 分类器不可用时回退询问。我们这里用**确定性规则分类**（比黑盒分类器更可预测）：
 //   - 显然安全的只读命令 / 已知无害操作 → auto allow
 //   - 命中危险模式（删除/写系统/高危参数）→ 需要确认（prompt）
@@ -372,7 +372,7 @@ const AUTO_SAFE_PREFIX = [
   'wc', 'stat', 'file', 'printenv', 'env', 'getconf', 'uname', 'true', 'false',
   'git status', 'git log', 'git diff', 'git branch', 'git remote -v', 'git diff --stat',
   // 2026-09-24 扩充：真实会话里 9/13 条被误问的命令是这些（构建/测试/脚本/提交），
-  // 对齐 WorkBuddy command-risk.ts —— 构建、管道、重定向、&& 链一律 low，不拦。
+  // 对齐主流实现 command-risk.ts —— 构建、管道、重定向、&& 链一律 low，不拦。
   'npm', 'pnpm', 'npx', 'yarn', 'bun', 'node', 'deno', 'tsc', 'tsx',
   'vitest', 'jest', 'pytest', 'python', 'python3', 'pip', 'pip3', 'uv',
   'make', 'cargo', 'go', 'rustc', 'gradle', 'mvn', 'javac',
@@ -533,8 +533,8 @@ export function classifySensitiveTool(toolName: string, argText: string): 'allow
   }
 
   if (toolName === 'file_delete') return 'block'   // 删除永不可逆：任何档位/白名单都拦（老板"除删除外全放行"）
-  if (toolName === 'skill_install') return 'block' // 装的是可执行代码，对齐 WorkBuddy 恒问集合
-  if (toolName === 'computer_use') return 'block'  // 操作本机（WorkBuddy computerUseVlmApproval 恒问）
+  if (toolName === 'skill_install') return 'block' // 装的是可执行代码，对齐主流实现恒问集合
+  if (toolName === 'computer_use') return 'block'  // 操作本机（操作本机类工具恒问）
 
   if (toolName === 'shell_exec') return classifyShellCommand(extractShellCommand(argText))
 

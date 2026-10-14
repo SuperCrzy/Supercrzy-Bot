@@ -1,7 +1,7 @@
 <template>
   <div class="vrm-card" :class="{ executing: isExecuting }">
     <div class="vrm-header" :class="{ expandable: canExpand }" @click="handleToggle">
-      <!-- 执行中不显示图标（WorkBuddy 同款：cb-shining-text 闪烁状态词） -->
+      <!-- 执行中不显示图标（主流实现同款：cb-shining-text 闪烁状态词） -->
       <svg v-if="!isExecuting" class="vrm-icon" width="15" height="15" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
         <path d="M8 1.6c2.4 0 4.35 1.9 4.35 4.35 0 1.1-.4 2.1-1.05 2.9L14 11.6l-1.1 1.1-2.7-2.7c-.6.35-1.35.6-2.2.6-2.4 0-4.35-1.9-4.35-4.35S5.6 1.6 8 1.6zm0 1.8a2.55 2.55 0 1 0 0 5.1 2.55 2.55 0 0 0 0-5.1z" fill="currentColor"/>
       </svg>
@@ -29,7 +29,7 @@ const { t } = useI18n({ useScope: 'global' })
 
 const expanded = ref(false)
 
-/** 执行中状态（WorkBuddy isRunningStatus 同款） */
+/** 执行中状态（主流实现 isRunningStatus 同款） */
 const isExecuting = computed(() => ['idle', 'pending', 'parsing', 'stream_executing', 'full_executing', 'running', 'streaming'].includes(props.status || ''))
 
 /** 完成且有内容 → 可展开 */

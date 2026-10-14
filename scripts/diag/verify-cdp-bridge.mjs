@@ -101,11 +101,10 @@ const childEnv = { ...process.env }
 delete childEnv.NODE_OPTIONS
 delete childEnv.BASH_ENV
 delete childEnv.ELECTRON_RUN_AS_NODE
-delete childEnv.CODEBUDDY_BROKERED_FS_HOOK_ENABLED
-delete childEnv.CODEBUDDY_SANDBOX_BROKER_IPC_ADDRESS
-delete childEnv.CODEBUDDY_SAFE_DELETE_BROKER_DELETE
-delete childEnv.CODEBUDDY_BROKERED_BIN_DIR
-delete childEnv.CODEBUDDY_BROKERED_SHELL_ENV
+// 宿主注入的沙箱/broker 变量按模式剥离（名字会变，列举必然漏）
+for (const k of Object.keys(childEnv)) {
+  if (/BROKER/i.test(k)) delete childEnv[k]
+}
 
 // ⚠️ 代理变量必须剥掉 —— 宿主给 shell 注入了 HTTP(S)_PROXY=http://127.0.0.1:<port>（沙箱出口代理），
 //    且**没有 NO_PROXY**。Electron 子进程整体继承后，页面载入会 ERR_FAILED，

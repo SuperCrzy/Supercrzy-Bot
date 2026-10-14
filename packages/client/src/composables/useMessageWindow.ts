@@ -1,5 +1,5 @@
 /**
- * 消息区滚动跟随 + 消息级渐进渲染（WorkBuddy react-virtuoso 同款思路：只渲染视口附近，长会话不卡）。
+ * 消息区滚动跟随 + 消息级渐进渲染（主流实现 react-virtuoso 同款思路：只渲染视口附近，长会话不卡）。
  *
  * 抽自 `ChatView.vue`（I10 低风险批）。两块逻辑本来就是一件事（`onScroll` 同时驱动两者），
  * 拆开会需要互相回指，所以按"消息区视口"整体下沉。
@@ -119,7 +119,7 @@ export function useMessageWindow(opts: UseMessageWindowOptions) {
   function onScroll() {
     const el = opts.messagesRef.value
     if (!el) return
-    // 流式中也尊重用户滚动位置（WorkBuddy useMessageScroll 同款：用户上滑 → 暂停自动跟随）：
+    // 流式中也尊重用户滚动位置（主流实现 useMessageScroll 同款：用户上滑 → 暂停自动跟随）：
     // 内容增长不触发 scroll 事件，但用户主动滚动会触发 → stickToBottom 状态可靠
     stickToBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < BOTTOM_TOL
     // 渐进渲染：接近顶部 → 加载更早一批消息（滚动位置补偿，防跳动）

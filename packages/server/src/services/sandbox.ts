@@ -10,7 +10,7 @@
  *      仅放行项目仓库 + 运行时只读 + 临时目录；探测不可用（如 CI/嵌套沙箱）时自动降级 L2，不阻塞功能
  *
  * 边界语义：
- *   - 放行：项目仓库根（agent 的"工作区"）+ workspaceDir + ~/.workbuddy/{binaries,skills} 只读 + ~/.local/bin 只读 + /tmp
+ *   - 放行：项目仓库根（agent 的"工作区"）+ workspaceDir + ~/.local/bin 只读 + /tmp
  *   - 禁止：home 下其余一切（.ssh/.aws/.env/凭据）、系统敏感文件、仓库内凭据文件（.env/.npmrc/id_rsa 等）
  *
  * 参考：deepseek-harness 的 Landlock 沙箱思路（Linux LSM），macOS 对应实现为 sandbox-exec (SBPL)。
@@ -58,8 +58,6 @@ function allowedPrefixes(level: PermissionLevel = 'sandbox', workspaceDir?: stri
   list.unshift(PROJECT_ROOT, WORKSPACE_ROOT)
   if (HOME) {
     list.push(
-      join(HOME, '.workbuddy', 'binaries'),
-      join(HOME, '.workbuddy', 'skills'),
       join(HOME, '.local', 'bin'),
     )
   }
@@ -125,8 +123,6 @@ export function buildSandboxProfile(): string {
     `(allow file-write* (subpath "${esc(WORKSPACE_ROOT)}"))`,
     // 放行：运行时只读（node/python/pnpm 等，位于 home 下，需在 deny 后显式放行）
     ...(HOME ? [
-      `(allow file-read* (subpath "${esc(join(HOME, '.workbuddy', 'binaries'))}"))`,
-      `(allow file-read* (subpath "${esc(join(HOME, '.workbuddy', 'skills'))}"))`,
       `(allow file-read* (subpath "${esc(join(HOME, '.local', 'bin'))}"))`,
     ] : []),
     // 临时目录读写（/tmp 与 /private/tmp 同源）

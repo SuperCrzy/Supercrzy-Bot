@@ -21,7 +21,7 @@ const tool: ToolDef = {
     required: ['url'],
   },
   async execute(args) {
-    // 抓取分层（对齐 WorkBuddy WebFetch 能力）：
+    // 抓取分层（对齐主流实现 WebFetch 能力）：
     // 1) Jina Reader 官方端点（配置 jinaApiKey → Authorization Bearer，更稳定，免费 100w token/月）
     // 2) Jina Reader 免费层（无 key 兜底，服务端渲染 JS → Markdown，解决 403/SPA 空白）
     // 3) 原生 fetch + 文本提取（轻量兜底）
@@ -141,7 +141,7 @@ function parseWebPageMeta(md: string): { title?: string; sourceUrl?: string; pub
   return { title, sourceUrl, publishedTime, content }
 }
 
-/** web_fetch 结构化结果（WorkBuddy WebFetchCompactRenderer 同款：{title,url,publishedTime,content,truncated} 供前端解构展示） */
+/** web_fetch 结构化结果（主流实现 WebFetchCompactRenderer 同款：{title,url,publishedTime,content,truncated} 供前端解构展示） */
 function buildWebFetchResult(meta: { title?: string; sourceUrl?: string; publishedTime?: string; content: string }, rawUrl: string, maxLen: number) {
   const content = meta.content || '(空内容)'
   const truncated = content.length > maxLen

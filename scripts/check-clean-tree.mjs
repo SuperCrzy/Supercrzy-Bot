@@ -43,7 +43,7 @@ const BLOCKLIST = [
   {
     id: 'local-tool-state',
     why: '本机工具状态目录，与项目源码无关',
-    anySegment: ['.workbuddy', '.playwright-cli', '.codexstation', '.git-rewrite'],
+    anySegment: ['.playwright-cli', '.git-rewrite'],
   },
   {
     id: 'build-output',

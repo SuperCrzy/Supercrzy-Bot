@@ -1,7 +1,7 @@
 /**
  * Agent 流事件 → flow 数据操作（从 ChatView handleAgentEvent 拆出的纯逻辑层，可单测）。
  * 职责：工具节点的查找/更新（按 toolCallId 精确归属），不涉及 UI 状态（aiStatus/打字机）。
- * 对齐 WorkBuddy accumulator：toolCallId → contentBlockIndex 的映射由 findToolNode 承载。
+ * 对齐主流实现 accumulator：toolCallId → contentBlockIndex 的映射由 findToolNode 承载。
  */
 import type { ChatMessage } from '@/types'
 
@@ -30,7 +30,7 @@ export function findToolNode(
       continue
     }
     if (name && n.tool.name === name && (!skipTerminal || !TERMINAL.has(n.tool.status))) {
-      // 无 id 匹配（旧事件/增量早期）：记日志便于排查串卡（P0-1 补强，WorkBuddy 全程 toolCallId 归属）
+      // 无 id 匹配（旧事件/增量早期）：记日志便于排查串卡（P0-1 补强，主流实现 全程 toolCallId 归属）
       if (import.meta.env?.DEV) console.warn(`[agent-flow] tool 无 toolCallId 按 name 匹配: ${name}`)
       return n
     }
@@ -54,7 +54,7 @@ export function applyToolArgsChunk(msg: ChatMessage, data: any) {
   }
   node.tool.arguments = (node.tool.arguments || '') + chunk
   if (node.tool.status === 'pending') node.tool.status = 'running'
-  // 生成期实时 ±（2026-09-25，对齐 WorkBuddy useLiveChangeStats :257044）：文件类工具从
+  // 生成期实时 ±（2026-09-25，对齐主流实现 useLiveChangeStats :257044）：文件类工具从
   // args 已到前缀估行数（单调不减），写入 progress.added/deleted → PSL / 工具卡零改动自动实时。
   // server 落盘后的结构化 tool_progress（真值）到达时经 applyToolProgress 合并覆盖估算值。
   if (isFileToolName(node.tool.name)) {
@@ -133,7 +133,7 @@ export function nextNodeId(): string {
   return `n_${Date.now().toString(36)}_${nodeSeq}`
 }
 
-/** 工具名 → 状态词条（对齐 WorkBuddy tool_executing.<工具> 细分映射）。从 ChatView toolStatusLabel 下沉。 */
+/** 工具名 → 状态词条（对齐主流实现 tool_executing.<工具> 细分映射）。从 ChatView toolStatusLabel 下沉。 */
 export function toolStatusLabel(toolName: string): string {
   if (toolName.startsWith('shell_')) return 'chat.statusRunningCmd'
   if (toolName.startsWith('file_write') || toolName.startsWith('file_edit')) return 'chat.statusEditingFile'
@@ -167,7 +167,7 @@ const EDIT_TOOL_RE = /(multi_edit|replace_in_file|edit_file|file_edit)/
 const FIELD_VALUE_START_RE = /"(content|new_str|old_str)"\s*:\s*"/g
 
 /**
- * 生成期实时增删估算（2026-09-25，对齐 WorkBuddy useLiveChangeStats :257044 的"按参数前缀做 diff"）：
+ * 生成期实时增删估算（2026-09-25，对齐主流实现 useLiveChangeStats :257044 的"按参数前缀做 diff"）：
  * 从（可能不完整的）args JSON 流式前缀统计已写行数。
  *
  *   - 写入类（file_write 等）：第一个 `content` 字段的已到前缀行数 → added；deleted 未知恒 0（真值由 server 补）。

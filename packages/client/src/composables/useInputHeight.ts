@@ -1,5 +1,5 @@
 /**
- * 输入框高度记忆（对齐 WorkBuddy ChatInput：拖拽调高 + localStorage 记忆，刷新保持）。
+ * 输入框高度记忆（对齐主流实现 ChatInput：拖拽调高 + localStorage 记忆，刷新保持）。
  *
  * 抽自 `ChatView.vue`（I10 低风险批）。0 = 自动（autosize），>0 = 固定像素高。
  *

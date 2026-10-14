@@ -70,7 +70,7 @@ export function useWelcomePanel(opts: UseWelcomePanelOptions) {
     nextTick(() => welcomeInputRef.value?.focus())
   }
 
-  /** 欢迎页输入框自动增高（对齐 WorkBuddy ChatInput autosize：文字多时输入框长高，操作栏独立在底部不重叠） */
+  /** 欢迎页输入框自动增高（对齐主流实现 ChatInput autosize：文字多时输入框长高，操作栏独立在底部不重叠） */
   watch(inputText, () => {
     const el = welcomeInputRef.value
     if (!el) return

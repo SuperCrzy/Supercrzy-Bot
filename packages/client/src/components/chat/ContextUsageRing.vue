@@ -32,7 +32,7 @@
     <!-- 点击详情 -->
     <div v-if="showDetail" class="ctx-detail">
       <div class="ctx-detail-title">{{ $t('chat.ctxDetailTitle') }}</div>
-      <!-- 分类用量（对齐 WorkBuddy usage-by-category-popover） -->
+      <!-- 分类用量（对齐主流实现 usage-by-category-popover） -->
       <div v-if="catTokens.total > 0" class="ctx-cats">
         <div class="ctx-cat">
           <span class="ctx-cat-label"><span class="dot" style="background:#378ADD" />{{ $t('chat.ctxCatUser') }}</span>
@@ -116,7 +116,7 @@ const windowK = computed(() => Math.round(windowTokens.value / 1024))
 // 注意：$t 的插值参数必须传数值（不能传 computed ref，否则 i18n 序列化 ref 触发 circular JSON → 渲染崩溃白屏）
 const tipLabel = computed(() => t('chat.ctxUsage', { pct: pctNum.value }))
 
-// ---- 分类用量（对齐 WorkBuddy usage-by-category-popover：用户/AI 正文/工具过程 各占多少，前端估算 0.6 token/字符） ----
+// ---- 分类用量（对齐主流实现 usage-by-category-popover：用户/AI 正文/工具过程 各占多少，前端估算 0.6 token/字符） ----
 const catTokens = computed(() => {
   let user = 0
   let assistant = 0
@@ -193,7 +193,7 @@ watch(() => appStore.ctxCompressedAt, (v, old) => {
   display: flex; flex-direction: column; gap: 4px;
 }
 .ctx-detail-title { font-weight: 500; color: var(--text-primary); margin-bottom: 2px; }
-/* 分类用量（对齐 WorkBuddy usage-by-category-popover） */
+/* 分类用量（对齐主流实现 usage-by-category-popover） */
 .ctx-cats { display: flex; flex-direction: column; gap: 3px; margin-bottom: 2px; }
 .ctx-cat { display: flex; align-items: center; gap: 6px; }
 .ctx-cat-label { display: inline-flex; align-items: center; gap: 4px; min-width: 68px; max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 0; }

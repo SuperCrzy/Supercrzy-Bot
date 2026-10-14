@@ -1,5 +1,5 @@
 <template>
-  <!-- 问题浮层（对齐 WorkBuddy QuestionFloating：对话区顶部 portal，醒目不推挤消息流） -->
+  <!-- 问题浮层（对齐主流实现 QuestionFloating：对话区顶部 portal，醒目不推挤消息流） -->
   <div class="question-floating">
     <div class="qf-card">
       <div class="qf-head">

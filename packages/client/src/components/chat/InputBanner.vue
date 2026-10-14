@@ -1,5 +1,5 @@
 <template>
-  <!-- 输入横幅（对齐 WorkBuddy cb-input-banner：输入框上方，变体 + 图标 + 消息 + 动作 + 关闭） -->
+  <!-- 输入横幅（对齐主流实现 cb-input-banner：输入框上方，变体 + 图标 + 消息 + 动作 + 关闭） -->
   <div class="input-banner" :class="`input-banner--${variant}`">
     <button v-if="dismissible" type="button" class="input-banner__close" :title="$t('chat.errorBannerClose')" @click="emit('dismiss')">
       <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3.5 3.5L10.5 10.5M10.5 3.5L3.5 10.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>

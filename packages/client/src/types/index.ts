@@ -197,7 +197,7 @@ export interface ChatMessage {
   _hasEnd?: boolean
   /** 折叠状态机信号：用户手动折叠/展开覆盖（最高优先，展开后自动折叠让位） */
   _userFoldState?: 'folded' | 'expanded'
-  /** 结构化停止原因（对齐 WorkBuddy MaxTurnsExceededError：轮次超限/空内容兜底/API 失败时让用户知道为什么停） */
+  /** 结构化停止原因（对齐主流实现 MaxTurnsExceededError：轮次超限/空内容兜底/API 失败时让用户知道为什么停） */
   stopReason?: { reason: string; message: string; checkpointId?: string; toolCalls?: number; turns?: number }
   /** P0-03 统一任务状态机：后端唯一权威状态（task_id/status/current_step/cancel_requested_at…） */
   taskState?: {
@@ -244,7 +244,7 @@ export interface ChatMessage {
   retrying?: string
   /** 应用的历史经验（playbook_used 事件） */
   playbookUsed?: Array<{ taskType: string; lesson: string }>
-  /** AI 主动推荐保存为可复用流程（routine_suggest 事件，学 Grok"演示一次就学会"） */
+  /** AI 主动推荐保存为可复用流程（routine_suggest 事件，即"演示一次就学会"） */
   routineSuggestion?: { sessionId: string; title: string; toolSummary: string[]; toolCount: number; turnCount: number }  /** 角色分发（role_routed 事件） */
   roleRouted?: { roleId: string; roleName: string; matchedKeyword: string }
   /** AI 绘制的矢量图（draw_diagram 工具，diagram 事件） */
@@ -280,12 +280,12 @@ export interface ChatMessage {
   }
 }
 
-/** 聊天时序流节点（agent 模式实时渲染用）——统一块模型：每节点带 id（事件精确归属/断点恢复基础，对齐 WorkBuddy contentBlockId） */
+/** 聊天时序流节点（agent 模式实时渲染用）——统一块模型：每节点带 id（事件精确归属/断点恢复基础，对齐主流实现 contentBlockId） */
 export type ChatFlowNode =
   | { id?: string; kind: 'thinking'; turn?: number; message: string; reasoning: string; completed: boolean }
   | { id?: string; kind: 'tool'; tool: ToolCallEvent }
   | { id?: string; kind: 'text'; text: string }
-  /** 图节点（WorkBuddy image-block 同款：按 flow 顺序渲染，文字不会把图推走；pending=流式绘制中） */
+  /** 图节点（主流实现 image-block 同款：按 flow 顺序渲染，文字不会把图推走；pending=流式绘制中） */
   | { id?: string; kind: 'diagram'; svg: string; title: string; pending?: boolean }
   /** 生成图节点（generate_image 工具：data 为 dataURL 或 URL，对话内 <img> 渲染） */
   | { id?: string; kind: 'image'; data: string; isUrl: boolean; title: string }
@@ -341,7 +341,7 @@ export {
 
 // ===== API 类型 =====
 /**
- * 工具状态机（WorkBuddy ToolState 10 态对齐）：
+ * 工具状态机（主流实现 ToolState 10 态对齐）：
  * idle → parsing → pending → stream_executing/full_executing → executed
  *                         ↘                    ↙
  *                            skipped / failed / cancelled / destroyed
@@ -384,7 +384,7 @@ export interface ToolProgress {
   count?: number
   /**
    * 阶段**机器标识**（不是展示文案）：`'create'` 新建文件 / `'edit'` 修改已有文件。
-   * 前端据此本地化「创建 / 编辑」——对齐 WorkBuddy `tool.writeFile.{creating,create,editing,edit}`
+   * 前端据此本地化「创建 / 编辑」——对齐主流实现 `tool.writeFile.{creating,create,editing,edit}`
    * 的动词动态推导。⚠️ 禁止往这里塞任何给人看的文案。
    */
   phase?: 'create' | 'edit'
@@ -400,7 +400,7 @@ export interface ToolCallEvent {
   duration?: number
   /** 开始时间（实时计时用） */
   startedAt?: number
-  /** 工具真实执行时刻（P0-7：历史重放耗时订正用，WorkBuddy tool-call createTime 同款） */
+  /** 工具真实执行时刻（P0-7：历史重放耗时订正用，主流实现 tool-call createTime 同款） */
   createTime?: number
   /** 工具流式输出（执行中实时追加） */
   streamOutput?: string

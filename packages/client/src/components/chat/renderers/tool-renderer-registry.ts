@@ -1,10 +1,10 @@
 /**
- * 工具渲染器注册表（WorkBuddy toolRendererRegistry + matchPriority 同款）。
+ * 工具渲染器注册表（主流实现 toolRendererRegistry + matchPriority 同款）。
  *
  * 目标：工具名 → 渲染分支 key 的单一事实来源。新增工具渲染只需注册一行，
  * 不再改 ToolCallBlock 的 v-if 链。匹配顺序：EXACT（精确名）→ PREFIX（前缀长优先）→ MATCH（函数）→ generic。
  *
- * 对齐 WorkBuddy ToolMatchPriority：NONE=0 / DEFAULT=1 / EXACT=10。
+ * 对齐主流实现 ToolMatchPriority：NONE=0 / DEFAULT=1 / EXACT=10。
  */
 
 /** 渲染分支 key（ToolCallBlock 模板按 key 分发到对应渲染器组件） */
@@ -20,7 +20,7 @@ export type ToolRendererKey =
 
 interface RegistryEntry {
   key: ToolRendererKey
-  /** 精确匹配工具名（camelCase + snake_case 都登记，对齐 WorkBuddy toolIconEntries） */
+  /** 精确匹配工具名（camelCase + snake_case 都登记，对齐主流实现 toolIconEntries） */
   names?: string[]
   /** 前缀匹配（如 Supabase* / mcp__*） */
   prefixes?: string[]
@@ -59,7 +59,7 @@ const REGISTRY: RegistryEntry[] = [
   },
 ]
 
-/** 归一化工具名（小写 + 去分隔符，对齐 WorkBuddy normalizeName） */
+/** 归一化工具名（小写 + 去分隔符，对齐主流实现 normalizeName） */
 function normalizeName(name: string): string {
   return name.toLowerCase().replace(/[-_.:]/g, '')
 }

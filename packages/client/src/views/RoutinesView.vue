@@ -179,7 +179,7 @@ async function saveFromSession() {
   } finally { savingFromSession.value = false }
 }
 
-/** 执行例程：把描述作为指令发到聊天页（学 Grok 一键重放） */
+/** 执行例程：把描述作为指令发到聊天页（一键重放） */
 async function runRoutine(r: Routine) {
   const text = `【例程执行】${r.name}\n\n${r.description || ''}`.trim()
   await fetch(`/api/routines/${r.id}/run`, { method: 'POST' })

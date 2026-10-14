@@ -1,6 +1,6 @@
 <template>
   <div class="web-fetch-card" :class="{ executing: isExecuting }">
-    <!-- header 一行（WorkBuddy WebFetchCompactRenderer 同款：icon + action + title），执行中不展开正文 -->
+    <!-- header 一行（主流实现 WebFetchCompactRenderer 同款：icon + action + title），执行中不展开正文 -->
     <div class="wf-header" @click="toggle">
       <svg v-if="!isExecuting" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="wf-icon"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
       <span class="wf-action" :class="{ 'wf-action--loading': isExecuting }">{{ actionText }}</span>
@@ -36,7 +36,7 @@ import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 /**
- * WebFetch 专属卡片（WorkBuddy WebFetchCompactRenderer 同款）：
+ * WebFetch 专属卡片（主流实现 WebFetchCompactRenderer 同款）：
  * - 一行 header：icon + 状态词（生成摘要/网页获取）+ 标题（真实标题→域名→兜底三级语义）
  * - 执行中不展开正文（并行 N 张 = N 行，不占屏）
  * - 展开态：Title / URL / Published Time 元信息 + 内容限高 240px 滚动
@@ -52,7 +52,7 @@ const props = withDefaults(defineProps<{
 const expanded = ref(false)
 const contentExpanded = ref(false)
 
-/** 执行中集合（WorkBuddy 5 态 running 集合，我们前端对齐） */
+/** 执行中集合（主流实现 5 态 running 集合，我们前端对齐） */
 const isExecuting = computed(() => ['pending', 'approved', 'running', 'stream_executing'].includes(props.status))
 
 /** 状态词联动：执行中 → "生成摘要"，完成 → "网页获取" */
@@ -106,7 +106,7 @@ const pageTitle = computed(() => data.value.title)
 const pageUrl = computed(() => data.value.url || fullUrl.value)
 const publishedTime = computed(() => data.value.publishedTime)
 
-/** 标题三级语义回落：真实标题 → 域名 → i18n 兜底（WorkBuddy displayTitle 同款） */
+/** 标题三级语义回落：真实标题 → 域名 → i18n 兜底（主流实现 displayTitle 同款） */
 const displayTitle = computed(() => {
   const t0 = pageTitle.value.trim()
   if (t0) return t0.length > 60 ? t0.slice(0, 60) + '…' : t0

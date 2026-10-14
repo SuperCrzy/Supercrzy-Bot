@@ -28,19 +28,19 @@ const tool: ToolDef = {
       // 变更对比：写入前读旧内容（存在则 diff 显示"修改"，不存在则是"新增"）
       let oldContent = ''
       try { oldContent = await readFile(path, 'utf-8') } catch { /* 新文件 */ }
-      // 写文件格式化（P2-3，WorkBuddy formatters 同款）：JSON 自动规范化缩进（无依赖安全；JS/TS 等需 prettier 暂缓）
+      // 写文件格式化（P2-3，主流实现 formatters 同款）：JSON 自动规范化缩进（无依赖安全；JS/TS 等需 prettier 暂缓）
       let toWrite = String(args.content ?? '')
       if (/\.json$/i.test(path)) {
         try { toWrite = JSON.stringify(JSON.parse(toWrite), null, 2) + '\n' } catch { /* 非法 JSON 保持原样 */ }
       }
-      // 写文件流式化（ChatGPT 同款：写入过程代码实时"长出来"）：分块写入 + onOutput 推送代码内容
+      // 写文件流式化（主流实现同款：写入过程代码实时"长出来"）：分块写入 + onOutput 推送代码内容
       // 每块 25 行 flush，推送带行号进度的代码块 → 前端工具卡片流式区显示行号代码视图（打字机滚动）
       const toWriteStr = String(toWrite ?? '')
       const totalLines = toWriteStr.split('\n').length
       const CHUNK = 12
       const linesArr = toWriteStr.split('\n')
       const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
-      // 打字节奏：按块数自适应（ChatGPT 是模型流式天然慢，我们参数一次性到达需模拟）——
+      // 打字节奏：按块数自适应（主流实现 是模型流式天然慢，我们参数一次性到达需模拟）——
       // 块数多则块间快（不拖慢大文件），块数少则块间慢（小文件肉眼可见逐块滚动）
       const numBlocks = Math.max(1, Math.ceil(totalLines / CHUNK))
       const blockDelay = Math.min(200, Math.max(45, Math.round(1400 / numBlocks)))
@@ -74,7 +74,7 @@ const tool: ToolDef = {
           done: written,
           total: totalLines,
           // 动词机器标识（不是文案）：新建 → 前端本地化成"创建"，改已有文件 → "编辑"。
-          // 对齐 WorkBuddy tool.writeFile.{creating,create} / {editing,edit} 的动态动词推导
+          // 对齐主流实现 tool.writeFile.{creating,create} / {editing,edit} 的动态动词推导
           phase: oldContent ? 'edit' : 'create',
         })
         if (!ctx?.onOutput) return
@@ -107,7 +107,7 @@ const tool: ToolDef = {
       if (ctx?.onFileChange) {
         ctx.onFileChange(path, oldContent, String(args.content || ''))
       }
-      // 行数统计（WorkBuddy addedLines/deletedLines 同款）：diff 新增/删除行
+      // 行数统计（主流实现 addedLines/deletedLines 同款）：diff 新增/删除行
       // ⚠️ addedFinal/deleted 已在流式推送前算好，此处直接复用，不重复计算；
       //    过程里 countAdded 累出来的 addedSoFar 末尾恒等于 addedFinal
       return oldContent

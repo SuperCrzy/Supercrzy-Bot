@@ -16,10 +16,10 @@
       <div class="skeleton-line w55"></div>
     </div>
 
-    <!-- 时序流：分段 MetaFold（WorkBuddy 同款）——正文/图始终原位，连续思考/工具聚合成"过程段"默认折叠成摘要条 -->
+    <!-- 时序流：分段 MetaFold（主流实现同款）——正文/图始终原位，连续思考/工具聚合成"过程段"默认折叠成摘要条 -->
     <template v-if="msg.flow && msg.flow.length">
       <template v-for="(seg, si) in segments" :key="'seg-' + si">
-        <!-- 分批展开：超长会话（展开态）顶部显示"显示更早 N 条"（WorkBuddy expand-budget 同款） -->
+        <!-- 分批展开：超长会话（展开态）顶部显示"显示更早 N 条"（主流实现 expand-budget 同款） -->
         <div
           v-if="si === 0 && hiddenCount > 0 && !props.isLoading"
           class="expand-earlier"
@@ -74,7 +74,7 @@
             @click="toggleSegment(si)"
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-            <!-- 2026-09-26 老板：收尾条臃肿 → 对齐 WorkBuddy fold.completedWithDuration（:249472 取证）：
+            <!-- 2026-09-26 老板：收尾条臃肿 → 对齐主流实现 fold.completedWithDuration（:249472 取证）：
                  收尾只显「已完成 27s」，统计（阶段画像/轮数/±）下移进展开态头部 -->
             <span class="pc-label">{{ foldLabel(si) }}</span>
             <span v-if="segSummary(seg)" class="pc-summary">{{ segSummary(seg) }}</span>
@@ -141,7 +141,7 @@
       <span>{{ msg.retrying }}</span>
     </div>
 
-    <!-- 结构化停止原因（对齐 WorkBuddy MaxTurnsExceededError：轮次超限/中断——明确告诉用户为什么停、怎么继续） -->
+    <!-- 结构化停止原因（对齐主流实现 MaxTurnsExceededError：轮次超限/中断——明确告诉用户为什么停、怎么继续） -->
     <div v-if="msg.stopReason" class="stop-reason-banner">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
       <span class="sr-text">{{ msg.stopReason.message || t('chat.stopReasonDefault') }}</span>
@@ -257,7 +257,7 @@ async function downloadFlowImage(node: Extract<ChatFlowNode, { kind: 'image' }>)
 }
 
 // ============ Markdown 渲染（从 ChatView 迁入） ============
-// 代码块渲染对齐 WorkBuddy CodeBlock（cr-code-like-box）：header（语言标签 + 常驻复制按钮）+ pre 代码。
+// 代码块渲染对齐主流实现 CodeBlock（cr-code-like-box）：header（语言标签 + 常驻复制按钮）+ pre 代码。
 // 复制按钮带 .code-copy-btn class → ChatView enhanceCodeBlocks 事件委托统一处理；pre 带 has-copy 防重复注入。
 const md: MarkdownIt = new MarkdownIt({
   html: false,
@@ -265,7 +265,7 @@ const md: MarkdownIt = new MarkdownIt({
   typographer: true,
   highlight(str: string, lang: string): string {
     let code: string
-    // 无语言代码块语言标签对齐 WorkBuddy（language || "code"）——不显示 plaintext
+    // 无语言代码块语言标签对齐主流实现（language || "code"）——不显示 plaintext
     let safeLang = 'code'
     if (lang && hljs.getLanguage(lang)) {
       safeLang = lang
@@ -294,7 +294,7 @@ const md: MarkdownIt = new MarkdownIt({
 const SVG_CODE_BLOCK_RE = /```(?:svg|xml)\s*[\s\S]*?```/g
 const SVG_BARE_RE = /<svg[\s\S]*?<\/svg>/g
 
-/** 正文路径链接（WorkBuddy inline-code path-detector 同款：正文里的代码路径可点击定位） */
+/** 正文路径链接（主流实现 inline-code path-detector 同款：正文里的代码路径可点击定位） */
 const PATH_LINK_RE = /((?:\/|~\/|\.{1,2}\/)?(?:[\w@.-]+\/)+[\w@.-]+\.(?:[tj]sx?|vue|ts|js|mjs|cjs|json|md|mdx|css|scss|sass|less|py|go|rs|java|kt|c|h|cpp|hpp|cs|php|rb|swift|yml|yaml|toml|ini|cfg|sh|bash|zsh|fish|html|htm|svg|png|jpe?g|gif|webp|ico|db|sqlite|sql|txt|log|xml|env|lock|editorconfig|gitignore|dockerfile|graphql|proto|wasm))/gi
 
 /**
@@ -394,7 +394,7 @@ function flowDisplay(flow: ChatFlowNode[] | undefined): FlowDisplayNode[] {
   return out
 }
 
-// ============ 分段 MetaFold（WorkBuddy 同款）：正文/图原位，连续思考/工具聚合成"过程段"默认折叠 ============
+// ============ 分段 MetaFold（主流实现同款）：正文/图原位，连续思考/工具聚合成"过程段"默认折叠 ============
 type FlowSegment =
   | { kind: 'text'; node: Extract<ChatFlowNode, { kind: 'text' }> }
   | { kind: 'diagram'; node: Extract<ChatFlowNode, { kind: 'diagram' }> }
@@ -425,7 +425,7 @@ function segmentFlow(nodes: FlowDisplayNode[]): FlowSegment[] {
       segs.push({ kind: 'image', node: n })
     } else if (n.kind === 'text' && n.text.trim()) {
       // 正文（含中间说明/正式回复/最终报告）一律单独成段、永不折叠——
-      // WorkBuddy 同款（isFoldableContent 仅 reasoning+tool-call，text 不折叠）：正式回复不隐藏（老板 2026-08-21）
+      // 主流实现同款（isFoldableContent 仅 reasoning+tool-call，text 不折叠）：正式回复不隐藏（老板 2026-08-21）
       flush()
       segs.push({ kind: 'text', node: n })
     } else {
@@ -576,7 +576,7 @@ function runningLines(n: Extract<FlowDisplayNode, { kind: 'tool' }>): string {
 }
 
 /** 段摘要（**只服务收尾条**）：流式中的历史段显示阶段画像，收尾返回空（条上只留状态词+耗时，
- *  对齐 WorkBuddy fold.completedWithDuration —— 2026-09-26 老板"收尾条臃肿"） */
+ *  对齐主流实现 fold.completedWithDuration —— 2026-09-26 老板"收尾条臃肿"） */
 function segSummary(seg: FlowSegment): string {
   if (seg.kind !== 'process') return ''
   if (!isMsgStreaming(props.msg)) return ''
@@ -605,7 +605,7 @@ function segSummary(seg: FlowSegment): string {
 }
 
 /** 段统计（**只服务展开态头部**）：阶段画像 · 思考轮数 · 写文件 ± 总账。
- *  2026-09-26 从收尾条 segSummary 下移——条上只留「已完成 Ns」，统计点开才见（对齐 WorkBuddy）。 */
+ *  2026-09-26 从收尾条 segSummary 下移——条上只留「已完成 Ns」，统计点开才见（对齐主流实现）。 */
 function segStatsSummary(seg: FlowSegment): string {
   if (seg.kind !== 'process') return ''
   const parts: string[] = []
@@ -638,7 +638,7 @@ function detailStatsText(si: number, seg: FlowSegment): string {
 }
 
 /** 折叠条状态词：收尾 → 「已完成 / 已停止」（stopReason 存在=中断/轮次超限/出错）；
- *  流式中的历史段 → 「执行过程」（对齐 WorkBuddy fold.process / fold.completed 两族 title） */
+ *  流式中的历史段 → 「执行过程」（对齐主流实现 fold.process / fold.completed 两族 title） */
 function foldLabel(si: number): string {
   if (isMsgStreaming(props.msg)) return t('chat.processCollapsed')
   const reason = props.msg.stopReason?.reason
@@ -721,7 +721,7 @@ const hiddenCount = computed(() => {
   return Math.max(0, nodes.length - visibleCount.value)
 })
 
-/** 点击"显示更早"：多显示一批（WorkBuddy 尾部优先逐批展开） */
+/** 点击"显示更早"：多显示一批（主流实现 尾部优先逐批展开） */
 function revealEarlier() {
   visibleCount.value += BATCH_SIZE
 }
@@ -741,7 +741,7 @@ watch(
 
 /**
  * 当前消息是否正在流式接收（最后一条且 chatStore 加载中）。
- * WorkBuddy 逻辑：执行中全程平铺可视化，完成出结果才折叠。
+ * 主流实现 逻辑：执行中全程平铺可视化，完成出结果才折叠。
  */
 /** 工具终态集合（非终态 = 仍在执行） */
 const TOOL_TERMINAL = new Set(['done', 'error', 'denied', 'cancelled', 'skipped'])
@@ -760,7 +760,7 @@ function isMsgStreaming(msg: ChatMessage): boolean {
 }
 
 /**
- * 折叠态判定（对齐 WorkBuddy"执行完折叠过程只出结果"）：
+ * 折叠态判定（对齐主流实现"执行完折叠过程只出结果"）：
  * - true  → 折叠（done 完成自动折叠 / 历史消息默认折叠）
  * - false → 展开（用户手动展开）
  * - undefined：流式中 → 平铺全过程；历史 → 折叠
@@ -799,7 +799,7 @@ function shouldCollapse(msg: ChatMessage): boolean {
   color: var(--text-primary);
 }
 
-/* 正文路径链接（P0-1：代码路径可点击定位，WorkBuddy inline-code 同款） */
+/* 正文路径链接（P0-1：代码路径可点击定位，主流实现 inline-code 同款） */
 .msg-flow-renderer :deep(.msg-path-link) {
   color: var(--accent, #6366f1);
   border-bottom: 1px dashed color-mix(in srgb, var(--accent, #6366f1) 40%, transparent);
@@ -814,7 +814,7 @@ function shouldCollapse(msg: ChatMessage): boolean {
   border-bottom-style: solid;
 }
 
-/* flow 图节点（WorkBuddy image-block 同款：按位置内联渲染，白底卡片） */
+/* flow 图节点（主流实现 image-block 同款：按位置内联渲染，白底卡片） */
 .flow-diagram-card {
   margin: 8px 0;
   border-radius: var(--radius-md, 8px);
@@ -921,7 +921,7 @@ function shouldCollapse(msg: ChatMessage): boolean {
   to { transform: rotate(360deg); }
 }
 
-/* 分批展开：显示更早 N 条（WorkBuddy expand-budget 同款） */
+/* 分批展开：显示更早 N 条（主流实现 expand-budget 同款） */
 .expand-earlier {
   display: inline-flex;
   align-items: center;
@@ -1194,7 +1194,7 @@ body.dark .message-content a:hover,
   color: #0f766e;
 }
 
-/* ===== 代码框（对齐 WorkBuddy cr-code-like-box：header 语言标签 + 常驻复制按钮 + 圆角边框） ===== */
+/* ===== 代码框（对齐主流实现 cr-code-like-box：header 语言标签 + 常驻复制按钮 + 圆角边框） ===== */
 .cr-code-like-box {
   margin: 8px 0;
   border: 1px solid var(--border-color, rgba(128, 128, 128, 0.3));
@@ -1255,7 +1255,7 @@ body.dark .message-content a:hover,
   position: relative;
 }
 
-/* ===== 代码框 hljs token 配色（WorkBuddy one-light/one-dark 双主题同款） ===== */
+/* ===== 代码框 hljs token 配色（主流实现 one-light/one-dark 双主题同款） ===== */
 /* 浅色模式（默认）：one-light——深色系 token 在浅灰底上清晰 */
 .message-content .hljs {
   color: #383a42;

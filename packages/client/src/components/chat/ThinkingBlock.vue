@@ -17,7 +17,7 @@
         <div v-if="reasoning && liveOpen" ref="reasoningEl" class="thinking-reasoning live" @scroll="onReasoningScroll" v-html="reasoningHtml"></div>
       </div>
     </template>
-    <!-- 已完成：一行"深度思考"标题，点击展开/收起推理（对齐 WorkBuddy ReasoningRenderer） -->
+    <!-- 已完成：一行"深度思考"标题，点击展开/收起推理（对齐主流实现 ReasoningRenderer） -->
     <template v-else>
       <div class="thinking-done-indicator"></div>
       <div class="thinking-content">
@@ -39,7 +39,7 @@ import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js/lib/common'
 import { defaultCompletedOpen, useReasoningDisplay } from '@/utils/reasoning-display'
 
-// ============ 推理内容 markdown 渲染（对齐 WorkBuddy reasoning theme：代码显示成整洁代码框，不是纯文本） ============
+// ============ 推理内容 markdown 渲染（对齐主流实现 reasoning theme：代码显示成整洁代码框，不是纯文本） ============
 const reasoningMd = new MarkdownIt({
   html: false,
   linkify: true,
@@ -124,7 +124,7 @@ function onReasoningScroll(e: Event) {
   stickReasoningBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 20
 }
 
-/** 点击"深度思考"标题：展开/收起推理内容（对齐 WorkBuddy 点击 header 切换） */
+/** 点击"深度思考"标题：展开/收起推理内容（对齐主流实现 点击 header 切换） */
 function toggleReasoning() {
   if (props.reasoning) reasoningOpen.value = !reasoningOpen.value
 }
@@ -164,7 +164,7 @@ watch(
 )
 onUnmounted(() => { if (reasoningRaf !== null) cancelAnimationFrame(reasoningRaf) })
 
-/** 思考内容过滤：仅剥离裸 SVG 草稿（正文的 SVG 会提取成图卡片，思考里的草稿不应裸露）；代码块保留 → markdown 渲染成代码框（对齐 WorkBuddy reasoning 代码框整洁展示，老板 2026-08-21） */
+/** 思考内容过滤：仅剥离裸 SVG 草稿（正文的 SVG 会提取成图卡片，思考里的草稿不应裸露）；代码块保留 → markdown 渲染成代码框（对齐主流实现 reasoning 代码框整洁展示，老板 2026-08-21） */
 const filteredReasoning = computed(() => cleanReasoning(throttledReasoning.value))
 
 /** 渲染后 HTML：cleanReasoning 剥 SVG 后 markdown 渲染（代码块 → hljs 高亮代码框） */
@@ -174,7 +174,7 @@ const reasoningHtml = computed(() => reasoningMd.render(filteredReasoning.value)
 function cleanReasoning(text: string | undefined): string {
   if (!text) return ''
   let s = text
-  // 裸 SVG（未包在代码块里）兜底——代码块 ``` 里的 SVG 文本保留（渲染成代码框，WorkBuddy 同款）
+  // 裸 SVG（未包在代码块里）兜底——代码块 ``` 里的 SVG 文本保留（渲染成代码框，主流实现同款）
   s = s.replace(/<svg[\s\S]*?<\/svg>/g, '[SVG 图草稿]')
   return s
 }
@@ -286,7 +286,7 @@ function cleanReasoning(text: string | undefined): string {
   gap: 8px;
 }
 
-/* 完成态"深度思考"标题整行可点击（对齐 WorkBuddy ReasoningRenderer 点击 header 展开） */
+/* 完成态"深度思考"标题整行可点击（对齐主流实现 ReasoningRenderer 点击 header 展开） */
 .thinking-header-clickable {
   cursor: pointer;
   user-select: none;
@@ -348,7 +348,7 @@ function cleanReasoning(text: string | undefined): string {
   max-height: min(60vh, 400px);
   overflow-y: auto;
 }
-/* 推理内 markdown 元素（对齐 WorkBuddy reasoning theme：弱化紧凑、代码框整洁） */
+/* 推理内 markdown 元素（对齐主流实现 reasoning theme：弱化紧凑、代码框整洁） */
 .thinking-reasoning :deep(p) { margin: 0 0 6px; }
 .thinking-reasoning :deep(p:last-child) { margin-bottom: 0; }
 .thinking-reasoning :deep(ul), .thinking-reasoning :deep(ol) { margin: 0 0 6px; padding-left: 18px; }
@@ -386,7 +386,7 @@ function cleanReasoning(text: string | undefined): string {
 }
 </style>
 
-<!-- 推理代码框 hljs token 配色（全局：ThinkingBlock scoped 不覆盖子块渲染；WorkBuddy one-light/one-dark 双主题同款） -->
+<!-- 推理代码框 hljs token 配色（全局：ThinkingBlock scoped 不覆盖子块渲染；主流实现 one-light/one-dark 双主题同款） -->
 <style>
 /* 浅色模式（默认）：one-light 深色系 token */
 .thinking-reasoning .hljs {

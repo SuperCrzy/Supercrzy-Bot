@@ -1,6 +1,6 @@
 <template>
   <div class="lint-renderer">
-    <!-- lint 展开态：诊断列表（WorkBuddy ReadLintsRenderer 同款） -->
+    <!-- lint 展开态：诊断列表（主流实现 ReadLintsRenderer 同款） -->
     <div v-if="lintIssues.length" class="lint-list">
       <div v-for="(d, i) in lintIssues" :key="i" class="lint-item" :class="d.severity">
         <span class="lint-sev">{{ d.severity === 'error' ? 'E' : 'W' }}</span>
@@ -16,7 +16,7 @@
 import { computed } from 'vue'
 
 /**
- * lint 诊断渲染器（lint_file / read_lints 专属，WorkBuddy ReadLintsRenderer 同款）。
+ * lint 诊断渲染器（lint_file / read_lints 专属，主流实现 ReadLintsRenderer 同款）。
  * header（问题计数徽标）由 ToolCallBlock 外壳负责，这里只渲染诊断列表。
  */
 const props = withDefaults(defineProps<{ result?: string }>(), { result: '' })

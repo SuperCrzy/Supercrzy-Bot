@@ -81,7 +81,7 @@ export function createAuditTask(projectPath: string, instruction?: string): Audi
  * 2. **加上限**：这个数字只用于进度文案，没必要为它遍历整个仓库，
  *    超过 MAX_COUNT 就停止（文案里标注"+"）。
  */
-const COUNT_SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.next', '.nuxt', 'coverage', '.workbuddy', 'uploads', 'data'])
+const COUNT_SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.next', '.nuxt', 'coverage', 'uploads', 'data'])
 const COUNT_MAX = 20000
 
 async function countFiles(root: string): Promise<{ n: number; capped: boolean }> {

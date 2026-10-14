@@ -1,5 +1,5 @@
 /**
- * MCP 连接器 API：用户自定义 MCP server 管理（对标 WorkBuddy 连接器）
+ * MCP 连接器 API：用户自定义 MCP server 管理（对标 主流实现 连接器）
  */
 import Router from 'koa-router'
 import type { Context } from 'koa'

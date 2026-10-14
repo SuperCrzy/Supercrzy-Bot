@@ -449,7 +449,7 @@ router.post('/sync', (ctx) => {
   }
 })
 
-// 导出单个技能为 SKILL.md（Agent Skills 开放标准，Claude Code/Codex/Cursor 可读）
+// 导出单个技能为 SKILL.md（Agent Skills 开放标准，主流编码代理/主流编码代理/主流编码代理 可读）
 router.post('/export', (ctx) => {
   try {
     const db = getDB()

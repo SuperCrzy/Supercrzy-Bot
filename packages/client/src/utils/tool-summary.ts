@@ -1,7 +1,7 @@
 /**
- * 工具摘要描述符表 + 折叠条摘要合成（对齐 WorkBuddy metaFold.summary：动词+宾语）
+ * 工具摘要描述符表 + 折叠条摘要合成（对齐主流实现 metaFold.summary：动词+宾语）
  *
- * WorkBuddy 原版：TOOL_DESCRIPTORS（canonical/aliases/actionKey/objectFields/noObjectKey）
+ * 主流实现 原版：TOOL_DESCRIPTORS（canonical/aliases/actionKey/objectFields/noObjectKey）
  * → extractAtom（从工具参数提取动作+宾语）→ selectSummary → renderTemplate（"{verb} {object}"）
  */
 import type { ChatFlowNode } from '@/types'
@@ -80,7 +80,7 @@ function extractAtom(node: Extract<ChatFlowNode, { kind: 'tool' }>): { actionKey
 }
 
 /**
- * 折叠条摘要合成（对齐 WorkBuddy metaFold.summary）：
+ * 折叠条摘要合成（对齐主流实现 metaFold.summary）：
  * - 单动作：动词（无宾语）→ "运行命令"；有宾语 → "读取 src/utils.ts"
  * - 多动作（≤3）：顿号连接 → "运行命令、修改：topic"
  * - 多动作（>3）：分类计数 → "5 类操作"
@@ -110,7 +110,7 @@ export function composeFoldSummary(flow: ChatFlowNode[] | undefined, t: (key: st
   return t('chat.sumCategoryCount').replace('{n}', String(segments.length))
 }
 
-/** 时长格式（对齐 WorkBuddy formatDurationMs）：≥1h → "1h23m"；≥1m → "5m17s"；<1m → "42s" */
+/** 时长格式（对齐主流实现 formatDurationMs）：≥1h → "1h23m"；≥1m → "5m17s"；<1m → "42s" */
 export function formatDurationMs(ms: number | undefined | null): string {
   if (!ms || ms < 0) return ''
   const totalSeconds = Math.floor(ms / 1000)

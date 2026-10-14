@@ -31,7 +31,7 @@ export async function openFilePreview(path: string, startLine?: number, endLine?
     const d = await r.json()
     if (d.error) throw new Error(d.error)
 
-    // 展示标签：路径（带行号范围时附加 L{start}-{end}，WorkBuddy "已读取 demo.py L12-30" 同款语义）
+    // 展示标签：路径（带行号范围时附加 L{start}-{end}，主流实现 "已读取 demo.py L12-30" 同款语义）
     const range = d.startLine ? ` L${d.startLine}${d.endLine && d.endLine !== d.startLine ? `-${d.endLine}` : ''}` : ''
     const label = `${d.path}${range}`
 

@@ -5,8 +5,8 @@ dist/
 .env.production
 *.log
 .DS_Store
-.codexstation/
-.workbuddy/
+.*station/
+.*buddy/
 *.db
 *.db-journal
 *.db-shm

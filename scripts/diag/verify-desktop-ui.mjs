@@ -145,11 +145,11 @@ if (!electronBin) { console.log('✘ 找不到 Electron 二进制，可用 SUPER
  *   BASH_ENV / NODE_OPTIONS → brokered shell 与 language-shim 注入
  */
 const childEnv = { ...process.env }
-for (const k of ['NODE_OPTIONS', 'BASH_ENV', 'ELECTRON_RUN_AS_NODE', 'HTTP_PROXY', 'HTTPS_PROXY',
-  'http_proxy', 'https_proxy', 'ALL_PROXY', 'all_proxy',
-  'CODEBUDDY_BROKERED_FS_HOOK_ENABLED', 'CODEBUDDY_SANDBOX_BROKER_IPC_ADDRESS',
-  'CODEBUDDY_SAFE_DELETE_BROKER_DELETE', 'CODEBUDDY_BROKERED_BIN_DIR', 'CODEBUDDY_BROKERED_SHELL_ENV']) {
-  delete childEnv[k]
+const STRIP_KEYS = ['NODE_OPTIONS', 'BASH_ENV', 'ELECTRON_RUN_AS_NODE', 'HTTP_PROXY', 'HTTPS_PROXY',
+  'http_proxy', 'https_proxy', 'ALL_PROXY', 'all_proxy']
+// 宿主可能注入任意名字的沙箱/broker 变量（名字会变，列举必然漏），按模式剥离
+for (const k of Object.keys(childEnv)) {
+  if (STRIP_KEYS.includes(k) || /BROKER/i.test(k)) delete childEnv[k]
 }
 
 // ---------------------------------------------------------------- 临时目录（不碰老板的真实数据）

@@ -192,7 +192,7 @@ describe('服务端载荷 → 状态行（端到端对接）', () => {
   })
 })
 
-describe('生成期实时 ±（diffArgsLive，对齐 WorkBuddy useLiveChangeStats）', () => {
+describe('生成期实时 ±（diffArgsLive，对齐主流实现 useLiveChangeStats）', () => {
   it('file_write：args 逐 chunk 喂入 → progress.added 单调不减，中文/空行按行计', () => {
     const m = emptyMsg()
     const chunks = [

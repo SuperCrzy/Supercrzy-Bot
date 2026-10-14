@@ -1,5 +1,5 @@
 /**
- * 统一打字机引擎（WorkBuddy conversation-render streaming-text 同款）。
+ * 统一打字机引擎（主流实现 conversation-render streaming-text 同款）。
  *
  * 模型：目标 = 流式到达的完整文本；显示 = displayLength 逐步揭示。
  * 每帧（targetIntervalMs）按非对称 EMA 平滑滞后（lag = 目标 - 已显示）：
@@ -33,7 +33,7 @@ export interface TypewriterConfig {
   fastDrainThreshold: number
 }
 
-/** WorkBuddy STREAMING_TEXT_BUFFER_CONFIG 原参数 */
+/** 主流实现 STREAMING_TEXT_BUFFER_CONFIG 原参数 */
 export const DEFAULT_TYPING_CONFIG: TypewriterConfig = {
   targetIntervalMs: 40,
   speedDivisor: 28,
@@ -44,7 +44,7 @@ export const DEFAULT_TYPING_CONFIG: TypewriterConfig = {
   fastDrainThreshold: 0,
 }
 
-/** 避免把一个 emoji 的代理对（surrogate pair）从中间切断（WorkBuddy avoidSurrogateSplit 同款） */
+/** 避免把一个 emoji 的代理对（surrogate pair）从中间切断（主流实现 avoidSurrogateSplit 同款） */
 export function avoidSurrogateSplit(text: string, length: number): number {
   const clamped = Math.max(0, Math.min(length, text.length))
   if (clamped <= 0) return 0
@@ -55,7 +55,7 @@ export function avoidSurrogateSplit(text: string, length: number): number {
 }
 
 /**
- * 计算下一帧应显示的长度。纯函数（WorkBuddy advanceReveal 同款）：
+ * 计算下一帧应显示的长度。纯函数（主流实现 advanceReveal 同款）：
  * 给定当前状态 + 目标文本长度，返回新状态。
  */
 export function advanceReveal(

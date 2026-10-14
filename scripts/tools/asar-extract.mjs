@@ -2,7 +2,7 @@
 /**
  * asar-extract.mjs — 按需读取 Electron asar 包内容（不解包）
  *
- * 为什么需要它：WorkBuddy 的 `app.asar` 有 317MB / 23224 条目，
+ * 为什么需要它：主流实现 的 `app.asar` 有 317MB / 23224 条目，
  * 全量 extractAll 要解出 ~700MB 且污染磁盘。调研只需要其中几十个文件，
  * 所以做成"按需抽取 + 包内 grep"。
  *
@@ -15,7 +15,7 @@
  *   node scripts/tools/asar-extract.mjs info  <path-in-asar>          # 大小/类型/前 512 字节
  *
  * 环境变量：
- *   ASAR_PATH  覆盖 asar 路径（默认 /Applications/WorkBuddy.app/Contents/Resources/app.asar）
+ *   ASAR_PATH  asar 路径（也可用第一个命令行参数）
  *
  * 注意：包内路径一律以 `/` 开头（asar.listPackage 的返回格式）。
  */
@@ -24,7 +24,11 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const ASAR = process.env.ASAR_PATH || '/Applications/WorkBuddy.app/Contents/Resources/app.asar';
+const ASAR = process.env.ASAR_PATH || process.argv[2];
+if (!ASAR) {
+  console.error('用法: node scripts/tools/asar-extract.mjs <path/to/app.asar>  （或用环境变量 ASAR_PATH）');
+  process.exit(1);
+}
 
 // @electron/asar 是 CJS，且装在仓库根 node_modules 里
 let asar;

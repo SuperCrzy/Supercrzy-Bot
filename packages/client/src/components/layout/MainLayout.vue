@@ -35,7 +35,7 @@
     <!-- Mobile overlay backdrop -->
     <div class="mobile-overlay" v-if="mobileMenuOpen" @click="mobileMenuOpen = false"></div>
 
-    <!-- 红绿灯悬浮区（仅 Electron App）：独立横条横跨全窗口（对齐 WorkBuddy main-header）。
+    <!-- 红绿灯悬浮区（仅 Electron App）：独立横条横跨全窗口（对齐主流实现 main-header）。
          三段：①红绿灯(0~87px) ②侧边栏上方(87~220px，收缩按钮驻留) ③工作区段(220px+，会话标题+模型+操作)。
          sidebar 收缩不影响它；整行可拖拽；交互元素 no-drag。
          展开/收起：横栏收缩按钮、单击分隔条、Cmd+B（按钮式，无拖拽） -->
@@ -75,7 +75,7 @@
         <button class="traffic-action-btn" @click="dispatchChatAction('search')" :title="$t('chat.searchMessages')">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
         </button>
-        <!-- 对话分享（Grok 式传播：复制/下载 Markdown、生成分享图） -->
+        <!-- 对话分享（分享式传播：复制/下载 Markdown、生成分享图） -->
         <button class="traffic-action-btn" @click="dispatchChatAction('share')" :title="$t('chat.share')">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
         </button>
@@ -105,7 +105,7 @@
 
       <!-- 伸缩按钮已移到侧边栏底部 footer（展开态在主题左侧 / 收起态在头像上方），不再骑缘 -->
 
-      <!-- 收起态图标列（Web 与 App 一致：收缩后保留核心功能 SVG，Grok 同款窄栏） -->
+      <!-- 收起态图标列（Web 与 App 一致：收缩后保留核心功能 SVG，窄栏） -->
       <nav v-if="sidebarCollapsed && !isMobile" class="sidebar-icon-rail">
         <button class="rail-btn" :class="{ active: route.name === 'Chat' }" @click="handleNewChat" :title="$t('nav.newTask')">
           <SvgIcon name="message" :size="17" />
@@ -169,7 +169,7 @@
           </span>
         </div>
         <div class="chats-list" v-show="!chatsCollapsed">
-          <!-- 空间分组：按工作区目录归类会话（对齐 WorkBuddy） -->
+          <!-- 空间分组：按工作区目录归类会话（对齐主流实现） -->
           <div v-for="g in chatStore.groupedSessions" :key="g.key" class="chat-group">
             <div class="chat-group-header" @click="toggleGroup(g.key)">
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="chat-group-caret" :class="{ rotated: !collapsedGroups.has(g.key) }"><polyline points="6 9 12 15 18 9"/></svg>
@@ -437,7 +437,7 @@ function handleNewChat() {
 }
 
 // =================================================================
-// 空间分组：会话按工作区目录归类（对齐 WorkBuddy）；wsCurrent 供 ChatView 全局工作区使用
+// 空间分组：会话按工作区目录归类（对齐主流实现）；wsCurrent 供 ChatView 全局工作区使用
 // =================================================================
 /** 当前工作区（localStorage 持久化；会话创建时绑定到 workspace_dir） */
 const wsCurrent = ref(localStorage.getItem('supercrzy:workspace') || '')
@@ -562,7 +562,7 @@ onMounted(() => {
   min-width: 48px;
 }
 
-/* 红绿灯悬浮区（Electron App 沉浸式）：独立横条横跨全窗口（对齐 WorkBuddy main-header）。
+/* 红绿灯悬浮区（Electron App 沉浸式）：独立横条横跨全窗口（对齐主流实现 main-header）。
    三段布局：①红绿灯悬浮在左上角(x=21~71) ②侧边栏上方留白(hover 滑出热区) ③工作区段(标题+模型)。
    整行可拖拽；交互元素 no-drag */
 .traffic-spacer {
@@ -571,7 +571,7 @@ onMounted(() => {
   align-items: center;
   height: 56px;
   min-height: 56px;
-  padding: 0 12px 0 87px; /* 左侧 87px 红绿灯让位（对齐 WorkBuddy） */
+  padding: 0 12px 0 87px; /* 左侧 87px 红绿灯让位（对齐主流实现） */
   flex-shrink: 0;
   -webkit-app-region: drag; /* 整行可拖拽窗口 */
   user-select: none;

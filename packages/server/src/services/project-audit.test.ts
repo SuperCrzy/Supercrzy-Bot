@@ -43,7 +43,7 @@ describe('scanProject 裁剪语义', () => {
       'node_modules/pkg/index.ts': 'huge',
       'dist/bundle.ts': 'built',
       '.git/objects/x.ts': 'git',
-      '.workbuddy/memory/a.ts': 'mem',
+      '.next/cache/a.ts': 'mem',
     })
     const out = await scanProject(root)
     expect(out.map((f) => f.rel)).toEqual(['src/a.ts'])

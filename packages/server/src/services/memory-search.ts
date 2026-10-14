@@ -214,7 +214,7 @@ export function memoryRankedSearch(query: string, limit = 5, roleId?: string): R
 }
 
 /**
- * embedding 混合检索（2026-08-23，对齐 WorkBuddy `score = α·cosine + (1-α)·bm25Normalized`，α=0.8）
+ * embedding 混合检索（2026-08-23，对齐主流实现 `score = α·cosine + (1-α)·bm25Normalized`，α=0.8）
  * - 未配置 embedding key → 完全退化回纯 FTS5 ranking（与 memoryRankedSearch 同结果）
  * - 配置了 → 召回候选上融合：final = 0.8·normCosine(query, content) + 0.2·normRankScore
  * - 异步（embedding 需网络调用）；供 memory_recall 等 async 工具使用；系统提示注入保持同步 FTS5

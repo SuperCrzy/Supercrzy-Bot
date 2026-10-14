@@ -26,7 +26,7 @@ export interface AuditReport {
 }
 
 // 跳过目录（避免 node_modules/dist/.git 爆炸）
-const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.next', '.nuxt', 'coverage', '.workbuddy', 'uploads', 'data'])
+const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.next', '.nuxt', 'coverage', 'uploads', 'data'])
 const MAX_FILES = 60         // 单项目最多扫描文件数
 const MAX_BYTES = 60 * 1024  // 单文件最多读 60KB
 const MAX_CHARS_PER_MEMBER = 5200  // 每个成员最多喂的代码量

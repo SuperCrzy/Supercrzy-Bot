@@ -121,7 +121,7 @@
 
     <!-- Messages -->
     <div class="messages-area" ref="messagesRef" @scroll="onScroll" @click="closeMsgMenu">
-      <!-- 错误横幅（对齐 WorkBuddy ErrorBanner：任务出错浮顶部，可复制错误报告/重试，替代一闪而过的小弹条） -->
+      <!-- 错误横幅（对齐主流实现 ErrorBanner：任务出错浮顶部，可复制错误报告/重试，替代一闪而过的小弹条） -->
       <ErrorBanner
         v-if="errorBanner"
         :title="errorBanner.title"
@@ -316,7 +316,7 @@
         </div>
         <div class="message" :class="msg.role">
           <div class="message-header">
-            <!-- TurnFoldAvatar（WorkBuddy 同款）：耗时独立显示在头像下方，点击头像切换整轮折叠（耗时已由消息总计时徽标承担，不再重复） -->
+            <!-- TurnFoldAvatar（主流实现同款）：耗时独立显示在头像下方，点击头像切换整轮折叠（耗时已由消息总计时徽标承担，不再重复） -->
             <div class="avatar-wrap">
               <div class="message-avatar" :class="{ 'turn-foldable': msg.role !== 'user' && hasProcess(msg) }" :title="msg.role !== 'user' && hasProcess(msg) ? $t('chat.toggleProcess') : ''" @click="msg.role !== 'user' && hasProcess(msg) && toggleMsgFold(msg)">
                 <!-- 2026-08-29 超级协作平台：有 actor 的多 AI 用图标头像，单 AI（无 actor）保留原 logo -->
@@ -371,7 +371,7 @@
               </div>
             </div>
 
-            <!-- 消息核心：思考状态 + 时序流（折叠条/块渲染）+ 无流正文 + 重试 + 停止横幅（WorkBuddy 块架构，MessageFlowRenderer） -->
+            <!-- 消息核心：思考状态 + 时序流（折叠条/块渲染）+ 无流正文 + 重试 + 停止横幅（主流实现 块架构，MessageFlowRenderer） -->
             <MessageFlowRenderer
               :msg="msg"
               :is-loading="chatStore.isLoading"
@@ -474,7 +474,7 @@
               </div>
             </div>
 
-            <!-- Routine 推荐（学 Grok"演示一次就学会"）：复杂任务完成后 AI 主动建议保存为流程 -->
+            <!-- Routine 推荐（"演示一次就学会"）：复杂任务完成后 AI 主动建议保存为流程 -->
             <div v-if="msg.routineSuggestion" class="routine-suggest">
               <div class="rs-info">
                 <span class="rs-title">可保存为可复用流程</span>
@@ -505,7 +505,7 @@
               <span v-if="msg.cost"> · {{ formatCurrency(msg.cost) }}</span>
             </div>
 
-            <!-- Agent 结构化提问已浮层化（QuestionFloating 顶部浮层，WorkBuddy 同款——原内嵌 question-card 移除，避免藏消息里不明显） -->
+            <!-- Agent 结构化提问已浮层化（QuestionFloating 顶部浮层，主流实现同款——原内嵌 question-card 移除，避免藏消息里不明显） -->
 
           </div>
 
@@ -630,7 +630,7 @@
 
     <!-- Input area（欢迎页时隐藏，中央输入框替代；保留 DOM 供文件选择器使用） -->
     <footer class="input-area" v-show="messages.length > 0">
-      <!-- 输入横幅（对齐 WorkBuddy cb-input-banner：未配置模型时输入框上方提示 + 跳转配置，替代仅按钮 title 提示） -->
+      <!-- 输入横幅（对齐主流实现 cb-input-banner：未配置模型时输入框上方提示 + 跳转配置，替代仅按钮 title 提示） -->
       <InputBanner
         v-if="showNoKeyBanner"
         :message="$t('chat.errorBannerNoKeyDesc')"
@@ -795,7 +795,7 @@
         </div>
 
         <div class="input-hint">
-          <!-- ＋ 菜单（对齐 WorkBuddy：上传图片/文件、技能、@引用对话文件、模式等收纳进一个菜单） -->
+          <!-- ＋ 菜单（对齐主流实现：上传图片/文件、技能、@引用对话文件、模式等收纳进一个菜单） -->
           <n-dropdown
             trigger="click"
             placement="bottom-start"
@@ -806,7 +806,7 @@
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             </button>
           </n-dropdown>
-          <!-- 权限（挨着 ＋，对齐 WorkBuddy） -->
+          <!-- 权限（挨着 ＋，对齐主流实现） -->
           <span class="input-hint-perm" :title="$t('chat.wcPermission')">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="input-hint-icon"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
             <select
@@ -821,7 +821,7 @@
           </span>
           <!-- 间距（权限与模型之间留白） -->
           <span class="input-hint-gap"></span>
-          <!-- 模型下拉（对齐 WorkBuddy：模型切换在语音前） -->
+          <!-- 模型下拉（对齐主流实现：模型切换在语音前） -->
           <span class="input-hint-model">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="input-hint-icon"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
             <select
@@ -842,7 +842,7 @@
           </span>
           <span v-if="uploadedFiles.length > 0" class="input-hint-count">{{ $t('chat.fileCount', { n: uploadedFiles.length }) }}</span>
           <span class="input-hint-spacer"></span>
-          <!-- 语音输入（对齐 WorkBuddy：语音紧挨发送按钮左侧） -->
+          <!-- 语音输入（对齐主流实现：语音紧挨发送按钮左侧） -->
           <button class="wc-icon-btn" :class="{ listening: isListening }" :title="isListening ? $t('chat.wcVoiceStop') : $t('chat.wcVoice')" @click="toggleVoice">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><line x1="12" y1="18" x2="12" y2="22"/></svg>
           </button>
@@ -857,7 +857,7 @@
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="5" width="3.4" height="14" rx="1.2"/><rect x="13.6" y="5" width="3.4" height="14" rx="1.2"/></svg>
           </button>
-          <!-- 发送/停止一体（对齐 WorkBuddy：发送按钮在控制行最右，语音紧挨其左） -->
+          <!-- 发送/停止一体（对齐主流实现：发送按钮在控制行最右，语音紧挨其左） -->
           <n-button
             :type="chatStore.isLoading ? 'error' : 'primary'"
             :disabled="!canSend && !chatStore.isLoading"
@@ -871,7 +871,7 @@
           </n-button>
         </div>
       </div>
-      <!-- 输入高度拖拽手柄（对齐 WorkBuddy resize-handle：拖拽调高，localStorage 记忆） -->
+      <!-- 输入高度拖拽手柄（对齐主流实现 resize-handle：拖拽调高，localStorage 记忆） -->
       <div class="chat-resize-handle" @mousedown="startHeightResize" :title="$t('chat.resizeInput')"></div>
     </footer>
 
@@ -1037,7 +1037,7 @@ const { pushInputHistory, historyPrev, historyNext } = useInputHistory({
 })
 const { inputHeight, startHeightResize } = useInputHeight()
 
-/** 全局执行状态条（输入框上方）：AI 当前动作（对齐 WorkBuddy progress.phase 体验） */
+/** 全局执行状态条（输入框上方）：AI 当前动作（对齐主流实现 progress.phase 体验） */
 const aiStatus = ref<string | null>(null)
 /** 状态条目标对象（如"正在获取网页 supercrzy.com"的 URL/路径/命令摘要） */
 const aiStatusTarget = ref('')
@@ -1076,7 +1076,7 @@ function onDesktopChatAction(e: Event) {
 onMounted(() => window.addEventListener('supercrzy:chat-action', onDesktopChatAction))
 onUnmounted(() => window.removeEventListener('supercrzy:chat-action', onDesktopChatAction))
 
-/** 例程执行：RoutinesView 一键重放 → 把例程指令作为消息发送（学 Grok"演示一次就学会"） */
+/** 例程执行：RoutinesView 一键重放 → 把例程指令作为消息发送（"演示一次就学会"） */
 function onExternalSendPrompt(e: Event) {
   const text = (e as CustomEvent).detail as string
   if (!text || chatStore.isLoading) return
@@ -1142,7 +1142,7 @@ const compareMode = ref(false)
 const compareModels = ref<string[]>([])
 const comparePickerOpen = ref(false)
 
-// ===== 输入框 ＋菜单（对齐 WorkBuddy：上传图片/文件、技能、@引用对话文件、多模型模式收纳） =====
+// ===== 输入框 ＋菜单（对齐主流实现：上传图片/文件、技能、@引用对话文件、多模型模式收纳） =====
 const plusMenuOptions = computed(() => [
   { label: t('chat.plusUploadImage'), key: 'image', icon: () => h('svg', { width: '15', height: '15', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [h('rect', { x: '3', y: '3', width: '18', height: '18', rx: '2' }), h('circle', { cx: '8.5', cy: '8.5', r: '1.5' }), h('polyline', { points: '21 15 16 10 5 21' })]) },
   { label: t('chat.plusUploadFile'), key: 'file', icon: () => h('svg', { width: '15', height: '15', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [h('path', { d: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z' }), h('polyline', { points: '14 2 14 8 20 8' })]) },
@@ -1393,7 +1393,7 @@ function deleteQueued(id: string) {
 
 /** 停止当前 AI 回复（停止后若有队列会自动发布） */
 function stopGeneration() {
-  // P0-6：把当前轮未完成的工具节点标记为 cancelled（WorkBuddy ToolState.cancelled 同款）
+  // P0-6：把当前轮未完成的工具节点标记为 cancelled（主流实现 ToolState.cancelled 同款）
   const msgs = messages.value
   for (let i = msgs.length - 1; i >= 0; i--) {
     const m = msgs[i]
@@ -1487,13 +1487,13 @@ function lastFlowNodeOf<T extends ChatFlowNode['kind']>(
   return undefined
 }
 
-/** 消息是否有过程节点（TurnFoldAvatar 显示/可折叠判定，对齐 WorkBuddy turnFoldActive） */
+/** 消息是否有过程节点（TurnFoldAvatar 显示/可折叠判定，对齐主流实现 turnFoldActive） */
 function hasProcess(msg: ChatMessage): boolean {
   if (!msg.flow || msg.flow.length === 0) return false
   return msg.flow.some((n) => n.kind === 'tool' || n.kind === 'thinking')
 }
 
-/** 点击头像切换整轮折叠（WorkBuddy TurnFoldAvatar 同款：collapsed 切换，用户操作后不被自动折叠覆盖） */
+/** 点击头像切换整轮折叠（主流实现 TurnFoldAvatar 同款：collapsed 切换，用户操作后不被自动折叠覆盖） */
 function toggleMsgFold(msg: ChatMessage) {
   // 2026-08-25 状态机版：记录用户覆盖（最高优先），由 applyCollapse 统一写回
   if (msg._userFoldState === 'expanded') msg._userFoldState = 'folded'
@@ -1648,7 +1648,7 @@ const pendingApprovalTool = computed<ToolCallEvent | null>(() => {
   return null
 })
 
-/** 待回答问题（提问浮层数据源）：消息流中第一个 pendingQuestion（对齐 WorkBuddy QuestionFloating 顶部浮层，醒目） */
+/** 待回答问题（提问浮层数据源）：消息流中第一个 pendingQuestion（对齐主流实现 QuestionFloating 顶部浮层，醒目） */
 const pendingQuestion = computed(() => {
   for (const m of messages.value) {
     if (m.pendingQuestion) return m.pendingQuestion
@@ -1657,7 +1657,7 @@ const pendingQuestion = computed(() => {
 })
 const canSend = computed(() => inputText.value.trim() || uploadedFiles.value.length > 0)
 
-// ---- 错误横幅 / 输入横幅（对齐 WorkBuddy ErrorBanner / InputBanner：顶部横幅替代一闪而过的小弹条） ----
+// ---- 错误横幅 / 输入横幅（对齐主流实现 ErrorBanner / InputBanner：顶部横幅替代一闪而过的小弹条） ----
 const errorBanner = ref<{ title: string; message?: string; details?: Record<string, string>; canRetry?: boolean } | null>(null)
 /** 横幅重试：重新执行最后一条用户消息（调 handleSend 前需有内容可重发——记录最后发送文本） */
 let lastFailedText = ''
@@ -1715,7 +1715,7 @@ const copyMd = new MarkdownIt({ html: false, linkify: true, typographer: true })
 async function copyMessage(msg: ChatMessage) {
   const raw = textOf(msg.content)
   const text = msg.role === 'assistant' ? stripMarkdown(raw) : raw
-  // 富文本复制：text/plain + text/html（对齐 WorkBuddy；不支持 ClipboardItem 自动降级纯文本）
+  // 富文本复制：text/plain + text/html（对齐主流实现；不支持 ClipboardItem 自动降级纯文本）
   const ok = await copyRichText(text, `<div>${copyMd.render(raw)}</div>`)
   if (ok) {
     copiedMsgId.value = msg.id
@@ -1894,7 +1894,7 @@ const {
 
 // 任务完成耗时格式化统一走 utils/tool-summary 的 formatDurationMs（与折叠条同一函数），
 // 原先这里的本地 formatElapsed 会输出 "1m 3s" 而折叠条输出 "1m3s"，同一条回复两处显示不一致。
-/** Routine 推荐：保存为例程（AI 主动建议，学 Grok"演示一次就学会"） */
+/** Routine 推荐：保存为例程（AI 主动建议，即"演示一次就学会"） */
 const savingRoutine = ref(false)
 async function saveRoutineSuggestion(msg: { routineSuggestion?: { sessionId: string; title: string } }) {
   const sugg = msg.routineSuggestion
@@ -2149,7 +2149,7 @@ function buildAPIMessage(m: ChatMessage) {
   return { role: m.role, content }
 }
 
-// 消息历史滑动窗口：只发最近 N 条给模型（WorkBuddy contextWindow 同思路，控制长会话 prompt 膨胀）
+// 消息历史滑动窗口：只发最近 N 条给模型（主流实现 contextWindow 同思路，控制长会话 prompt 膨胀）
 const HISTORY_WINDOW = 40
 
 /** 未配置 API Key 时拦截发送：跳转模型页 + 轻提示（发送按钮 title 也提示"先配置模型"） */
@@ -2277,7 +2277,7 @@ async function doSend(text: string, files: Attachment[]) {
     if (err.name !== 'AbortError') {
       const cur = messages.value.find((m) => m.id === assistantMsg.id)
       if (cur) cur.content = `❌ ${t('chat.requestFail', { msg: err.message || t('chat.apiKeyHint') })}`
-      // 错误横幅（对齐 WorkBuddy ErrorBanner）：可复制错误报告 + 重试（doSend 主路径）
+      // 错误横幅（对齐主流实现 ErrorBanner）：可复制错误报告 + 重试（doSend 主路径）
       lastFailedText = text
       errorBanner.value = {
         title: t('chat.errorBannerExecTitle'),
@@ -2288,7 +2288,7 @@ async function doSend(text: string, files: Attachment[]) {
     }
   } finally {
     chatStore.setLoading(false)
-    // 兜底保险：流完全结束后，最后一条有过程的助手消息确保默认折叠（对齐 WorkBuddy turnFold）
+    // 兜底保险：流完全结束后，最后一条有过程的助手消息确保默认折叠（对齐主流实现 turnFold）
     // 即使 done 事件异常未触发，也通过状态机 markEnd 强制折叠，避免过程平铺残留
     const lastMsg = messages.value[messages.value.length - 1]
     if (lastMsg && lastMsg.role === 'assistant' && lastMsg.flow && lastMsg.flow.length > 0 && lastMsg.processCollapsed === undefined) {
@@ -2475,7 +2475,7 @@ async function sendAgentMessage(assistantMsg: ChatMessage, apiMessages: Array<{ 
   // 绑定流实例：打字机 + flow 更新集中到 stores/chat-stream.ts（SSE 直写，可多实例）
   bindStream(reactiveMsg)
 
-  // ---- SSE 流式读取：带事件 id 解析 + 按 seq 去重 + 断线安全重试（P1-4，对齐 WorkBuddy accumulator） ----
+  // ---- SSE 流式读取：带事件 id 解析 + 按 seq 去重 + 断线安全重试（P1-4，对齐主流实现 accumulator） ----
   // 事件 id 由后端 emitSSE 自增写入（agent.ts）；重试从头重跑，前端靠 seq 过滤旧事件实现"无感续播"。
   // 副作用保护：已收到 tool_call/tool_result（工具已执行）后断线 → 不自动重试（避免重复执行），改为提示。
   const decoder = new TextDecoder()
@@ -2586,7 +2586,7 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage, sessionId?
       break
     }
     case 'model_requesting': {
-      // 模型请求已发出、响应未到达（WorkBuddy model_requesting 同款：等待模型响应，消除"暂停几秒"空白感）
+      // 模型请求已发出、响应未到达（主流实现 model_requesting 同款：等待模型响应，消除"暂停几秒"空白感）
       aiStatus.value = 'chat.statusWaitingModel'
       aiStatusTarget.value = ''
       break
@@ -2645,7 +2645,7 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage, sessionId?
       break
     }
     case 'tool_args_chunk': {
-      // 工具参数增量流（WorkBuddy 流式参数解析同款）：纯 flow 操作（utils/agent-flow），节点未建 → 占位。
+      // 工具参数增量流（主流实现 流式参数解析同款）：纯 flow 操作（utils/agent-flow），节点未建 → 占位。
       // 时序修复：增量参数先于 tool_call 到达 → 参数开始出现 = 思考阶段结束，
       // 必须同 tool_call 一样收起 thinking（markAllThinkingDone 刷完推理 + 折叠），
       // 否则出现"上面还在正在思考、下面工具卡片已渲染"的错位（老板 2026-08-21 反馈）
@@ -2666,7 +2666,7 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage, sessionId?
       break
     }
     case 'tool_result': {
-      // 更新对应 tool 节点：优先按 toolCallId 精确归属（并行同名工具不串卡，WorkBuddy toolCallId→index 同款），找不到回退按 name
+      // 更新对应 tool 节点：优先按 toolCallId 精确归属（并行同名工具不串卡，主流实现 toolCallId→index 同款），找不到回退按 name
       aiStatus.value = 'chat.statusThinking'
       aiStatusTarget.value = ''
       applyToolResult(msg, data)
@@ -2678,7 +2678,7 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage, sessionId?
       break
     }
     case 'turn_limit_reached': {
-      // 轮次超限（结构化停止原因，对齐 WorkBuddy MaxTurnsExceededError）：消息内提示 + 折叠条下方显示"可继续"
+      // 轮次超限（结构化停止原因，对齐主流实现 MaxTurnsExceededError）：消息内提示 + 折叠条下方显示"可继续"
       msg.stopReason = { reason: 'max_turns', message: data.message || '', checkpointId: data.checkpointId || '', toolCalls: data.toolCallCount || 0 }
       aiStatus.value = null
       aiStatusTarget.value = ''
@@ -2730,7 +2730,7 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage, sessionId?
         msg.actor = pendingActor
         pendingActor = undefined
       }
-      // 注意：执行中（含工具间简短说明）全程平铺，不折叠——折叠只在 done（轮次完成）时触发（WorkBuddy turnFold 逻辑）
+      // 注意：执行中（含工具间简短说明）全程平铺，不折叠——折叠只在 done（轮次完成）时触发（主流实现 turnFold 逻辑）
       // 2026-08-25：不再 markAllThinkingDone——正文开始时思考可能还在前端打字机播（模型 reasoning 一次性到达），
       // 强制收起会让"思考没看完就被收掉"；思考保持展开，用户可滚动看完整推理，done 时统一标记完成。
       // 2026-08-25 14:5x 状态机：正文到达 → markTextStarted（800ms 延迟确认折叠）。
@@ -2786,7 +2786,7 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage, sessionId?
       break
     }
     case 'routine_suggest': {
-      // 复杂任务完成 → AI 主动推荐保存为可复用流程（学 Grok"演示一次就学会"）
+      // 复杂任务完成 → AI 主动推荐保存为可复用流程（"演示一次就学会"）
       msg.routineSuggestion = {
         sessionId: data.sessionId || '',
         title: data.title || '未命名任务',
@@ -2848,7 +2848,7 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage, sessionId?
       break
     }
     case 'diagram_chunk': {
-      // 流式画图（WorkBuddy 同款"先出画板再逐框绘制"）：SVG 块追加到进行中的图节点，
+      // 流式画图（主流实现同款"先出画板再逐框绘制"）：SVG 块追加到进行中的图节点，
       // 元素闭合即被浏览器绘制 → 视觉上像实时画图；无进行中节点则先建空"画板"
       if (typeof data.chunk === 'string') {
         streamTarget = msg
@@ -2858,7 +2858,7 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage, sessionId?
     }
     case 'diagram': {
       // AI 画图（P0）：draw_diagram 工具 / 代码块兜底 / 后端自动补图
-      // 图作为 flow 节点按位置渲染（WorkBuddy image-block 同款）——diagram 事件在总结文字之前到达，
+      // 图作为 flow 节点按位置渲染（主流实现 image-block 同款）——diagram 事件在总结文字之前到达，
       // push 到 flow 末尾即"产生位置"，后续正文 text 节点追加在它后面 → 图固定在工具与总结之间，不再被文字推走
       if (typeof data.svg === 'string' && data.svg.startsWith('<svg')) {
         const cur = streamTarget || [...messages.value].reverse().find((m) => m.role === 'assistant')
@@ -2893,7 +2893,7 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage, sessionId?
       // 文件变更（变更 tab）：写入文件时记录改前/改后内容
       if (typeof data.path === 'string') {
         appStore.addFileChange(data.path, data.oldContent || '', data.newContent || '')
-        // 工具卡片内嵌 diff（对齐 WorkBuddy WriteFileRenderer）：挂到最近一个 file_write 工具节点
+        // 工具卡片内嵌 diff（对齐主流实现 WriteFileRenderer）：挂到最近一个 file_write 工具节点
         if (msg.flow) {
           for (let i = msg.flow.length - 1; i >= 0; i--) {
             const n = msg.flow[i]
@@ -2972,9 +2972,9 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage, sessionId?
       })
       aiStatus.value = null
       aiStatusTarget.value = ''
-      // 轮次完成 → 折叠已由 markEnd 状态机处理（WorkBuddy turnFold 语义；用户手动展开过则 userOverride 优先不覆盖）
+      // 轮次完成 → 折叠已由 markEnd 状态机处理（主流实现 turnFold 语义；用户手动展开过则 userOverride 优先不覆盖）
       // ①移除末尾"收尾确认"思考节点（纯思考轮收尾）
-      // 注意：不做"text 统一置底"——交替式下中间说明文本保持原位（WorkBuddy 时序：说明→工具→说明→工具→最终报告）
+      // 注意：不做"text 统一置底"——交替式下中间说明文本保持原位（主流实现 时序：说明→工具→说明→工具→最终报告）
       if (msg.flow && msg.flow.length > 1) {
         while (msg.flow.length > 1 && msg.flow[msg.flow.length - 1].kind === 'thinking') {
           msg.flow.pop()
@@ -3166,7 +3166,7 @@ onMounted(async () => {
   // 不自动创建会话：保持欢迎页草稿态（resetToWelcome 置 null），
   // 用户发送第一条消息时 doSend 里才真正 createSession，避免空"新对话"堆积
 
-  // ---- Deep Links 深链接（学 Grok）：URL 参数 / postMessage 唤起 ----
+  // ---- Deep Links 深链接：URL 参数 / postMessage 唤起 ----
   const applyDeepLink = (action: { q?: string; session?: string; workspace?: string }) => {
     if (action.workspace) {
       localStorage.setItem('supercrzy:workspace', action.workspace)
@@ -3419,7 +3419,7 @@ onMounted(async () => {
 }
 .ds-more:hover { text-decoration: underline; }
 
-/* 产物卡片行（对标 WorkBuddy artifact-slot） */
+/* 产物卡片行（对标 主流实现 artifact-slot） */
 .ds-cards {
   display: flex;
   flex-direction: column;
@@ -4408,7 +4408,7 @@ onMounted(async () => {
   overflow: hidden;
 }
 
-/* TurnFoldAvatar（WorkBuddy 同款）：AI 轮次头像可点击切换折叠，耗时独立显示在头像下方 */
+/* TurnFoldAvatar（主流实现同款）：AI 轮次头像可点击切换折叠，耗时独立显示在头像下方 */
 .avatar-wrap {
   display: flex;
   flex-direction: column;
@@ -4993,12 +4993,12 @@ onMounted(async () => {
 
 /* ===== Input ===== */
 .input-area {
-  /* v4：去掉顶部分割线（输入卡直接浮在页面上，对齐 WorkBuddy） */
+  /* v4：去掉顶部分割线（输入卡直接浮在页面上，对齐主流实现） */
   background: var(--bg-primary);
   flex-shrink: 0;
 }
 
-/* 输入高度记忆（对齐 WorkBuddy resize-handle）：自定义高度时固定 textarea 高度（仅 chat-input-fixed 生效，不破坏 autosize；textarea 是 n-input 深层元素需 :deep） */
+/* 输入高度记忆（对齐主流实现 resize-handle）：自定义高度时固定 textarea 高度（仅 chat-input-fixed 生效，不破坏 autosize；textarea 是 n-input 深层元素需 :deep） */
 .chat-input-fixed :deep(textarea) {
   height: var(--chat-input-h) !important;
 }
@@ -5038,7 +5038,7 @@ onMounted(async () => {
   box-shadow: 0 1px 2px rgba(20,30,60,0.04), 0 6px 24px rgba(20,30,60,0.05);
   transition: border-color 0.2s, box-shadow 0.2s;
 }
-/* 聚焦光晕（Perplexity 同款：:focus-within 无需 JS，输入卡聚焦时外圈 accent 光圈） */
+/* 聚焦光晕（主流实现同款：:focus-within 无需 JS，输入卡聚焦时外圈 accent 光圈） */
 .composer-card:focus-within {
   border-color: var(--accent, #4f8cff);
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent, #4f8cff) 14%, transparent), 0 8px 32px rgba(20,30,60,0.08);
@@ -5078,7 +5078,7 @@ onMounted(async () => {
 .chat-input :deep(textarea) {
   border-radius: 16px;
 }
-/* 输入框文字亮白（对齐 WorkBuddy --cb-text-primary：覆盖 NaiveUI 默认灰字）+ 光标色 */
+/* 输入框文字亮白（对齐主流实现 --cb-text-primary：覆盖 NaiveUI 默认灰字）+ 光标色 */
 .chat-input :deep(textarea) {
   color: var(--text-primary) !important;
   caret-color: var(--text-primary);
@@ -5356,7 +5356,7 @@ onMounted(async () => {
   color: var(--text-secondary);
 }
 .input-hint-count { color: var(--text-tertiary); }
-/* ＋ 菜单按钮（对齐 WorkBuddy：控制行首个元素，胶囊描边） */
+/* ＋ 菜单按钮（对齐主流实现：控制行首个元素，胶囊描边） */
 .input-plus-btn {
   width: 26px; height: 26px;
   border-radius: 50%;
@@ -5367,10 +5367,10 @@ onMounted(async () => {
   cursor: pointer; transition: all 0.15s; flex-shrink: 0;
 }
 .input-plus-btn:hover { background: var(--bg-hover, rgba(127,127,127,0.08)); color: var(--accent, #4f8cff); }
-/* 权限与用量之间的间距（对齐 WorkBuddy） */
+/* 权限与用量之间的间距（对齐主流实现） */
 .input-hint-gap { width: 14px; flex-shrink: 0; }
-/* 增强提示词按钮（对齐 WorkBuddy） */
-/* 发送/停止一体（对齐 WorkBuddy：回复中发送变停止方块） */
+/* 增强提示词按钮（对齐主流实现） */
+/* 发送/停止一体（对齐主流实现：回复中发送变停止方块） */
 .send-button.is-stop { border-radius: 50% !important; }
 /* 输入框下方权限选择器（常驻）：位于模型选择器前面，行内靠左排列 */
 .input-hint-perm {

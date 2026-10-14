@@ -5,7 +5,7 @@
  * 事件时序耦合（tool_result 先到还是正文先到）决定行为，导致"并行工具 result 丢失→节点卡 running→
  * hasRunningTool 恒 true→折叠判定失效"这类 bug 反复出现（今天连修 5 轮）。
  *
- * 新设计（对齐 WorkBuddy computeFoldResult 纯函数思路）：
+ * 新设计（对齐主流实现 computeFoldResult 纯函数思路）：
  * - 事件只更新「信号」（textStarted / hasEnd / foldTimerElapsed / userOverride）
  * - 折叠态 = deriveCollapseState(信号) 纯函数推导，事件处理器统一调 applyCollapse 写回 processCollapsed
  * - 单一事实源、可单测、无状态泄漏

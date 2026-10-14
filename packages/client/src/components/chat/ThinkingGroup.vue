@@ -1,6 +1,6 @@
 <template>
   <div class="thinking-group" :class="{ open }">
-    <!-- header：深度思考标题（对齐 WorkBuddy ReasoningRenderer），点击展开/收起 -->
+    <!-- header：深度思考标题（对齐主流实现 ReasoningRenderer），点击展开/收起 -->
     <div class="tg-header" :class="{ clickable: hasReasoning }" @click="toggle">
       <span class="tg-indicator"></span>
       <span class="tg-label">{{ $t('chatui.deepThinking') }}<template v-if="turns.length > 1"> · {{ turns.length }} 轮</template></span>
@@ -26,7 +26,7 @@ const props = defineProps<{
 const open = ref(false)
 const hasReasoning = computed(() => props.turns.some((t) => t.reasoning))
 
-/** 点击"深度思考"标题：展开/收起推理（对齐 WorkBuddy 点击 header 切换） */
+/** 点击"深度思考"标题：展开/收起推理（对齐主流实现 点击 header 切换） */
 function toggle() {
   if (hasReasoning.value) open.value = !open.value
 }

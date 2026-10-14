@@ -1,7 +1,7 @@
 <template>
   <div class="tool-call-block" :class="[status, `cat-${category}`, { 'just-completed': justCompleted, 'just-errored': justErrored }]">
     <!-- Header：命令卡片（shell_exec）用命令短述 + 风险标签，其余通用工具用工具名（web_fetch 用专属卡片自带 header，隐藏通用 header） -->
-    <!-- 授权决策在 header 行内完成（对齐 WorkBuddy tool-head__actions：Allow/Always Allow/Deny 一行，不展开 body 占地方） -->
+    <!-- 授权决策在 header 行内完成（对齐主流实现 tool-head__actions：Allow/Always Allow/Deny 一行，不展开 body 占地方） -->
     <div v-if="!isWebFetch" class="tool-header" @click="toggle">
       <span class="tool-status-indicator">
         <svg v-if="status === 'running' || status === 'stream_executing'" class="spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
@@ -12,7 +12,7 @@
         <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
       </span>
       <template v-if="isCommand">
-        <!-- 终端图标 + 命令短述（Run Command 风格收起行）；pending 时显示"执行命令？"状态标签（WorkBuddy showApprovalButtons 同款） -->
+        <!-- 终端图标 + 命令短述（Run Command 风格收起行）；pending 时显示"执行命令？"状态标签（主流实现 showApprovalButtons 同款） -->
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="cmd-icon"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
         <span v-if="status === 'pending'" class="run-command-ask">{{ $t('chatui.runCommandAsk') }}</span>
         <code class="tool-name cmd-summary">{{ commandSummary || $t('chatui.runCommand') }}</code>
@@ -31,7 +31,7 @@
         <span v-if="status === 'pending'" class="perm-tag" :class="`perm-${permission}`">{{ permLabel }}</span>
       </template>
       <template v-else>
-        <!-- 通用工具：每工具图标 + 友好名称（WorkBuddy tool-icon-registry/tool-name-map 同款） -->
+        <!-- 通用工具：每工具图标 + 友好名称（主流实现 tool-icon-registry/tool-name-map 同款） -->
         <svg v-if="toolIcon === 'read'" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="cmd-icon"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
         <svg v-else-if="toolIcon === 'write'" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="cmd-icon"><path d="M17 3a2.83 2.83 0 0 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
         <svg v-else-if="toolIcon === 'search'" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="cmd-icon"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -52,7 +52,7 @@
         <svg v-else-if="toolIcon === 'cloud'" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="cmd-icon"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>
         <svg v-else-if="toolIcon === 'grid'" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="cmd-icon"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
         <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="cmd-icon"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
-        <!-- 读文件卡片：文件名可点击 → 打开文件定位行号（P0-3，WorkBuddy onFileClick 同款） -->
+        <!-- 读文件卡片：文件名可点击 → 打开文件定位行号（P0-3，主流实现 onFileClick 同款） -->
         <code v-if="isReadFile && fullFilePath" class="tool-name file-link" :title="fullFilePath" @click.stop="openReadFile">{{ fileHeaderLabel }}</code>
         <code v-else class="tool-name" :class="{ 'tool-shining': isFileWrite && isExecutingState }">{{ fileHeaderLabel }}</code>
         <span v-if="status === 'pending'" class="perm-tag" :class="`perm-${permission}`">{{ permLabel }}</span>
@@ -60,12 +60,12 @@
       </template>
       <span v-if="runningElapsed" class="tool-duration">{{ runningElapsed }}</span>
       <span v-else-if="duration" class="tool-duration">{{ duration }}s</span>
-      <!-- 错误摘要（对齐 WorkBuddy：失败卡片 header 显示原因，点击展开详情） -->
+      <!-- 错误摘要（对齐主流实现：失败卡片 header 显示原因，点击展开详情） -->
       <span v-if="status === 'error'" class="tool-error-hint">{{ errorSummary }}</span>
-      <!-- 执行中数字滚动徽标（GPT 同款：+N 实时滚动——写入行数平滑增长，WorkBuddy +N/-M 徽标） -->
+      <!-- 执行中数字滚动徽标（GPT 同款：+N 实时滚动——写入行数平滑增长，主流实现 +N/-M 徽标） -->
       <span v-if="liveLines && (status === 'running' || status === 'stream_executing')" class="tool-lines lines-live-badge"><span class="lines-badge live">+{{ displayedLines }}</span></span>
       <span v-if="lineStat && status === 'done'" class="tool-lines" :class="{ 'lines-live': justCompleted }"><span class="lines-badge">{{ lineStat }}</span></span>
-      <!-- 授权按钮组（对齐 WorkBuddy tool-head__actions：header 一行内决策，pending 不展开 body）
+      <!-- 授权按钮组（对齐主流实现 tool-head__actions：header 一行内决策，pending 不展开 body）
            判据只有 status：服务端对"需要审批"的工具下发 pending（agent.ts:1695），
            不再叠一份客户端手写名单 —— 那会让服务端已挂起的工具在界面上没有按钮（#13）。 -->
       <span v-if="status === 'pending'" class="tool-head-actions" @click.stop>
@@ -112,32 +112,32 @@
 
     <!-- Body -->
     <div class="tool-body" v-if="expanded">
-      <!-- 网页获取卡片（WorkBuddy WebFetchCompactRenderer 同款：一行 header + 结构化展开，执行中不展开正文） -->
+      <!-- 网页获取卡片（主流实现 WebFetchCompactRenderer 同款：一行 header + 结构化展开，执行中不展开正文） -->
       <WebFetchCard
         v-if="isWebFetch"
         :args="props.args"
         :result="props.result"
         :status="props.status"
       />
-      <!-- 可视化指南卡片（WorkBuddy VisualizerReadMeRenderer 同款：read_me 工具专属） -->
+      <!-- 可视化指南卡片（主流实现 VisualizerReadMeRenderer 同款：read_me 工具专属） -->
       <VisualizerReadMeCard
         v-else-if="isReadMe"
         :args="props.args"
         :result="props.result"
         :status="props.status"
       />
-      <!-- 命令卡片展开态（WorkBuddy ExecuteCommandRenderer 同款，renderers/ 目录） -->
+      <!-- 命令卡片展开态（主流实现 ExecuteCommandRenderer 同款，renderers/ 目录） -->
       <CommandRenderer
         v-else-if="isCommand"
         :args="props.args"
         :result="props.result"
         :status="props.status"
       />
-      <!-- 执行计划任务卡（2026-08-27 加：create_plan 内联 PlanCard，显示 #N 步骤进度，对齐 WorkBuddy todo 卡） -->
+      <!-- 执行计划任务卡（2026-08-27 加：create_plan 内联 PlanCard，显示 #N 步骤进度，对齐主流实现 todo 卡） -->
       <PlanCard
         v-else-if="isPlan"
       />
-      <!-- lint 展开态：诊断列表（WorkBuddy ReadLintsRenderer 同款） -->
+      <!-- lint 展开态：诊断列表（主流实现 ReadLintsRenderer 同款） -->
       <LintRenderer
         v-else-if="isLint"
         :result="props.result"
@@ -190,13 +190,13 @@ const props = withDefaults(defineProps<{
   permission?: string
   /** 授权弹窗自动允许等待秒数（>0 时显示倒计时提示，超时后端自动放行） */
   autoApproveSeconds?: number
-  /** 工具流式输出（执行中实时追加，WorkBuddy streamOutput 同款） */
+  /** 工具流式输出（执行中实时追加，主流实现 streamOutput 同款） */
   streamOutput?: string
   /** 工具结构化进度（tool_progress 事件，执行中实时覆盖）——写文件行数/编辑处数的**唯一数据源** */
   progress?: ToolProgress
   /** 工具开始执行时刻（执行中实时耗时显示用） */
   startedAt?: number
-  /** 写文件 diff（file_changed 事件挂载，对齐 WorkBuddy WriteFileRenderer DiffViewer） */
+  /** 写文件 diff（file_changed 事件挂载，对齐主流实现 WriteFileRenderer DiffViewer） */
   fileDiff?: { path: string; oldContent: string; newContent: string }
 }>(), {
   args: '',
@@ -212,11 +212,11 @@ const emit = defineEmits<{
   (e: 'allow-session'): void
 }>()
 
-// 展开策略（对齐 WorkBuddy ToolCard clickHeader + defaultShowResult）：
+// 展开策略（对齐主流实现 ToolCard clickHeader + defaultShowResult）：
 // 默认折叠成摘要行（工具名+状态+输出尾部预览），点击 header 展开详情；
 // 授权按钮组内嵌 header 一行（tool-head__actions），pending 不强制展开 body——并行工具不占地方（老板 2026-08-21）
 // web_fetch 走专属卡片（WebFetchCard 内部管理折叠），ToolCallBlock 恒展开
-/** 渲染分支 key（注册表单一来源：tool-renderer-registry.ts，WorkBuddy toolRendererRegistry 同款） */
+/** 渲染分支 key（注册表单一来源：tool-renderer-registry.ts，主流实现 toolRendererRegistry 同款） */
 const rendererKey = computed(() => resolveToolRendererKey(props.toolName))
 const isWebFetch = computed(() => rendererKey.value === 'web-fetch')
 const expanded = ref(isWebFetch.value)
@@ -258,7 +258,7 @@ const errorSummary = computed(() => {
   return r.length > 40 ? r.slice(0, 40) + '…' : r
 })
 
-// 写文件行数统计徽标（WorkBuddy addedLines 同款）：从结果文本解析 "+N/-M 行" 或 "(N 行)"
+// 写文件行数统计徽标（主流实现 addedLines 同款）：从结果文本解析 "+N/-M 行" 或 "(N 行)"
 const lineStat = computed(() => {
   const r = props.result || ''
   // 更新: "+N/-M 行"；新建: "(字符, N 行)"（逗号后可能有空格）
@@ -267,7 +267,7 @@ const lineStat = computed(() => {
   return m[2] !== undefined ? `+${m[1]} / -${m[2]} 行` : `+${m[1]} 行`
 })
 
-// ===== 执行中数字滚动徽标（三合一：ChatGPT 行数滚动 + WorkBuddy 徽标 + 我们进度流）=====
+// ===== 执行中数字滚动徽标（三合一：主流实现 行数滚动 + 主流实现 徽标 + 我们进度流）=====
 const isFileWrite = computed(() => isWriteFileTool(props.toolName))
 
 /** 从结构化进度提取当前写入行数（tool_progress 的 done）。
@@ -311,7 +311,7 @@ watch(
   () => props.toolName,
   () => { lastWrittenLines = 0; recentDeltas.value = [] },
 )
-/** 平滑滚动的显示行数（CountUp 风格：旧值过渡到新值，比 ChatGPT 硬跳更顺滑） */
+/** 平滑滚动的显示行数（CountUp 风格：旧值过渡到新值，比 主流实现 硬跳更顺滑） */
 const displayedLines = ref(0)
 let linesAnimFrame = 0
 watch(liveLines, (to) => {
@@ -359,12 +359,12 @@ const justCompleted = ref(false)
 const justErrored = ref(false)
 
 watch(() => props.status, (newStatus, oldStatus) => {
-  // 写文件工具进入执行态 → 自动展开（对齐 WorkBuddy defaultShowResult：代码流实时"长出来"可见）。
+  // 写文件工具进入执行态 → 自动展开（对齐主流实现 defaultShowResult：代码流实时"长出来"可见）。
   // 旧逻辑"执行中不强制展开"只留折叠摘要，慢屏幕上看不到正在写的代码；执行中展开让代码实时可见，完成再折叠。
   if (isFileWrite.value && (newStatus === 'stream_executing' || newStatus === 'running') && oldStatus !== newStatus) {
     expanded.value = true
   }
-  // 执行中/等待授权均不强制展开（默认折叠摘要行；授权按钮组已在 header 一行，无需展开 body）——对齐 WorkBuddy compact
+  // 执行中/等待授权均不强制展开（默认折叠摘要行；授权按钮组已在 header 一行，无需展开 body）——对齐主流实现 compact
   if ((newStatus === 'done' || newStatus === 'denied' || newStatus === 'skipped') && (oldStatus === 'running' || oldStatus === 'stream_executing')) {
     justCompleted.value = true
     setTimeout(() => { justCompleted.value = false }, 700)
@@ -372,7 +372,7 @@ watch(() => props.status, (newStatus, oldStatus) => {
   }
   if (newStatus === 'error' && (oldStatus === 'running' || oldStatus === 'stream_executing')) {
     justErrored.value = true
-    // 错误也折叠成一行（对齐 WorkBuddy：header 状态色+错误指示，点击展开看详情，不裸露参数/结果）
+    // 错误也折叠成一行（对齐主流实现：header 状态色+错误指示，点击展开看详情，不裸露参数/结果）
     if (!isWebFetch.value) expanded.value = false
     setTimeout(() => { justErrored.value = false }, 700)
   }
@@ -417,18 +417,18 @@ const categoryMap: Record<string, { label: string; cat: string }> = {
 const category = computed(() => categoryMap[props.toolName]?.cat || 'system')
 const categoryLabel = computed(() => categoryMap[props.toolName]?.label || 'System')
 
-// 工具图标 + 友好名称（WorkBuddy tool-icon-registry/tool-name-map 同款：精确→前缀→兜底）
+// 工具图标 + 友好名称（主流实现 tool-icon-registry/tool-name-map 同款：精确→前缀→兜底）
 const toolMeta = computed(() => resolveToolMeta(props.toolName))
 const toolIcon = computed(() => toolMeta.value.icon)
 const friendlyName = computed(() => t(toolMeta.value.nameKey))
 
-/** 读文件工具判定（WorkBuddy ReadFileCompactRenderer 同款） */
+/** 读文件工具判定（主流实现 ReadFileCompactRenderer 同款） */
 const isReadFile = computed(() => isReadFileTool(props.toolName))
 
-/** 可视化指南工具判定（WorkBuddy isVisualizerReadMe 同款） */
+/** 可视化指南工具判定（主流实现 isVisualizerReadMe 同款） */
 const isReadMe = computed(() => rendererKey.value === 'read-me')
 
-/** 多文件编辑判定（WorkBuddy multi_edit 同款） */
+/** 多文件编辑判定（主流实现 multi_edit 同款） */
 const isMultiEdit = computed(() => rendererKey.value === 'multi-edit')
 
 /** 接受修改（保留当前 diff 展示，标记已接受——后续可扩展为后端确认） */
@@ -452,7 +452,7 @@ const fullFilePath = computed(() => {
     return ''
   }
 })
-/** 写/读文件操作的文件名（WorkBuddy 从 args.path/file_path 提取 basename） */
+/** 写/读文件操作的文件名（主流实现 从 args.path/file_path 提取 basename） */
 const fileName = computed(() => {
   if (!props.args) return ''
   try {
@@ -486,13 +486,13 @@ const readLineEnd = computed(() => {
     return undefined
   }
 })
-/** 点击已读取的文件名 → 打开文件预览 + 定位行号（WorkBuddy onFileClick(filePath,startLine,endLine) 同款） */
+/** 点击已读取的文件名 → 打开文件预览 + 定位行号（主流实现 onFileClick(filePath,startLine,endLine) 同款） */
 function openReadFile() {
   if (!fullFilePath.value) return
   openFilePreview(fullFilePath.value, readLineStart.value, readLineEnd.value)
 }
-/** 读文件行号范围（WorkBuddy "L12-30" 同款：从 args.startLine/endLine 或 start/end 提取；
- *  只有 startLine 无 endLine → 表示读到末尾，显示 "L489-末尾"（对齐 WorkBuddy "L489 至末尾" 语义，2026-08-27） */
+/** 读文件行号范围（主流实现 "L12-30" 同款：从 args.startLine/endLine 或 start/end 提取；
+ *  只有 startLine 无 endLine → 表示读到末尾，显示 "L489-末尾"（对齐主流实现 "L489 至末尾" 语义，2026-08-27） */
 const readLineRange = computed(() => {
   if (!props.args) return ''
   try {
@@ -506,7 +506,7 @@ const readLineRange = computed(() => {
     return ''
   }
 })
-/** 读文件状态词（WorkBuddy tool.readFile.running/done/error 同款） */
+/** 读文件状态词（主流实现 tool.readFile.running/done/error 同款） */
 const readStatusText = computed(() => {
   if (props.status === 'error' || props.status === 'denied') return t('chat.toolReadFailed')
   if (props.status === 'running' || props.status === 'stream_executing' || props.status === 'pending') return t('chat.toolReading')
@@ -514,7 +514,7 @@ const readStatusText = computed(() => {
 })
 /** 执行中状态（写文件流光动画/摘要用） */
 const isExecutingState = computed(() => ['running', 'stream_executing', 'pending'].includes(props.status))
-/** 文件操作 header 显示：写文件 → "编辑 demo.py"；读文件 → "已读取 demo.py L12-30"（对齐 GPT/WorkBuddy 文件变更摘要） */
+/** 文件操作 header 显示：写文件 → "编辑 demo.py"；读文件 → "已读取 demo.py L12-30"（对齐 GPT/主流实现 文件变更摘要） */
 const fileHeaderLabel = computed(() => {
   if (isReadFile.value) {
     if (!fileName.value) return friendlyName.value
@@ -522,7 +522,7 @@ const fileHeaderLabel = computed(() => {
     return `${readStatusText.value} ${fileName.value}${range}`
   }
   if (!isFileWrite.value || !fileName.value) return friendlyName.value
-  // 语义联动（WorkBuddy write-file getOperateName 同款）：动词由"新建 vs 修改"动态推导，不写死
+  // 语义联动（主流实现 write-file getOperateName 同款）：动词由"新建 vs 修改"动态推导，不写死
   const verb = isWriteNew.value
     ? isExecutingState.value ? t('chatui.toolCreating') : t('chatui.toolCreated')
     : isExecutingState.value ? t('chatui.toolModifying') : t('chatui.toolModified')
@@ -551,10 +551,10 @@ const formattedArgs = computed(() => {
 })
 
 // Result handling
-// ===== 命令执行卡片（shell_exec 专用，学 WorkBuddy Run Command） =====
+// ===== 命令执行卡片（shell_exec 专用，学 主流实现 Run Command） =====
 const isCommand = computed(() => rendererKey.value === 'command')
 
-// ===== 执行计划任务卡（2026-08-27 加：create_plan 工具挂内联 PlanCard，对齐 WorkBuddy todo 卡） =====
+// ===== 执行计划任务卡（2026-08-27 加：create_plan 工具挂内联 PlanCard，对齐主流实现 todo 卡） =====
 const isPlan = computed(() => props.toolName === 'create_plan' || props.toolName === 'plan_task' || props.toolName === 'plan_create')
 
 // ===== lint_file 诊断渲染 =====
@@ -593,10 +593,10 @@ const commandText = computed(() => {
 })
 
 /** 命令短述：第一行截断 ~60 字符 */
-/** 命令卡标题（对齐 WorkBuddy headerText = description || command）：
+/** 命令卡标题（对齐主流实现 headerText = description || command）：
  *  优先模型提供的 description（"运行查看 deeplink.ts 实际位置"），没有时从命令首行推导人类可读摘要 */
 const commandSummary = computed(() => {
-  // ① 优先 description（WorkBuddy 同款：工具调用方写的短说明，前端用作卡片标题）
+  // ① 优先 description（主流实现同款：工具调用方写的短说明，前端用作卡片标题）
   let argsObj: Record<string, unknown> = {}
   try {
     argsObj = JSON.parse(props.args || '{}')
@@ -846,7 +846,7 @@ function toggle() {
   font-family: var(--font-mono);
   flex-shrink: 0;
 }
-/* 写文件行数徽标（+N/-M 行，对齐 ChatGPT 代码写入反馈）：header 内联、彩色、完成时脉冲强调 */
+/* 写文件行数徽标（+N/-M 行，对齐主流实现 代码写入反馈）：header 内联、彩色、完成时脉冲强调 */
 .tool-lines {
   display: inline-flex;
   align-items: center;
@@ -928,7 +928,7 @@ function toggle() {
   border-top: 1px dashed var(--border-color);
 }
 
-/* 写文件流式区：行号代码视图（ChatGPT CodeDiff 同款——代码逐行"长出来"，自动吸底） */
+/* 写文件流式区：行号代码视图（主流实现 CodeDiff 同款——代码逐行"长出来"，自动吸底） */
 .stream-code {
   max-height: 260px;
   overflow-y: auto;
@@ -1304,7 +1304,7 @@ function toggle() {
   filter: brightness(1.1);
 }
 
-/* 授权按钮组（对齐 WorkBuddy tool-head__actions：header 一行内嵌，pending 不展开 body） */
+/* 授权按钮组（对齐主流实现 tool-head__actions：header 一行内嵌，pending 不展开 body） */
 .tool-head-actions {
   display: flex;
   align-items: center;
@@ -1312,7 +1312,7 @@ function toggle() {
   margin-left: 6px;
   flex-shrink: 0;
 }
-/* pending 命令状态标签（WorkBuddy "Run Command?" 同款） */
+/* pending 命令状态标签（主流实现 "Run Command?" 同款） */
 .run-command-ask {
   font-size: 11px;
   font-weight: 600;
@@ -1350,7 +1350,7 @@ function toggle() {
 }
 .tba-deny:hover { background: rgba(209, 36, 47, 0.1); }
 
-/* 写文件执行中标题流光（WorkBuddy cb-shining-text 同款：渐变扫过，表现"正在写入"状态感） */
+/* 写文件执行中标题流光（主流实现 cb-shining-text 同款：渐变扫过，表现"正在写入"状态感） */
 .tool-shining {
   background: linear-gradient(90deg, var(--text-primary) 40%, var(--accent, #6366f1) 50%, var(--text-primary) 60%);
   background-size: 200% 100%;
@@ -1409,7 +1409,7 @@ function toggle() {
   flex-wrap: wrap;
   min-width: 0;
 }
-/* 折叠态文件名栏（2026-08-27 补，对齐 WorkBuddy WriteFileRenderer：文件图标+文件名+行数三并列）：
+/* 折叠态文件名栏（2026-08-27 补，对齐主流实现 WriteFileRenderer：文件图标+文件名+行数三并列）：
    让"在写哪个文件"一眼可见；点击文件名展开详情 */
 .write-progress-bar .wp-file {
   display: inline-flex;

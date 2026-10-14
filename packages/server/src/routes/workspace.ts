@@ -40,7 +40,7 @@ export function safePath(input: string): string | null {
   return abs
 }
 
-// ---- 工作区索引（参考 WorkBuddy workspaces 表）----
+// ---- 工作区索引（参考 主流实现 workspaces 表）----
 
 // 记录/更新工作区打开时间（会话创建/切换时调用）
 export function upsertWorkspace(workspacePath: string) {

@@ -87,11 +87,11 @@ if (!electronBin) { console.log('✘ 找不到 Electron 二进制，可用 SUPER
 
 // 干净子进程 env：剥掉宿主注入的一切（见技能 clean-shell-env 的"报错措辞会骗人"表）
 const childEnv = { ...process.env }
-for (const k of ['NODE_OPTIONS', 'BASH_ENV', 'ELECTRON_RUN_AS_NODE', 'HTTP_PROXY', 'HTTPS_PROXY',
-  'http_proxy', 'https_proxy', 'ALL_PROXY', 'all_proxy',
-  'CODEBUDDY_BROKERED_FS_HOOK_ENABLED', 'CODEBUDDY_SANDBOX_BROKER_IPC_ADDRESS',
-  'CODEBUDDY_SAFE_DELETE_BROKER_DELETE', 'CODEBUDDY_BROKERED_BIN_DIR', 'CODEBUDDY_BROKERED_SHELL_ENV']) {
-  delete childEnv[k]
+const STRIP_KEYS = ['NODE_OPTIONS', 'BASH_ENV', 'ELECTRON_RUN_AS_NODE', 'HTTP_PROXY', 'HTTPS_PROXY',
+  'http_proxy', 'https_proxy', 'ALL_PROXY', 'all_proxy']
+// 宿主可能注入任意名字的沙箱/broker 变量（名字会变，列举必然漏），按模式剥离
+for (const k of Object.keys(childEnv)) {
+  if (STRIP_KEYS.includes(k) || /BROKER/i.test(k)) delete childEnv[k]
 }
 
 const children = []
