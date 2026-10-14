@@ -1,14 +1,18 @@
 {
   "name": "supercrzy-bot",
   "version": "0.3.0",
+  "private": true,
   "description": "SUPERCRZY BOT - AI Agent Platform: unified brain + Agent Loop + multi-tool + multi-platform gateway",
   "author": "SuperCrzy",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/SuperCrzy/supercrzy-bot"
+    "url": "git+https://github.com/SuperCrzy/supercrzy-agent.git"
   },
-  "homepage": "https://github.com/SuperCrzy/supercrzy-bot#readme",
+  "homepage": "https://github.com/SuperCrzy/supercrzy-agent#readme",
+  "bugs": {
+    "url": "https://github.com/SuperCrzy/supercrzy-agent/issues"
+  },
   "packageManager": "pnpm@10.33.3",
   "engines": {
     "node": ">=22.18.0 <23",
@@ -21,7 +25,9 @@
     "build": "pnpm --filter @supercrzy/client build && pnpm --filter @supercrzy/server build",
     "cli": "pnpm --filter @supercrzy/server cli",
     "lint": "pnpm -r lint",
-    "verify": "pnpm lint && pnpm test && pnpm --filter @supercrzy/server validate:tools && pnpm build",
+    "check:clean": "node scripts/check-clean-tree.mjs",
+    "export:clean": "node scripts/check-clean-tree.mjs --export ../supercrzy-clean",
+    "verify": "node scripts/check-clean-tree.mjs && pnpm lint && pnpm test && pnpm --filter @supercrzy/server validate:tools && pnpm build",
     "clean": "pnpm -r clean",
     "test": "pnpm -r test"
   },
