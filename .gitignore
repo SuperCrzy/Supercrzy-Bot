@@ -18,6 +18,11 @@ uploads/
 # 任务日志（2026-08-26 起写到用户目录 ~/.supercrzy/logs；此条兜底防误入库）
 logs/
 
+# ── 内部资料（2026-10-14 加）──
+# 战略/竞品逆向/审计报告/演示稿/原型页全部集中在此，**不随仓库分发**。
+# 目录内文件保留在工作区，仅挡入库。
+docs/internal/
+
 # ── 敏感文件：含服务器凭据，禁止入库 ──
 SUPERCRZY_AGENT_参考手册.md
 
@@ -35,6 +40,8 @@ articles/
 .git-rewrite/
 .git-rewrite/
 _tmp_*
+# Playwright CLI 会话缓存（2026-10-14 加：浏览器自动化运行时残留）
+/.playwright-cli/
 
 # ── 根目录杂项试验页/脚本（2026-08-28 加：非产品代码，保留文件但挡入库）──
 /pet.html
@@ -49,8 +56,33 @@ _tmp_*
 **/dist-bak-*/
 # 2026-08-28：构建前手动移开的旧产物目录（dist-old-*），同样是编译备份
 **/dist-old-*/
-/start.bat
-/start.sh
+
+# 🔴 2026-10-14 修正：上面 `/*.bat` `/*.command` 与旧的 `/start.sh` 把**产品启动入口**
+#    一起扫进了忽略区，导致新克隆的仓库没有 README 承诺的启动路径，
+#    且已跟踪的 scripts/install.command 依赖 start.sh（它自己也是 tracked）。
+#    这三个是手写、随仓库分发的入口，必须解除忽略。
+#    `SUPERCRZY BOT.app` 保持忽略——它由 scripts/make-app.sh 生成。
+!/start.bat
+!/start.sh
+!/SUPERCRZY BOT.command
+
+# ── 根目录一次性试验残留（2026-10-14 加：UI 原型 / 截图 / 探针脚本）──
+/login-modern.html
+/login-page.html
+/todo.html
+/snake.html
+/shooting-game.html
+/snake-game/
+/psl-*.png
+/shot-*.png
+/streaming.png
+/notes.md
+/shot.js
+/verify-full.js
+/nova-watch/
+/aurora-product/
+/chat-full.png
+/game-live-1.png
 
 # server 试验残留（2026-08-28 加）
 packages/server/test_stream_*.py
@@ -59,8 +91,30 @@ packages/server/union-demo.html
 packages/server/ui*.mts
 packages/server/*-probe.mts
 packages/server/*-probe.ts
+# ── server 顶层其他一次性残留（2026-10-14 加）──
+# 一页式 HTML 试验页已于同日迁到 docs/internal/prototypes/server-demo-pages/；
+# 这里堵住剩余的手工探针/临时产物，避免 `git add -A` 把它们当成后端代码提交。
+packages/server/_detach_probe.txt
+packages/server/_do_restart.sh
+packages/server/_restart.log
+packages/server/fib.py
+packages/server/server*.log
+packages/server/snake_game/
+# 🔴 2026-10-14 加：不再随仓库分发 ffmpeg 二进制。
+#    删除原因两条：①原 bin/ffmpeg 是 x86_64 Mach-O，Apple Silicon 上 execve 直接 EBADARCH，
+#    本就不可能是可用兜底；②它是 --enable-gpl --enable-version3 构建，分发会连带
+#    GPL「提供对应源码」义务。运行期一律走「用户自装 + 解析链」，见 services/ffmpeg.ts 的
+#    candidates() / ffmpegInstallHint()；对应防线测试在 services/ffmpeg.test.ts。
+#    反查已做：加此规则前 packages/server/bin/ 下已跟踪文件数 = 0，零误伤。
+packages/server/bin/
 # desktop 构建产物（2026-08-28 加，只入库源码）
 packages/desktop/node_modules/
 packages/desktop/dist/
 packages/desktop/releases/
 packages/desktop/.deploy-server/
+# 构建期工具独立目录（@electron/rebuild）—— 故意装在产物之外，绝不能被打进 App（2026-09-21 加）
+packages/desktop/.build-tools/
+
+# ── 宣传片渲染产物（2026-09-19 加：视频体积大，只留源码 scripts/promo/）──
+*.mp4
+*.mov
