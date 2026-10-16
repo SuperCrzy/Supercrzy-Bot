@@ -6,7 +6,7 @@
 A ready-to-run **AI Agent platform** — unified brain + Agent Loop + multi-tool + multi-platform gateway, natively wired to DeepSeek V4 with support for 200+ models via OpenAI-compatible providers.
 
 <p align="center">
-  <img src="docs/images/ai-browser.gif" alt="SuperCrzy Bot in action — screen recording from the app (last 8 seconds of a real session)" width="860" />
+  <img src="docs/images/demo.gif" alt="SuperCrzy Bot in action — screen recording from the app (last 8 seconds of a real session)" width="860" />
 </p>
 
 <p align="center">

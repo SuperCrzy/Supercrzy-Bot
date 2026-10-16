@@ -5,7 +5,7 @@
 一个开箱即用的 **AI Agent 平台** —— 统一大脑 + Agent Loop + 多工具 + 多平台网关,原生对接 DeepSeek V4。
 
 <p align="center">
-  <img src="docs/images/ai-browser.gif" alt="SuperCrzy Bot 实际运行 —— App 内真实录屏（一段真实会话的最后 8 秒）" width="860" />
+  <img src="docs/images/demo.gif" alt="SuperCrzy Bot 实际运行 —— App 内真实录屏（一段真实会话的最后 8 秒）" width="860" />
 </p>
 
 <p align="center">
