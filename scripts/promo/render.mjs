@@ -40,8 +40,14 @@ await page.goto('http://127.0.0.1:4173/', { waitUntil: 'load' })
 
 const ready = await page.evaluate(() => window.__ready)
 console.log('ready:', JSON.stringify(ready, null, 1))
-const missing = ready.scenes.filter((s) => s.img && !ready.loaded.includes(s.img))
-if (missing.length) console.log('WARN 缺图:', JSON.stringify(missing))
+// 兼容 v2(scenes) 与 v3(cards+vid) 两种 stage —— v3 不再用逐个 img 字段，
+// 而是顺次探测 /vid/*.png，所以只需确认 vid 帧数 > 0。
+if (Array.isArray(ready.scenes)) {
+  const missing = ready.scenes.filter((s) => s.img && !ready.loaded.includes(s.img))
+  if (missing.length) console.log('WARN 缺图:', JSON.stringify(missing))
+} else if (!ready.vidFrames) {
+  console.log('WARN 未加载到视频帧（/vid/*.png）—— 画面会是纯背景色')
+}
 
 if (MODE === 'preview') {
   const marks = [1.3, 2.9, 6.5, 11.2, 15.8, 20.2, 24.1, 27.6]
@@ -64,8 +70,8 @@ if (MODE === 'preview') {
       return Math.round(R / n)
     }
     const out = { grid: [] }
-    const src = await load('/hero/final.png')
-    if (!src) return { err: 'hero 未加载' }
+    const src = await load('/vid/v0000.png')
+    if (!src) return { err: 'vid 未加载' }
     window.__drawAt(6.5)
     const cnv = document.getElementById('c')
     const blocks = [[0.1, 0.15], [0.5, 0.15], [0.85, 0.15], [0.1, 0.5], [0.5, 0.5], [0.85, 0.5], [0.1, 0.85], [0.5, 0.85], [0.85, 0.85]]

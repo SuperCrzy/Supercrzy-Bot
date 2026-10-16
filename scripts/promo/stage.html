@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <title>SUPERCRZY BOT promo renderer</title>
@@ -14,45 +14,57 @@
 <script type="module">
 import { Muxer, ArrayBufferTarget } from '/mp4-muxer.mjs'
 
-const W = 1920, H = 1080, FPS = 30
+const W = 1920, H = 1080, FPS = 30, VID_FPS = 12
 
+/**
+ * v3 (2026-10-16) —— 从「PPT 分镜」改成「一镜到底的界面实录」。
+ *
+ * v1/v2 为什么像 PPT（老板两次反馈）：
+ *   ① 60% 画面是纯黑（intro/outro 全黑 + ui 场景左半是实心暗块）
+ *   ② 截图是静态贴图，画面里「没有东西在动」
+ *   ③ 结构是「标题页 → 内容页 → 标题页」，读起来像翻页
+ *
+ * v3 策略：
+ *   ① 全屏铺真实操作录屏（16.15.23：运动量 26.5，其它素材的 5 倍）
+ *   ② 文字只做**角标**（左下小字 + 细线），不做大标题页
+ *   ③ intro/outro 也用视频帧做底，**没有一帧纯黑**
+ *   ④ 整片一次 Ken Burns 缓推 + 漂移，像一次连续镜头
+ *   ⑤ 右侧细章节点
+ */
 const C = {
-  stage: '#08080c',
   accent: '#818cf8',
   white: '#ffffff',
-  dim: 'rgba(255,255,255,0.80)',
-  faint: 'rgba(255,255,255,0.44)',
-  track: 'rgba(255,255,255,0.16)',
+  dim: 'rgba(255,255,255,0.86)',
+  faint: 'rgba(255,255,255,0.50)',
 }
 
-const SCENES = [
-  { kind: 'intro', dur: 4.0 },
-  { kind: 'ui', dur: 5.0, img: 'hero', n: '01', of: '05', accent: '#818cf8',
-    title: '多轮推理，工具执行',
-    sub: '同一个大脑调度 43 个工具\n每一步思考与调用实时可见' },
-  { kind: 'ui', dur: 5.0, img: '02-gateway', n: '02', of: '05', accent: '#22d3ee',
-    title: '8 个渠道，同一个它',
-    sub: '微信 / 企微 / 钉钉 / 飞书 / QQ\nTelegram / Discord / Slack\n共用同一套记忆、会话与技能' },
-  { kind: 'ui', dur: 4.5, img: '03-memory', n: '03', of: '05', accent: '#a78bfa',
-    title: '长期记忆，越用越懂你',
-    sub: '自动提炼要点，按权重注入上下文\n定期去重合并，聊完不会就忘' },
-  { kind: 'ui', dur: 4.0, img: '04-skills', n: '04', of: '05', accent: '#f59e0b',
-    title: '技能与自动化',
-    sub: '内置技能按需匹配加载\n定时任务跑完主动推结果到你手机' },
-  { kind: 'ui', dur: 3.5, img: '06-models', n: '05', of: '05', accent: '#34d399',
-    title: '200+ 模型，一处切换',
-    sub: 'DeepSeek / OpenAI / Claude / Gemini\n通义千问 / 本地 Ollama\n一个界面全部管起来' },
-  { kind: 'outro', dur: 4.0 },
+/** 字幕卡：画面连续不切，只换角标文案 */
+const CARDS = [
+  { at: 0.0,  hold: 4.5, kicker: '',                    line: 'SUPERCRZY BOT',             sub: 'An AI agent workbench \u2014 self-hosted' },
+  { at: 4.5,  hold: 6.0, kicker: 'AGENT LOOP',          line: 'Reason, then act',          sub: '43 tools on one brain \u00b7 every step visible' },
+  { at: 10.5, hold: 6.0, kicker: 'OMNICHANNEL',         line: 'Eight channels, one agent', sub: 'WeChat \u00b7 WeCom \u00b7 DingTalk \u00b7 Feishu \u00b7 QQ \u00b7 Telegram \u00b7 Discord \u00b7 Slack' },
+  { at: 16.5, hold: 5.5, kicker: 'LONG-TERM MEMORY',    line: 'It remembers',              sub: 'Facts distilled and weighted into context' },
+  { at: 22.0, hold: 5.0, kicker: 'SKILLS & AUTOMATION', line: 'Skills on demand',          sub: 'Scheduled jobs push results to your phone' },
+  { at: 27.0, hold: 4.5, kicker: 'MODEL ROUTING',       line: '200+ models, one switch',   sub: 'DeepSeek \u00b7 OpenAI \u00b7 Claude \u00b7 Gemini \u00b7 Qwen \u00b7 Ollama' },
 ]
-const TOTAL = SCENES.reduce((s, x) => s + x.dur, 0)
+const OUTRO_AT = 31.5
+const TOTAL = OUTRO_AT + 3.5
 
 const cv = document.getElementById('c')
 const ctx = cv.getContext('2d', { alpha: false })
 ctx.imageSmoothingEnabled = true
 ctx.imageSmoothingQuality = 'high'
 
-const CJK = '"PingFang SC", "Hiragino Sans GB", "Heiti SC", "Microsoft YaHei", sans-serif'
-const assets = {}
+const SANS = '"Inter", "Helvetica Neue", Helvetica, Arial, sans-serif'
+
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v))
+const easeOut = (x) => 1 - Math.pow(1 - clamp(x, 0, 1), 3)
+const easeInOut = (x) => { x = clamp(x, 0, 1); return x < 0.5 ? 4*x*x*x : 1 - Math.pow(-2*x+2, 3)/2 }
+const seg = (t, a, b) => clamp((t - a) / (b - a), 0, 1)
+
+const assets = { vid: [] }
+let vidCount = 0
+
 function loadImg(src) {
   return new Promise((res) => {
     const im = new Image()
@@ -62,40 +74,20 @@ function loadImg(src) {
   })
 }
 
-const clamp = (v, a, b) => Math.min(b, Math.max(a, v))
-const easeOut = (x) => 1 - Math.pow(1 - clamp(x, 0, 1), 3)
-const easeInOut = (x) => { x = clamp(x, 0, 1); return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2 }
-const seg = (t, a, b) => clamp((t - a) / (b - a), 0, 1)
-
 function text(str, x, y, font, fill, alpha, align, shadow) {
   ctx.globalAlpha = clamp(alpha, 0, 1)
   ctx.font = font
   ctx.fillStyle = fill
   ctx.textAlign = align || 'left'
-  if (shadow) { ctx.shadowColor = 'rgba(0,0,0,0.55)'; ctx.shadowBlur = 20; ctx.shadowOffsetY = 2 }
+  if (shadow) { ctx.shadowColor = 'rgba(0,0,0,0.75)'; ctx.shadowBlur = 16; ctx.shadowOffsetY = 2 }
   ctx.fillText(str, x, y)
   ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0
   ctx.globalAlpha = 1
   ctx.textAlign = 'left'
 }
 
-function wrap(str, maxW, font) {
-  ctx.font = font
-  const out = []
-  for (const para of str.split('\n')) {
-    const toks = para.match(/[A-Za-z0-9+.\-/]+|\s+|[^\s]/g) || []
-    let line = ''
-    for (const tk of toks) {
-      const test = line + tk
-      if (ctx.measureText(test).width > maxW && line.trim()) { out.push(line.replace(/\s+$/, '')); line = tk.replace(/^\s+/, '') }
-      else line = test
-    }
-    if (line.trim()) out.push(line.replace(/\s+$/, ''))
-  }
-  return out
-}
-
-function coverDraw(im, alpha, zoom, ox, oy) {
+/** 全屏 cover（保持比例填满画布） */
+function coverFull(im, alpha, zoom, ox, oy) {
   if (!im) return
   const s = Math.max(W / im.width, H / im.height) * zoom
   const dw = im.width * s, dh = im.height * s
@@ -104,110 +96,111 @@ function coverDraw(im, alpha, zoom, ox, oy) {
   ctx.globalAlpha = 1
 }
 
-function leftPanel(strength) {
-  ctx.fillStyle = `rgba(9,9,14,${0.96 * strength})`
-  ctx.fillRect(0, 0, 700, H)
-  const g = ctx.createLinearGradient(700, 0, 920, 0)
-  g.addColorStop(0, `rgba(9,9,14,${0.96 * strength})`)
-  g.addColorStop(0.5, `rgba(9,9,14,${0.55 * strength})`)
-  g.addColorStop(1, 'rgba(9,9,14,0)')
+/** 底部渐变压暗 —— 不是整块黑板（那正是 v1/v2 的 PPT 感来源） */
+function bottomScrim(strength) {
+  const h = H * 0.34
+  const g = ctx.createLinearGradient(0, H - h, 0, H)
+  g.addColorStop(0, 'rgba(6,7,11,0)')
+  g.addColorStop(0.45, `rgba(6,7,11,${0.52 * strength})`)
+  g.addColorStop(1, `rgba(6,7,11,${0.86 * strength})`)
   ctx.fillStyle = g
-  ctx.fillRect(700, 0, 220, H)
+  ctx.fillRect(0, H - h, W, h)
 }
 
-function glow(cx, cy, r, color, alpha) {
-  const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r)
-  g.addColorStop(0, color)
-  g.addColorStop(1, 'rgba(0,0,0,0)')
-  ctx.globalAlpha = clamp(alpha, 0, 1)
-  ctx.fillStyle = g
-  ctx.fillRect(cx - r, cy - r, r * 2, r * 2)
+/** 右侧竖向章节点（一镜到底时给进度感，比横条像片子） */
+function chapterDots(t, accent) {
+  const x = W - 56, y0 = H / 2 - (CARDS.length - 1) * 16
+  CARDS.forEach((c, i) => {
+    const y = y0 + i * 32
+    const active = t >= c.at && t < c.at + c.hold
+    const past = t >= c.at + c.hold
+    ctx.globalAlpha = active ? 0.95 : past ? 0.45 : 0.18
+    ctx.fillStyle = active ? accent : 'rgba(255,255,255,0.92)'
+    ctx.beginPath(); ctx.arc(x, y, active ? 5 : 3, 0, Math.PI * 2); ctx.fill()
+    if (active) {
+      const p = clamp((t - c.at) / c.hold, 0, 1)
+      ctx.globalAlpha = 0.85
+      ctx.fillStyle = accent
+      ctx.fillRect(x + 12, y - 1, 20 * p, 2)
+    }
+  })
   ctx.globalAlpha = 1
 }
 
-function progressBar(t) {
-  const p = clamp(t / TOTAL, 0, 1)
-  ctx.fillStyle = C.track
-  ctx.fillRect(0, H - 4, W, 4)
-  ctx.fillStyle = C.accent
-  ctx.fillRect(0, H - 4, W * p, 4)
+function vidFrame(t) {
+  if (!vidCount) return null
+  const i = Math.round(clamp(t, 0, (vidCount - 1) / VID_FPS) * VID_FPS)
+  return assets.vid[clamp(i, 0, vidCount - 1)]
 }
 
 function frame(t) {
-  ctx.fillStyle = C.stage
+  // ① 背景永远是视频帧（没有任何一帧纯黑）
+  const im = vidFrame(t)
+  const gp = clamp(t / TOTAL, 0, 1)
+  const zoom = 1.045 + 0.055 * easeInOut(gp)     // 整片一次缓推
+  const ox = -22 * easeInOut(gp)
+  const oy = -8 * easeInOut(gp)
+
+  ctx.fillStyle = '#06070b'
+  ctx.fillRect(0, 0, W, H)
+  coverFull(im, 1, zoom, ox, oy)
+
+  // ② 统一暗角（提升可读性，但不是黑板）
+  const vg = ctx.createRadialGradient(W / 2, H * 0.46, H * 0.34, W / 2, H * 0.5, H * 0.92)
+  vg.addColorStop(0, 'rgba(0,0,0,0)')
+  vg.addColorStop(1, 'rgba(0,0,0,0.42)')
+  ctx.fillStyle = vg
   ctx.fillRect(0, 0, W, H)
 
-  let acc = 0, cur = null, local = 0
-  for (const s of SCENES) {
-    if (t < acc + s.dur) { cur = s; local = t - acc; break }
-    acc += s.dur
-  }
-  if (!cur) { cur = SCENES[SCENES.length - 1]; local = cur.dur }
+  let cur = CARDS[0]
+  for (const c of CARDS) { if (t >= c.at) cur = c }
+  const local = t - cur.at
 
-  if (cur.kind === 'intro') {
-    glow(W / 2, 470, 640, 'rgba(129,140,248,0.30)', easeInOut(seg(local, 0.1, 2.2)) * 0.95)
-    const li = easeOut(seg(local, 0.25, 1.6))
-    if (assets.logo) {
-      const size = 200 * (0.84 + 0.16 * li)
-      ctx.globalAlpha = li
-      ctx.drawImage(assets.logo, W / 2 - size / 2, 360 - size / 2 + (1 - li) * 24, size, size)
+  if (t < OUTRO_AT) {
+    // 字幕卡：只做角标（左下），不做大标题页
+    const inA = easeOut(seg(local, 0.15, 0.75))
+    const outA = 1 - easeInOut(seg(local, cur.hold - 0.55, cur.hold))
+    const a = inA * outA
+
+    bottomScrim(a * 0.92)
+
+    const X = 148
+    if (cur.kicker) {
+      ctx.globalAlpha = a * 0.9
+      ctx.fillStyle = C.accent
+      ctx.fillRect(X, H - 232, 34, 3)
       ctx.globalAlpha = 1
+      text(cur.kicker, X, H - 196, '600 19px ' + SANS, C.accent, a * 0.95)
     }
-    text('SUPERCRZY BOT', W / 2, 560 + (1 - easeOut(seg(local, 1.15, 2.15))) * 16,
-      '500 84px Stencil, ' + CJK, C.white, easeOut(seg(local, 1.15, 2.15)), 'center')
-    text('自带内容源的 AI Agent 工作台', W / 2, 628 + (1 - easeOut(seg(local, 1.9, 2.9))) * 12,
-      '400 30px ' + CJK, C.dim, easeOut(seg(local, 1.9, 2.9)), 'center')
-    const lw = easeInOut(seg(local, 2.5, 3.3))
-    ctx.fillStyle = C.accent
-    ctx.fillRect(W / 2 - 120 * lw, 668, 240 * lw, 4)
-    text('43 个工具 · 8 个渠道 · 长期记忆 · 本地部署', W / 2, 732,
-      '400 24px ' + CJK, C.faint, easeOut(seg(local, 2.9, 3.8)), 'center')
-  } else if (cur.kind === 'ui') {
-    const a = easeOut(seg(local, 0, 0.45)) * (1 - easeInOut(seg(local, cur.dur - 0.4, cur.dur)))
-    const p = clamp(local / cur.dur, 0, 1)
-    const zoom = 1.065 - 0.065 * easeOut(p)
-
-    coverDraw(assets[cur.img], a, zoom, -50 * easeOut(p), -8 * easeOut(p))
-    leftPanel(a)
-
-    const tIn = easeOut(seg(local, 0.35, 1.05))
-    const slide = (1 - tIn) * 44
-    text(`${cur.n} / ${cur.of}`, 148 + slide, 340, '500 22px ' + CJK, cur.accent, a * tIn)
-    ctx.fillStyle = cur.accent
-    ctx.globalAlpha = a * tIn
-    ctx.fillRect(148 + slide, 368, 64, 5)
-    ctx.globalAlpha = 1
-    text(cur.title, 148 + slide, 462, '500 52px ' + CJK, C.white, a * tIn, 'left', true)
-
-    const lines = wrap(cur.sub, 500, '400 26px ' + CJK)
-    const sIn = easeOut(seg(local, 0.6, 1.3))
-    lines.forEach((ln, i) => {
-      text(ln, 148 + (1 - sIn) * 28, 536 + i * 42, '400 26px ' + CJK, C.dim, a * sIn, 'left', true)
-    })
-
-    text('SUPERCRZY BOT', 148, 1010, '500 22px Stencil, ' + CJK, C.faint, a * easeOut(seg(local, 0.8, 1.6)) * 0.9)
-    progressBar(t)
+    text(cur.line, X, H - 138 + (1 - inA) * 14, '600 44px ' + SANS, C.white, a, 'left', true)
+    text(cur.sub, X, H - 92 + (1 - inA) * 10, '400 21px ' + SANS, C.dim,
+      a * easeOut(seg(local, 0.32, 0.95)), 'left', true)
+    text('SUPERCRZY BOT', X, H - 44, '500 17px Stencil, ' + SANS, C.faint, 0.55)
+    chapterDots(t, C.accent)
   } else {
-    const a = easeOut(seg(local, 0, 0.7)) * (1 - easeInOut(seg(local, cur.dur - 0.9, cur.dur)))
-    glow(W / 2, 460, 660, 'rgba(129,140,248,0.26)', a * 0.95)
-    const li = easeInOut(seg(local, 0.1, 1.1))
+    // ③ 结尾：不黑屏 —— 视频帧继续跑，叠暗 + 居中品牌
+    const a = easeOut(seg(t - OUTRO_AT, 0, 0.9))
+    ctx.globalAlpha = 0.66 * a
+    ctx.fillStyle = '#06070b'
+    ctx.fillRect(0, 0, W, H)
+    ctx.globalAlpha = 1
+
     if (assets.logo) {
-      const size = 160
-      ctx.globalAlpha = a * li
-      ctx.drawImage(assets.logo, W / 2 - size / 2, 352 - size / 2, size, size)
+      const size = 132
+      ctx.globalAlpha = a
+      ctx.drawImage(assets.logo, W / 2 - size / 2, H / 2 - 148 - size / 2, size, size)
       ctx.globalAlpha = 1
     }
-    text('SUPERCRZY BOT', W / 2, 500, '500 76px Stencil, ' + CJK, C.white,
-      a * easeOut(seg(local, 0.7, 1.5)), 'center')
-    text('本地部署 · 数据在自己机器上', W / 2, 572, '400 30px ' + CJK, C.dim,
-      a * easeOut(seg(local, 1.1, 1.9)), 'center')
-    const lw = easeInOut(seg(local, 1.4, 2.2))
-    ctx.fillStyle = C.accent
+    text('SUPERCRZY BOT', W / 2, H / 2 + 24, '500 62px Stencil, ' + SANS, C.white, a, 'center')
+    const lw = easeInOut(seg(t - OUTRO_AT, 0.5, 1.3))
     ctx.globalAlpha = a
-    ctx.fillRect(W / 2 - 130 * lw, 612, 260 * lw, 4)
+    ctx.fillStyle = C.accent
+    ctx.fillRect(W / 2 - 96 * lw, H / 2 + 56, 192 * lw, 3)
     ctx.globalAlpha = 1
-    text('MIT 开源  ·  supercrzy.com', W / 2, 676, '400 26px ' + CJK, C.faint,
-      a * easeOut(seg(local, 1.7, 2.5)), 'center')
+    text('Self-hosted \u00b7 MIT licensed', W / 2, H / 2 + 116, '400 24px ' + SANS, C.dim,
+      a * easeOut(seg(t - OUTRO_AT, 0.7, 1.5)), 'center')
+    text('supercrzy.com', W / 2, H / 2 + 162, '500 28px ' + SANS, C.accent,
+      a * easeOut(seg(t - OUTRO_AT, 0.9, 1.7)), 'center')
   }
 }
 
@@ -217,22 +210,19 @@ window.__ready = (async () => {
   await new FontFace('Stencil', 'url(/fonts/SairaStencilOne.ttf)').load()
     .then((x) => document.fonts.add(x)).catch(() => {})
   assets.logo = await loadImg('/logo.png')
-  const heroChain = ['/hero/final.png', '/hero/65s.png', '/hero/45s.png', '/hero/30s.png', '/hero/20s.png', '/hero/12s.png', '/hero/07s.png', '/hero/03s.png', '/ui/01-chat.png']
-  for (const s of SCENES) {
-    if (s.kind !== 'ui') continue
-    if (s.img === 'hero') {
-      for (const src of heroChain) {
-        const im = await loadImg(src)
-        if (im) { assets.hero = im; s.src = src; break }
-      }
-    } else {
-      assets[s.img] = await loadImg(`/ui/${s.img}.png`)
-    }
+
+  // 探测视频帧数（顺次加载直到 404）
+  for (let n = 0; n < 2000; n++) {
+    const im = await loadImg(`/vid/v${String(n).padStart(4, '0')}.png`)
+    if (!im) break
+    assets.vid.push(im)
   }
+  vidCount = assets.vid.length
+
   return {
-    scenes: SCENES.map((s) => ({ kind: s.kind, dur: s.dur, img: s.img || null, src: s.src || null })),
     total: TOTAL, fps: FPS, frames: Math.round(TOTAL * FPS),
-    loaded: Object.keys(assets).filter((k) => assets[k]),
+    cards: CARDS.length, vidFrames: vidCount,
+    loaded: ['logo'].filter((k) => assets[k]).concat(vidCount ? ['vid'] : []),
   }
 })()
 
@@ -248,17 +238,14 @@ window.__encodeRaw = async (onProgress) => {
     output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
     error: (e) => { encErr = e },
   })
-  enc.configure({ codec: 'avc1.640028', width: W, height: H, bitrate: 14_000_000, framerate: FPS, latencyMode: 'quality' })
+  enc.configure({ codec: 'avc1.640028', width: W, height: H, bitrate: 16_000_000, framerate: FPS, latencyMode: 'quality' })
 
   for (let i = 0; i < totalFrames; i++) {
     frame(i / FPS)
     const vf = new VideoFrame(cv, { timestamp: Math.round((i * 1e6) / FPS), duration: Math.round(1e6 / FPS) })
     enc.encode(vf, { keyFrame: i % (FPS * 2) === 0 })
     vf.close()
-    if (i % 30 === 0) {
-      if (onProgress) onProgress(i, totalFrames)
-      await new Promise((r) => setTimeout(r, 0))
-    }
+    if (i % 30 === 0) { if (onProgress) onProgress(i, totalFrames); await new Promise((r) => setTimeout(r, 0)) }
     if (encErr) throw encErr
   }
   await enc.flush()
@@ -273,10 +260,8 @@ window.__encodeAndDownload = async (onProgress) => {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = 'SUPERCRZY_BOT_PROMO_30s_1080p.mp4'
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
+  a.download = 'SUPERCRZY_BOT_PROMO_1080p.mp4'
+  document.body.appendChild(a); a.click(); a.remove()
   return { size: bytes.length, frames }
 }
 </script>

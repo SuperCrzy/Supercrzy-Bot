@@ -23,13 +23,39 @@ A ready-to-run **AI Agent platform** — unified brain + Agent Loop + multi-tool
 - **Agent Loop**: multi-turn reasoning + tool execution (file ops, shell, web search, web fetch, memory, skills)
 - **Execution timeline**: every step of reasoning/tool calls visualized live, replayable, **branchable and resumable**
 - **Playbook (experience base)**: auto retrospective after each task; similar tasks reuse past experience — the agent gets smarter over time
-- **Ghost mode**: watches workspace file changes and proactively suggests low-intrusion code interventions
-- **Skill system**: built-in skills + automatic matching + install third-party skills from GitHub
+- **Collaboration Hub**: a serial pipeline where execution, review and audit run on **different vendors' models** — one model does not grade its own homework. Stages persist to SQLite, so a run survives a restart
+- **Skill system**: 32 built-in skills in a catalog, installable on demand, plus open sources — 461 browser-automation skills from browse.sh and the official repositories of OpenAI, Anthropic, Hugging Face and NVIDIA
 - **Long-term memory**: auto-extracts and persists important facts across sessions
 - **Workspace**: file browser + terminal + code editor in one place
 - **Multi-platform gateway**: Web / WeChat / QQ share the same memory, sessions and skill library
 - **Full model catalog**: DeepSeek V1~V4 / R1 series, 18+ models
 - **Secure by default**: sensitive tools require confirmation before execution, dangerous command blacklist, CORS whitelist, optional API token
+
+## 🔧 Engineering Notes
+
+These are the decisions that only show up when you run an agent on a real machine. Each item names the file it lives in.
+
+**Shell access is sandboxed in three layers.** A command blacklist catches the extremes — root deletion, `sudo`, fork bombs, curl-pipe-to-shell. A second layer scans the command for dangerous paths in pure Node, so it holds in any environment. On macOS a third layer applies a kernel-level `sandbox-exec` profile, the SBPL equivalent of Linux Landlock, that permits the project repository and `/tmp` and denies **all** reads and writes under the user's home directory:
+
+```
+(deny file-read*  (subpath "$HOME"))
+(deny file-write* (subpath "$HOME"))
+(allow file-read* (subpath "$PROJECT_ROOT"))
+```
+
+Credential files inside the repository are denied by literal rule as a fallback, and where `sandbox-exec` is unavailable — CI, nested containers — the layer degrades instead of failing closed. *`services/sandbox.ts`*
+
+**Streaming has back-pressure control and disconnect protection.** The naive `res.write(chunk)` fails in two ways that both look like "the backend is fine, the interface is frozen": it returns `false` when the socket buffer fills, so a slow client makes events pile up in server memory while the server reports perfect health; and writing after a disconnect throws, which — because the response is detached from Koa — becomes an uncaught exception that takes the whole backend down. Both are handled in one guarded write path, and the counters are exposed on the health endpoint, so "is it stuck?" has a number rather than a hunch. *`services/sse-health.ts`*
+
+**Stalls are diagnosed with an objective measure, not by eye.** Two earlier investigations reached opposite conclusions about the same freeze because there was no metric to settle it. Event-loop delay is now sampled every second and reset each time, keeping a rolling 60-second window — because `perf_hooks.monitorEventLoopDelay` returns a *cumulative* histogram whose peaks flatten out over a long uptime. Normal lag plus a frozen client means the problem is in transport, and you stop digging in the backend. *`services/event-loop-lag.ts`*
+
+**Skills write and repair themselves.** Complex tasks are distilled into standard `SKILL.md` files after completion, and a skill that was used but failed gets patched. The Playbook and the skill library are two different learning surfaces on purpose: one stores one-line lessons injected into prompts, the other stores reusable step workflows loaded on demand. *`services/skill-evolve.ts`*
+
+**Memory extraction runs serially, by design.** A single background worker with a FIFO queue and a maximum concurrency of one. Firing an LLM extraction call on every turn of every session is how you get rate-limited and surprised by a bill; serializing them throttles naturally. Reads and writes form a loop — semantic pre-fetch before a turn, sync after it. *`services/memory-worker.ts`*
+
+**Search is a plugin chain, not a ladder of conditionals.** `web_search` used to be five nested `if` blocks. It now walks a provider interface in priority order — Tavily, Serper, SearXNG, DeepSeek, Bing — and takes the first non-empty result. Adding an engine means implementing the interface and pushing it onto the array. *`services/search-providers.ts`*
+
+**The content feed needs no API key.** News search reads `supercrzy.com/feed.xml` — plain RSS 2.0, live, no key, no cost, no rate limit. The agent consumes the project's own editorial output, which is the closed loop this product is built around. *`services/supercrzy-feed.ts`*
 
 ## 🌍 Model Providers
 
