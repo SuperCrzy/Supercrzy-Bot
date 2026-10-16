@@ -4,6 +4,19 @@
 
 一个开箱即用的 **AI Agent 平台** —— 统一大脑 + Agent Loop + 多工具 + 多平台网关,原生对接 DeepSeek V4。
 
+<p align="center">
+  <img src="docs/images/ai-browser.gif" alt="SuperCrzy Bot 驱动真实浏览器 —— Agent 打开 supercrzy.com 并逐屏滚动，App 内实录" width="860" />
+</p>
+
+<p align="center">
+  <em>AI 真的在操作一个浏览器 —— 而且你能实时看着它干活。App 内实录。</em>
+</p>
+
+<p align="center">
+  <img src="docs/images/app-models.png" alt="模型管理：10 个厂商预设 + 本地 Ollama" width="46%" />
+  <img src="docs/images/app-news.png" alt="应用内置的 AI 资讯看板，读取自有内容源" width="46%" />
+</p>
+
 ## ✨ 功能亮点
 
 - **Agent Loop**:多轮思考 + 工具执行(文件操作、Shell、网络搜索、网页抓取、记忆、技能)
