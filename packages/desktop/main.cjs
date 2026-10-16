@@ -304,6 +304,13 @@ function createWindow() {
   mainWindow.on('close', (e) => {
     if (!isQuitting) {
       e.preventDefault()
+      // ⚠️ 必须同步隐藏 AI 浏览器的原生视图（WebContentsView）。
+      //
+      // 2026-10-16 修（老板反馈"点关闭按钮后屏幕黑屏"）：
+      // `WebContentsView` 不在 DOM 里、且永远盖在 App UI 之上；
+      // 主窗口 hide() 后它**仍然可见** ⇒ 屏幕上留下一块黑色矩形。
+      // 之前只在 before-quit（真退出）里 destroy()，走"隐藏到托盘"这条路时没人管它。
+      try { if (browserViewManager) browserViewManager.hide() } catch { /* 忽略 */ }
       mainWindow.hide()
     }
   })
@@ -351,6 +358,16 @@ function pushUpdateState(payload) {
     if (app.dock) app.dock.setProgressBar(lastUpdateState.status === 'downloading' ? (lastUpdateState.percent || 0) / 100 : -1)
   } catch { /* 非 mac / Dock 不可用 */ }
 }
+/**
+ * 是否正在「启动时的自动检查」阶段。
+ *
+ * 2026-10-16 修（老板反馈：没有新版本时顶部却显示 `Update failed / net::ERR_CONNECTION_CLOSED`）：
+ * 更新源连不上时，**启动自动检查必然失败**，而失败被当成 error 状态推给 UI，
+ * 于是每次启动都在顶部挂一条用户看不懂的技术错误。
+ * 自动检查是**后台行为**，失败应静默（只进 console）；只有用户主动触发的下载/安装失败才该提示。
+ */
+let autoCheckInFlight = false
+
 function setupAutoUpdater() {
   if (DEV) {
     // 未打包（dev）形态：强制读 dev-app-update.yml，便于本地测试检测+下载流程
@@ -395,7 +412,12 @@ function setupAutoUpdater() {
   autoUpdater.on('error', (err) => {
     const message = err && err.message ? err.message : String(err)
     console.error('[Updater] error:', message)
-    // 以前这里完全静默 ⇒ 失败也没任何反馈；现在横幅给一条轻提示，用户可关掉
+    // 自动检查阶段的失败静默：用户没主动要求检查，不该被技术错误打扰（2026-10-16）
+    if (autoCheckInFlight) {
+      console.error('[Updater] auto-check failed, kept silent')
+      return
+    }
+    // 用户主动触发的下载/安装失败才提示（原始信息留给设置面板日志）
     pushUpdateState({ status: 'error', message })
   })
 }
@@ -414,6 +436,31 @@ ipcMain.handle('update:download', () => {
       return { ok: false, message }
     })
 })
+/**
+ * 手动检查更新（2026-10-16 新增）。
+ *
+ * 为什么需要（老板反馈「设置里没有检查更新的按钮」）：
+ *   此前**只有**启动后 6 秒那一次自动检查，且有 `updateCheckedOnce` 保证只跑一次 ——
+ *   启动时网络不好（或 VPN 没连）⇒ **整个生命周期都不会再检查**，用户毫无办法。
+ *
+ * 与自动检查的**关键区别**：这是用户主动动作 ⇒ **失败要提示**（不静默）。
+ *   实现上复用 `autoCheckInFlight`：这里**不置位**（保持 false）⇒ error 事件走"提示"分支。
+ */
+ipcMain.handle('update:check', () => {
+  // 重置一次性闸门：否则用户第一次点完，后续点击会被 checkForAppUpdate 直接 return
+  updateCheckedOnce = true
+  pushUpdateState({ status: 'checking' })
+  return autoUpdater.checkForUpdates()
+    .then(() => ({ ok: true }))
+    .catch((e) => {
+      const message = e && e.message ? e.message : String(e)
+      console.error('[Updater] manual check failed:', message)
+      // 用户主动发起 ⇒ 明确告知失败（不静默）
+      pushUpdateState({ status: 'error', message: 'check-failed' })
+      return { ok: false, message }
+    })
+})
+
 ipcMain.handle('update:install', () => {
   try {
     autoUpdater.quitAndInstall(false, true)
@@ -449,12 +496,15 @@ function checkForAppUpdate(delayMs = 6000) {
   if (updateCheckedOnce) return
   updateCheckedOnce = true
   setTimeout(() => {
-    autoUpdater.checkForUpdates().catch((e) => {
-      const message = e && e.message ? e.message : String(e)
-      console.error('[Updater] check failed:', message)
-      // checkForUpdates 失败只 reject promise、不触发 'error' 事件，必须在这里补状态
-      pushUpdateState({ status: 'error', message })
-    })
+    autoCheckInFlight = true
+    autoUpdater.checkForUpdates()
+      .catch((e) => {
+        const message = e && e.message ? e.message : String(e)
+        // 2026-10-16：**不再 pushUpdateState error**。
+        // 更新源不可用时这是每次启动都会发生的事，推到 UI 就是一条常驻的技术错误横幅。
+        console.error('[Updater] auto check failed (silent):', message)
+      })
+      .finally(() => { autoCheckInFlight = false })
   }, delayMs)
 }
 
@@ -473,6 +523,8 @@ const ctx = {
   },
   toggleWindow() {
     if (mainWindow && mainWindow.isVisible() && !mainWindow.isMinimized()) {
+      // 同上：跟主窗口一起隐藏原生视图，否则托盘切换后同样留黑块
+      try { if (browserViewManager) browserViewManager.hide() } catch { /* 忽略 */ }
       mainWindow.hide()
     } else {
       ctx.showMainWindow()

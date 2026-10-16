@@ -19,6 +19,19 @@ echo -e "      SUPERCRZY BOT — 一键启动"
 echo -e "==============================================${C_NC}"
 
 # 停止服务：start.sh stop
+# 开发模式：server + client（5173 热更新）—— 供 `supercrzy dev` 转发（2026-10-16）
+# 与生产模式的差别：前台运行、带 HMR、不写 pid 文件、不开浏览器（由 vite 自己给地址）
+if [ "$1" = "dev" ]; then
+  echo -e "${C_CYAN}[SUPERCRZY BOT]${C_NC} 开发模式（ctrl-c 退出）"
+  exec pnpm dev
+fi
+
+# 终端对话：转发到 server 的 cli.ts —— 供 `supercrzy cli` 转发（2026-10-16）
+if [ "$1" = "cli" ]; then
+  exec pnpm cli
+fi
+
+
 if [ "$1" = "stop" ]; then
   PID_FILE="${HOME}/.supercrzy/server.pid"
   stopped=0
@@ -129,4 +142,7 @@ done
 if command -v open >/dev/null 2>&1; then open "$URL"; fi
 info "服务已就绪：${URL}（关掉本窗口不影响，服务后台保活）"
 info "停止：bash start.sh stop"
+if command -v supercrzy >/dev/null 2>&1; then
+  info "也可以用：supercrzy status / supercrzy dev / supercrzy cli"
+fi
 

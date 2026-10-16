@@ -16,7 +16,7 @@ export interface ChangelogEntry {
 
 /**
  * 引擎（代码仓库）版本 —— 必须与根 / packages/client / packages/server 三个
- * package.json 的 `version` 保持一致（当前 0.3.0）。
+ * package.json 的 `version` 保持一致（当前 0.4.0）。
  *
  * ⚠️ 这**不是** App 二进制版本。App 版本请走 `window.supercrzyDesktop.app.getInfo()`
  * （主进程 `app.getVersion()`：打包读 Info.plist、dev 读 packages/desktop/package.json）。
@@ -25,9 +25,41 @@ export interface ChangelogEntry {
  * 与 App 的真实版本（1.0.5/1.0.6）并排出现时口径打架 —— 数字本身没错，标签错了。
  * CHANGELOG 记录的就是**引擎**的版本变更，与上面的 ENGINE_VERSION 同体系。
  */
-export const ENGINE_VERSION = '0.3.0'
+export const ENGINE_VERSION = '0.4.0'
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '0.4.0',
+    date: '2026-10-16',
+    title: '全界面双语 + 中英通用音色 + 桌面端稳定性',
+    titleEn: 'Full bilingual UI + multilingual voice + desktop stability',
+    features: [
+      '英文界面补齐：定时任务、例程、协作平台、侧栏会话、文件树、工具调用卡等页面此前在英文模式下仍显示中文，现已全部接入 i18n',
+      '朗读音色新增「中英通用」档：默认改为 Ava（Edge TTS 多语言音色），中英混排都自然；同时保留纯中文音色（晓晓 / 晓伊 / 云希 / 云扬 / 晓北）',
+      '音色列表清理：移除上游已失效的 en-US-AriaNeural',
+      '设置 → 关于新增「检查更新」按钮：此前只有启动后自动检查一次，启动时网络不通就再也没机会检查',
+      '自动更新源恢复可用（updates.supercrzy.com 持续发布新版本）',
+    ],
+    featuresEn: [
+      'English coverage completed: Scheduled tasks, Routines, Collaboration Hub, sidebar sessions, file tree and tool-call cards previously still showed Chinese in English mode — all now wired to i18n',
+      'New "multilingual" voice tier: default is now Ava (Edge TTS multilingual), natural for both Chinese and English; the Chinese-only voices (Xiaoxiao / Xiaoyi / Yunxi / Yunyang / Xiaobei) remain available',
+      'Voice list cleanup: removed the now-retired upstream voice en-US-AriaNeural',
+      'Settings > About gained a "Check for updates" button: previously the only check ran once at startup, so a bad network at launch meant no chance to check again',
+      'The auto-update feed is live again (updates.supercrzy.com keeps receiving releases)',
+    ],
+    fixes: [
+      '修复点关闭按钮后屏幕残留黑色方块：主窗口隐藏到托盘时未同步隐藏 AI 浏览器的原生视图（WebContentsView）',
+      '修复没有新版本时顶部常驻显示 Update failed / net::ERR_CONNECTION_CLOSED：启动时的后台自动检查失败现改为静默，不再把技术错误抛给用户',
+      '修复协作平台整块翻译不生效（i18n 的 collab 段在英文侧被错误嵌套进 aiBrowser 段）',
+      '更新失败提示改为友好文案，原始错误只保留在设置面板的更新日志里',
+    ],
+    fixesEn: [
+      'Fixed a black rectangle left on screen after clicking close: hiding the main window to the tray did not hide the AI browser native view (WebContentsView)',
+      'Fixed "Update failed / net::ERR_CONNECTION_CLOSED" permanently shown when already up to date: the background check at startup now fails silently instead of surfacing a technical error',
+      'Fixed the Collaboration Hub translation never applying (the collab block was wrongly nested inside aiBrowser on the English side)',
+      'Update-failure messages are now user-friendly; raw errors stay in the settings update log',
+    ],
+  },
   {
     version: '0.3.0',
     date: '2026-08-13',

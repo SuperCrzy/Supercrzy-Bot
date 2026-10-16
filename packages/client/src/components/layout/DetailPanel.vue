@@ -17,7 +17,7 @@
       <div class="more-wrap">
         <button class="panel-tab more-tab" :class="{ active: inMoreTab || tabMoreOpen }" @click="tabMoreOpen = !tabMoreOpen" title="更多">
           <div class="tab-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></div>
-          <span class="tab-label">{{ inMoreTab ? (moreTabs.find(x => x.key === activeTab)?.label || '更多') : '更多' }}</span>
+          <span class="tab-label">{{ inMoreTab ? (moreTabs.find(x => x.key === activeTab)?.label || t('chat.more')) : t('chat.more') }}</span>
         </button>
         <div v-if="tabMoreOpen" class="tab-more-drop">
           <button v-for="tb in moreTabs" :key="tb.key" class="more-item" :class="{ active: activeTab === tb.key }" @click="switchMainOrMore(tb.key)">

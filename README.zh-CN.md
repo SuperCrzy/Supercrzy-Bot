@@ -40,7 +40,18 @@
 
 ## 🚀 快速开始(3 分钟)
 
-### 方式一:双击启动(最简单,推荐)
+### 方式一:终端一行命令(首次使用,无需任何配置)
+
+```bash
+git clone https://github.com/SuperCrzy/Supercrzy-Bot.git
+cd Supercrzy-Bot
+./start.sh          # 自动检查环境 → 装依赖 → 构建前端 → 启动 → 自动打开浏览器
+```
+
+
+> `./start.sh` **无需任何配置** —— 自动校验 Node/pnpm、缺 `.env` 时自动创建、构建前端、启动服务并打开浏览器。停止：`./start.sh stop`
+
+### 方式二:双击启动(不碰终端,最简单)
 
 > **macOS**:
 > 1. 双击 **`scripts/install.command`**（安装器）→ 生成 `SUPERCRZY BOT.app`,并在桌面创建「SUPERCRZY BOT」图标
@@ -53,15 +64,26 @@
 >
 > Linux/终端:执行 `./start.sh`。
 
-### 方式二:一键脚本
+### 方式三(可选):装成全局命令
+
+clone 之后（任意方式均可），可以让 `supercrzy` 在**任意目录**使用：
 
 ```bash
-git clone https://github.com/SuperCrzy/Supercrzy-Bot.git
-cd Supercrzy-Bot
-./start.sh          # 自动检查环境 → 装依赖 → 构建前端 → 启动 → 自动打开浏览器
+npm link                   # 或：pnpm setup && pnpm link --global
+
+supercrzy                  # 启动（等价 ./start.sh）
+supercrzy dev              # 开发模式（server + client，5173 热更新）
+supercrzy cli              # 终端对话
+supercrzy stop             # 停止后台服务
+supercrzy status           # 查看版本与服务状态
+supercrzy install          # 在桌面创建启动图标（macOS）
 ```
 
-### 方式三:手动(开发模式)
+> 这是**便利选项，不是必需** —— `./start.sh` 本身已经做完所有事。
+> `supercrzy web` / `stop` / `install` 一律转发到同一套 `start.sh` / `install.command`，
+> 两种方式行为完全一致。
+
+### 方式四:手动(开发模式)
 
 ```bash
 # 1. 安装依赖(需 Node 22.x 与 pnpm 10.x,详见 package.json 的 engines)

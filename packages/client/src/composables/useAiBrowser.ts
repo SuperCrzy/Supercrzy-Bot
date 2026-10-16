@@ -296,14 +296,15 @@ export function useAiBrowser(opts: AiBrowserOptions) {
     await doAct({ action: 'scroll', deltaY: dy })
   }
 
-  const keyButtons: Array<{ key: string; label: string; title: string }> = [
-    { key: 'Enter', label: '回车', title: '按下 Enter（提交表单/搜索）' },
-    { key: 'Escape', label: 'Esc', title: '按下 Esc（关闭弹窗）' },
-    { key: 'Tab', label: 'Tab', title: '按下 Tab（切换焦点）' },
-    { key: 'ArrowUp', label: '↑', title: '上' },
-    { key: 'ArrowDown', label: '↓', title: '下' },
-    { key: 'ArrowLeft', label: '←', title: '左' },
-    { key: 'ArrowRight', label: '→', title: '右' },
+  // labelKey/titleKey 交给组件用 t() 渲染；label 只放语言无关的键位符号
+  const keyButtons: Array<{ key: string; label: string; titleKey: string }> = [
+    { key: 'Enter', label: '', titleKey: 'aiBrowser.keyEnterTitle' },
+    { key: 'Escape', label: 'Esc', titleKey: 'aiBrowser.keyEscTitle' },
+    { key: 'Tab', label: 'Tab', titleKey: 'aiBrowser.keyTabTitle' },
+    { key: 'ArrowUp', label: '\u2191', titleKey: 'aiBrowser.keyUp' },
+    { key: 'ArrowDown', label: '\u2193', titleKey: 'aiBrowser.keyDown' },
+    { key: 'ArrowLeft', label: '\u2190', titleKey: 'aiBrowser.keyLeft' },
+    { key: 'ArrowRight', label: '\u2192', titleKey: 'aiBrowser.keyRight' },
   ]
 
   let lastFrameTs = 0

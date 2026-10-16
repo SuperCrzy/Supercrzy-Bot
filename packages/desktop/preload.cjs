@@ -51,6 +51,8 @@ contextBridge.exposeInMainWorld('supercrzyDesktop', {
       ipcRenderer.on('app-update-state', listener)
       return () => ipcRenderer.removeListener('app-update-state', listener)
     },
+    /** 手动检查更新（用户主动 ⇒ 失败会提示，不同于启动时的静默检查） */
+    check: () => ipcRenderer.invoke('update:check'),
     download: () => ipcRenderer.invoke('update:download'),
     install: () => ipcRenderer.invoke('update:install'),
     dismiss: () => ipcRenderer.invoke('update:dismiss'),

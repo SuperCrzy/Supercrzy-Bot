@@ -73,6 +73,8 @@ interface UpdateState {
 interface UpdateBridge {
   getState: () => Promise<UpdateState>
   onState: (cb: (s: UpdateState) => void) => () => void
+  /** 手动检查更新（2026-10-16）—— 横幅本身不用，但桥类型要与 preload 一致 */
+  check: () => Promise<{ ok: boolean; message?: string }>
   download: () => Promise<unknown>
   install: () => Promise<{ ok: boolean; message?: string }>
   dismiss: () => Promise<unknown>
@@ -131,7 +133,9 @@ const detail = computed(() => {
   const s = state.value
   if (s.status === 'available') return t('appUpdate.availableHint')
   if (s.status === 'downloaded') return t('appUpdate.downloadedHint')
-  if (s.status === 'error') return s.message || ''
+  // 2026-10-16：不显示原始技术错误（如 net::ERR_CONNECTION_CLOSED）——
+  // 用户看不懂，且更新源不可用时它会常驻。友好文案即可，原始信息在设置面板的更新日志里。
+  if (s.status === 'error') return t('nav.updateFailedShort')
   if (s.status === 'downloading') {
     const mb = (n?: number) => (typeof n === 'number' ? (n / 1048576).toFixed(1) : '')
     const speed = typeof s.bytesPerSecond === 'number' ? ` · ${(s.bytesPerSecond / 1048576).toFixed(1)} MB/s` : ''

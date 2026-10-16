@@ -1,50 +1,50 @@
 <template>
   <div class="page-container">
     <header class="page-header">
-      <h2>例程</h2>
-      <p class="page-desc">把跑通的任务保存为可复用流程，一键重放 —— 像教同事一样教 AI，教一次就会</p>
+      <h2>{{ t('routines.title') }}</h2>
+      <p class="page-desc">{{ t('routines.desc') }}</p>
       <div class="header-actions">
         <n-select
           v-model:value="fromSessionId"
           :options="sessionOpts"
-          placeholder="从会话保存为例程"
+          :placeholder="t('routines.fromSessionPh')"
           clearable
           size="small"
           style="width: 220px"
         />
-        <n-input v-model:value="fromSessionName" size="small" placeholder="例程名称（可选）" style="width: 160px" />
-        <n-button size="small" :loading="savingFromSession" @click="saveFromSession">从会话保存</n-button>
-        <n-button size="small" type="primary" @click="showCreate = true">新建例程</n-button>
+        <n-input v-model:value="fromSessionName" size="small" :placeholder="t('routines.namePh')" style="width: 160px" />
+        <n-button size="small" :loading="savingFromSession" @click="saveFromSession">{{ t('routines.saveFromSession') }}</n-button>
+        <n-button size="small" type="primary" @click="showCreate = true">{{ t('routines.create') }}</n-button>
       </div>
     </header>
 
     <div class="routine-content">
       <n-spin :show="loading">
         <div v-if="routines.length === 0" class="empty-hint">
-          <p>还没有例程</p>
-          <p class="hint">从一个跑通的任务会话保存，或手动新建</p>
+          <p>{{ t('routines.empty') }}</p>
+          <p class="hint">{{ t('routines.emptyHint') }}</p>
         </div>
         <n-card v-for="r in routines" :key="r.id" size="small" class="routine-card">
           <div class="routine-top">
             <div class="routine-title">
               <span class="routine-name">{{ r.name }}</span>
-              <span class="routine-runs">{{ r.runCount }} 次执行</span>
+              <span class="routine-runs">{{ t('routines.runs', { n: r.runCount }) }}</span>
             </div>
             <div class="routine-actions">
               <n-button size="tiny" type="primary" @click="runRoutine(r)">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" style="margin-right:3px"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                执行
+                {{ t('routines.run') }}
               </n-button>
-              <n-button size="tiny" quaternary @click="editRoutine(r)">编辑</n-button>
+              <n-button size="tiny" quaternary @click="editRoutine(r)">{{ t('routines.edit') }}</n-button>
               <n-popconfirm @positive-click="deleteRoutine(r.id)">
                 <template #trigger>
-                  <n-button size="tiny" quaternary type="error">删除</n-button>
+                  <n-button size="tiny" quaternary type="error">{{ t('routines.del') }}</n-button>
                 </template>
-                删除该例程？
+                {{ t('routines.delConfirm') }}
               </n-popconfirm>
             </div>
           </div>
-          <div class="routine-desc">{{ r.description || '（无描述）' }}</div>
+          <div class="routine-desc">{{ r.description || t('routines.noDesc') }}</div>
           <div v-if="r.steps && r.steps.length" class="routine-steps">
             <div v-for="(s, i) in r.steps" :key="i" class="routine-step">
               <span class="step-no">{{ i + 1 }}</span>
@@ -58,26 +58,28 @@
     </div>
 
     <!-- 新建/编辑 -->
-    <n-modal v-model:show="showCreate" preset="card" :title="editId ? '编辑例程' : '新建例程'" style="max-width: 480px">
+    <n-modal v-model:show="showCreate" preset="card" :title="editId ? t('routines.modalEdit') : t('routines.modalCreate')" style="max-width: 480px">
       <div class="modal-form">
         <div class="form-group">
-          <label>名称</label>
-          <n-input v-model:value="form.name" placeholder="如：每周生成销售周报" />
+          <label>{{ t('routines.formName') }}</label>
+          <n-input v-model:value="form.name" :placeholder="t('routines.nameExamplePh')" />
         </div>
         <div class="form-group">
-          <label>描述 / 执行步骤</label>
-          <n-input v-model:value="form.description" type="textarea" :rows="6" placeholder="告诉 AI 这个例程怎么做，如：&#10;1. 读取 data/sales.csv&#10;2. 用 python 生成汇总图表&#10;3. 写入 reports/weekly.md" />
+          <label>{{ t('routines.formDesc') }}</label>
+          <n-input v-model:value="form.description" type="textarea" :rows="6" :placeholder="t('routines.descPh')" />
         </div>
       </div>
       <template #footer>
-        <n-button @click="showCreate = false">取消</n-button>
-        <n-button type="primary" :loading="saving" @click="saveRoutine">保存</n-button>
+        <n-button @click="showCreate = false">{{ t('routines.cancel') }}</n-button>
+        <n-button type="primary" :loading="saving" @click="saveRoutine">{{ t('routines.submit') }}</n-button>
       </template>
     </n-modal>
   </div>
 </template>
 
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
+const { t } = useI18n({ useScope: 'global' })
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui'
@@ -101,7 +103,7 @@ const fromSessionId = ref<string | null>(null)
 const fromSessionName = ref('')
 const sessions = ref<Array<{ id: string; title: string }>>([])
 
-const sessionOpts = computed(() => sessions.value.map((s) => ({ label: s.title || '(无标题)', value: s.id })))
+const sessionOpts = computed(() => sessions.value.map((s) => ({ label: s.title || t('routines.noTitle'), value: s.id })))
 
 function formatTime(d: string): string {
   if (!d) return ''
@@ -133,7 +135,7 @@ function editRoutine(r: Routine) {
 }
 
 async function saveRoutine() {
-  if (!form.value.name.trim()) { nMessage.warning('请输入名称'); return }
+  if (!form.value.name.trim()) { nMessage.warning(t('routines.needName')); return }
   saving.value = true
   try {
     const isEdit = !!editId.value
@@ -143,7 +145,7 @@ async function saveRoutine() {
       body: JSON.stringify(form.value),
     })
     if (r.ok) {
-      nMessage.success(isEdit ? '已更新' : '已创建')
+      nMessage.success(isEdit ? t('routines.updated') : t('routines.created'))
       showCreate.value = false
       editId.value = ''
       form.value = { name: '', description: '' }
@@ -155,11 +157,11 @@ async function saveRoutine() {
 async function deleteRoutine(id: string) {
   await fetch(`/api/routines/${id}`, { method: 'DELETE' })
   routines.value = routines.value.filter((r) => r.id !== id)
-  nMessage.success('已删除')
+  nMessage.success(t('routines.deleted'))
 }
 
 async function saveFromSession() {
-  if (!fromSessionId.value) { nMessage.warning('请选择会话'); return }
+  if (!fromSessionId.value) { nMessage.warning(t('routines.needSession')); return }
   savingFromSession.value = true
   try {
     const r = await fetch('/api/routines/from-session', {
@@ -169,19 +171,19 @@ async function saveFromSession() {
     })
     const d = await r.json()
     if (d.success) {
-      nMessage.success(`已保存例程：${d.name}`)
+      nMessage.success(t('routines.saved', { name: d.name }))
       fromSessionId.value = null
       fromSessionName.value = ''
       await loadRoutines()
     } else {
-      nMessage.error(d.error || '保存失败')
+      nMessage.error(d.error || t('routines.saveFailed'))
     }
   } finally { savingFromSession.value = false }
 }
 
 /** 执行例程：把描述作为指令发到聊天页（一键重放） */
 async function runRoutine(r: Routine) {
-  const text = `【例程执行】${r.name}\n\n${r.description || ''}`.trim()
+  const text = `${t('routines.runPrefix')} ${r.name}\n\n${r.description || ''}`.trim()
   await fetch(`/api/routines/${r.id}/run`, { method: 'POST' })
   // 跳转到聊天页并把例程作为消息发出（ChatView 监听 supercrzy:send-prompt）
   router.push('/')

@@ -4,27 +4,27 @@
     <header class="collab-topbar">
       <div class="collab-brand">
         <span class="collab-logo"><SvgIcon name="super" :size="15" /></span>
-        <span class="collab-name">超级协作平台</span>
+        <span class="collab-name">{{ t('collab.title') }}</span>
       </div>
       <div class="collab-mode-switch">
         <button
           class="mode-btn"
           :class="{ active: mode === 'semi' }"
           @click="switchMode('semi')"
-        >半自动</button>
+        >{{ t('collab.modeSemi') }}</button>
         <button
           class="mode-btn"
           :class="{ active: mode === 'senate' }"
           @click="switchMode('senate')"
-        >全自动 · 议院</button>
+        >{{ t('collab.modeSenate') }}</button>
       </div>
       <span class="collab-auth" :class="{ on: authSeconds > 0 }">
-        {{ authSeconds > 0 ? `已授权 ${authSeconds}s` : '手动确认' }}
+        {{ authSeconds > 0 ? t('collab.authorized', { n: authSeconds }) : t('collab.manualConfirm') }}
       </span>
-      <span class="collab-api" v-if="apiOk">API 正常</span>
+      <span class="collab-api" v-if="apiOk">{{ t('collab.apiOk') }}</span>
       <button class="collab-browser-toggle" @click="toggleAiBrowser">
         <SvgIcon name="super" :size="13" />
-        <span>AI 浏览器</span>
+        <span>{{ t('collab.aiBrowser') }}</span>
       </button>
     </header>
 
@@ -34,15 +34,15 @@
       <main class="collab-main">
         <div class="chat-flow" ref="chatFlowRef">
           <div v-if="!selectedTask" class="chat-empty">
-            <p>在左侧选择一个超级任务查看各 AI 的分工与进展</p>
-            <p class="chat-empty-hint">执行 AI 负责实现，质检 AI / 议院负责把关，你可在底部 @ 协商</p>
+            <p>{{ t('collab.heroEmpty') }}</p>
+            <p class="chat-empty-hint">{{ t('collab.heroEmptyHint') }}</p>
           </div>
           <template v-else>
             <!-- 任务标题入口：模拟"你发布任务" -->
             <div class="chat-line user-line">
-              <span class="chat-avatar" style="background:#eff6ff;color:#1d4ed8">你</span>
+              <span class="chat-avatar" style="background:#eff6ff;color:#1d4ed8">{{ t('collab.you') }}</span>
               <div class="chat-bubble-meta">
-                <span class="chat-actor">你</span>
+                <span class="chat-actor">{{ t('collab.you') }}</span>
                 <div class="chat-bubble user">{{ selectedTask.goal }}</div>
               </div>
             </div>
@@ -50,7 +50,7 @@
             <div v-for="(h, hi) in (selectedTask.history || [])" :key="hi" class="chat-line">
               <span class="chat-avatar" :style="{ background: actorBg(h.actor), color: actorColor(h.actor) }">{{ actorIcon(h.actor) }}</span>
               <div class="chat-bubble-meta">
-                <span class="chat-actor" :style="{ color: actorColor(h.actor) }">{{ h.actor }}</span>
+                <span class="chat-actor" :style="{ color: actorColor(h.actor) }">{{ actorLabel(h.actor) }}</span>
                 <div class="chat-bubble">
                   <span>{{ h.summary }}</span>
                 </div>
@@ -58,44 +58,44 @@
             </div>
             <!-- 当前运行状态 -->
             <div v-if="RUNNING_STATES.includes(selectedTask.state)" class="chat-line">
-              <span class="chat-avatar" style="background:#eef2ff;color:#4338ca">步</span>
+              <span class="chat-avatar" style="background:#eef2ff;color:#4338ca">{{ t('collab.actorPlatform').slice(0, 1) }}</span>
               <div class="chat-bubble-meta">
-                <span class="chat-actor" style="color:#4338ca">平台</span>
-                <div class="chat-bubble"><span class="run-dot" /> 正在{{ stateText(selectedTask.state) }}…</div>
+                <span class="chat-actor" style="color:#4338ca">{{ t('collab.actorPlatform') }}</span>
+                <div class="chat-bubble"><span class="run-dot" /> {{ t('collab.running', { state: stateText(selectedTask.state) }) }}</div>
               </div>
             </div>
             <!-- 最终交付物（done） -->
             <div v-if="selectedTask.summary" class="chat-line">
-              <span class="chat-avatar" style="background:#e5e7eb;color:#374151">执</span>
+              <span class="chat-avatar" style="background:#e5e7eb;color:#374151">{{ t('collab.actorExecutor').slice(0, 1) }}</span>
               <div class="chat-bubble-meta">
-                <span class="chat-actor" style="color:#374151">交付物</span>
+                <span class="chat-actor" style="color:#374151">{{ t('collab.actorDeliverable') }}</span>
                 <div class="chat-bubble" v-html="renderMarkdown(selectedTask.summary)" />
               </div>
             </div>
             <!-- 机制C：半自动 done 后建议上议院评审 -->
             <div v-if="selectedTask.state === 'done' && selectedTask.suggestSenate" class="chat-line">
-              <span class="chat-avatar" style="background:#f5f3ff;color:#6d28d9">议</span>
+              <span class="chat-avatar" style="background:#f5f3ff;color:#6d28d9">{{ t('collab.actorSuggestion').slice(0, 1) }}</span>
               <div class="chat-bubble-meta">
-                <span class="chat-actor" style="color:#6d28d9">系统建议</span>
+                <span class="chat-actor" style="color:#6d28d9">{{ t('collab.actorSuggestion') }}</span>
                 <div class="chat-bubble senate suggest-box">
-                  <div class="suggest-text">这是一份重要交付，建议升级到<b>议院评审</b>（DeepSeek + Kimi 多品牌复核），进一步把关？</div>
+                  <div class="suggest-text">{{ t('collab.suggestText') }}</div>
                   <div class="suggest-actions">
-                    <button class="sug-btn yes" @click="promoteToSenate">进行议院评审</button>
-                    <button class="sug-btn no" @click="dismissSuggest">跳过</button>
+                    <button class="sug-btn yes" @click="promoteToSenate">{{ t('collab.promoteSenate') }}</button>
+                    <button class="sug-btn no" @click="dismissSuggest">{{ t('collab.skip') }}</button>
                   </div>
                 </div>
               </div>
             </div>
             <!-- 质检报告（引擎自动产出） -->
             <div v-if="selectedTask.quality && selectedTask.quality.status !== 'pending'" class="chat-line">
-              <span class="chat-avatar" style="background:#fffbeb;color:#b45309">检</span>
+              <span class="chat-avatar" style="background:#fffbeb;color:#b45309">{{ t('collab.actorQuality').slice(0, 1) }}</span>
               <div class="chat-bubble-meta">
-                <span class="chat-actor" style="color:#b45309">质检 AI</span>
+                <span class="chat-actor" style="color:#b45309">{{ t('collab.actorQuality') }}</span>
                 <div class="chat-bubble quality">
                   <div class="quality-head">
                     <span class="quality-score" :class="selectedTask.quality.status">{{ selectedTask.quality.score }}</span>
                     <div>
-                      <span class="quality-badge" :class="selectedTask.quality.status">{{ selectedTask.quality.status === 'pass' ? '通过' : '需复核' }}</span>
+                      <span class="quality-badge" :class="selectedTask.quality.status">{{ selectedTask.quality.status === 'pass' ? t('collab.pass') : t('collab.needsReview') }}</span>
                       <span class="quality-summary">{{ selectedTask.quality.summary }}</span>
                     </div>
                   </div>
@@ -115,14 +115,14 @@
             </div>
             <!-- 议院审查（senate 模式） -->
             <div v-if="selectedTask.senate && selectedTask.senate.status !== 'pending'" class="chat-line">
-              <span class="chat-avatar" style="background:#f5f3ff;color:#6d28d9">院</span>
+              <span class="chat-avatar" style="background:#f5f3ff;color:#6d28d9">{{ t('collab.actorSenateShort').slice(0, 1) }}</span>
               <div class="chat-bubble-meta">
-                <span class="chat-actor" style="color:#6d28d9">议院审查</span>
+                <span class="chat-actor" style="color:#6d28d9">{{ t('collab.actorSenate') }}</span>
                 <div class="chat-bubble senate">
                   <div class="quality-head">
-                    <span class="quality-score" :class="selectedTask.senate.status">{{ selectedTask.senate.status === 'pass' ? '✓' : '需修订' }}</span>
+                    <span class="quality-score" :class="selectedTask.senate.status">{{ selectedTask.senate.status === 'pass' ? '\u2713' : t('collab.needsRevision') }}</span>
                     <div>
-                      <span>通过 {{ selectedTask.senate.passCount }} / {{ selectedTask.senate.totalSenators }} · 打回 {{ selectedTask.senate.rejectCount }}</span>
+                      <span>{{ t('collab.senateTally', { pass: selectedTask.senate.passCount, total: selectedTask.senate.totalSenators, reject: selectedTask.senate.rejectCount }) }}</span>
                     </div>
                   </div>
                   <div v-for="(v, idx) in selectedTask.senate.votes" :key="idx" class="senator-vote">
@@ -133,7 +133,7 @@
                         <b>{{ v.senator }}</b>
                         <span class="senator-brand-name">{{ v.brand || '' }}</span>
                       </div>
-                      <span class="senator-verdict" :class="v.verdict">{{ v.verdict === 'pass' ? '通过' : (v.verdict === 'reject' ? '打回' : '弃权') }}</span>
+                      <span class="senator-verdict" :class="v.verdict">{{ v.verdict === 'pass' ? t('collab.pass') : (v.verdict === 'reject' ? t('collab.reject') : t('collab.abstain')) }}</span>
                       <span class="senator-score">{{ v.score }}</span>
                     </div>
                     <div class="senator-summary">{{ v.summary }}</div>
@@ -148,23 +148,23 @@
             <div v-if="selectedTask.state === 'failed'" class="chat-line">
               <span class="chat-avatar" style="background:#fef2f2;color:#dc2626">!</span>
               <div class="chat-bubble-meta">
-                <span class="chat-actor" style="color:#dc2626">平台</span>
-                <div class="chat-bubble fail-box">{{ selectedTask.error || '任务失败' }}</div>
+                <span class="chat-actor" style="color:#dc2626">{{ t('collab.actorPlatform') }}</span>
+                <div class="chat-bubble fail-box">{{ selectedTask.error || t('collab.taskFailed') }}</div>
               </div>
             </div>
             <!-- 半自动人控裁定（质检后停下等你） -->
             <div v-if="selectedTask.state === 'awaiting_decision'" class="chat-line">
-              <span class="chat-avatar" style="background:#eff6ff;color:#1d4ed8">你</span>
+              <span class="chat-avatar" style="background:#eff6ff;color:#1d4ed8">{{ t('collab.you') }}</span>
               <div class="chat-bubble-meta">
-                <span class="chat-actor" style="color:#1d4ed8">请裁定这份交付</span>
+                <span class="chat-actor" style="color:#1d4ed8">{{ t('collab.decideTitle') }}</span>
                 <div class="chat-bubble decision-box">
-                  <div class="decision-hint">质检已完成，这份结果你认为满意吗？</div>
+                  <div class="decision-hint">{{ t('collab.decideHint') }}</div>
                   <div class="decision-actions">
-                    <button class="dec-btn pass" @click="sendDecision('accept')">通过验收</button>
-                    <button class="dec-btn revise" @click="sendDecision('revise', feedback)">打回重做</button>
-                    <button class="dec-btn discard" @click="sendDecision('discard')">放弃</button>
+                    <button class="dec-btn pass" @click="sendDecision('accept')">{{ t('collab.accept') }}</button>
+                    <button class="dec-btn revise" @click="sendDecision('revise', feedback)">{{ t('collab.revise') }}</button>
+                    <button class="dec-btn discard" @click="sendDecision('discard')">{{ t('collab.discard') }}</button>
                   </div>
-                  <input v-model="feedback" class="dec-feedback" placeholder="（打回时可选）说明你想让它改哪里…" @keyup.enter="sendDecision('revise', feedback)" />
+                  <input v-model="feedback" class="dec-feedback" :placeholder="t('collab.feedbackPh')" @keyup.enter="sendDecision('revise', feedback)" />
                 </div>
               </div>
             </div>
@@ -177,19 +177,19 @@
             <input
               v-model="customGoal"
               class="chat-input"
-              :placeholder="mode === 'senate' ? '发布任务，多位 AI 审查后交付…' : '发布任务，执行 + 质检完成后交付…'"
+              :placeholder="mode === 'senate' ? t('collab.taskPhSenate') : t('collab.taskPhSemi')"
               @keyup.enter="startGoal(customGoal)"
             />
             <button class="chat-send" :disabled="starting || !customGoal.trim()" @click="startGoal(customGoal)">
-              {{ starting ? '…' : '发布' }}
+              {{ starting ? '…' : t('collab.publish') }}
             </button>
           </div>
           <div class="chat-input-meta">
             <label class="auth-opt">
               <input type="checkbox" v-model="authEnabled" />
-              <span>危险操作保留确认</span>
+              <span>{{ t('collab.dangerConfirm') }}</span>
             </label>
-            <span class="chat-hint">收敛后交付 · @议院 可集体评议</span>
+            <span class="chat-hint">{{ t('collab.hint') }}</span>
           </div>
         </div>
       </main>
@@ -292,13 +292,19 @@ const sortedTasks = computed(() => {
 })
 
 const STATE_TEXT: Record<string, string> = {
-  init: '发起', executing: '执行中', reviewing: '质检中', senate: '议院评审', optimizing: '优化中', awaiting_decision: '待你裁定', delivering: '交付中', done: '完成', failed: '失败',
+  init: 'collab.stateInit', executing: 'collab.stateExecuting', reviewing: 'collab.stateReviewing',
+  senate: 'collab.stateSenate', optimizing: 'collab.stateOptimizing', awaiting_decision: 'collab.stateAwaiting',
+  delivering: 'collab.stateDelivering', done: 'collab.stateDone', failed: 'collab.stateFailed',
 }
-function stateText(s: string) { return STATE_TEXT[s] || s }
+function stateText(s: string) { return STATE_TEXT[s] ? t(STATE_TEXT[s]) : s }
 // 需展示"运行中"状态点的阶段（awaiting_decision 是停下等你，不算运行）
 const RUNNING_STATES = ['init', 'executing', 'reviewing', 'senate', 'optimizing', 'delivering']
 
 // 发言人身份映射（执行/质检/议院）
+function actorLabel(a: string) {
+  const M: Record<string, string> = { '执行AI': 'collab.actorExecutor', '质检AI': 'collab.actorQuality', '议院': 'collab.actorSenateShort', '平台': 'collab.actorPlatform' }
+  return M[a] ? t(M[a]) : a
+}
 function actorIcon(a: string) { return ({ '执行AI': '执', '质检AI': '检', '议院': '院', '平台': '平' } as Record<string,string>)[a] || 'AI' }
 function actorColor(a: string) { return ({ '执行AI': '#374151', '质检AI': '#b45309', '议院': '#6d28d9', '平台': '#4338ca' } as Record<string,string>)[a] || '#374151' }
 function actorBg(a: string) { return ({ '执行AI': '#e5e7eb', '质检AI': '#fffbeb', '议院': '#f5f3ff', '平台': '#eef2ff' } as Record<string,string>)[a] || '#e5e7eb' }

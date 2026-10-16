@@ -104,8 +104,8 @@
       </template>
       <template v-else>
         <span class="wp-count">+{{ displayedLines }}</span>
-        <span class="wp-detail">行</span>
-        <span class="wp-progress">写入 {{ writeProgress.written }}/{{ writeProgress.total }} 行</span>
+        <span class="wp-detail">{{ t('chat.writeLineUnit') }}</span>
+        <span class="wp-progress">{{ t('chat.writeProgress', { n: writeProgress.written, total: writeProgress.total }) }}</span>
       </template>
       <span v-for="(d, i) in (isWriteRunning ? recentDeltas : [])" :key="i" class="wp-delta">{{ d > 0 ? '+' + d : d }}</span>
     </div>

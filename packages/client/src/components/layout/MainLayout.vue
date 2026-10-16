@@ -190,7 +190,7 @@
                 <SvgIcon :name="s.collabMode ? 'super' : 'message'" :size="13" class="chat-item-icon" :class="{ 'super-item-icon': s.collabMode }" />
                 <div class="chat-item-info">
                   <div class="chat-item-title">
-                    <span v-if="s.collabMode" class="chat-item-collab" :title="s.collabMode === 'senate' ? '全自动 · 议院' : '半自动'">超级</span>
+                    <span v-if="s.collabMode" class="chat-item-collab" :title="s.collabMode === 'senate' ? t('collab.modeSenate') : t('collab.modeSemi')">{{ t('collab.title') }}</span>
                     {{ s.title }}
                   </div>
                   <div class="chat-item-meta">{{ formatRelativeTime(s.updatedAt) }}</div>
@@ -202,7 +202,7 @@
                   :options="sessionMenuOptions(s)"
                   @select="(key: string) => onSessionMenu(key, s.id)"
                 >
-                  <button class="chat-item-del" @click.stop title="更多">
+                  <button class="chat-item-del" @click.stop :title="t('chat.more')">
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
                   </button>
                 </n-dropdown>
@@ -230,7 +230,7 @@
                 <SvgIcon :name="s.collabMode ? 'super' : 'message'" :size="13" class="chat-item-icon" :class="{ 'super-item-icon': s.collabMode }" />
                 <div class="chat-item-info">
                   <div class="chat-item-title">
-                    <span v-if="s.collabMode" class="chat-item-collab" :title="s.collabMode === 'senate' ? '全自动 · 议院' : '半自动'">超级</span>
+                    <span v-if="s.collabMode" class="chat-item-collab" :title="s.collabMode === 'senate' ? t('collab.modeSenate') : t('collab.modeSemi')">{{ t('nav.collab') }}</span>
                     {{ s.title }}
                   </div>
                   <div class="chat-item-meta">{{ formatRelativeTime(s.updatedAt) }}</div>
@@ -242,7 +242,7 @@
                   :options="sessionMenuOptions(s)"
                   @select="(key: string) => onSessionMenu(key, s.id)"
                 >
-                  <button class="chat-item-del" @click.stop title="更多">
+                  <button class="chat-item-del" @click.stop :title="t('chat.more')">
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
                   </button>
                 </n-dropdown>

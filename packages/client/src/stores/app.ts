@@ -97,7 +97,7 @@ export const useAppStore = defineStore('app', () => {
   const busyInputMode = ref(true)
   const streamingEnabled = ref(true)
   /** 朗读音色（Edge TTS voice id，2026-09-27） */
-  const ttsVoice = ref('zh-CN-XiaoxiaoNeural')
+  const ttsVoice = ref('en-US-AvaMultilingualNeural')
   /** 朗读语速百分比（-50~50，0=正常，映射到 Edge TTS 的 '+N%'） */
   const ttsRate = ref(0)
   /** 自动朗读档位（2026-09-27）：off / background（仅窗口不在前台时，默认）/ always */

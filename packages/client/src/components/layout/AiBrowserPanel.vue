@@ -10,7 +10,23 @@
   只把长轮询与原生视图同步停掉（靠 `active` 入参的 watcher，逻辑在 useAiBrowser 里）。
 -->
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
 import { useAiBrowser } from '@/composables/useAiBrowser'
+
+// Internal status values stay as-is (the dot logic compares them); only display is translated.
+const { t } = useI18n({ useScope: 'global' })
+const STATUS_KEY: Record<string, string> = {
+  '待机': 'aiBrowser.idle',
+  '原生视图 · 人机共用': 'aiBrowser.nativeShared',
+  '导航中': 'aiBrowser.navigating',
+  '失败': 'aiBrowser.failed',
+  '实时': 'aiBrowser.live',
+  '断开': 'aiBrowser.disconnected',
+  '刷新中': 'aiBrowser.refreshing',
+  '动作失败': 'aiBrowser.actionFailed',
+  '已释放': 'aiBrowser.released',
+}
+const statusText = (s: string) => (STATUS_KEY[s] ? t(STATUS_KEY[s]) : s)
 
 const props = defineProps<{
   /** 当前会话 id：切会话要释放上一个会话的浏览器实例。store 里可能是 null（无会话）。 */
@@ -42,25 +58,25 @@ const {
   <div v-show="active" class="tab-content browser-tab">
     <div class="browser-live">
       <span class="browser-live-dot" :class="{ active: browserStatus === '导航中' }" />
-      <span class="browser-live-text">{{ browserStatus }}</span>
+      <span class="browser-live-text">{{ statusText(browserStatus) }}</span>
     </div>
     <div class="browser-url-row">
       <input
         v-model="browserUrlInput"
         class="browser-url-input"
-        placeholder="输入网址，AI 浏览器打开…"
+        :placeholder="t('aiBrowser.phUrl')"
         @keyup.enter="goToUrl"
       />
-      <button class="browser-ico" @click="goToUrl" title="打开">
+      <button class="browser-ico" @click="goToUrl" :title="t('aiBrowser.open')">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
       </button>
-      <button class="browser-ico" @click="refreshPage" title="刷新">
+      <button class="browser-ico" @click="refreshPage" :title="t('aiBrowser.refresh')">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
       </button>
-      <button class="browser-ico" @click="browserGoBack" title="后退">
+      <button class="browser-ico" @click="browserGoBack" :title="t('aiBrowser.back')">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
       </button>
-      <button class="browser-maxbtn" @click="emit('update:maximized', !maximized)" :title="maximized ? '还原侧栏' : '放大看浏览器画面'">
+      <button class="browser-maxbtn" @click="emit('update:maximized', !maximized)" :title="maximized ? t('aiBrowser.restorePanel') : t('aiBrowser.maximize')">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
       </button>
     </div>
@@ -76,7 +92,7 @@ const {
              这个 div 的唯一职责是"把矩形量出来"。 -->
         <div v-if="browserNative" class="browser-native-slot">
           <span class="browser-placeholder" :class="{ loading: !browserNativeReady }">
-            {{ browserNativeReady ? '' : '正在把网页放进窗口…' }}
+            {{ browserNativeReady ? '' : t('aiBrowser.mounting') }}
           </span>
         </div>
         <template v-else>
@@ -86,12 +102,12 @@ const {
               class="browser-shot clickable"
               @click="clickPage"
               @wheel.prevent="onCanvasWheel"
-              alt="浏览器画面 (点击可操作, 滚轮可滚动)"
+              :alt="t('aiBrowser.altView')"
             />
-            <div class="browser-hit-hint" v-if="browserScreenshotBase64">点击画面 = 替你点击　滚轮 = 滚动页面　输入前先点一下输入框</div>
+            <div class="browser-hit-hint" v-if="browserScreenshotBase64">{{ t('aiBrowser.hitHint') }}</div>
           </div>
           <span v-else class="browser-placeholder" :class="{ loading: browserLoading }">
-            {{ browserLoading ? 'AI 浏览器导航中…' : 'AI 浏览器就绪，输入网址打开（或等 AI 操作）' }}
+            {{ browserLoading ? t('aiBrowser.navigatingHint') : t('aiBrowser.ready') }}
           </span>
         </template>
         <p class="browser-fail" v-if="browserFailHint">{{ browserFailHint }}</p>
@@ -100,42 +116,42 @@ const {
            人在右栏能点、不能打字/滚动/回车，「自己接管一下」根本做不到。
            原生视图模式下这一整块**不需要**：那是真网页，人用真键盘鼠标即可。 -->
       <div class="browser-native-note" v-if="browserNative">
-        这是 AI 正在操作的那个网页本体：你可以直接在上面点、选、打字，AI 立刻就能看到。
+        {{ t('aiBrowser.liveHint') }}
       </div>
       <div class="browser-cmd" v-else>
         <div class="bc-row">
           <input
             v-model="browserTypeText"
             class="bc-input"
-            placeholder="输入文字…（回车 = 输入并回车）"
+            :placeholder="t('aiBrowser.phType')"
             @keyup.enter="doType(true)"
           />
-          <button class="bc-btn primary" @click="doType(true)" title="输入文字并按回车（提交表单/搜索）">输入+回车</button>
-          <button class="bc-btn" @click="doType(false)" title="只输入文字，不按回车。需要有焦点，先在画面上点一下输入框">仅输入</button>
+          <button class="bc-btn primary" @click="doType(true)" :title="t('aiBrowser.typeEnterTitle')">{{ t('aiBrowser.typeEnter') }}</button>
+          <button class="bc-btn" @click="doType(false)" :title="t('aiBrowser.typeOnlyTitle')">{{ t('aiBrowser.typeOnly') }}</button>
         </div>
         <div class="bc-row">
           <button
             v-for="k in keyButtons"
             :key="k.key"
             class="bc-btn key"
-            :title="k.title"
+            :title="t(k.titleKey)"
             @click="doKey(k.key)"
-          >{{ k.label }}</button>
+          >{{ k.key === 'Enter' ? t('aiBrowser.keyEnter') : k.label }}</button>
         </div>
         <div class="bc-row">
           <input
             v-model="browserClickText"
             class="bc-input"
-            placeholder="按页面上的文字点击，如「登录」…"
+            :placeholder="t('aiBrowser.phClick')"
             @keyup.enter="doClickText"
           />
-          <button class="bc-btn" @click="doClickText" title="在页面里找到这段文字并点击它">点它</button>
+          <button class="bc-btn" @click="doClickText" :title="t('aiBrowser.clickTextTitle')">{{ t('aiBrowser.clickText') }}</button>
         </div>
       </div>
     </div>
     <div class="browser-console">
       <div v-for="(l, i) in browserLog" :key="i" class="browser-log-line">&gt; {{ l }}</div>
-      <div v-if="browserLog.length === 0" class="browser-log-line muted">无操作记录</div>
+      <div v-if="browserLog.length === 0" class="browser-log-line muted">{{ t('aiBrowser.noLog') }}</div>
     </div>
   </div>
 </template>

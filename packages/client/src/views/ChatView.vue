@@ -477,15 +477,15 @@
             <!-- Routine 推荐（"演示一次就学会"）：复杂任务完成后 AI 主动建议保存为流程 -->
             <div v-if="msg.routineSuggestion" class="routine-suggest">
               <div class="rs-info">
-                <span class="rs-title">可保存为可复用流程</span>
-                <span class="rs-desc">「{{ msg.routineSuggestion.title }}」用了 {{ msg.routineSuggestion.toolCount }} 次工具调用（{{ msg.routineSuggestion.turnCount }} 轮）</span>
+                <span class="rs-title">{{ t('routine.suggestTitle') }}</span>
+                <span class="rs-desc">{{ t('routine.suggestDesc', { title: msg.routineSuggestion.title, tools: msg.routineSuggestion.toolCount, turns: msg.routineSuggestion.turnCount }) }}</span>
               </div>
               <div class="rs-actions">
                 <n-button size="tiny" type="primary" :loading="savingRoutine" @click="saveRoutineSuggestion(msg)">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:3px"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-                  保存为例程
+                  {{ t('routine.saveAsRoutine') }}
                 </n-button>
-                <n-button size="tiny" quaternary @click="dismissRoutineSuggestion(msg)">忽略</n-button>
+                <n-button size="tiny" quaternary @click="dismissRoutineSuggestion(msg)">{{ t('routine.ignore') }}</n-button>
               </div>
             </div>
 

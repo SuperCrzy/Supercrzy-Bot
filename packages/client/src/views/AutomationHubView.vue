@@ -2,10 +2,10 @@
   <div class="auto-hub">
     <div class="hub-tabs">
       <n-tabs v-model:value="activeTab" type="line" animated size="large">
-        <n-tab-pane name="automations" tab="定时任务">
+        <n-tab-pane name="automations" :tab="t('nav.automations')">
           <AutomationsView />
         </n-tab-pane>
-        <n-tab-pane name="routines" tab="可复用流程">
+        <n-tab-pane name="routines" :tab="t('nav.routines')">
           <RoutinesView />
         </n-tab-pane>
       </n-tabs>
@@ -14,6 +14,8 @@
 </template>
 
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
+const { t } = useI18n({ useScope: 'global' })
 import { ref } from 'vue'
 import AutomationsView from './AutomationsView.vue'
 import RoutinesView from './RoutinesView.vue'

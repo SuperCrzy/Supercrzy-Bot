@@ -57,7 +57,23 @@
         @click="runUpdate"
       >{{ $t('nav.updateSource') }}</n-button>
       <n-button v-if="updating" size="small" loading disabled>{{ $t('nav.updating') }}</n-button>
+      <!--
+        手动检查更新（2026-10-16 新增）：
+        此前只有"启动后 6 秒自动检查一次"，且有一次性闸门 —— 启动时网络不好就整个生命周期不再检查，
+        用户毫无补救手段。这里给一个显式入口，且**失败会提示**（自动检查失败是静默的）。
+      -->
+      <n-button
+        size="small"
+        quaternary
+        :loading="checking"
+        :disabled="checking"
+        @click="checkAppUpdate"
+      >{{ checking ? $t('nav.checkingUpdate') : $t('nav.checkUpdate') }}</n-button>
       <n-button size="small" quaternary @click="showChangelog = true">{{ $t('nav.changelog') }}</n-button>
+    </div>
+
+    <div v-if="checkError" class="update-log">
+      <div class="update-log-line err">{{ checkError }}</div>
     </div>
 
     <div v-if="updateLog.length" class="update-log">
@@ -99,6 +115,10 @@ const isZh = computed(() => locale.value.startsWith('zh'))
 const CHANGELOG_SEEN_KEY = 'supercrzy:changelog_seen'
 const showChangelog = ref(false)
 const updating = ref(false)
+/** 手动检查更新进行中（与"下载/安装"的 updating 分开：检查很快，不该显示"正在更新"） */
+const checking = ref(false)
+/** 手动检查失败提示；下次成功检查时清掉 */
+const checkError = ref('')
 const updateLog = ref<Array<{ message: string; ok: boolean | null }>>([])
 
 // ---- 桌面桥（纯 Web 形态没有）----
@@ -114,6 +134,8 @@ interface DesktopBridge {
   update?: {
     getState: () => Promise<AppUpdateState>
     onState: (cb: (s: AppUpdateState) => void) => () => void
+    /** 手动检查更新（2026-10-16）：用户主动 ⇒ 失败会返回 ok:false 且主进程推 error 状态 */
+    check: () => Promise<{ ok: boolean; message?: string }>
     /** 触发下载（electron-updater）；进度由主进程经 onState 推回，不在此等待完成 */
     download: () => Promise<unknown>
     /** 退出并安装（quitAndInstall）；失败信息由主进程推 error 状态带回 */
@@ -208,6 +230,32 @@ async function runAppAction() {
     if (a.kind === 'install') await b.install()
     else await b.download()
   } catch { /* 失败由主进程推 error 状态带回界面 */ }
+}
+
+/**
+ * 手动检查更新（2026-10-16 新增）。
+ *
+ * 与启动时自动检查的差别：**失败要明确告知**（自动检查失败是静默的）。
+ * 更新源在海外，本机需要代理才连得上 —— 失败提示里直接点出这一点，省掉一轮排查。
+ */
+async function checkAppUpdate() {
+  const b = desktop?.update
+  if (checking.value || !b?.check) return
+  checking.value = true
+  checkError.value = ''
+  updateLog.value = []
+  try {
+    const r = await b.check()
+    if (r && r.ok === false) {
+      checkError.value = t('nav.checkFailed')
+      updateLog.value.push({ message: r.message || String(r), ok: false })
+    }
+  } catch (e) {
+    checkError.value = t('nav.checkFailed')
+    updateLog.value.push({ message: String(e), ok: false })
+  } finally {
+    checking.value = false
+  }
 }
 
 /** 弹窗打开时检查源码更新；关闭时记录已读 */

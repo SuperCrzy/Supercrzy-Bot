@@ -1,6 +1,6 @@
 {
   "name": "supercrzy-bot",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "SUPERCRZY BOT - AI Agent Platform: unified brain + Agent Loop + multi-tool + multi-platform gateway",
   "author": "SuperCrzy",
@@ -45,5 +45,18 @@
       "http-errors": "^2.0.1",
       "entities": "^7.0.1"
     }
-  }
+  },
+  "bin": {
+    "supercrzy": "bin/supercrzy.mjs"
+  },
+  "files": [
+    "bin/",
+    "packages/",
+    "scripts/",
+    "start.sh",
+    "start.bat",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ]
 }

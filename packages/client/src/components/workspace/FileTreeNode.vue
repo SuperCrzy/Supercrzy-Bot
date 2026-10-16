@@ -16,7 +16,7 @@
         <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
       </span>
       <span class="file-name">{{ node.name }}</span>
-      <span v-if="dirty" class="dirty-dot" :title="'Git 已修改'" />
+      <span v-if="dirty" class="dirty-dot" :title="t('chat.gitModified')" />
       <span class="file-size" v-if="!node.isDirectory">{{ formatSize(node.size) }}</span>
     </div>
     <div v-if="node.isDirectory && node.expanded" class="ftn-children">
@@ -30,12 +30,14 @@
         @open="$emit('open', $event)"
         @ctx="(ev: MouseEvent, n: TreeNode) => $emit('ctx', ev, n)"
       />
-      <div v-if="node.children && node.children.length === 0" class="ftn-empty" :style="{ paddingLeft: depth * 14 + 24 + 'px' }">（空目录）</div>
+      <div v-if="node.children && node.children.length === 0" class="ftn-empty" :style="{ paddingLeft: depth * 14 + 24 + 'px' }">{{ t('chat.emptyDir') }}</div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
+const { t } = useI18n({ useScope: 'global' })
 import { computed } from 'vue'
 
 export interface TreeNode {

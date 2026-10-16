@@ -440,7 +440,18 @@ export async function synthesizeSpeechStream(
 }
 
 
-const DEFAULT_VOICE = 'zh-CN-XiaoxiaoNeural'
+/**
+ * 默认音色（2026-10-16 改）。
+ *
+ * 由 `zh-CN-XiaoxiaoNeural` 改为 **`en-US-AvaMultilingualNeural`**：
+ * 晓晓是**中文专用**音色，读英文带中文口音；Ava 是 Edge TTS 的**多语言**音色，
+ * 中英混排都自然（上游实测：中文 62KB / 英文 44KB 均 200）。
+ *
+ * ⚠️ **中文区没有 Multilingual 音色**（上游总表 322 个音色里 `zh-CN-*Multilingual*` = 0），
+ * 所以中英通用只能从 `en-US-*-MultilingualNeural` 里选（全表共 12 个，中文场景可用 4 个）。
+ * 想纯中文最自然的话，设置里可选回晓晓。
+ */
+const DEFAULT_VOICE = 'en-US-AvaMultilingualNeural'
 
 /**
  * 输出音频格式。
@@ -500,12 +511,17 @@ const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
  * 中文音色故意混入英文品牌名（"中英文读"），顺带验证中英混排的合成质量。
  */
 export const TTS_VOICES = [
-  { id: 'zh-CN-XiaoxiaoNeural', label: '晓晓（女声·自然）', sample: '您好，我是晓晓，是你的 SUPERCRZY BOT.' },
-  { id: 'zh-CN-XiaoyiNeural', label: '晓伊（女声·活泼）', sample: '您好，我是晓伊，是你的 SUPERCRZY BOT.' },
-  { id: 'zh-CN-YunxiNeural', label: '云希（男声·年轻）', sample: '您好，我是云希，是你的 SUPERCRZY BOT.' },
-  { id: 'zh-CN-YunyangNeural', label: '云扬（男声·播报）', sample: '您好，我是云扬，是你的 SUPERCRZY BOT.' },
-  { id: 'zh-CN-liaoning-XiaobeiNeural', label: '晓北（东北话）', sample: '您好，我是晓北，是你的 SUPERCRZY BOT.' },
-  { id: 'en-US-AriaNeural', label: 'Aria（English）', sample: "Hi, I'm Aria, your SUPERCRZY BOT." },
+  // ── 中英通用（Edge TTS 多语言音色）—— 默认档，读英文不带中文口音 ──
+  { id: 'en-US-AvaMultilingualNeural', label: 'Ava（中英通用·女声）', sample: "Hi, I'm Ava. 您好，我是 Ava，是你的 SUPERCRZY BOT." },
+  { id: 'en-US-EmmaMultilingualNeural', label: 'Emma（中英通用·女声）', sample: "Hi, I'm Emma. 您好，我是 Emma，是你的 SUPERCRZY BOT." },
+  { id: 'en-US-AndrewMultilingualNeural', label: 'Andrew（中英通用·男声）', sample: "Hi, I'm Andrew. 您好，我是 Andrew，是你的 SUPERCRZY BOT." },
+  { id: 'en-US-BrianMultilingualNeural', label: 'Brian（中英通用·男声）', sample: "Hi, I'm Brian. 您好，我是 Brian，是你的 SUPERCRZY BOT." },
+  // ── 中文专用（纯中文最自然；读英文会带口音）──
+  { id: 'zh-CN-XiaoxiaoNeural', label: '晓晓（中文·女声·自然）', sample: '您好，我是晓晓，是你的 SUPERCRZY BOT.' },
+  { id: 'zh-CN-XiaoyiNeural', label: '晓伊（中文·女声·活泼）', sample: '您好，我是晓伊，是你的 SUPERCRZY BOT.' },
+  { id: 'zh-CN-YunxiNeural', label: '云希（中文·男声·年轻）', sample: '您好，我是云希，是你的 SUPERCRZY BOT.' },
+  { id: 'zh-CN-YunyangNeural', label: '云扬（中文·男声·播报）', sample: '您好，我是云扬，是你的 SUPERCRZY BOT.' },
+  { id: 'zh-CN-liaoning-XiaobeiNeural', label: '晓北（中文·东北话）', sample: '您好，我是晓北，是你的 SUPERCRZY BOT.' },
 ] as const
 
 export function defaultVoice(): string {

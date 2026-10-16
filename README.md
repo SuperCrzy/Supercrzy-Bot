@@ -60,7 +60,18 @@ pnpm -v    # should print 10.x  (corepack enable  # if missing)
 > Versions above are **pinned on purpose** — a mismatched Node/pnpm is the most common
 > "install works but build/test fails" cause. Use `nvm use` (reads `.nvmrc`) to match.
 
-### Option 1: double-click launcher (easiest)
+### Option 1: terminal one-liner (first-time users)
+
+```bash
+git clone https://github.com/SuperCrzy/Supercrzy-Bot.git
+cd Supercrzy-Bot
+./start.sh          # checks env → installs deps → builds frontend → starts → opens browser
+```
+
+> `./start.sh` needs **no setup** — it verifies Node/pnpm, creates `.env` if missing,
+> builds the frontend, starts the server and opens your browser. Stop it with `./start.sh stop`.
+
+### Option 2: double-click launcher (no terminal)
 
 > **macOS**:
 > 1. Double-click **`scripts/install.command`** — it generates `SUPERCRZY BOT.app` and puts a
@@ -75,15 +86,26 @@ pnpm -v    # should print 10.x  (corepack enable  # if missing)
 >
 > Linux/terminal: run `./start.sh`.
 
-### Option 2: one-liner script
+### Option 3 (optional): install as a global command
+
+After cloning (any option above), make `supercrzy` available from **any directory**:
 
 ```bash
-git clone https://github.com/SuperCrzy/Supercrzy-Bot.git
-cd Supercrzy-Bot
-./start.sh          # checks env → installs deps → builds frontend → starts → opens browser
+npm link                   # or: pnpm setup && pnpm link --global
+
+supercrzy                  # start (same as ./start.sh)
+supercrzy dev              # dev mode (server + client, 5173 hot reload)
+supercrzy cli              # chat in the terminal
+supercrzy stop             # stop the background server
+supercrzy status           # show versions & server state
+supercrzy install          # create a desktop launcher icon (macOS)
 ```
 
-### Option 3: manual (development)
+> A **convenience, not a requirement** — `./start.sh` already does everything.
+> `supercrzy web` / `stop` / `install` forward to the very same `start.sh` / `install.command`,
+> so behaviour is identical either way.
+
+### Option 4: manual (development)
 
 ```bash
 # 1. Install dependencies (Node 22.x + pnpm 10.x required — see Requirements above)
