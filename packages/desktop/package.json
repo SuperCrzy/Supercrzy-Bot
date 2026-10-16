@@ -12,7 +12,7 @@
     "dist": "electron-builder"
   },
   "dependencies": {
-    "electron-store": "^8.2.0",
+    "electron-store": "^12.0.0",
     "electron-updater": "^6.8.9"
   },
   "devDependencies": {
