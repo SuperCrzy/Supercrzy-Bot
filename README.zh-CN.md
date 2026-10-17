@@ -1,8 +1,21 @@
+<p align="center">
+  <img src="docs/images/banner.png" alt="Introducing SuperCrzy Bot — 自部署 AI Agent 平台" width="100%">
+</p>
+
 # SUPERCRZY BOT
 
-[English](README.md)
+<p align="center">
+  <a href="https://supercrzy.com/bot"><img src="https://img.shields.io/badge/官网-supercrzy.com-5b6dff?style=for-the-badge" alt="官网"></a>
+  <a href="https://github.com/SuperCrzy/Supercrzy-Bot/releases/latest"><img src="https://img.shields.io/badge/下载-macOS%20arm64-000000?style=for-the-badge&logo=apple&logoColor=white" alt="下载"></a>
+  <a href="https://github.com/SuperCrzy/Supercrzy-Bot/blob/main/LICENSE"><img src="https://img.shields.io/badge/许可证-MIT-green?style=for-the-badge" alt="许可证"></a>
+  <a href="README.md"><img src="https://img.shields.io/badge/Lang-English-blue?style=for-the-badge" alt="English"></a>
+</p>
 
 一个开箱即用的 **AI Agent 平台** —— 统一大脑 + Agent Loop + 多工具 + 多平台网关,原生对接 DeepSeek V4。
+
+**自己的 key，自己的磁盘。** 没有订阅、不赚推理差价、不用注册账号 —— 应用直接连你已经在付费的模型厂商，整套代码 MIT 开源。
+
+三样大多数自部署 agent 凑不齐的东西：**完整 Web UI**（15 个页面，不是终端）、**跨厂商交叉质检**（不让一个模型给自己打分）、**无需 API key 的内容源**。
 
 <p align="center">
   <img src="docs/images/demo.gif" alt="SuperCrzy Bot 实际运行 —— App 内真实录屏（一段真实会话的最后 8 秒）" width="860" />
@@ -13,22 +26,45 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/app-models.png" alt="模型管理：10 个厂商预设 + 本地 Ollama" width="46%" />
+  <img src="docs/images/app-models.png" alt="模型管理：13 个厂商预设 + 本地 Ollama" width="46%" />
   <img src="docs/images/app-news.png" alt="应用内置的 AI 资讯看板，读取自有内容源" width="46%" />
 </p>
 
+## 快速安装
+
+**macOS（Apple Silicon）** —— [下载 .dmg](https://github.com/SuperCrzy/Supercrzy-Bot/releases/latest)，打开后把应用拖进「应用程序」。首次启动：右键 → 打开（构建未签名）。
+
+**从源码** —— macOS / Linux / WSL2（需要 Node 22.x + pnpm 10.x）：
+
+```bash
+git clone https://github.com/SuperCrzy/Supercrzy-Bot.git
+cd Supercrzy-Bot
+./start.sh          # 检查环境 → 装依赖 → 构建 → 启动 → 开浏览器
+```
+
+> `start.sh` 不需要任何配置：自动校验 Node 与 pnpm、缺 `.env` 时自动创建、构建前端并打开应用。停止用 `./start.sh stop`。
+> 想让 `supercrzy` 命令在任意目录可用？之后跑 `npm link`。
+
+然后到应用里[填模型 key](#-海外模型渠道) —— DeepSeek、OpenRouter、OpenAI、Anthropic、Gemini、xAI、Mistral、通义千问，或本地 Ollama。
+
 ## ✨ 功能亮点
 
-- **Agent Loop**:多轮思考 + 工具执行(文件操作、Shell、网络搜索、网页抓取、记忆、技能)
-- **Agent 执行时间线**:每一步思考/工具调用实时可视化,历史可回放、**可分支续跑**
-- **经验库(Playbook)**:任务结束自动复盘,同类任务自动注入历史经验,越用越聪明
-- **超级协作平台**:串行流水线，执行 / 质检 / 会诊跑在**不同厂商的模型**上——不让一个模型给自己打分。每个阶段的进度落库，进程重启不丢
-- **技能系统**:32 个内置技能按需安装；另有开源来源——browse.sh 的 461 个浏览器自动化技能，以及 OpenAI / Anthropic / Hugging Face / NVIDIA 的官方技能仓库
-- **长期记忆**:自动提取并持久化重要信息,跨会话生效
-- **工作台**:文件浏览器 + 终端 + 代码编辑器一站式
-- **多平台网关**:Web / 微信 / QQ 共享同一记忆、会话、技能库
-- **完整模型库**:DeepSeek V1~V4 / R1 全系列 18+ 模型目录
-- **安全默认**:敏感工具"先确认后执行"、危险命令黑名单、CORS 白名单、可选 API 令牌
+**它把活干完，还让你看见过程。** 下面标 ★ 的三条，是同行很少同时做到的。
+
+- **Agent Loop（Agent 循环）** —— 多轮推理 + 44 个工具：文件、Shell、网络、记忆、技能。每一步都在时间线上实时渲染，可回放、**可从检查点分支续跑**。
+- ★ **完整 Web UI，不是终端** —— 15 个页面：带执行时间线的对话、含编辑器与文件浏览的工作台、模型、记忆、技能、网关、日志、用量。同一个 server 也提供 CLI，**用界面是选择，不是强制**。
+- **真终端，不是一次性 Shell** —— 六个终端工具让会话保持存活：后台跑 dev server、运行交互式程序、增量读输出、发 SIGINT 中断。和「执行完就结束」的 `shell_exec` 是两回事。
+- **它造的东西你能直接看见** —— `draw_diagram` 输出 SVG 在对话里直接渲染；`generate_image` 生成图片；`make_article` 丢一个 URL 或 YouTube 链接进去，返回一篇配好图的成品；`video_edit` 裁剪与拼接音视频。
+- ★ **带出处的深度研究** —— `deep_research` 递归搜索、逐层加深度，输出多页报告并附 Sources 来源列表。`news_search` 读本项目自己的 RSS 源，**无 API key、无限流**。
+- **能看见的计划，而且会自查** —— `create_plan` 先拆步骤再动手，前端以计划卡片跟踪进度；`get_goal` 让 Agent 在中途发现自己跑偏了原始需求。
+- **它知道自己刚写的代码有问题** —— `lint_file` 在写完文件后跑一遍静态检查：危险模式、凭据泄露、括号不配对。
+- ★ **不让一个模型给自己打分** —— 超级协作平台让执行、质检、会诊跑在**不同厂商的模型**上（DeepSeek 执行、Kimi 质检、GPT 进议院）。各阶段进度落 SQLite，进程重启不丢。
+- **Playbook 经验库** —— 任务结束写一份复盘；下一个类似任务开始前，把经验注入进去。
+- **技能是一条供应链** —— 32 个内置技能在市场里按需安装，另有 browse.sh 的 461 个浏览器自动化技能，以及 OpenAI / Anthropic / Hugging Face / NVIDIA 的官方技能仓库。**技能还会自己写、自己修**。
+- **长期记忆** —— 跨会话提取事实，注入时按权重排序，定期去重合并。提取走单一串行 worker，忙一天也不会变成限流事故。
+- **电脑操作（Computer Use）** —— 截屏、点击、输入、组合键、滚动、打开应用。截屏以图片回传给模型，**所以它看得见自己点击后的结果**。三道门：每次调用确认、仅「完全访问」会话可用、macOS 需授予录屏与辅助功能。
+- **八个渠道，同一份记忆** —— 微信、企微、钉钉、飞书、QQ、Telegram、Discord、Slack，与桌面端共享同一套会话、技能与记忆。
+- **默认安全** —— 敏感工具先确认、危险命令由命令级分类器拦截、Shell 访问三层沙箱、文件读写限定在工作区白名单内。
 
 ## 🔧 工程说明
 
@@ -77,7 +113,7 @@
 
 内置 **Ollama (本地)** 渠道:安装 [Ollama](https://ollama.com) 并 `ollama pull llama3.1` 后,模型页选 Ollama → 点「识别可用模型」→ 自动列出本地已拉取的模型(`llama3.1:8b` 等),点选即用。API Key 留空即可(本地无需鉴权)。
 
-## 🚀 快速开始(3 分钟)
+## 🚀 安装细节
 
 ### 方式一:终端一行命令(首次使用,无需任何配置)
 

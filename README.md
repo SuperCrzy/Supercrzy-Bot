@@ -1,9 +1,21 @@
+<p align="center">
+  <img src="docs/images/banner.png" alt="Introducing SuperCrzy Bot — self-hosted AI agent platform" width="100%">
+</p>
+
 # SUPERCRZY BOT
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[中文版](README.zh-CN.md)
+<p align="center">
+  <a href="https://supercrzy.com/bot"><img src="https://img.shields.io/badge/Website-supercrzy.com-5b6dff?style=for-the-badge" alt="Website"></a>
+  <a href="https://github.com/SuperCrzy/Supercrzy-Bot/releases/latest"><img src="https://img.shields.io/badge/Download-macOS%20arm64-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download"></a>
+  <a href="https://github.com/SuperCrzy/Supercrzy-Bot/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License"></a>
+  <a href="README.zh-CN.md"><img src="https://img.shields.io/badge/Lang-中文-red?style=for-the-badge" alt="中文"></a>
+</p>
 
 A ready-to-run **AI Agent platform** — unified brain + Agent Loop + multi-tool + multi-platform gateway, natively wired to DeepSeek V4 with support for 200+ models via OpenAI-compatible providers.
+
+**Bring your own key, keep every session on your own disk.** No subscription, no inference markup, no account — the app talks to the provider you already pay, and the whole stack is MIT-licensed.
+
+Three things most self-hosted agents don't ship together: a **full web UI** (15 screens, not a terminal), **cross-vendor review** where one model doesn't grade its own work, and a **content feed that needs no API key**.
 
 <p align="center">
   <img src="docs/images/demo.gif" alt="SuperCrzy Bot in action — screen recording from the app (last 8 seconds of a real session)" width="860" />
@@ -14,22 +26,45 @@ A ready-to-run **AI Agent platform** — unified brain + Agent Loop + multi-tool
 </p>
 
 <p align="center">
-  <img src="docs/images/app-models.png" alt="Model management: 10 provider presets plus a local Ollama option" width="46%" />
+  <img src="docs/images/app-models.png" alt="Model management: 13 provider presets plus a local Ollama option" width="46%" />
   <img src="docs/images/app-news.png" alt="The in-app AI news board reading the in-house content feed" width="46%" />
 </p>
 
+## Quick Install
+
+**macOS (Apple Silicon)** — [download the .dmg](https://github.com/SuperCrzy/Supercrzy-Bot/releases/latest), open it, drag the app to Applications. First launch: right-click → Open (the build is unsigned).
+
+**From source** — macOS, Linux or WSL2 (needs Node 22.x + pnpm 10.x):
+
+```bash
+git clone https://github.com/SuperCrzy/Supercrzy-Bot.git
+cd Supercrzy-Bot
+./start.sh          # checks env → installs deps → builds → starts → opens browser
+```
+
+> `start.sh` needs no setup: it verifies Node and pnpm, creates `.env` if missing, builds the frontend and opens the app. Stop it with `./start.sh stop`.
+> Want a `supercrzy` command that works from any directory? `npm link` afterwards.
+
+Then [add your model key](#-model-providers) in the app — DeepSeek, OpenRouter, OpenAI, Anthropic, Gemini, xAI, Mistral, Qwen or a local Ollama.
+
 ## ✨ Highlights
 
-- **Agent Loop**: multi-turn reasoning + tool execution (file ops, shell, web search, web fetch, memory, skills)
-- **Execution timeline**: every step of reasoning/tool calls visualized live, replayable, **branchable and resumable**
-- **Playbook (experience base)**: auto retrospective after each task; similar tasks reuse past experience — the agent gets smarter over time
-- **Collaboration Hub**: a serial pipeline where execution, review and audit run on **different vendors' models** — one model does not grade its own homework. Stages persist to SQLite, so a run survives a restart
-- **Skill system**: 32 built-in skills in a catalog, installable on demand, plus open sources — 461 browser-automation skills from browse.sh and the official repositories of OpenAI, Anthropic, Hugging Face and NVIDIA
-- **Long-term memory**: auto-extracts and persists important facts across sessions
-- **Workspace**: file browser + terminal + code editor in one place
-- **Multi-platform gateway**: Web / WeChat / QQ share the same memory, sessions and skill library
-- **Full model catalog**: DeepSeek V1~V4 / R1 series, 18+ models
-- **Secure by default**: sensitive tools require confirmation before execution, dangerous command blacklist, CORS whitelist, optional API token
+**It does the work, and shows you the work.** The three things below that rivals rarely ship together are marked with ★.
+
+- **Agent Loop** — multi-turn reasoning plus 44 tools: files, shell, web, memory, skills. Every step renders live in a timeline you can replay, branch and resume from a checkpoint.
+- ★ **A full web UI, not a terminal** — 15 screens: chat with a live execution timeline, workspace with editor and file browser, models, memory, skills, gateway, logs, usage. The same server also serves a CLI, so the UI is a choice rather than a requirement.
+- **A real terminal, not a one-shot shell** — six terminal tools that keep a session alive: start a dev server in the background, run an interactive program, read output incrementally, send SIGINT. Distinct from `shell_exec`, which is fire-and-forget.
+- **It builds things you can see** — `draw_diagram` emits SVG that renders inline in the conversation; `generate_image` produces images; `make_article` takes a URL or a YouTube link and returns a finished illustrated write-up; `video_edit` trims and concatenates media.
+- ★ **Research with sources** — `deep_research` recurses through searches, widens depth, and returns a multi-page report with a Sources list. `news_search` reads this project's own RSS feed, no API key, no rate limit.
+- **Plans you can watch, and that self-check** — `create_plan` lays out steps before acting, the UI tracks them as a plan card, and `get_goal` lets the agent notice mid-run that it has drifted from what you asked.
+- **It knows when the code it just wrote is broken** — `lint_file` runs a static pass after a write: dangerous patterns, leaked credentials, unbalanced brackets.
+- ★ **One model does not grade its own homework** — the Collaboration Hub runs execution, quality review and audit on different vendors' models (DeepSeek executes, Kimi reviews, GPT joins the senate). Stage progress persists to SQLite, so a run survives a restart.
+- **Playbook** — after a task, a retrospective is written down; a similar next task gets those lessons injected before it starts.
+- **Skills as a supply chain** — 32 built-in in a catalog, plus 461 browser-automation skills from browse.sh and the official repositories of OpenAI, Anthropic, Hugging Face and NVIDIA. Skills also write and patch themselves.
+- **Long-term memory** — facts extracted across sessions, weighted when injected, deduplicated over time. Extraction runs through a serial worker so a busy day doesn't turn into a rate-limit incident.
+- **Computer Use** — screenshot, click, type, key combos, scroll, launch apps. Screenshots come back as images, so the agent sees what its click did. Three gates: per-call confirmation, full-permission sessions only, and macOS Screen Recording + Accessibility.
+- **Eight channels, one memory** — WeChat, WeCom, DingTalk, Feishu, QQ, Telegram, Discord, Slack all share the same sessions, skills and memory as the desktop app.
+- **Secure by default** — sensitive tools require confirmation, dangerous commands are blocked by a command-level classifier, shell access is sandboxed in three layers, files are confined to a workspace whitelist.
 
 ## 🔧 Engineering Notes
 
@@ -59,7 +94,7 @@ Credential files inside the repository are denied by literal rule as a fallback,
 
 ## 🌍 Model Providers
 
-The Models page (`/models`) ships with 10 provider presets supporting the OpenAI-compatible protocol:
+The Models page (`/models`) ships with 13 provider presets supporting the OpenAI-compatible protocol:
 
 | Provider | Notes |
 |------|------|
@@ -78,7 +113,7 @@ Usage: open the Models page → click a provider → paste your API key (baseUrl
 
 A built-in **Ollama (local)** provider is included: install [Ollama](https://ollama.com), `ollama pull llama3.1`, then on the Models page pick Ollama → "Discover models" → the locally pulled models (`llama3.1:8b` etc.) are listed automatically. Leave the API key empty (no auth needed locally).
 
-## 🚀 Quick Start (3 minutes)
+## 🚀 Installation Details
 
 ### Requirements (pinned)
 
