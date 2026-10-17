@@ -15,13 +15,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 不写 `with: version` —— pnpm/action-setup@v4 在 package.json 已有
+      # `packageManager` 字段时，显式 version 会与之冲突并直接失败。
+      # 让 action 自己读 packageManager（唯一真源）即可。
       - uses: pnpm/action-setup@v4
-        with:
-          version: 10
 
+      # node-version-file 读 .nvmrc（仓库里是精确的 22.22.2）。
+      # 不写 `node-version: 22`：那会让 setup-node 取"当前最新 22.x"，
+      # 而 engines 要求 >=22.18.0 <23 —— 与本地 .nvmrc 对齐才是单一真源。
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: pnpm
 
       - name: Install dependencies

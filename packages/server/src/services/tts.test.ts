@@ -194,11 +194,32 @@ describe('TTS_VOICES 音色清单不变量', () => {
     expect(ids).toContain(defaultVoice())
   })
 
-  it('中文音色台词含中文、英文音色台词不含中文（两个方向都要能读）', () => {
+  it('台词与音色能力匹配：中文专用音色必须含中文，中英通用音色必须同时含中英', () => {
+    // 2026-10-16 修：原断言假设「非 zh- 前缀 = 纯英文音色」，因此要求台词不含中文。
+    // 但 Ava/Emma/Andrew/Brian 是 Edge TTS 的 Multilingual 音色 —— 中英通用，
+    // 台词故意中英双写（试听时正好验证两种语言都读得自然）。
+    // 按前缀判断已不成立，改为按「音色实际能力」判断：
+    //   zh-CN-*      → 中文专用 ⇒ 台词应含中文
+    //   *Multilingual* → 中英通用 ⇒ 台词应同时含中英
     for (const v of TTS_VOICES) {
       const hasHan = /[\u4e00-\u9fa5]/.test(v.sample)
-      if (v.id.startsWith('zh')) expect(hasHan, `${v.id} 应含中文`).toBe(true)
-      else expect(hasHan, `${v.id} 不该含中文`).toBe(false)
+      const hasLatin = /[A-Za-z]/.test(v.sample)
+      if (v.id.includes('Multilingual')) {
+        expect(hasHan, `${v.id} 是中英通用，台词应含中文`).toBe(true)
+        expect(hasLatin, `${v.id} 是中英通用，台词应含英文`).toBe(true)
+      } else if (v.id.startsWith('zh')) {
+        expect(hasHan, `${v.id} 是中文专用，台词应含中文`).toBe(true)
+      }
+    }
+  })
+
+  it('中英通用音色台词里的自称与音色名一致（防止复制粘贴串名）', () => {
+    // 2026-10-16 加：四个 Multilingual 音色是批量加的，容易出现
+    // 「Andrew 的台词写着我叫 Ava」这类复制粘贴错误 —— 台词读出来会很尴尬。
+    for (const v of TTS_VOICES) {
+      if (!v.id.includes('Multilingual')) continue
+      const name = v.id.replace('en-US-', '').replace('MultilingualNeural', '')
+      expect(v.sample, `${v.id} 台词应包含音色名 ${name}`).toContain(name)
     }
   })
 })
