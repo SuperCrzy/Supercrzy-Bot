@@ -173,7 +173,11 @@ jobs:
           while ($attempt -lt 4 -and -not $ok) {
             $attempt++
             Write-Host "=== electron-builder attempt $attempt ==="
-            pnpm exec electron-builder --win nsis --publish never
+            # --config.electronDownload.mirror= 空字符串 ⇒ 覆盖 electron-builder.yml 里
+            # 写死的 huaweicloud 镜像（那份配置是为本机打包写的，在 Actions 的共享出口 IP
+            # 上会被 429 限流）。CLI 参数优先级高于配置文件，env 覆盖不了。
+            # 留空 ⇒ 回落到 Electron 的官方 GitHub release，runner 访问走高速通道。
+            pnpm exec electron-builder --win nsis --publish never --config.electronDownload.mirror=
             if ($LASTEXITCODE -eq 0) { $ok = $true }
             else {
               Write-Host "attempt $attempt failed (exit $LASTEXITCODE)"
