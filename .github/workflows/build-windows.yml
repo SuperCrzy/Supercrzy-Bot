@@ -150,14 +150,34 @@ jobs:
           Write-Host "Package hygiene OK"
 
       # ── ⑤ 出 nsis 安装包 ──
+      # electron-builder 会从 GitHub 拉 nsis / winCodeSign / nsis-resources 等打包工具。
+      # Actions runner 是共享出口 IP，实测会撞 429（Too Many Requests）。
+      # Electron 二进制走 huaweicloud 镜像（与 electron-builder.yml 里 mac 的配置一致，
+      # 那边实测 npmmirror 只有 11 KB/s，huaweicloud 313 KB/s）。
+      # nsis 等工具没有官方镜像变量，靠重试兜住 —— 429 是瞬时的。
       - name: Build Windows installer
         working-directory: packages/desktop
         shell: pwsh
         env:
-          # publish.url 用 ${env.UPDATE_URL}；Windows 的更新通道与 mac 分开写
           UPDATE_URL: https://updates.supercrzy.com/releases
+          ELECTRON_MIRROR: https://mirrors.huaweicloud.com/electron/
         run: |
-          pnpm exec electron-builder --win nsis --publish never
+          $env:CSC_IDENTITY_AUTO_DISCOVERY = "false"   # 没签名证书，别去发现
+          $attempt = 0
+          $ok = $false
+          while ($attempt -lt 3 -and -not $ok) {
+            $attempt++
+            Write-Host "=== electron-builder attempt $attempt ==="
+            pnpm exec electron-builder --win nsis --publish never
+            if ($LASTEXITCODE -eq 0) { $ok = $true }
+            else {
+              Write-Host "attempt $attempt failed (exit $LASTEXITCODE)"
+              if ($attempt -lt 3) {
+                Start-Sleep -Seconds (30 * $attempt)   # 30s / 60s 退避
+              }
+            }
+          }
+          if (-not $ok) { Write-Error "electron-builder failed after $attempt attempts"; exit 1 }
 
       - name: List artifacts
         working-directory: packages/desktop/dist
