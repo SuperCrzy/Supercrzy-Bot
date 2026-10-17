@@ -104,9 +104,20 @@ jobs:
           $ver = (Get-Content "packages/desktop/package.json" -Raw | ConvertFrom-Json).devDependencies.electron
           $ver = $ver -replace '[\^~]', ''
           Write-Host "Electron $ver"
-          Push-Location packages/desktop/.deploy-server
+          # rebuild 工具装在**独立目录**，不能装进 .deploy-server ——
+          # 否则 @electron/* 会留进产物，被第 ④ 步的卫生检查拦下（本地
+          # build-dmg.sh 用的是 .build-tools/，这里照做）。
+          $tools = "packages/desktop/.build-tools"
+          New-Item -ItemType Directory -Force -Path $tools | Out-Null
+          Set-Content "$tools/package.json" '{"name":"supercrzy-build-tools","version":"0.0.0","private":true}'
+          Push-Location $tools
           npm install --no-save --no-audit --no-fund "@electron/rebuild"
-          npx electron-rebuild -f -w better-sqlite3 -v $ver
+          Pop-Location
+
+          # cwd 落在 .deploy-server 里跑 electron-rebuild（-m 参数语义有歧义，
+          # 1.0.2 起就用默认值，见 build-dmg.sh 的说明）
+          Push-Location packages/desktop/.deploy-server
+          & "../../.build-tools/node_modules/.bin/electron-rebuild" -f -w better-sqlite3 -v $ver
           $abi = "node_modules/better-sqlite3/build/Release/better_sqlite3.node"
           if (-not (Test-Path $abi)) {
             Write-Error "better-sqlite3 native binary missing after rebuild"
