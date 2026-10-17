@@ -42,6 +42,8 @@ if [ "$1" = "stop" ]; then
   pkill -f "tsx.*src/app.ts" 2>/dev/null || true
   pkill -f "packages/server/src/app" 2>/dev/null || true
   # 3. 兜底：杀占用 3000-3010 的进程
+  #    启动端口已固定 3000，但**保留 3001-3010 扫描**：用于清理旧版本遗留的漂移进程
+  #    （2026-10-17 之前会自动换端口，可能残留 3001/3002…，它们和 3000 共写同一个 DB）
   for port in $(seq 3000 3010); do lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null | xargs kill 2>/dev/null || true; done
   rm -f "$PID_FILE"
   [ "$stopped" = "1" ] && ok "已停止服务" || warn "未检测到运行中的服务（已清理残留）"
@@ -62,33 +64,70 @@ if ! command -v pnpm >/dev/null 2>&1; then
 fi
 ok "pnpm $(pnpm -v)"
 
-# 3. 安装依赖（首次 / 依赖变更 / 上次安装中断）
+# 3. 安装依赖（首次 / 依赖真的变了 / 上次安装中断）
 #
 # 为什么不能只看 `[ -d node_modules ]`：安装中断、clone 后残留、手工删过部分包，
 # 都会留下一个"存在但不完整"的 node_modules —— 目录在，实际什么都跑不起来。
-# 判据改成三件事一起看：
-#   ① node_modules/.modules.yaml 存在（pnpm 写完这个才算装成功）
-#   ② pnpm-lock.yaml 不比 .modules.yaml 新（依赖清单变过就得重装）
-#   ③ 关键包可解析（node 能 require 到 electron / better-sqlite3 的落点）
+#
+# 为什么不用 `pnpm-lock.yaml -nt .modules.yaml` 判"依赖变没变"（2026-10-17 加固）：
+#   时间戳会被 git checkout / 编辑器保存 / 手工 touch 无端刷新，lock 内容一个字没变
+#   也会触发 1.6 GB 重装；反过来拷贝仓库时 mtime 被统一改写，真变了也检测不到。
+#   改成**内容指纹**：装完把 lock 的 sha256 写进 .sc-install-state，
+#   下次只比对指纹，一致就跳过 —— 指纹相同 = 依赖树相同，与时间无关。
+#
+# 判据（四条，命中任一即重装）：
+#   ① node_modules 或 .modules.yaml 不存在（pnpm 写完这个才算装成功）
+#   ② 关键包目录缺失（手工删过 / 磁盘写满）
+#   ③ 没有指纹记录（老仓库升级上来）→ 补写，不重装
+#   ④ lock 指纹与记录不一致（依赖清单内容真的变了）→ 重装
 NEED_INSTALL=0
+NEED_REASON=""
 MODULES_MARK="node_modules/.modules.yaml"
+LOCK_FILE="pnpm-lock.yaml"
+STATE_FILE="node_modules/.sc-install-state"
+
+# lock 指纹：优先 sha256（Linux sha256sum / mac shasum）；都没有则退回 cksum
+lock_fingerprint() {
+  if [ ! -f "$LOCK_FILE" ]; then echo "no-lock"; return; fi
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$LOCK_FILE" | cut -d' ' -f1
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$LOCK_FILE" | cut -d' ' -f1
+  else
+    cksum "$LOCK_FILE" | tr ' ' '-'
+  fi
+}
+
+CURRENT_FP="$(lock_fingerprint)"
+
 if [ ! -d node_modules ]; then
   info "首次运行，安装依赖（干净机器约 3-8 分钟）..."
-  NEED_INSTALL=1
+  NEED_INSTALL=1; NEED_REASON="first-run"
 elif [ ! -f "$MODULES_MARK" ]; then
   warn "node_modules 存在但没有 .modules.yaml（上次安装可能未完成），重新安装..."
-  NEED_INSTALL=1
-elif [ -f pnpm-lock.yaml ] && [ pnpm-lock.yaml -nt "$MODULES_MARK" ]; then
-  info "pnpm-lock.yaml 比安装记录新，重新安装依赖..."
-  NEED_INSTALL=1
-elif ! [ -d "packages/server/node_modules/tsx" ] || ! [ -d "packages/client/node_modules/vue" ]; then
-  # .modules.yaml 在、但关键包缺失（手工删过 / 磁盘写满）—— 同样视为不完整
+  NEED_INSTALL=1; NEED_REASON="incomplete"
+elif [ ! -d "packages/server/node_modules/tsx" ] || [ ! -d "packages/client/node_modules/vue" ]; then
+  # 关键包缺失（手工删过 / 磁盘写满）—— 视为不完整
   warn "依赖目录缺少关键包（tsx / vue），重新安装..."
-  NEED_INSTALL=1
+  NEED_INSTALL=1; NEED_REASON="missing-pkg"
+elif [ ! -f "$STATE_FILE" ]; then
+  # 老仓库升级上来：没有指纹记录，但 .modules.yaml 在 ⇒ 装过一次
+  # 按"已装好"处理，直接补写指纹（不触发重装；lock 随仓库带来，与已装的一致）
+  info "补写依赖指纹 ${CURRENT_FP:0:12}..."
+  echo "$CURRENT_FP" > "$STATE_FILE" 2>/dev/null || true
+elif [ "$(cat "$STATE_FILE" 2>/dev/null)" != "$CURRENT_FP" ]; then
+  info "pnpm-lock.yaml 内容有变化（依赖清单变了），重新安装依赖..."
+  NEED_INSTALL=1; NEED_REASON="lock-changed"
 fi
 
 if [ "$NEED_INSTALL" = "1" ]; then
-  pnpm install || fail "依赖安装失败（如果是网络问题，设好代理后重跑本脚本）"
+  # 指纹**装成功之后**才落盘（先写 .tmp 再 mv）：中途失败绝不留下"指纹已更新"的假象，
+  # 下次重跑仍会命中 ①/②/④ 继续重装，不会误判成"已就绪"。
+  pnpm install || {
+    rm -f "$STATE_FILE.tmp"
+    fail "依赖安装失败（如果是网络问题，设好代理后重跑本脚本）"
+  }
+  echo "$CURRENT_FP" > "$STATE_FILE.tmp" && mv -f "$STATE_FILE.tmp" "$STATE_FILE"
 else
   ok "依赖已就绪"
 fi
@@ -120,17 +159,27 @@ else
 fi
 
 # 6. 后台守护启动（2026-08-26 老板：一键免命令 + 关窗/端口不挂）
-# 用 nohup 后台起服务 + PID 文件管理：关终端窗不丢、重启不重复起、端口被占自动换。
+# 用 nohup 后台起服务 + PID 文件管理：关终端窗不丢、重启不重复起。
+#
+# 端口固定 3000，**不再自动顺延**（2026-10-17 老板拍板「合并成一份服务」）：
+#   旧逻辑 3000 被占就 +1 换到 3001/3002…，后果是三份隐性成本：
+#     ① 端口漂移：书签/脚本/`supercrzy status` 对不上，以为"版本不一样"其实只是换了口；
+#     ② 双服务并存：两个进程同时写同一个 SQLite（~/.supercrzy/data/supercrzy.db），
+#        better-sqlite3 是同步写，多写者会抢锁，最坏情况 SQLITE_BUSY 丢写；
+#     ③ 问题被掩盖：本该是"旧进程没停"，却表现成"看起来很正常的 3001"。
+#   现在：3000 被占 ⇒ 直接失败退出，并打印占用 PID + 停止命令，逼着先清理再启动。
 PID_FILE="${HOME}/.supercrzy/server.pid"
 LOG_FILE="${HOME}/.supercrzy/server.log"
 mkdir -p "${HOME}/.supercrzy"
+PORT="${PORT:-3000}"
+URL="http://localhost:${PORT}"
 
 # 若已在运行 → 直接打开浏览器（不重复起服务）
 if [ -f "$PID_FILE" ]; then
   OLD_PID=$(cat "$PID_FILE" 2>/dev/null)
-  if kill -0 "$OLD_PID" 2>/dev/null; then
+  if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then
     ok "服务已在运行 (PID $OLD_PID)，直接打开界面"
-    URL="http://localhost:$(grep -oE 'localhost:[0-9]+' "$LOG_FILE" 2>/dev/null | head -1 | cut -d: -f2 || echo 3000)"
+    # 端口不再漂移，直接用固定 PORT（旧逻辑从 log 里 grep，多行会取错）
     open "$URL" 2>/dev/null || true
     exit 0
   else
@@ -138,13 +187,22 @@ if [ -f "$PID_FILE" ]; then
   fi
 fi
 
-# 自动选端口：3000 起，被占则 +1（≤3010）
-port_free() { ! lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1 && ! curl -s -o /dev/null --max-time 1 "http://localhost:$1" 2>/dev/null; }
-PORT=3000
-for p in $(seq 3000 3010); do
-  if port_free "$p"; then PORT=$p; break; fi
-done
-URL="http://localhost:${PORT}"
+# 端口占用检查：被占就报错退出（不换端口）
+if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+  OCCUPY_LINE=$(lsof -nP -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null | tail -n +2 | head -1)
+  OCCUPY_PID=$(echo "$OCCUPY_LINE" | awk '{print $2}')
+  OCCUPY_CMD=$(echo "$OCCUPY_LINE" | awk '{print $1}')
+  echo ""
+  echo -e "${C_RED}✘${C_NC} 端口 ${PORT} 已被占用，拒绝启动（不再自动换端口，避免两份服务抢同一个数据库）"
+  echo -e "${C_YELLOW}  占用进程：PID ${OCCUPY_PID}  (${OCCUPY_CMD})${C_NC}"
+  echo -e "${C_YELLOW}  处理方式：${C_NC}"
+  echo -e "${C_YELLOW}    1) 若是本项目的旧服务 → bash start.sh stop${C_NC}"
+  echo -e "${C_YELLOW}    2) 若不确定是什么 → lsof -nP -iTCP:${PORT} -sTCP:LISTEN${C_NC}"
+  echo -e "${C_YELLOW}    3) 确认可杀 → kill ${OCCUPY_PID}${C_NC}"
+  echo -e "${C_YELLOW}  换端口启动（不推荐，会与上面的服务共写数据库）：PORT=3001 ./start.sh${C_NC}"
+  echo ""
+  exit 1
+fi
 
 # nohup 后台启动（脱离终端，关窗不挂）；走 pnpm（第2步已确认）+ PORT 环境变量
 info "后台启动服务... ${URL}"
