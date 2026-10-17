@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="https://supercrzy.com/bot"><img src="https://img.shields.io/badge/Website-supercrzy.com-5b6dff?style=for-the-badge" alt="Website"></a>
-  <a href="https://github.com/SuperCrzy/Supercrzy-Bot/releases/latest"><img src="https://img.shields.io/badge/Download-macOS%20arm64-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download"></a>
+  <a href="https://github.com/SuperCrzy/Supercrzy-Bot/releases/latest"><img src="https://img.shields.io/badge/Download-macOS%20%7C%20Windows-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download"></a>
   <a href="https://github.com/SuperCrzy/Supercrzy-Bot/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License"></a>
   <a href="README.zh-CN.md"><img src="https://img.shields.io/badge/Lang-中文-red?style=for-the-badge" alt="中文"></a>
 </p>
@@ -33,6 +33,8 @@ Three things most self-hosted agents don't ship together: a **full web UI** (15 
 ## Quick Install
 
 **macOS (Apple Silicon)** — [download the .dmg](https://github.com/SuperCrzy/Supercrzy-Bot/releases/latest), open it, drag the app to Applications. First launch: right-click → Open (the build is unsigned).
+
+**Windows (x64)** — [download the .exe setup](https://github.com/SuperCrzy/Supercrzy-Bot/releases/latest), run it. The installer is unsigned, so SmartScreen will ask you to allow it once.
 
 **From source** — macOS, Linux or WSL2 (needs Node 22.x + pnpm 10.x):
 

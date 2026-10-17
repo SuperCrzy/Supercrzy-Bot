@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="https://supercrzy.com/bot"><img src="https://img.shields.io/badge/官网-supercrzy.com-5b6dff?style=for-the-badge" alt="官网"></a>
-  <a href="https://github.com/SuperCrzy/Supercrzy-Bot/releases/latest"><img src="https://img.shields.io/badge/下载-macOS%20arm64-000000?style=for-the-badge&logo=apple&logoColor=white" alt="下载"></a>
+  <a href="https://github.com/SuperCrzy/Supercrzy-Bot/releases/latest"><img src="https://img.shields.io/badge/下载-macOS%20%7C%20Windows-000000?style=for-the-badge&logo=apple&logoColor=white" alt="下载"></a>
   <a href="https://github.com/SuperCrzy/Supercrzy-Bot/blob/main/LICENSE"><img src="https://img.shields.io/badge/许可证-MIT-green?style=for-the-badge" alt="许可证"></a>
   <a href="README.md"><img src="https://img.shields.io/badge/Lang-English-blue?style=for-the-badge" alt="English"></a>
 </p>
@@ -33,6 +33,8 @@
 ## 快速安装
 
 **macOS（Apple Silicon）** —— [下载 .dmg](https://github.com/SuperCrzy/Supercrzy-Bot/releases/latest)，打开后把应用拖进「应用程序」。首次启动：右键 → 打开（构建未签名）。
+
+**Windows（x64）** —— [下载 .exe 安装包](https://github.com/SuperCrzy/Supercrzy-Bot/releases/latest)，直接运行。安装包未签名，SmartScreen 会拦一次，选「仍要运行」即可。
 
 **从源码** —— macOS / Linux / WSL2（需要 Node 22.x + pnpm 10.x）：
 
