@@ -160,20 +160,25 @@ jobs:
         shell: pwsh
         env:
           UPDATE_URL: https://updates.supercrzy.com/releases
-          ELECTRON_MIRROR: https://mirrors.huaweicloud.com/electron/
+          # 刻意**不设** ELECTRON_MIRROR。
+          # 实测：huaweicloud 镜像在 Actions 的共享出口 IP 上返回 429（mac 本机单独 IP
+          # 时能用，313 KB/s —— 环境不同，结论不能照搬）。
+          # Electron 的 release 本来就在 GitHub 上，runner 拉自己的 release 走的是
+          # 高速通道，比任何第三方镜像都稳。
+          # 打包工具（nsis 等）同样从 GitHub 拉，靠下面的重试兜住瞬时 429。
         run: |
           $env:CSC_IDENTITY_AUTO_DISCOVERY = "false"   # 没签名证书，别去发现
           $attempt = 0
           $ok = $false
-          while ($attempt -lt 3 -and -not $ok) {
+          while ($attempt -lt 4 -and -not $ok) {
             $attempt++
             Write-Host "=== electron-builder attempt $attempt ==="
             pnpm exec electron-builder --win nsis --publish never
             if ($LASTEXITCODE -eq 0) { $ok = $true }
             else {
               Write-Host "attempt $attempt failed (exit $LASTEXITCODE)"
-              if ($attempt -lt 3) {
-                Start-Sleep -Seconds (30 * $attempt)   # 30s / 60s 退避
+              if ($attempt -lt 4) {
+                Start-Sleep -Seconds (30 * [Math]::Pow(2, $attempt - 1))   # 30 / 60 / 120s 退避
               }
             }
           }
