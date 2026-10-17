@@ -10,6 +10,7 @@ cd "$(dirname "$0")/.."
 
 APP_NAME="SUPERCRZY BOT.app"
 APP_PATH="$PWD/$APP_NAME"
+# 权威图标源（见下方第 3 步）；此变量是 logo.png 回退路径
 LOGO="packages/client/public/logo.png"
 
 echo "[SUPERCRZY BOT] 生成桌面 App: $APP_NAME"
@@ -32,8 +33,24 @@ osacompile -o "$APP_PATH" \
   -e 'end run'
 echo "✔ AppleScript 包装完成"
 
-# 3. 生成品牌图标（logo.png → .icns）
-if [ -f "$LOGO" ]; then
+# 3. 应用品牌图标
+#
+# 🔴 图标源优先级（2026-10-17 老板确认「桌面图标需要用我们 App 的图标」）：
+#   ① packages/desktop/build/icon.icns —— **权威源**，与 Electron 安装版 App 同图，
+#      内含完整的 16→1024 十档尺寸，直接 copy 不做任何重采样。
+#   ② 回退 packages/client/public/logo.png —— 仅 512×512，需放大到 1024，
+#      Retina 上会发虚；只在 ① 缺失时兜底，并明确警告。
+# 历史问题：旧脚本只用 logo.png（512）生成，导致桌面图标与安装版 App 是**两张不同的图**，
+# 且 1024 档是把 512 强行放大出来的，视觉上模糊。
+BRAND_ICNS="packages/desktop/build/icon.icns"
+DEST_ICNS="$APP_PATH/Contents/Resources/applet.icns"
+
+if [ -f "$BRAND_ICNS" ]; then
+  cp "$BRAND_ICNS" "$DEST_ICNS" \
+    && echo "✔ 品牌图标已应用（build/icon.icns，与安装版 App 同图）" \
+    || echo "⚠ 图标拷贝失败，使用默认图标"
+elif [ -f "$LOGO" ]; then
+  echo "⚠ 未找到 build/icon.icns，回退到 logo.png（512，放大后略模糊）"
   ICONSET=$(mktemp -d)/logo.iconset
   mkdir -p "$ICONSET"
   for s in 16 32 64 128 256 512; do
@@ -49,13 +66,13 @@ if [ -f "$LOGO" ]; then
 
   if command -v iconutil >/dev/null 2>&1; then
     iconutil -c icns "$ICONSET" -o /tmp/applet.icns 2>/dev/null \
-      && cp /tmp/applet.icns "$APP_PATH/Contents/Resources/applet.icns" \
-      && echo "✔ 品牌图标已应用" || echo "⚠ 图标生成失败，使用默认图标"
+      && cp /tmp/applet.icns "$DEST_ICNS" \
+      && echo "✔ 图标已应用（logo.png 回退路径）" || echo "⚠ 图标生成失败，使用默认图标"
   else
     echo "⚠ 未找到 iconutil，使用默认图标"
   fi
 else
-  echo "⚠ 未找到 logo.png，使用默认图标"
+  echo "⚠ 未找到图标源（build/icon.icns / logo.png），使用默认图标"
 fi
 
 # 4. 完成

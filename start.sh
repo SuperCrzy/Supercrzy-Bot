@@ -257,3 +257,24 @@ if command -v supercrzy >/dev/null 2>&1; then
   info "也可以用：supercrzy status / supercrzy dev / supercrzy cli"
 fi
 
+# 7. 首次启动时补一个桌面快捷方式（仅 macOS，2026-10-17 老板：「用户首次只要运行一个口令，
+#    打开 Web，桌面也会出现快捷 app」）
+# 设计约束（任一不满足都不影响启动）：
+#   · 只在 macOS 且 .app 已存在/能生成时才做；osacompile 是 macOS 专属
+#   · 桌面已有同名图标 → 跳过，不覆盖用户自己建的
+#   · 生成失败静默降级为一行提示，**绝不阻断启动**（服务此时已经在跑了）
+if [ "$(uname -s 2>/dev/null)" = "Darwin" ] && command -v osacompile >/dev/null 2>&1; then
+  DESKTOP_DIR="$HOME/Desktop"
+  [ -d "$DESKTOP_DIR" ] || DESKTOP_DIR="$(osascript -e 'tell application "Finder" to POSIX path of (desktop as alias)' 2>/dev/null || echo "$HOME/Desktop")"
+  if [ -d "$DESKTOP_DIR" ] && [ ! -e "$DESKTOP_DIR/SUPERCRZY BOT" ]; then
+    if [ ! -d "SUPERCRZY BOT.app" ]; then
+      ./scripts/make-app.sh >/dev/null 2>&1 || true
+    fi
+    if [ -d "SUPERCRZY BOT.app" ]; then
+      ln -s "$PROJECT_ROOT/SUPERCRZY BOT.app" "$DESKTOP_DIR/SUPERCRZY BOT" 2>/dev/null \
+        && info "已在桌面创建快捷方式「SUPERCRZY BOT」，下次双击即可启动" \
+        || info "（桌面快捷方式创建失败，可手动运行 scripts/install.command）"
+    fi
+  fi
+fi
+
