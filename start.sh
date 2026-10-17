@@ -62,10 +62,33 @@ if ! command -v pnpm >/dev/null 2>&1; then
 fi
 ok "pnpm $(pnpm -v)"
 
-# 3. 安装依赖（首次或依赖变更时）
+# 3. 安装依赖（首次 / 依赖变更 / 上次安装中断）
+#
+# 为什么不能只看 `[ -d node_modules ]`：安装中断、clone 后残留、手工删过部分包，
+# 都会留下一个"存在但不完整"的 node_modules —— 目录在，实际什么都跑不起来。
+# 判据改成三件事一起看：
+#   ① node_modules/.modules.yaml 存在（pnpm 写完这个才算装成功）
+#   ② pnpm-lock.yaml 不比 .modules.yaml 新（依赖清单变过就得重装）
+#   ③ 关键包可解析（node 能 require 到 electron / better-sqlite3 的落点）
+NEED_INSTALL=0
+MODULES_MARK="node_modules/.modules.yaml"
 if [ ! -d node_modules ]; then
-  info "首次运行，安装依赖（约 1-2 分钟）..."
-  pnpm install || fail "依赖安装失败"
+  info "首次运行，安装依赖（干净机器约 3-8 分钟）..."
+  NEED_INSTALL=1
+elif [ ! -f "$MODULES_MARK" ]; then
+  warn "node_modules 存在但没有 .modules.yaml（上次安装可能未完成），重新安装..."
+  NEED_INSTALL=1
+elif [ -f pnpm-lock.yaml ] && [ pnpm-lock.yaml -nt "$MODULES_MARK" ]; then
+  info "pnpm-lock.yaml 比安装记录新，重新安装依赖..."
+  NEED_INSTALL=1
+elif ! [ -d "packages/server/node_modules/tsx" ] || ! [ -d "packages/client/node_modules/vue" ]; then
+  # .modules.yaml 在、但关键包缺失（手工删过 / 磁盘写满）—— 同样视为不完整
+  warn "依赖目录缺少关键包（tsx / vue），重新安装..."
+  NEED_INSTALL=1
+fi
+
+if [ "$NEED_INSTALL" = "1" ]; then
+  pnpm install || fail "依赖安装失败（如果是网络问题，设好代理后重跑本脚本）"
 else
   ok "依赖已就绪"
 fi

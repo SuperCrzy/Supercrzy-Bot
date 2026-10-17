@@ -41,7 +41,7 @@
 ```bash
 git clone https://github.com/SuperCrzy/Supercrzy-Bot.git
 cd Supercrzy-Bot
-./start.sh          # 检查环境 → 装依赖 → 构建 → 启动 → 开浏览器
+./start.sh          # 首次会装依赖 + 构建（3-8 分钟），然后启动并打开浏览器
 ```
 
 > `start.sh` 不需要任何配置：自动校验 Node 与 pnpm、缺 `.env` 时自动创建、构建前端并打开应用。停止用 `./start.sh stop`。
@@ -138,6 +138,8 @@ cd Supercrzy-Bot
 > (`SUPERCRZY BOT.app` 是**生成物**,不随仓库分发;需放在项目根目录与 start.sh 同级,移动项目后重新运行安装器)
 >
 > **Windows**:双击 **`start.bat`**,浏览器会自动打开 UI。
+>
+> **Linux**:先跑一次 **`./scripts/install-linux.sh`** —— 它会写一个 `.desktop` 条目到应用菜单和桌面。之后像普通应用一样启动「SUPERCRZY BOT」。
 >
 > Linux/终端:执行 `./start.sh`。
 

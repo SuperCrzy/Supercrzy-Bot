@@ -41,7 +41,7 @@ Three things most self-hosted agents don't ship together: a **full web UI** (15 
 ```bash
 git clone https://github.com/SuperCrzy/Supercrzy-Bot.git
 cd Supercrzy-Bot
-./start.sh          # checks env → installs deps → builds → starts → opens browser
+./start.sh          # first run installs deps + builds (3-8 min), then starts and opens your browser
 ```
 
 > `start.sh` needs no setup: it verifies Node and pnpm, creates `.env` if missing, builds the frontend and opens the app. Stop it with `./start.sh stop`.
@@ -159,6 +159,9 @@ cd Supercrzy-Bot
 > `start.sh`; re-run the installer after moving the project)
 >
 > **Windows**: double-click **`start.bat`** — the UI opens in your browser.
+>
+> **Linux**: run **`./scripts/install-linux.sh`** once — it writes a `.desktop` entry to your
+> application menu and desktop. Then launch "SUPERCRZY BOT" like any other app.
 >
 > Linux/terminal: run `./start.sh`.
 
