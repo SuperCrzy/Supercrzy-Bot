@@ -7,6 +7,8 @@
 # ============================================================
 set -e
 cd "$(dirname "$0")"
+# 项目根（物理路径，用于判定端口占用者是否属于本仓库；/tmp vs /private/tmp 需 pwd -P 归一）
+PROJECT_ROOT="$(pwd -P)"
 
 C_RED='\033[0;31m'; C_GREEN='\033[0;32m'; C_YELLOW='\033[1;33m'; C_CYAN='\033[0;36m'; C_NC='\033[0m'
 info()  { echo -e "${C_CYAN}[SUPERCRZY BOT]${C_NC} $1"; }
@@ -176,30 +178,40 @@ URL="http://localhost:${PORT}"
 
 # 若已在运行 → 直接打开浏览器（不重复起服务）
 #
-# 🔴 判活必须看**端口实际监听者**，不能只看 PID 文件（2026-10-17 修）：
-#   PID 文件记的是 `pnpm --filter ... start` 的父 PID，真正 listen 的是它 fork 的 node 子进程。
-#   父进程先死（如终端关闭、SIGTERM）时，子进程会变成孤儿**继续占着 3000**，
-#   此时 kill -0 判父 PID 失败 → 旧逻辑删掉 PID 文件 → 接着撞"端口被占"直接拒启动，
-#   用户明明有服务在跑却被告知"拒绝启动"，只能自己去 lsof 找 PID。
-#   改为：先看端口有没有人监听；有监听且 PID 文件对得上 → 复用；对不上 → 也复用（open 界面），
-#   并把实际监听 PID 回写 PID 文件，让后续 stop 能杀对进程。
+# 🔴 判活两件事必须同时成立（2026-10-17 两次修正）：
+#   ① 看**端口实际监听者**，不能只看 PID 文件：
+#      PID 文件记的是 `pnpm --filter ... start` 的父 PID，真正 listen 的是它 fork 的 node 子进程。
+#      父进程先死（终端关闭/SIGTERM）时子进程变孤儿仍占着 3000，kill -0 判父 PID 失败
+#      → 旧逻辑删 PID 文件 → 撞"端口被占"拒绝启动，用户有服务在跑却被拒。
+#   ② 该监听者必须**属于当前仓库**（cwd 在本项目内）：
+#      一台机器上可能有多个副本（主目录 + 干净树/测试目录/另一个 clone）。
+#      只看"3000 有人听"就复用，会让 B 副本认为"服务已在运行"其实是 A 副本在服务，
+#      于是 B 永远起不来自己的服务 —— 用户看到的是别人的界面/别人的数据库。
+# 结论：端口有人听 + 属于本仓库 ⇒ 复用；端口有人听但不属于本仓库 ⇒ 报冲突让用户处理。
+PID_ALIVE_ELSEWHERE=0
 if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
   LIVE_PID=$(lsof -nP -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null | tail -n +2 | head -1 | awk '{print $2}')
-  REC_PID=$(cat "$PID_FILE" 2>/dev/null || echo "")
   if [ -n "$LIVE_PID" ]; then
-    # 回写真实监听者，修正"父 PID 已死但子进程还在"的历史记录
-    echo "$LIVE_PID" > "$PID_FILE" 2>/dev/null || true
-    if [ -n "$REC_PID" ] && [ "$REC_PID" != "$LIVE_PID" ]; then
-      ok "服务已在运行（端口 ${PORT}，监听 PID ${LIVE_PID}），直接打开界面"
-    else
-      ok "服务已在运行 (PID ${LIVE_PID})，直接打开界面"
-    fi
-    open "$URL" 2>/dev/null || true
-    exit 0
+    # 取该进程的工作目录，判断是否落在本项目根内（macOS: lsof -a -p PID -d cwd）
+    LIVE_CWD=$(lsof -a -p "$LIVE_PID" -d cwd -Fn 2>/dev/null | grep '^n' | head -1 | sed 's/^n//')
+    case "$LIVE_CWD" in
+      "$PROJECT_ROOT"|"$PROJECT_ROOT"/*)
+        # 属于本仓库 ⇒ 真·已在运行，复用
+        echo "$LIVE_PID" > "$PID_FILE" 2>/dev/null || true
+        ok "服务已在运行 (PID ${LIVE_PID})，直接打开界面"
+        open "$URL" 2>/dev/null || true
+        exit 0
+        ;;
+      *)
+        # 端口被**别的副本/别的程序**占着 ⇒ 不能当成自己的服务
+        PID_ALIVE_ELSEWHERE=1
+        OTHER_CWD="$LIVE_CWD"
+        ;;
+    esac
   fi
 fi
-# 走到这里说明端口没监听：清理陈旧的 PID 记录
-rm -f "$PID_FILE"
+# 端口无监听：清理陈旧 PID 记录
+if [ "$PID_ALIVE_ELSEWHERE" = "0" ]; then rm -f "$PID_FILE"; fi
 
 # 端口占用检查：被占就报错退出（不换端口）
 if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
@@ -209,6 +221,10 @@ if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
   echo ""
   echo -e "${C_RED}✘${C_NC} 端口 ${PORT} 已被占用，拒绝启动（不再自动换端口，避免两份服务抢同一个数据库）"
   echo -e "${C_YELLOW}  占用进程：PID ${OCCUPY_PID}  (${OCCUPY_CMD})${C_NC}"
+  if [ "$PID_ALIVE_ELSEWHERE" = "1" ] && [ -n "$OTHER_CWD" ]; then
+    echo -e "${C_YELLOW}  该进程工作目录：${OTHER_CWD}${C_NC}"
+    echo -e "${C_YELLOW}  ⇒ 是**另一个副本**在跑（不是当前目录：${PROJECT_ROOT}）${C_NC}"
+  fi
   echo -e "${C_YELLOW}  处理方式：${C_NC}"
   echo -e "${C_YELLOW}    1) 若是本项目的旧服务 → bash start.sh stop${C_NC}"
   echo -e "${C_YELLOW}    2) 若不确定是什么 → lsof -nP -iTCP:${PORT} -sTCP:LISTEN${C_NC}"
