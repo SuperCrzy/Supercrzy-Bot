@@ -175,17 +175,31 @@ PORT="${PORT:-3000}"
 URL="http://localhost:${PORT}"
 
 # 若已在运行 → 直接打开浏览器（不重复起服务）
-if [ -f "$PID_FILE" ]; then
-  OLD_PID=$(cat "$PID_FILE" 2>/dev/null)
-  if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then
-    ok "服务已在运行 (PID $OLD_PID)，直接打开界面"
-    # 端口不再漂移，直接用固定 PORT（旧逻辑从 log 里 grep，多行会取错）
+#
+# 🔴 判活必须看**端口实际监听者**，不能只看 PID 文件（2026-10-17 修）：
+#   PID 文件记的是 `pnpm --filter ... start` 的父 PID，真正 listen 的是它 fork 的 node 子进程。
+#   父进程先死（如终端关闭、SIGTERM）时，子进程会变成孤儿**继续占着 3000**，
+#   此时 kill -0 判父 PID 失败 → 旧逻辑删掉 PID 文件 → 接着撞"端口被占"直接拒启动，
+#   用户明明有服务在跑却被告知"拒绝启动"，只能自己去 lsof 找 PID。
+#   改为：先看端口有没有人监听；有监听且 PID 文件对得上 → 复用；对不上 → 也复用（open 界面），
+#   并把实际监听 PID 回写 PID 文件，让后续 stop 能杀对进程。
+if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+  LIVE_PID=$(lsof -nP -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null | tail -n +2 | head -1 | awk '{print $2}')
+  REC_PID=$(cat "$PID_FILE" 2>/dev/null || echo "")
+  if [ -n "$LIVE_PID" ]; then
+    # 回写真实监听者，修正"父 PID 已死但子进程还在"的历史记录
+    echo "$LIVE_PID" > "$PID_FILE" 2>/dev/null || true
+    if [ -n "$REC_PID" ] && [ "$REC_PID" != "$LIVE_PID" ]; then
+      ok "服务已在运行（端口 ${PORT}，监听 PID ${LIVE_PID}），直接打开界面"
+    else
+      ok "服务已在运行 (PID ${LIVE_PID})，直接打开界面"
+    fi
     open "$URL" 2>/dev/null || true
     exit 0
-  else
-    rm -f "$PID_FILE"
   fi
 fi
+# 走到这里说明端口没监听：清理陈旧的 PID 记录
+rm -f "$PID_FILE"
 
 # 端口占用检查：被占就报错退出（不换端口）
 if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
