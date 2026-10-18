@@ -241,16 +241,39 @@ SERVER_PID=$!
 echo "$SERVER_PID" > "$PID_FILE"
 ok "已启动 (PID $SERVER_PID, 端口 $PORT)"
 
-# 等待就绪（最多 30s）
-for i in $(seq 1 30); do
-  if curl -s -o /dev/null --max-time 1 "http://localhost:${PORT}/api/conversations" 2>/dev/null; then
+# 等待就绪（最多 60s）
+# 🔴 2026-10-18 修：原逻辑只循环 30 次就往下走，**不管是否真的起来**；
+#    且循环里 curl 失败不抛错，所以"没起来"和"起来了"表现一样 —— 结果是
+#    open 在服务就绪前被调用，浏览器打开后页面 502/空白，用户以为"没自动打开"。
+#    现在：只有 /api/health 真的返回 200 才继续；超时则明确报错并提示日志位置。
+READY=0
+for i in $(seq 1 60); do
+  if curl -s -o /dev/null -w "%{http_code}" --max-time 2 "http://localhost:${PORT}/api/health" 2>/dev/null | grep -q '^200$'; then
+    READY=1
     break
   fi
   sleep 1
 done
+if [ "$READY" != "1" ]; then
+  warn "服务在 60s 内未就绪，请检查日志：tail -50 ${LOG_FILE}"
+  warn "常见原因：端口 ${PORT} 被占、依赖不完整、缺少 API Key"
+  exit 1
+fi
+ok "服务健康检查通过（${PORT}）"
 
 # 自动打开浏览器
-if command -v open >/dev/null 2>&1; then open "$URL"; fi
+# 🔴 2026-10-18 修：原来 `open "$URL"` 把 stderr 丢了，失败也看不到。
+#    另外部分环境（无 GUI session / 非交互 shell）open 会静默失败，
+#    这里显式检测并给出可手动点击的地址。
+OPENED=0
+if command -v open >/dev/null 2>&1; then
+  if open "$URL" 2>/dev/null; then
+    OPENED=1
+  fi
+fi
+if [ "$OPENED" != "1" ]; then
+  warn "未能自动打开浏览器，请手动访问：${URL}"
+fi
 info "服务已就绪：${URL}（关掉本窗口不影响，服务后台保活）"
 info "停止：bash start.sh stop"
 if command -v supercrzy >/dev/null 2>&1; then

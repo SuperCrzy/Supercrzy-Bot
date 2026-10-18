@@ -36,21 +36,39 @@ fi
 #   `&> /dev/null` 丢弃输出（applet 无终端可写）；`nohup` + `&` 让脚本脱离父进程，
 #   applet 立即退出不阻塞（start.sh 自己会把服务 nohup 到后台并 open 浏览器）。
 rm -rf "$APP_PATH"
-osacompile -o "$APP_PATH" \
-  -e 'on run' \
-  -e '  set appPath to POSIX path of (path to me)' \
-  -e '  set projectDir to do shell script "dirname " & quoted form of appPath' \
-  -e '  set scriptPath to projectDir & "/start.sh"' \
-  -e '  try' \
-  -e '    do shell script "test -f " & quoted form of scriptPath' \
-  -e '  on error' \
-  -e '    display dialog "[SUPERCRZY BOT] 未找到 start.sh。请将 SUPERCRZY BOT.app 放回项目根目录后再双击。" buttons {"好"} default button 1 with title "SUPERCRZY BOT"' \
-  -e '    return' \
-  -e '  end try' \
-  -e '  display notification "正在启动，浏览器稍后自动打开…" with title "SUPERCRZY BOT"' \
-  -e '  do shell script "cd " & quoted form of projectDir & " && nohup /bin/bash ./start.sh >/dev/null 2>&1 &"' \
-  -e 'end run'
-echo "✔ AppleScript 包装完成（do shell script，无需终端与自动化授权）"
+# 用独立 .applescript 文件编译（-e 多行写法对注释/特殊字符脆弱，2026-10-18 换）
+APPLESCRIPT_SRC="$(mktemp -d)/main.applescript"
+cat > "$APPLESCRIPT_SRC" <<'APPLESCRIPT'
+on run
+	set appPath to POSIX path of (path to me)
+	set projectDir to do shell script "dirname " & quoted form of appPath
+	set scriptPath to projectDir & "/start.sh"
+	try
+		do shell script "test -f " & quoted form of scriptPath
+	on error
+		display dialog "[SUPERCRZY BOT] 未找到 start.sh。请将 SUPERCRZY BOT.app 放回项目根目录后再双击。" buttons {"好"} default button 1 with title "SUPERCRZY BOT"
+		return
+	end try
+	display notification "正在启动，浏览器稍后自动打开…" with title "SUPERCRZY BOT"
+	do shell script "cd " & quoted form of projectDir & " && nohup /bin/bash ./start.sh >/dev/null 2>&1 &"
+	(* 2026-10-18：applet 自己兜底打开浏览器。
+	   start.sh 内部也会 open，但从 applet 的 do shell script 环境继承的 session
+	   可能拿不到 GUI 上下文，导致静默失败。这里轮询 /api/health，
+	   一旦 200 就用 open location 打开（走 Apple Events，更可靠）。 *)
+	repeat 90 times
+		delay 1
+		try
+			set code to do shell script "curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://localhost:3000/api/health"
+			if code is "200" then
+				open location "http://localhost:3000"
+				exit repeat
+			end if
+		end try
+	end repeat
+end run
+APPLESCRIPT
+osacompile -o "$APP_PATH" "$APPLESCRIPT_SRC"
+echo "✔ AppleScript 包装完成（do shell script + 自兜底开浏览器）"
 
 # 3. 应用品牌图标
 #
