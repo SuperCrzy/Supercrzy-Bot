@@ -51,20 +51,12 @@ on run
 	end try
 	display notification "正在启动，浏览器稍后自动打开…" with title "SUPERCRZY BOT"
 	do shell script "cd " & quoted form of projectDir & " && nohup /bin/bash ./start.sh >/dev/null 2>&1 &"
-	(* 2026-10-18：applet 自己兜底打开浏览器。
-	   start.sh 内部也会 open，但从 applet 的 do shell script 环境继承的 session
-	   可能拿不到 GUI 上下文，导致静默失败。这里轮询 /api/health，
-	   一旦 200 就用 open location 打开（走 Apple Events，更可靠）。 *)
-	repeat 90 times
-		delay 1
-		try
-			set code to do shell script "curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://localhost:3000/api/health"
-			if code is "200" then
-				open location "http://localhost:3000"
-				exit repeat
-			end if
-		end try
-	end repeat
+	(* 2026-10-18：applet 兜底开浏览器。start.sh 也会 open，但从 applet 的
+	   do shell script 继承的 session 可能拿不到 GUI 上下文，open 会静默失败。
+	   这里**立刻** open location（不等服务就绪）—— 等 health 200 才开会把"打开"
+	   推迟 40s+（app.listen 在所有初始化之后），用户以为没反应。 *)
+	delay 2
+	open location "http://localhost:3000"
 end run
 APPLESCRIPT
 osacompile -o "$APP_PATH" "$APPLESCRIPT_SRC"

@@ -241,39 +241,30 @@ SERVER_PID=$!
 echo "$SERVER_PID" > "$PID_FILE"
 ok "已启动 (PID $SERVER_PID, 端口 $PORT)"
 
-# 等待就绪（最多 60s）
-# 🔴 2026-10-18 修：原逻辑只循环 30 次就往下走，**不管是否真的起来**；
-#    且循环里 curl 失败不抛错，所以"没起来"和"起来了"表现一样 —— 结果是
-#    open 在服务就绪前被调用，浏览器打开后页面 502/空白，用户以为"没自动打开"。
-#    现在：只有 /api/health 真的返回 200 才继续；超时则明确报错并提示日志位置。
-READY=0
+# 立刻打开浏览器（2026-10-18 修正：不要等就绪）
+# 🔴 上一版让 open 等到 /api/health 返回 200，等于把"打开"推迟到**全部初始化完成之后**。
+#    app.listen() 在 app.ts 第 539 行，即所有 26 个 router + 依赖 import 都跑完才监听，
+#    实测要 40-55s ⇒ 用户点完一分钟没反应，以为"没打开"。
+#    正确做法：立刻开浏览器。浏览器自己会重试，页面在服务起来前显示连接失败，
+#    就绪后刷新即可 —— 而"就绪"只作为终端里的提示。
+OPENED=0
+if command -v open >/dev/null 2>&1; then
+  open "$URL" 2>/dev/null && OPENED=1
+fi
+if [ "$OPENED" = "1" ]; then
+  info "已打开浏览器：${URL}（服务仍在初始化，页面刷新后可用）"
+else
+  warn "未能自动打开浏览器，请手动访问：${URL}"
+fi
+
+# 等待就绪（仅用于终端提示，最多 60s；失败不改退出码，服务可能仍在初始化）
 for i in $(seq 1 60); do
   if curl -s -o /dev/null -w "%{http_code}" --max-time 2 "http://localhost:${PORT}/api/health" 2>/dev/null | grep -q '^200$'; then
-    READY=1
+    ok "服务健康检查通过（${PORT}，耗时约 ${i}s）"
     break
   fi
   sleep 1
 done
-if [ "$READY" != "1" ]; then
-  warn "服务在 60s 内未就绪，请检查日志：tail -50 ${LOG_FILE}"
-  warn "常见原因：端口 ${PORT} 被占、依赖不完整、缺少 API Key"
-  exit 1
-fi
-ok "服务健康检查通过（${PORT}）"
-
-# 自动打开浏览器
-# 🔴 2026-10-18 修：原来 `open "$URL"` 把 stderr 丢了，失败也看不到。
-#    另外部分环境（无 GUI session / 非交互 shell）open 会静默失败，
-#    这里显式检测并给出可手动点击的地址。
-OPENED=0
-if command -v open >/dev/null 2>&1; then
-  if open "$URL" 2>/dev/null; then
-    OPENED=1
-  fi
-fi
-if [ "$OPENED" != "1" ]; then
-  warn "未能自动打开浏览器，请手动访问：${URL}"
-fi
 info "服务已就绪：${URL}（关掉本窗口不影响，服务后台保活）"
 info "停止：bash start.sh stop"
 if command -v supercrzy >/dev/null 2>&1; then
