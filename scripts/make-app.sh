@@ -20,18 +20,37 @@ if ! command -v osacompile >/dev/null 2>&1; then
   echo "✘ 未找到 osacompile（需要 macOS）"; exit 1
 fi
 
-# 2. 用 AppleScript 生成 app（点击后打开终端运行 start.sh）
+# 2. 用 AppleScript 生成 app
+#
+# 🔴 2026-10-18 重写：**不再 tell application "Terminal"**
+#   旧实现 `tell app "Terminal" ... do script "cd ... && ./start.sh"` 有两个致命问题：
+#     ① TCC/Automation 拦截：命令串里出现 `./start.sh`，macOS 会把同级目录下的
+#        `SUPERCRZY BOT.command` 判成"要在终端中打开的文稿"，触发
+#        「不允许 "xxx" 在"终端"中打开文稿」。宿主进程名不同（Terminal / Sandbox /
+#        WorkBuddy 等）报错文案就不同，但**根因都是这条 Automation 路径**。
+#        且 .app 是 adhoc 签名、CFBundleIdentifier 带空格（osacompile 默认），
+#        TCC 记录无法稳定绑定 ⇒ 用户每次都要重新授权，或被直接拒绝。
+#     ② 依赖 Terminal.app 存在：无终端环境（远程、受限账户、精简系统）直接失败。
+#   现在改用 `do shell script`：由 applet 进程自己 fork 执行 start.sh，
+#   **不经过 Terminal、不触发 Apple Events、不需要任何 Automation 授权**。
+#   `&> /dev/null` 丢弃输出（applet 无终端可写）；`nohup` + `&` 让脚本脱离父进程，
+#   applet 立即退出不阻塞（start.sh 自己会把服务 nohup 到后台并 open 浏览器）。
 rm -rf "$APP_PATH"
 osacompile -o "$APP_PATH" \
   -e 'on run' \
   -e '  set appPath to POSIX path of (path to me)' \
   -e '  set projectDir to do shell script "dirname " & quoted form of appPath' \
-  -e '  tell application "Terminal"' \
-  -e '    activate' \
-  -e '    do script "cd " & quoted form of projectDir & " && if [ -f start.sh ]; then ./start.sh; else echo; echo \"[SUPERCRZY BOT] 未找到 start.sh\"; echo \"请将 SUPERCRZY BOT.app 放回项目根目录后再双击\"; echo; fi"' \
-  -e '  end tell' \
+  -e '  set scriptPath to projectDir & "/start.sh"' \
+  -e '  try' \
+  -e '    do shell script "test -f " & quoted form of scriptPath' \
+  -e '  on error' \
+  -e '    display dialog "[SUPERCRZY BOT] 未找到 start.sh。请将 SUPERCRZY BOT.app 放回项目根目录后再双击。" buttons {"好"} default button 1 with title "SUPERCRZY BOT"' \
+  -e '    return' \
+  -e '  end try' \
+  -e '  display notification "正在启动，浏览器稍后自动打开…" with title "SUPERCRZY BOT"' \
+  -e '  do shell script "cd " & quoted form of projectDir & " && nohup /bin/bash ./start.sh >/dev/null 2>&1 &"' \
   -e 'end run'
-echo "✔ AppleScript 包装完成"
+echo "✔ AppleScript 包装完成（do shell script，无需终端与自动化授权）"
 
 # 3. 应用品牌图标
 #
