@@ -199,7 +199,15 @@ if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
         # 属于本仓库 ⇒ 真·已在运行，复用
         echo "$LIVE_PID" > "$PID_FILE" 2>/dev/null || true
         ok "服务已在运行 (PID ${LIVE_PID})，直接打开界面"
-        open "$URL" 2>/dev/null || true
+        # 🔴 2026-10-18 修「打开两遍（相隔几十秒）」：
+        #    这个分支也会 open，但**之前没写标记就 exit 0** ⇒ applet 等满 30s
+        #    看不到标记，判定"start.sh 没开"，又兜底 open location 一次。
+        #    现在与主路径保持同一契约：开成功就写标记。
+        if open "$URL" 2>/dev/null; then
+          BROWSER_FLAG_EARLY="${HOME}/.supercrzy/.browser-opened"
+          mkdir -p "$(dirname "$BROWSER_FLAG_EARLY")" 2>/dev/null || true
+          date +%s > "$BROWSER_FLAG_EARLY" 2>/dev/null || true
+        fi
         exit 0
         ;;
       *)
