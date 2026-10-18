@@ -50,15 +50,16 @@ on run
 		return
 	end try
 	display notification "正在启动，浏览器稍后自动打开…" with title "SUPERCRZY BOT"
-	(* 🔴 2026-10-18 修「点击一次打开两遍」：
-	   start.sh 打开浏览器成功后会在 ~/.supercrzy/.browser-opened 写时间戳标记。
-	   这里**先删旧标记**（必须在拉起 start.sh 之前，否则有竞态：start 已写完又被删掉），
-	   再启动 → 等 6 秒 → **只有没有新标记**时才兜底 open location。
-	   结果：start.sh 成功 → 只开一次；start.sh 失败（无 GUI 上下文等）→ applet 补一次。 *)
+	(* 🔴 2026-10-18 修「点击一次打开两遍」（第二次修）：
+	   第一版用「delay 6 后看标记」，但 start.sh 要跑完 Node/pnpm 检查、
+	   依赖指纹、前端产物检查才写标记（实测 4.3s，机器慢时更久），
+	   6s 固定等待会漏 ⇒ 标记还没写就兜底 → 仍然开两遍。
+	   **用时间判断不可靠。** 改为**轮询等标记出现**，最多等 30s：
+	     · 标记出现 → start.sh 已经开过 → 不开
+	     · 30s 内始终没有 → start.sh 确实开不了 → 兜底开一次
+	   先删旧标记（必须在拉起 start.sh 之前），避免读到上一轮的残留。 *)
 	set flagPath to (do shell script "echo $HOME") & "/.supercrzy/.browser-opened"
-	try
-		do shell script "rm -f " & quoted form of flagPath
-	end try
+	do shell script "rm -f " & quoted form of flagPath
 
 	(* 🔴 2026-10-18 恢复终端窗口（老板：「之前的启动器不是会先打开终端页面吗?」）
 	   上一版为了绕开 TCC 报错把 Terminal 整个去掉了，副作用是：
@@ -73,12 +74,16 @@ on run
 		do script bootCmd
 	end tell
 
-	delay 6
+	(* 轮询等标记：出现→start.sh 已开过；30s 一直没有→兜底开一次 *)
 	set flagExists to false
-	try
-		do shell script "test -f " & quoted form of flagPath
-		set flagExists to true
-	end try
+	repeat 60 times
+		delay 0.5
+		try
+			do shell script "test -f " & quoted form of flagPath
+			set flagExists to true
+			exit repeat
+		end try
+	end repeat
 	if not flagExists then
 		open location "http://localhost:3000"
 	end if
