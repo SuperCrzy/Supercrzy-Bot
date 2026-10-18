@@ -160,6 +160,26 @@ else
   fi
 fi
 
+# 5.5 服务端改动检测（2026-10-18 加）
+#
+# 服务端 `start` 是 `tsx src/app.ts` —— **直接运行 TS 源码**，
+# 所以源码改动在重启后自然生效，不需要预编译。
+# 但这条链路依赖一个隐含前提，值得显式守护：
+#   · 若哪天改成 `node dist/app.js`（为了启动速度），改源码而不重建会**静默跑旧代码**
+#   · 若 tsx 缓存异常，也可能出现「改了没生效」的假象
+# 这里只做**告知**：列出自上次构建以来改过的服务端文件，让"改了没生效"能被一眼看穿。
+# 不参与任何构建决策，也不阻塞启动。
+if [ -d packages/server/src ]; then
+  SERVER_DIST_JS="packages/server/dist/app.js"
+  if [ -f "$SERVER_DIST_JS" ]; then
+    CHANGED_SINCE_BUILD=$(find packages/server/src -newer "$SERVER_DIST_JS" -type f -name '*.ts' 2>/dev/null | wc -l | tr -d ' ')
+    if [ "${CHANGED_SINCE_BUILD:-0}" -gt 0 ]; then
+      warn "服务端有 ${CHANGED_SINCE_BUILD} 个源码文件比 dist 新（tsx 直跑源码，改动会自动生效；"
+      warn "  但若你用的是 node dist/app.js 方式，请先 pnpm --filter @supercrzy/server build）"
+    fi
+  fi
+fi
+
 # 6. 后台守护启动（2026-08-26 老板：一键免命令 + 关窗/端口不挂）
 # 用 nohup 后台起服务 + PID 文件管理：关终端窗不丢、重启不重复起。
 #
