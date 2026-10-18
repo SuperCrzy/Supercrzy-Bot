@@ -251,9 +251,18 @@ OPENED=0
 if command -v open >/dev/null 2>&1; then
   open "$URL" 2>/dev/null && OPENED=1
 fi
+# 🔴 2026-10-18：写一个"已开浏览器"标记，供 applet 判断是否还要兜底。
+#   之前 applet 无条件 delay 6 后 open location，导致**点击一次打开两遍**。
+#     · open 成功 → 写标记，applet 看到标记就不开
+#     · open 失败 → 不写标记，applet 兜底开一次
+#   用文件而不是查进程，是因为 applet 那边查浏览器状态不可靠且慢。
+BROWSER_FLAG="${HOME}/.supercrzy/.browser-opened"
 if [ "$OPENED" = "1" ]; then
+  mkdir -p "$(dirname "$BROWSER_FLAG")" 2>/dev/null || true
+  date +%s > "$BROWSER_FLAG" 2>/dev/null || true
   info "已打开浏览器：${URL}（服务仍在初始化，页面刷新后可用）"
 else
+  rm -f "$BROWSER_FLAG" 2>/dev/null || true
   warn "未能自动打开浏览器，请手动访问：${URL}"
 fi
 

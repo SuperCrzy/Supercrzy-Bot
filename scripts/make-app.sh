@@ -50,22 +50,38 @@ on run
 		return
 	end try
 	display notification "正在启动，浏览器稍后自动打开…" with title "SUPERCRZY BOT"
+	(* 🔴 2026-10-18 修「点击一次打开两遍」：
+	   start.sh 打开浏览器成功后会在 ~/.supercrzy/.browser-opened 写时间戳标记。
+	   这里**先删旧标记**（必须在拉起 start.sh 之前，否则有竞态：start 已写完又被删掉），
+	   再启动 → 等 6 秒 → **只有没有新标记**时才兜底 open location。
+	   结果：start.sh 成功 → 只开一次；start.sh 失败（无 GUI 上下文等）→ applet 补一次。 *)
+	set flagPath to (do shell script "echo $HOME") & "/.supercrzy/.browser-opened"
+	try
+		do shell script "rm -f " & quoted form of flagPath
+	end try
+
 	(* 🔴 2026-10-18 恢复终端窗口（老板：「之前的启动器不是会先打开终端页面吗?」）
 	   上一版为了绕开 TCC 报错把 Terminal 整个去掉了，副作用是：
 	     · 用户看不到任何启动过程（安装依赖/构建前端可能要好几分钟）
 	     · 日志被丢进 /dev/null，出问题无从排查
 	   TCC 报错的真正成因不是 Terminal 本身，而是 `do script` 的命令串里出现了
 	   `./start.sh` 这种**文件引用**，macOS 会把它判成"要在终端中打开的文稿"。
-	   规避办法：用 `bash -lc` 包一层，并且**不写 ./xxx 形式**，改用 bash -lc 的字符串，
-	   让 Automation 推断不到具体文稿对象。 *)
+	   规避：命令串全部用绝对路径，零 `./` 引用。 *)
 	set bootCmd to "cd " & quoted form of projectDir & " && SUPERCRZY_AUTOCLOSE=1 bash -lc " & quoted form of ("bash " & quoted form of scriptPath)
 	tell application "Terminal"
 		activate
 		do script bootCmd
 	end tell
-	(* 浏览器由 start.sh 自己打开；这里只做一次兜底，同样不等就绪。 *)
+
 	delay 6
-	open location "http://localhost:3000"
+	set flagExists to false
+	try
+		do shell script "test -f " & quoted form of flagPath
+		set flagExists to true
+	end try
+	if not flagExists then
+		open location "http://localhost:3000"
+	end if
 end run
 APPLESCRIPT
 osacompile -o "$APP_PATH" "$APPLESCRIPT_SRC"
