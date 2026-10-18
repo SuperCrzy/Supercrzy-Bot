@@ -22,7 +22,7 @@
     "@tencent-weixin/openclaw-weixin": "^2.4.10",
     "@types/koa-static": "^4.0.4",
     "better-sqlite3": "^11.7.0",
-    "dotenv": "^16.4.0",
+    "dotenv": "^18.0.8",
     "exceljs": "^4.4.0",
     "https-proxy-agent": "^7.0.6",
     "koa": "^3.2.1",
