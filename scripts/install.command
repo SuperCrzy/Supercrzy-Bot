@@ -43,7 +43,7 @@ ln -s "$APP_PATH" "$DESKTOP/$LINK_NAME" || fail "创建桌面图标失败"
 
 echo ""
 echo -e "${C_GREEN}=============================================="
-echo -e "  安装完成！桌面已出现「$LINK_NAME」图标"
+echo -e "  安装完成！桌面已出现「${LINK_NAME}」图标"
 echo -e "  双击图标即可启动 SUPERCRZY BOT"
 echo -e "  （提示: 若移动了项目文件夹，请重新运行安装器）"
 echo -e "==============================================${C_NC}"
