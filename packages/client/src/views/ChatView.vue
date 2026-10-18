@@ -191,19 +191,13 @@
               ></textarea>
               <!-- 右侧：模型 / 语音 / 发送 -->
               <div class="wc-actions">
-                <select
-                  class="input-model-select wc-model"
-                  :value="appStore.currentModel"
-                  @change="appStore.setModel(($event.target as HTMLSelectElement).value)"
+                <ModelSelect
+                  class="wc-model"
+                  :model-value="appStore.currentModel"
+                  :options="appStore.modelSelectOptions"
                   :title="$t('models.currentModel')"
-                >
-                  <template v-for="opt in appStore.modelSelectOptions" :key="optKey(opt)">
-                    <optgroup v-if="isGroup(opt)" :label="opt.label">
-                      <option v-for="child in optChildren(opt)" :key="child.value" :value="child.value">{{ child.label }}</option>
-                    </optgroup>
-                    <option v-else :value="optValue(opt)">{{ opt.label }}</option>
-                  </template>
-                </select>
+                  @update:model-value="appStore.setModel($event)"
+                />
                 <button class="wc-icon-btn" :class="{ listening: isListening }" :title="isListening ? $t('chat.wcVoiceStop') : $t('chat.wcVoice')" @click="toggleVoice">
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><line x1="12" y1="18" x2="12" y2="22"/></svg>
                 </button>
@@ -988,6 +982,7 @@ import ErrorBanner from '@/components/chat/ErrorBanner.vue'
 import InputBanner from '@/components/chat/InputBanner.vue'
 import WorkspacePickerModal from '@/components/workspace/WorkspacePickerModal.vue'
 import WelcomeTemplates from '@/components/chat/WelcomeTemplates.vue'
+import ModelSelect from '@/components/chat/ModelSelect.vue'
 import CompareResult from '@/components/chat/CompareResult.vue'
 
 const chatStore = useChatStore()
@@ -3929,7 +3924,10 @@ onMounted(async () => {
   justify-content: flex-end;
 }
 .wc-model {
-  max-width: 180px;
+  /* 2026-10-18：原来的 max-width:180px 是"V4 Flash (DeepSeek) 后面留大空隙"的直接原因
+     —— 原生 select 宽度由最长 option 决定，锁 180px 就必然留白。
+     现在改用 ModelSelect 组件，宽度由当前文字撑开，此处**不再限制宽度**。 */
+  flex: none;
 }
 .wc-icon-btn {
   width: 32px;
