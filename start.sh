@@ -258,13 +258,18 @@ else
 fi
 
 # 等待就绪（仅用于终端提示，最多 60s；失败不改退出码，服务可能仍在初始化）
+READY=0
 for i in $(seq 1 60); do
   if curl -s -o /dev/null -w "%{http_code}" --max-time 2 "http://localhost:${PORT}/api/health" 2>/dev/null | grep -q '^200$'; then
+    READY=1
     ok "服务健康检查通过（${PORT}，耗时约 ${i}s）"
     break
   fi
   sleep 1
 done
+if [ "$READY" = "0" ]; then
+  warn "服务在 60s 内未就绪，窗口保留以便排查：tail -50 ${LOG_FILE}"
+fi
 info "服务已就绪：${URL}（关掉本窗口不影响，服务后台保活）"
 info "停止：bash start.sh stop"
 if command -v supercrzy >/dev/null 2>&1; then
@@ -290,5 +295,34 @@ if [ "$(uname -s 2>/dev/null)" = "Darwin" ] && command -v osacompile >/dev/null 
         || info "（桌面快捷方式创建失败，可手动运行 scripts/install.command）"
     fi
   fi
+fi
+
+# 8. 启动成功后自动关闭终端窗口（2026-10-18 老板：「终端窗口启动成功后可以自动关闭吗?」）
+#
+# 约束：
+#   · 只在**由 applet 拉起**时关（applet 会设 SUPERCRZY_AUTOCLOSE=1），
+#     用户手动在终端跑 ./start.sh 时**绝不关**他正在看的窗口
+#   · 必须服务真的就绪（READY=1）；失败时保留窗口，让用户能看到报错
+#   · 关窗方式：让 Terminal 关闭承载本脚本的那个窗口（按 tty 匹配，避免误关别的窗口）
+if [ "${SUPERCRZY_AUTOCLOSE:-0}" = "1" ] && [ "${READY:-0}" = "1" ] \
+   && [ "$(uname -s 2>/dev/null)" = "Darwin" ] && [ -n "${TERM_PROGRAM:-}" ]; then
+  # 给用户 2 秒看清"服务已就绪"，再关
+  sleep 2
+  MY_TTY="$(tty 2>/dev/null | sed 's#^/dev/##')"
+  osascript >/dev/null 2>&1 <<APPLESCRIPT || true
+tell application "Terminal"
+	set winList to every window
+	repeat with w in winList
+		try
+			repeat with t in tabs of w
+				if tty of t is "/dev/${MY_TTY}" then
+					close w saving no
+					return
+				end if
+			end repeat
+		end try
+	end repeat
+end tell
+APPLESCRIPT
 fi
 

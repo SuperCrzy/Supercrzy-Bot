@@ -58,7 +58,7 @@ on run
 	   `./start.sh` 这种**文件引用**，macOS 会把它判成"要在终端中打开的文稿"。
 	   规避办法：用 `bash -lc` 包一层，并且**不写 ./xxx 形式**，改用 bash -lc 的字符串，
 	   让 Automation 推断不到具体文稿对象。 *)
-	set bootCmd to "cd " & quoted form of projectDir & " && bash -lc " & quoted form of ("bash " & quoted form of scriptPath)
+	set bootCmd to "cd " & quoted form of projectDir & " && SUPERCRZY_AUTOCLOSE=1 bash -lc " & quoted form of ("bash " & quoted form of scriptPath)
 	tell application "Terminal"
 		activate
 		do script bootCmd
