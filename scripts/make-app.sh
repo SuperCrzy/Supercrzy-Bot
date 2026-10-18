@@ -50,12 +50,21 @@ on run
 		return
 	end try
 	display notification "正在启动，浏览器稍后自动打开…" with title "SUPERCRZY BOT"
-	do shell script "cd " & quoted form of projectDir & " && nohup /bin/bash ./start.sh >/dev/null 2>&1 &"
-	(* 2026-10-18：applet 兜底开浏览器。start.sh 也会 open，但从 applet 的
-	   do shell script 继承的 session 可能拿不到 GUI 上下文，open 会静默失败。
-	   这里**立刻** open location（不等服务就绪）—— 等 health 200 才开会把"打开"
-	   推迟 40s+（app.listen 在所有初始化之后），用户以为没反应。 *)
-	delay 2
+	(* 🔴 2026-10-18 恢复终端窗口（老板：「之前的启动器不是会先打开终端页面吗?」）
+	   上一版为了绕开 TCC 报错把 Terminal 整个去掉了，副作用是：
+	     · 用户看不到任何启动过程（安装依赖/构建前端可能要好几分钟）
+	     · 日志被丢进 /dev/null，出问题无从排查
+	   TCC 报错的真正成因不是 Terminal 本身，而是 `do script` 的命令串里出现了
+	   `./start.sh` 这种**文件引用**，macOS 会把它判成"要在终端中打开的文稿"。
+	   规避办法：用 `bash -lc` 包一层，并且**不写 ./xxx 形式**，改用 bash -lc 的字符串，
+	   让 Automation 推断不到具体文稿对象。 *)
+	set bootCmd to "cd " & quoted form of projectDir & " && bash -lc " & quoted form of ("bash " & quoted form of scriptPath)
+	tell application "Terminal"
+		activate
+		do script bootCmd
+	end tell
+	(* 浏览器由 start.sh 自己打开；这里只做一次兜底，同样不等就绪。 *)
+	delay 6
 	open location "http://localhost:3000"
 end run
 APPLESCRIPT
