@@ -2,6 +2,63 @@
 
 > SUPERCRZY BOT 版本更新记录。最新版本在顶部，历史版本完整保留。
 > 此文件为官网更新日志页的数据母版；应用内弹窗仅展示当前版本。
+>
+> **发布节奏（2026-10-18 起）：每周发布一版。**
+> 周期内累积的修复与新功能统一进本文件对应版本；版本号按 `MAJOR.MINOR.PATCH` 递增，
+> 补丁类修复走 PATCH，含新能力走 MINOR。
+
+---
+
+## v0.4.1 (2026-10-18) — 启动器可靠性 + AI NEWS 图片 + 模型选择器
+
+### 修复
+
+**启动器（桌面快捷方式 / `start.sh`）**
+- 修复 macOS 报错「"SUPERCRZY BOT.command" 无法打开，因为不允许在"终端"中打开文稿」：
+  根因是 `do script` 命令串里出现 `./start.sh` 相对引用，被 Automation 推断成"要打开的文稿"。
+  改为绝对路径 + `bash -lc`，不再触发 TCC 拦截
+- 修复新用户双击桌面图标后**没有终端窗口、看不到任何启动过程**（此前为绕 TCC 把 Terminal 整个移除）
+- 修复浏览器打开时机：此前把 `open` 放在 `/api/health` 就绪之后，而 `app.listen()`
+  在所有初始化完成（实测 40–55s）才执行 ⇒ 点完近一分钟才弹浏览器。
+  现在依赖检查完即刻打开（实测 **4.3s**），健康检查降级为终端提示、不阻塞
+- 修复**点击一次打开两个浏览器窗口**：`start.sh` 的两条路径（正常启动 / 服务已在运行复用）
+  与 applet 兜底各自都会 `open`。改为标记文件 + 轮询协调，三条路径均只打开一次
+- 修复服务已在运行时**误把别的副本当成自己**：判活增加「监听者 cwd 是否属于本仓库」校验，
+  不再出现 B 副本显示 A 副本界面的情况
+- 修复孤儿进程（父进程退出、子进程仍占端口）导致「拒绝启动」，改为识别真实监听者
+- 新增：启动成功后自动关闭终端窗口（按 tty 精确匹配，不误关其他窗口；服务未就绪时保留窗口）
+- 新增：新用户跑一次 `./start.sh` 即自动生成桌面 App 与桌面图标，无需另跑安装器
+- 修复 `install.command` 输出乱码（`$LINK_NAME` 紧贴全角括号被吞字符）
+- 桌面图标统一为安装版 App 同一张图（`build/icon.icns`，1024 源、十档齐全），不再由 512 图放大
+
+**AI NEWS 图片**
+- 修复图片频繁加载失败、且加载缓慢。实测外网串行拉同一张 772 KB 图 6 次，
+  其中 2 次返回 `HTTP 200` 但字节不足（620 KB / 751 KB）并超时；
+  而服务器本机 8 次全部字节一致 ⇒ 抖动发生在公网链路，但后端三项防护全缺
+- 新增磁盘缓存（`~/.supercrzy/cache/news-images/`，URL+宽度 哈希，TTL 7 天）+ 进程内 LRU。
+  实测第二次起 **0.003s**（原 5.86s，约 2000 倍）
+- 新增重试：单次超时 8s × 最多 3 次，指数退避，4xx 不重试
+- 新增完整性校验：比对 `Content-Length`，短读视为失败并重试，且不写入缓存
+  （此前 `arrayBuffer()` 在连接提前关闭时返回不完整缓冲且不抛错，半张图会被当成功返回）
+- 失败降级为 1×1 透明 PNG 占位图，不再返回 502 裂图
+
+**模型选择器**
+- 修复欢迎页下拉框选中短模型名（如 `V4 Flash (DeepSeek)`）时，文字后出现 60–70px 大空隙。
+  根因：原生 `<select>` 宽度由最长 option 决定，叠加 `max-width: 180px`。
+  新增 `ModelSelect` 组件，宽度随当前文字自适应、右侧间距固定，下拉面板按内容自适应宽度
+
+### Features
+- Weekly release cadence starting 2026-10-18
+
+### 修复（英文摘要）
+- Launcher: fixed macOS TCC "cannot open document in Terminal" error; restored terminal window;
+  browser now opens at 4.3s instead of waiting for full init; eliminated double browser launch;
+  detects when port 3000 is held by another clone; auto-closes the terminal window after startup;
+  new users get a desktop icon from a single `./start.sh` run
+- AI NEWS images: added disk+memory cache, retry with exponential backoff, `Content-Length`
+  integrity check, and placeholder fallback (cache hit: 0.003s vs 5.86s)
+- Model picker: new `ModelSelect` component, width adapts to the selected label instead of the
+  longest option
 
 ---
 
