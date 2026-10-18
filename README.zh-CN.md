@@ -215,6 +215,26 @@ pnpm cli
 | `CORS_ORIGINS` | CORS 白名单(逗号分隔) | 仅 localhost |
 | `API_TOKEN` | 可选:非本地 API 请求的 Bearer 令牌 | 空(不启用) |
 | `TUNNEL_ENABLED` | 开启内网穿透(默认关闭,纯本地) | `false` |
+| `SUPERCRZY_TELEMETRY` | 匿名使用统计 — 设 `0` 关闭 | `1`(启用) |
+
+### 匿名使用统计
+
+服务启动时发**一次**极小请求,用于了解安装量与版本分布。只含四个字段,别无其他:
+
+```json
+{ "iid": "<随机 UUID>", "version": "0.4.1", "platform": "darwin 27.0.0", "firstRun": true }
+```
+
+- `iid` 是**随机生成的 UUID**,存在本地数据库。不基于硬件、网卡 MAC、主机名或账号,
+  无法反推到个人。
+- **绝不上报**:对话内容、提示词、文件路径、API Key、模型名、记忆内容。
+- **永久关闭**:`.env` 里设 `SUPERCRZY_TELEMETRY=0`,或执行:
+  ```bash
+  sqlite3 ~/.supercrzy/data/supercrzy.db \
+    "INSERT INTO settings(key,value,updated_at) VALUES('telemetry.enabled','false',datetime('now')) \
+     ON CONFLICT(key) DO UPDATE SET value='false'"
+  ```
+- 失败静默且单次运行内不重试 —— 离线对使用零影响。
 
 ## 🏗️ 架构
 

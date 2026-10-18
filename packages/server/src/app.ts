@@ -544,6 +544,11 @@ async function bootstrap() {
     if (getTunnelUrl()) console.log(`   Tunnel:  ${getTunnelUrl()}`)
     console.log(`   Workspace: ${WORKSPACE_ROOT}\n`)
 
+    // 匿名使用统计（2026-10-18）：每进程一次，fire-and-forget，失败静默。
+    // 只报 { iid, version, platform, firstRun }，不含任何内容/路径/密钥。
+    // 关闭方式：SUPERCRZY_TELEMETRY=0 或 settings 表 telemetry.enabled=false
+    import('./services/telemetry').then((m) => m.reportTelemetryOnce()).catch(() => {})
+
     // 超级协作平台：重启后标记上次未完成任务为"进程中断"（可恢复提示）
     recoverInterruptedTasks()
 

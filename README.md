@@ -238,6 +238,27 @@ Chat with the agent directly in the terminal — streaming output and tool calls
 | `CORS_ORIGINS` | CORS whitelist (comma-separated) | localhost only |
 | `API_TOKEN` | optional Bearer token for non-local API requests | empty (disabled) |
 | `TUNNEL_ENABLED` | enable tunneling (default off, fully local) | `false` |
+| `SUPERCRZY_TELEMETRY` | anonymous usage ping — set `0` to disable | `1` (enabled) |
+
+### Anonymous usage telemetry
+
+On startup the server sends **one** tiny request so we can see how many installs exist
+and which versions are in use. It contains exactly four fields and nothing else:
+
+```json
+{ "iid": "<random uuid>", "version": "0.4.1", "platform": "darwin 27.0.0", "firstRun": true }
+```
+
+- `iid` is a **randomly generated UUID** stored in your local database. It is not derived
+  from hardware, MAC address, hostname, or account — it cannot identify you.
+- **Never** sent: conversations, prompts, file paths, API keys, model names, memory contents.
+- **Disable permanently** — either set `SUPERCRZY_TELEMETRY=0` in `.env`, or run:
+  ```bash
+  sqlite3 ~/.supercrzy/data/supercrzy.db \
+    "INSERT INTO settings(key,value,updated_at) VALUES('telemetry.enabled','false',datetime('now')) \
+     ON CONFLICT(key) DO UPDATE SET value='false'"
+  ```
+- Failures are silent and never retried within a run — being offline has zero impact.
 
 ## 🏗️ Architecture
 
