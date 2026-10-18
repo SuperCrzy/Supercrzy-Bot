@@ -48,10 +48,8 @@ describe('decideToolApproval —— block 恒拦（放在白名单之前）', ()
 })
 
 describe('decideToolApproval —— "拦一次后记住"（老板 2026-09-24 17:57 裁决）', () => {
-  it('block 类被显式允许过一次 → 本会话不再拦（任何档位）', () => {
-    expect(
-      decideToolApproval('file_delete', '{}', ctx({ mode: 'auto', sessionBlockApproved: true, classify: Risk('block') })),
-    ).toBe('allow')
+  it('非删除的 block 类被显式允许过一次 → 本会话不再拦（任何档位）', () => {
+    // 2026-10-18 起 file_delete 已移出"可记住"范围（下面单列），这里只覆盖非删除类
     expect(
       decideToolApproval('shell_exec', 'rm -rf /tmp/x', ctx({ mode: 'prompt', sessionBlockApproved: true, classify: Risk('block') })),
     ).toBe('allow')
@@ -59,6 +57,21 @@ describe('decideToolApproval —— "拦一次后记住"（老板 2026-09-24 17:
       decideToolApproval('skill_install', '{}', ctx({ mode: 'accept-edits', sessionBlockApproved: true, classify: Risk('block') })),
     ).toBe('allow')
   })
+
+  it('🔴 删除类永不被"记住"放行 —— 任何档位都必须每次确认（老板 2026-10-18 裁决）', () => {
+    // 这是不变量：删除是唯一不可逆操作，不能继承任何会话级记忆。
+    // bug 存在时（旧逻辑 sessionBlockApproved 排在前）这里会返回 allow → 断言失败。
+    for (const mode of ['auto', 'prompt', 'accept-edits'] as const) {
+      expect(
+        decideToolApproval('file_delete', '{}', ctx({ mode, sessionBlockApproved: true, sessionApproved: true, classify: Risk('block') })),
+      ).toBe('confirm')
+    }
+    // 小写 delete 结尾的其它删除类工具同样恒问
+    expect(
+      decideToolApproval('bulk_delete', '{}', ctx({ mode: 'auto', sessionBlockApproved: true, classify: Risk('block') })),
+    ).toBe('confirm')
+  })
+
   it('deny 档仍拒绝（记住不能推翻"仅查看"）', () => {
     expect(
       decideToolApproval('file_delete', '{}', ctx({ mode: 'deny', sessionBlockApproved: true, classify: Risk('block') })),

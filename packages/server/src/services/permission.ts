@@ -155,7 +155,18 @@ export function decideToolApproval(
   if (ctx.mode === 'deny') return 'deny'
 
   const risk = ctx.classify(toolName, args)
-  // "拦一次后记住"：本会话已对 block 类显式允许过 → 不再拦（deny 档除外，见上）
+
+  // 🔴 2026-10-18 老板裁决（「3. 删除类永远必问」）：**删除任何档位都不被"记住"放行**。
+  //
+  //   改前：`if (ctx.sessionBlockApproved) return 'allow'` 排在 block 判断之前，
+  //         意味着只要用户在本会话对**任意** block 类工具点过一次「允许」，
+  //         之后 `file_delete` 也不再询问 —— 删文件静默执行。
+  //   删除是唯一真正不可逆的操作（文件内容无法从应用内恢复），
+  //   必须每次单独确认，不能继承任何会话级记忆。
+  const isDelete = toolName === 'file_delete' || risk === 'block' && /(^|_)delete$/.test(toolName)
+  if (isDelete) return 'confirm'
+
+  // "拦一次后记住"：本会话已对 block 类显式允许过 → 不再拦（deny 档除外；删除类已在上方排除）
   if (ctx.sessionBlockApproved) return 'allow'
   // block 恒拦：**放在普通白名单之前**，会话级"全部允许"不能推翻不可逆操作
   if (risk === 'block') return 'confirm'

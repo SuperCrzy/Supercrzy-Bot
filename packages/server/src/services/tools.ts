@@ -490,8 +490,22 @@ export function classifyShellCommand(command: string): 'allow' | 'ask' | 'block'
     const rmVerdict = classifyRmSegment(seg)
     if (rmVerdict === 'block') return 'block'
     if (rmVerdict === 'allow') continue
+    // 明确可疑（sudo/chmod/chown/kill/launchctl/rsync…）→ 必须问
     if (SUSPICIOUS_PATTERNS.some((p) => p.test(seg))) { worst = 'ask'; continue }
-    if (!isSafeSegment(seg)) worst = 'ask'
+    // 🔴 2026-10-18 决策（老板：「1+3」）：**未知命令默认放行，不再询问**。
+    //
+    //   改前：`if (!isSafeSegment(seg)) worst = 'ask'` —— 凡不在 AUTO_SAFE_PREFIX 白名单里的
+    //         命令一律弹框。实测这导致 `python3 -m ...`、`git cherry-pick`、`docker ps` 之类
+    //         无害命令每次都问，用户看到"一闪而过的授权框"。
+    //   对标 WorkBuddy（/cli/dist/codebuddy-lite-wb.mjs:1163 原文）：
+    //         `needsApproval.some(t => "unknown" !== t.level)`
+    //         —— 它把 level==="unknown" **排除**在触发条件之外，即未知 = 放行。
+    //
+    //   安全不倒退的理由：真正危险的东西在**上面两步已经拦死**，与本白名单无关 ——
+    //     ① IRREVERSIBLE_PATTERNS（含 `curl … | sh` 跨段组合）→ block
+    //     ② classifyRmSegment（递归 rm / 越界 rm）→ block
+    //     ③ SUSPICIOUS_PATTERNS（提权、改权限、改所有者、杀进程、装守护进程）→ ask
+    //   白名单从此只是"已知安全"的**快捷说明**，不再是"未知即危险"的隐式规则。
   }
   return worst
 }
