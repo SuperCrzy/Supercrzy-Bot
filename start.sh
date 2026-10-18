@@ -274,6 +274,37 @@ else
   warn "未能自动打开浏览器，请手动访问：${URL}"
 fi
 
+# 7. 桌面快捷方式（仅 macOS）
+#    2026-10-18 老板确认「B 方案」：新用户跑一次 ./start.sh 就应该同时得到桌面图标，
+#    不必再单独跑 scripts/install.command。
+# 上一版为什么没生效：这段在**健康检查 60s 之后**，而且 make-app.sh 失败被
+#   `>/dev/null 2>&1 || true` 完全吞掉 —— 用户既等不到也没提示。
+# 现在：
+#   · 提前到"服务已拉起、浏览器已开"之后立刻做（不阻塞任何可见动作）
+#   · 失败要提示原因，不静默
+#   · 桌面已有同名图标 → 跳过，不覆盖用户自建
+#   · 任何失败都不影响启动（服务此时已经在跑）
+if [ "$(uname -s 2>/dev/null)" = "Darwin" ] && command -v osacompile >/dev/null 2>&1; then
+  DESKTOP_DIR="$HOME/Desktop"
+  [ -d "$DESKTOP_DIR" ] || DESKTOP_DIR="$(osascript -e 'tell application "Finder" to POSIX path of (desktop as alias)' 2>/dev/null || echo "$HOME/Desktop")"
+  if [ -d "$DESKTOP_DIR" ] && [ ! -e "$DESKTOP_DIR/SUPERCRZY BOT" ]; then
+    if [ ! -d "SUPERCRZY BOT.app" ]; then
+      info "正在生成桌面图标（首次运行）..."
+      if ./scripts/make-app.sh >/tmp/sc-make-app.log 2>&1; then
+        :
+      else
+        warn "桌面 App 生成失败，详见 /tmp/sc-make-app.log"
+        tail -3 /tmp/sc-make-app.log 2>/dev/null | sed 's/^/    /'
+      fi
+    fi
+    if [ -d "SUPERCRZY BOT.app" ]; then
+      ln -s "$PROJECT_ROOT/SUPERCRZY BOT.app" "$DESKTOP_DIR/SUPERCRZY BOT" 2>/dev/null \
+        && info "已在桌面创建快捷方式「SUPERCRZY BOT」，下次双击即可启动" \
+        || info "（桌面快捷方式创建失败，可手动运行 scripts/install.command）"
+    fi
+  fi
+fi
+
 # 等待就绪（仅用于终端提示，最多 60s；失败不改退出码，服务可能仍在初始化）
 READY=0
 for i in $(seq 1 60); do
@@ -291,27 +322,6 @@ info "服务已就绪：${URL}（关掉本窗口不影响，服务后台保活�
 info "停止：bash start.sh stop"
 if command -v supercrzy >/dev/null 2>&1; then
   info "也可以用：supercrzy status / supercrzy dev / supercrzy cli"
-fi
-
-# 7. 首次启动时补一个桌面快捷方式（仅 macOS，2026-10-17 老板：「用户首次只要运行一个口令，
-#    打开 Web，桌面也会出现快捷 app」）
-# 设计约束（任一不满足都不影响启动）：
-#   · 只在 macOS 且 .app 已存在/能生成时才做；osacompile 是 macOS 专属
-#   · 桌面已有同名图标 → 跳过，不覆盖用户自己建的
-#   · 生成失败静默降级为一行提示，**绝不阻断启动**（服务此时已经在跑了）
-if [ "$(uname -s 2>/dev/null)" = "Darwin" ] && command -v osacompile >/dev/null 2>&1; then
-  DESKTOP_DIR="$HOME/Desktop"
-  [ -d "$DESKTOP_DIR" ] || DESKTOP_DIR="$(osascript -e 'tell application "Finder" to POSIX path of (desktop as alias)' 2>/dev/null || echo "$HOME/Desktop")"
-  if [ -d "$DESKTOP_DIR" ] && [ ! -e "$DESKTOP_DIR/SUPERCRZY BOT" ]; then
-    if [ ! -d "SUPERCRZY BOT.app" ]; then
-      ./scripts/make-app.sh >/dev/null 2>&1 || true
-    fi
-    if [ -d "SUPERCRZY BOT.app" ]; then
-      ln -s "$PROJECT_ROOT/SUPERCRZY BOT.app" "$DESKTOP_DIR/SUPERCRZY BOT" 2>/dev/null \
-        && info "已在桌面创建快捷方式「SUPERCRZY BOT」，下次双击即可启动" \
-        || info "（桌面快捷方式创建失败，可手动运行 scripts/install.command）"
-    fi
-  fi
 fi
 
 # 8. 启动成功后自动关闭终端窗口（2026-10-18 老板：「终端窗口启动成功后可以自动关闭吗?」）
