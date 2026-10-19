@@ -17,7 +17,7 @@
   "dependencies": {
     "@koa/cors": "^5.0.0",
     "@koa/multer": "^4.0.0",
-    "@larksuiteoapi/node-sdk": "1.75.0",
+    "@larksuiteoapi/node-sdk": "1.76.0",
     "@modelcontextprotocol/sdk": "^1.32.1",
     "@tencent-weixin/openclaw-weixin": "^2.4.10",
     "@types/koa-static": "^4.0.4",
@@ -34,7 +34,7 @@
     "multer": "^2.4.0",
     "node-edge-tts": "^1.2.11",
     "pdf-parse": "^2.4.5",
-    "playwright-core": "1.64.0",
+    "playwright-core": "1.64.1",
     "qrcode": "^1.5.4",
     "sharp": "^0.35.5",
     "uuid": "^11.0.0",
@@ -55,6 +55,6 @@
     "supertest": "^7.3.1",
     "tsx": "^4.23.15",
     "typescript": "^5.7.0",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.12"
   }
 }
