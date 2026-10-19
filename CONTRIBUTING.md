@@ -52,6 +52,7 @@ pnpm --filter @supercrzy/client build
 - **Use mature open source**: prefer well-maintained libraries over reinventing the wheel, unless the feature is a core differentiator.
 - **No emoji icons in UI**: the project keeps a clean, original visual style.
 - **Tests**: add or update tests in `packages/*/tests/` for any behavior change.
+- **Comments and PRs in any language**: most existing code comments are in Chinese — the project was built in a Chinese-speaking context. Contributions are welcome in **English or Chinese**, and PRs are reviewed in whichever language you write. New code should prefer **English comments** so the codebase gets easier to read over time; translating existing comments is appreciated but never required, and we will not ask for it in review.
 
 ## Reporting bugs
 
