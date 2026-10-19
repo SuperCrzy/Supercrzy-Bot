@@ -3,6 +3,13 @@
 # Weekly, grouped, capped. The goal is a readable stream of PRs, not a pile:
 # patch/minor bumps arrive as a single grouped PR per ecosystem, and majors are
 # left to a human because they usually need code changes (see the ignore list).
+#
+# 🔴 2026-10-19 修：此前 `groups` 只对 minor/patch 分组，**major 仍会各自单独开 PR**，
+#    5 天攒了 7 个（vite 6→8、electron 33→44、vue-i18n 10→11 …），
+#    对外呈现为「7 Open Issues / 7 Open PRs」，访客据此判断"无人维护"。
+#    现在：所有 npm 生态统一 `ignore: "*" semver-major`，major 一律人工。
+#    注意 security updates 不受本文件 ignore 影响（走 repo settings 的独立开关），
+#    所以安全补丁不会因此漏掉。
 
 version: 2
 updates:
@@ -52,6 +59,9 @@ updates:
         applies-to: version-updates
         patterns: ["*"]
         update-types: ["minor", "patch"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directory: /packages/server
@@ -70,9 +80,9 @@ updates:
         patterns: ["*"]
         update-types: ["minor", "patch"]
     ignore:
-      # better-sqlite3 is a native module and must match the Electron ABI at
-      # packaging time — bump it manually and re-run `electron-rebuild`.
-      - dependency-name: better-sqlite3
+      # 统一策略：major 一律人工（见文件头说明）。
+      # better-sqlite3 另需匹配 Electron ABI，打包前要 electron-rebuild，同样不自动升。
+      - dependency-name: "*"
         update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
@@ -91,6 +101,11 @@ updates:
         applies-to: version-updates
         patterns: ["*"]
         update-types: ["minor", "patch"]
+    ignore:
+      # 🔴 electron major 必须人工：需 electron-rebuild better-sqlite3 并重新验收打包产物。
+      # 此前该规则只写在根目录，/packages/desktop 没有，导致 electron 33→44 被提成 PR。
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   # --- GitHub Actions ---
   - package-ecosystem: github-actions
