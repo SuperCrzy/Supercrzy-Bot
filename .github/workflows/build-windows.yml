@@ -36,13 +36,13 @@ jobs:
     timeout-minutes: 40
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # 与 ci.yml 同源：pnpm 版本读 package.json 的 packageManager，
       # Node 版本读 .nvmrc —— 不写死，避免两处漂移。
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: pnpm
@@ -193,7 +193,7 @@ jobs:
         shell: pwsh
         run: Get-ChildItem -File | Select-Object Name, @{N='MB';E={[math]::Round($_.Length/1MB,1)}} | Format-Table -AutoSize
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: supercrzy-bot-windows-${{ github.event.inputs.version || github.ref_name }}
           path: |
