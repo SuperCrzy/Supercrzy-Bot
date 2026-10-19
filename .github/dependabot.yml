@@ -7,9 +7,18 @@
 # 🔴 2026-10-19 修：此前 `groups` 只对 minor/patch 分组，**major 仍会各自单独开 PR**，
 #    5 天攒了 7 个（vite 6→8、electron 33→44、vue-i18n 10→11 …），
 #    对外呈现为「7 Open Issues / 7 Open PRs」，访客据此判断"无人维护"。
-#    现在：所有 npm 生态统一 `ignore: "*" semver-major`，major 一律人工。
-#    注意 security updates 不受本文件 ignore 影响（走 repo settings 的独立开关），
-#    所以安全补丁不会因此漏掉。
+#
+# 🔴 同日第二次修正（更根本）：npm 生态的 version updates **全部停用**（limit: 0）。
+#    原因不是"没人管"，而是**这些 PR 从来没通过过 CI**：
+#        CI 用 `pnpm install --frozen-lockfile`，
+#        而 dependabot 对 pnpm workspace 只改 package.json、**不更新 pnpm-lock.yaml**
+#        ⇒ frozen-lockfile 检测不一致 → 每个 PR 的 CI 必红。
+#    也就是说自动化在本仓库配置下无法产出可合并的 PR，留着只会持续制造红叉。
+#    改用 limit: 0（官方支持的"关闭 version updates"方式）：
+#      · version updates 不再提 PR
+#      · **security updates 不受影响**（走 repo settings 独立开关，照常提安全补丁并可自动合并）
+#      · github-actions 生态保留（实测 CI 通过，见 #23）
+#    需要主动升依赖时：本地 `pnpm update <pkg>` → 一并提交 package.json + pnpm-lock.yaml。
 
 version: 2
 updates:
@@ -21,7 +30,7 @@ updates:
       day: monday
       time: "03:00"
       timezone: Asia/Shanghai
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 0
     versioning-strategy: increase
     commit-message:
       prefix: "chore(deps)"
@@ -50,7 +59,7 @@ updates:
       day: monday
       time: "03:00"
       timezone: Asia/Shanghai
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 0
     versioning-strategy: increase
     commit-message:
       prefix: "chore(deps-client)"
@@ -70,7 +79,7 @@ updates:
       day: monday
       time: "03:00"
       timezone: Asia/Shanghai
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 0
     versioning-strategy: increase
     commit-message:
       prefix: "chore(deps-server)"
@@ -92,7 +101,7 @@ updates:
       day: monday
       time: "03:00"
       timezone: Asia/Shanghai
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 0
     versioning-strategy: increase
     commit-message:
       prefix: "chore(deps-desktop)"
