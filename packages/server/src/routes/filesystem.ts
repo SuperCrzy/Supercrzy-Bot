@@ -4,7 +4,7 @@ import { readFile, stat } from 'fs/promises'
 import { join, resolve, dirname } from 'path'
 import { homedir } from 'os'
 import { assertSafeFilePath } from '../services/sandbox'
-import { mediaMimeOf, isNonPreviewableBinary } from '../services/file-kind'
+import { mediaMimeOf, isNonPreviewableBinary, docxMimeOf, isMarkdownPath, isSvgPath } from '../services/file-kind'
 
 /**
  * 文件内容预览的单文件上限。
@@ -132,6 +132,20 @@ fsRouter.get('/read', async (ctx) => {
     }
     return
   }
+  // Word（OOXML）：不能当文本读，但也不该只给一句"不支持" —— 前端有 docx-preview，
+  // 所以这里跟 media 一样只回地址，由前端拉原始字节自行渲染（2026-10-20）。
+  // ⚠️ 必须排在 `isNonPreviewableBinary` **之前**：`.docx` 若被并列进 BINARY_ONLY_EXT 就永远读不到这里。
+  const docxMime = docxMimeOf(safePath)
+  if (docxMime) {
+    ctx.body = {
+      path: safePath,
+      kind: 'docx',
+      mime: docxMime,
+      size: fileStat.size,
+      url: `/api/filesystem/raw?path=${encodeURIComponent(safePath)}`,
+    }
+    return
+  }
   if (isNonPreviewableBinary(safePath)) {
     ctx.body = {
       path: safePath,
@@ -149,9 +163,22 @@ fsRouter.get('/read', async (ctx) => {
     const s = start > 0 ? Math.min(start, totalLines) : 1
     const e = end >= s ? Math.min(end, totalLines) : totalLines
     const lines = allLines.slice(s - 1, e)
+    // `start`/`end` 是**调用方显式传的**定位范围（0 = 没传），不是上面归一化后的 s/e
+    const hasRange = start > 0 || end > 0
     ctx.body = {
       path: safePath,
-      kind: 'text',
+      // markdown 与纯文本的**内容**相同，只是前端渲染方式不同（渲染 vs 等宽平铺）；
+      // 判定放在这里而不是前端各自判扩展名，避免出现第二份清单（2026-10-20）。
+      // ⚠️ 但**带行号范围时一律按纯文本**：那次调用是"定位到第 N 行"（正文路径链接 / read_file），
+      // 只拿到中间几行 —— 半截 markdown 渲染出来只会是错乱的层级和残缺表格，
+      // 而且渲染后行号也对不上。定位场景要的就是"看到原文那几行"。
+      kind: hasRange
+        ? 'text'
+        : isSvgPath(safePath)
+          ? 'svg'
+          : isMarkdownPath(safePath)
+            ? 'markdown'
+            : 'text',
       totalLines,
       startLine: s,
       endLine: e,
@@ -173,8 +200,11 @@ fsRouter.get('/read', async (ctx) => {
  *
  * 安全边界（三条都要，缺一条就变成漏洞）：
  *   ① 与 `/read` **同一套** `assertSafeFilePath` 沙箱校验（含凭据文件/敏感目录拦截）；
- *   ② 只放行 `file-kind` 里白名单的媒体类型 —— 不让本路由变成"任意文件下载"通道；
+ *   ② 只放行 `file-kind` 里白名单的类型 —— 不让本路由变成"任意文件下载"通道；
  *   ③ 大小上限与文本预览一致 + `nosniff` + 图片加 CSP（媒体不需要脚本能力）。
+ *
+ * 2026-10-20：白名单加 `.docx`（`docxMimeOf`）。它只是 zip 数据、不具脚本能力，
+ * 且响应带 `nosniff` + OOXML 的 Content-Type ⇒ 浏览器不会当 HTML 执行。
  */
 fsRouter.get('/raw', async (ctx) => {
   const raw = String(ctx.query.path || '').trim()
@@ -182,7 +212,7 @@ fsRouter.get('/raw', async (ctx) => {
   const pathErr = assertSafeFilePath(raw)
   if (pathErr) { ctx.status = 403; ctx.body = { error: `路径不在白名单内：${pathErr}` }; return }
   const safePath = resolve(raw)
-  const mime = mediaMimeOf(safePath)
+  const mime = mediaMimeOf(safePath) || docxMimeOf(safePath)
   if (!mime) { ctx.status = 415; ctx.body = { error: '该类型不支持内嵌预览' }; return }
   let st: Awaited<ReturnType<typeof stat>>
   try {

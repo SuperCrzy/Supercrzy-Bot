@@ -1687,6 +1687,8 @@ function openDiagram(d: { title?: string; svg: string }) {
   appStore.previewFiles = { ...appStore.previewFiles, [name]: d.svg }
   appStore.previewPath = name
   appStore.previewContent = d.svg
+  // 图走 iframe 通道（类型"未知"）—— 不复位的话，上一次点开的 md/docx 会让 SVG 按旧类型渲染
+  appStore.setPreviewKind('')
   appStore.previewTs = Date.now()
   appStore.detailPanelVisible = true
   appStore.setDetailPanelTab('preview')

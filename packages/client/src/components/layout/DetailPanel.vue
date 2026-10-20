@@ -178,19 +178,17 @@
             </button>
           </div>
         </div>
-        <div v-else-if="!livePreviewContent && !previewContent && !previewHtml" class="tab-empty">
-          <n-empty :description="$t('detail.selectToPreview')" />
-        </div>
-        <HtmlPreview
-          v-else-if="livePreviewContent || previewHtml"
-          :content="livePreviewContent || previewHtml"
-          :path="livePreviewPath || previewFileName"
-          show-header
+        <!-- 预览内容渲染器（2026-10-20 抽出为 PreviewPane）：按 store 里的 previewKind
+             分流 docx / markdown / 纯文本 / HTML。这里**不再**自己写 iframe 与原文本分支 ——
+             原来那套顺序让 `<pre>` 变成死代码（.md/.txt 全被 iframe 当 HTML 解析、换行塌陷）。 -->
+        <PreviewPane
+          v-else
+          :kind="appStore.previewKind"
+          :text="appStore.previewContent"
+          :path="previewFileName || appStore.previewPath"
+          :html="livePreviewContent || previewHtml"
+          :doc-url="appStore.previewDocUrl"
         />
-        <div v-else-if="previewContent" class="preview-content">
-          <div class="preview-header">{{ previewFileName }}</div>
-          <pre class="preview-code"><code>{{ previewContent }}</code></pre>
-        </div>
       </div>
 
       <!-- 时间线 Tab -->
@@ -227,7 +225,7 @@ import { useI18n } from 'vue-i18n'
 import { extractFiles } from '@/types'
 import type { ChatFlowNode } from '@/types'
 import TimelinePanel from '@/components/chat/TimelinePanel.vue'
-import HtmlPreview from '@/components/chat/HtmlPreview.vue'
+import PreviewPane from '@/components/layout/PreviewPane.vue'
 import AiBrowserPanel from '@/components/layout/AiBrowserPanel.vue'
 import { sanitizeSvg } from '@/utils/sanitize-svg'
 import { openFilePreview } from '@/utils/file-preview'
@@ -261,12 +259,19 @@ const maximized = ref(false)
 const livePreviewPath = ref('')
 
 // ===== SVG 预览操作：下载 / 复制代码 =====
+// 内容来源两处：AI 实时预览走 `livePreviewContent`；**文件**预览（kind='svg'）走 store ——
+// watcher 对 svg 不再写 livePreviewContent，不兜这一下按钮会整个消失（2026-10-20）。
+const svgSource = computed(() => {
+  if (appStore.previewKind === 'svg') return appStore.previewContent || ''
+  return livePreviewContent.value || ''
+})
 const isSvgPreview = computed(() => {
+  if (appStore.previewKind === 'svg') return true
   const p = (livePreviewPath.value || '').toLowerCase()
   return p.endsWith('.svg') || (livePreviewContent.value || '').trimStart().startsWith('<svg')
 })
 function downloadSvg() {
-  const svg = livePreviewContent.value || ''
+  const svg = svgSource.value
   if (!svg) return
   const blob = new Blob([svg], { type: 'image/svg+xml' })
   const url = URL.createObjectURL(blob)
@@ -305,7 +310,7 @@ async function downloadPreviewImage() {
   }
 }
 async function copySvg() {
-  const svg = livePreviewContent.value || ''
+  const svg = svgSource.value
   if (!svg) return
   try {
     await navigator.clipboard.writeText(svg)
@@ -320,6 +325,23 @@ watch(
   () => appStore.previewTs,
   () => {
     if (previewDebounce) clearTimeout(previewDebounce)
+    /**
+     * 2026-10-20：`livePreviewContent` 的语义收窄为「**只装 HTML**」。
+     *
+     * 它原来对任何文本文件都赋值（`inlineAssets` 会把 html + 配套 css/js 内联），
+     * 而模板里 `HtmlPreview` 的分支排在文本分支前面 ⇒ `.md/.txt` 全被塞进 iframe
+     * 当 HTML 解析，换行折叠成空格。现在文本类（text / markdown / docx）**不写**它，
+     * 由 PreviewPane 按 `previewKind` 走各自渲染器。
+     */
+    const kind = appStore.previewKind
+    if (kind === 'text' || kind === 'markdown' || kind === 'docx' || kind === 'svg') {
+      livePreviewContent.value = ''
+      livePreviewPath.value = ''
+      previewHtml.value = ''          // 否则上一次的 .html 会盖住新点开的文本
+      previewFileName.value = appStore.previewPath
+      return
+    }
+    // 类型未知 = AI 实时预览 / html：保持原有 800ms 防抖（流式过程中内容会连续推）
     previewDebounce = setTimeout(() => {
       livePreviewPath.value = appStore.previewPath
       livePreviewContent.value = inlineAssets(appStore.previewContent, appStore.previewPath, appStore.previewFiles)
@@ -521,7 +543,8 @@ watch(() => ({ visible: true, tab: null }), () => {
 })
 
 // ----- Preview -----
-const previewContent = ref('')
+// `previewContent`（本地 ref）2026-10-20 删除：它全文件只在 html 分支被赋值 `''`，
+// 模板里对应的 `<pre>` 分支因此永远不可达（死代码）。文本内容已统一由 PreviewPane 读 store。
 const previewHtml = ref('')
 const previewFileName = ref('')
 // AI 生成图预览（从 appStore 读：generate_image 工具产物 + flow 图点击）
@@ -573,7 +596,8 @@ function showDiff() {
  * `openFilePreview` **之外的第二份重复实现**，而且图片在这条链路上同样会被
  * `readFile(p,'utf-8')` 解成乱码（老板报的"截屏预览是乱码"有两条触发路径，这是其中一条）。
  * 现在只保留 html 的 iframe 分支（它需要喂给 `HtmlPreview`，不是纯文本场景），
- * 其余全部交给 `openFilePreview`，由它按 `kind`（text / media / binary）分流。
+ * 其余全部交给 `openFilePreview`，由它按后端 `kind`（text / markdown / media / docx / binary）
+ * 分流；渲染由 `PreviewPane` 按 store 里的 `previewKind` 完成（2026-10-20）。
  */
 async function loadAndPreviewFile(filePath: string) {
   // HTML 走 iframe 渲染（当纯文本看没有意义），单独保留
@@ -583,8 +607,8 @@ async function loadAndPreviewFile(filePath: string) {
       if (res.ok) {
         const data = await res.json()
         previewFileName.value = filePath
-        previewContent.value = ''
         appStore.clearPreviewImage()          // 三种预览模式互斥（图 / html / 文本）
+        appStore.setPreviewKind('')           // html 文件 = "类型未知"通道（走 iframe）
         livePreviewContent.value = ''         // 否则 HtmlPreview 会继续显示上一次的内容
         livePreviewPath.value = ''
         previewHtml.value = String(data.content || '').substring(0, 100000)
@@ -680,6 +704,25 @@ const tabs = [
 
 /* 预览 Tab 工具条 */
 .preview-tab { display: flex; flex-direction: column; gap: 6px; }
+
+/* 🔴 2026-10-20 手机端「预览 / AI 浏览器画面是扁的」根因：
+   `.tab-content` 的高度原本**由内容决定**（没有 flex:1），而 HtmlPreview 用
+   `height:100%` + `iframe{flex:1}` 撑高 —— 100% 落在 auto 高度的父级上等于无效，
+   iframe 就塌成浏览器默认高度；AI 浏览器画面区同理只剩 `min-height:140px` 一条扁缝。
+   🔴 最终一环（第一次修复漏掉的）：`.panel-body` 原本 `display:block`，
+   tab-content 的 flex:1 落在**非 flex 父级**上照样无效 —— 必须先把 panel-body 变成
+   flex column，tab 才有"可以撑满的父亲"。
+   只对预览/浏览器两个 tab 撑满：产物/文件/时间线仍按内容高度自然滚动。 */
+@media (max-width: 768px) {
+  .panel-body {
+    display: flex;
+    flex-direction: column;
+  }
+  .tab-content.preview-tab {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+}
 
 /* 产物卡片流（对齐 Harness turn-deliverables） */
 .deliverables-tab { display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }

@@ -10,7 +10,7 @@
  *
  * 已知类别（改动本文件时同步维护）：
  *  - `sanitizeSvg(...)`            —— AI 产出的 SVG，**必须**走这里
- *  - markdown 渲染调用             —— 4 个 markdown-it 实例全为 `html: false`（裸 HTML 被转义）
+ *  - markdown 渲染调用             —— 5 个 markdown-it 实例全为 `html: false`（裸 HTML 被转义）
  *  - `reasoningHtml`               —— ThinkingBlock 的 computed，值 = `reasoningMd.render(...)`，
  *                                     而 `reasoningMd` 是 `html: false`（由下面第 4 条断言兜住）
  *  - 自有静态图标常量              —— DetailPanel 的 `tab.icon` / `tb.icon`，值写死在 `tabs` 数组里
@@ -20,6 +20,7 @@ import { describe, it, expect } from 'vitest'
 import flowRenderer from '../components/chat/MessageFlowRenderer.vue?raw'
 import chatView from '../views/ChatView.vue?raw'
 import detailPanel from '../components/layout/DetailPanel.vue?raw'
+import previewPane from '../components/layout/PreviewPane.vue?raw'
 import thinkingBlock from '../components/chat/ThinkingBlock.vue?raw'
 import collabWorkbench from '../views/CollabWorkbenchView.vue?raw'
 import compareResult from '../components/chat/CompareResult.vue?raw'
@@ -28,6 +29,8 @@ const FILES: Array<{ name: string; src: string }> = [
   { name: 'components/chat/MessageFlowRenderer.vue', src: flowRenderer },
   { name: 'views/ChatView.vue', src: chatView },
   { name: 'components/layout/DetailPanel.vue', src: detailPanel },
+  // 2026-10-20：右栏 preview tab 的内容渲染器（markdown 走 renderMarkdown，html:false）
+  { name: 'components/layout/PreviewPane.vue', src: previewPane },
   { name: 'components/chat/ThinkingBlock.vue', src: thinkingBlock },
   { name: 'views/CollabWorkbenchView.vue', src: collabWorkbench },
   { name: 'components/chat/CompareResult.vue', src: compareResult },

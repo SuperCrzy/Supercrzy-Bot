@@ -21,6 +21,9 @@ const { appStore } = vi.hoisted(() => ({
     clearPreviewImage: vi.fn(),
     setPreviewImage: vi.fn(),
     setDetailPanelTab: vi.fn(),
+    setPreviewKind: vi.fn(),
+    previewKind: '',
+    previewDocUrl: '',
   },
 }))
 
@@ -42,6 +45,7 @@ beforeEach(() => {
   appStore.clearPreviewImage.mockClear()
   appStore.setPreviewImage.mockClear()
   appStore.setDetailPanelTab.mockClear()
+  appStore.setPreviewKind.mockClear()
 })
 
 describe('openFilePreview 按后端 kind 分流', () => {
@@ -66,6 +70,7 @@ describe('openFilePreview 按后端 kind 分流', () => {
     expect(appStore.previewContent).toBe('line1\nline2\nline3')
     expect(appStore.previewPath).toBe('/tmp/a.ts L1-3')
     expect(appStore.setPreviewImage).not.toHaveBeenCalled()
+    expect(appStore.setPreviewKind).toHaveBeenCalledWith('text')
     expect((d as any).kind).toBe('text')
   })
 
@@ -75,6 +80,43 @@ describe('openFilePreview 按后端 kind 分流', () => {
     await openFilePreview('/tmp/a.zip')
 
     expect(appStore.previewContent).toBe('二进制文件（2.0 KB）不支持文本预览')
+    expect(appStore.setPreviewImage).not.toHaveBeenCalled()
+  })
+
+  it('kind:markdown → 内容照写，但类型标成 markdown（不再被 iframe 当 HTML 解析）', async () => {
+    stubJson({ path: '/tmp/README.md', kind: 'markdown', startLine: 1, endLine: 2, content: '# 标题\n正文' })
+
+    await openFilePreview('/tmp/README.md')
+
+    expect(appStore.previewContent).toBe('# 标题\n正文')
+    expect(appStore.setPreviewKind).toHaveBeenCalledWith('markdown')
+  })
+
+  it('kind:svg → 内容照写、类型标 svg（前端当图渲染，但仍不进 /raw）', async () => {
+    stubJson({ path: '/tmp/logo.svg', kind: 'svg', startLine: 1, endLine: 1, content: '<svg xmlns="…"/>' })
+
+    await openFilePreview('/tmp/logo.svg')
+
+    expect(appStore.previewContent).toBe('<svg xmlns="…"/>')
+    expect(appStore.setPreviewKind).toHaveBeenCalledWith('svg')
+    expect(appStore.setPreviewImage).not.toHaveBeenCalled()
+  })
+
+  it('🔴 kind:docx → 只把地址交给 docx 渲染器，绝不把字节当文本灌进去', async () => {
+    const url = '/api/filesystem/raw?path=%2Ftmp%2Freport.docx'
+    stubJson({
+      path: '/tmp/report.docx',
+      kind: 'docx',
+      mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      size: 39300,
+      url,
+    })
+
+    await openFilePreview('/tmp/report.docx')
+
+    expect(appStore.setPreviewKind).toHaveBeenCalledWith('docx', url)
+    // 修复前这里会是 1.5 万个 U+FFFD 组成的乱码字符串
+    expect(appStore.previewContent).toBe('')
     expect(appStore.setPreviewImage).not.toHaveBeenCalled()
   })
 

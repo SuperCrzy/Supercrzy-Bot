@@ -220,6 +220,7 @@ function openFlowDiagram(node: Extract<ChatFlowNode, { kind: 'diagram' }>) {
   appStore.previewFiles = { ...appStore.previewFiles, [name]: node.svg }
   appStore.previewPath = name
   appStore.previewContent = node.svg
+  appStore.setPreviewKind('')   // 图走 iframe 通道；不清会沿用上一次点开的 md/docx 类型
   appStore.previewTs = Date.now()
   appStore.detailPanelVisible = true
   appStore.setDetailPanelTab('preview')

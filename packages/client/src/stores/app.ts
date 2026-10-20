@@ -33,6 +33,30 @@ export const useAppStore = defineStore('app', () => {
   const previewPath = ref('')
   const previewContent = ref('')
   const previewTs = ref(0)
+  /**
+   * 预览的**渲染类型**（2026-10-20）。
+   *
+   * 为什么必须显式带一个类型：`previewContent` 一个字段装四种东西（html / markdown / 纯文本 /
+   * docx 的 url），而 DetailPanel 原先靠"内容非空 ⇒ 当 HTML 塞进 iframe"来分流 ——
+   * `.md` 被 iframe 当 HTML 解析后**换行全塌成空格**，`<pre>` 分支形同死代码。
+   *
+   * 取值语义：
+   *   - `''`       未知 ⇒ **沿用旧链路**（当 HTML 渲染）。AI 实时预览 / SVG 图都走这里，行为不变。
+   *   - `text`     等宽纯文本
+   *   - `markdown` markdown-it 渲染
+   *   - `docx`     docx-preview 渲染，内容取 `previewDocUrl`
+   *   - `svg`      SVG 文件：内容仍是文本，但交给 iframe 当图渲染（不进 `/raw`，见 file-kind.ts）
+   *
+   * 判定来源只有一个：后端 `/api/filesystem/read` 返回的 `kind`（见 server/services/file-kind.ts）。
+   * **前端不许再判扩展名**，否则又多一份清单。
+   */
+  const previewKind = ref<'' | 'text' | 'markdown' | 'docx' | 'svg'>('')
+  /** docx 预览的原始字节地址（`/api/filesystem/raw`），仅 `previewKind === 'docx'` 时有值 */
+  const previewDocUrl = ref('')
+  function setPreviewKind(kind: '' | 'text' | 'markdown' | 'docx' | 'svg', url = '') {
+    previewKind.value = kind
+    previewDocUrl.value = kind === 'docx' ? url : ''
+  }
   function setPreview(path: string, content: string) {
     previewFiles.value = { ...previewFiles.value, [path]: content }
     // 记录最近更新的 html 作为主预览文件（无 html 时取任意文件）
@@ -43,6 +67,9 @@ export const useAppStore = defineStore('app', () => {
       previewPath.value = path
       previewContent.value = content
     }
+    // SSE 推来的是 HTML 实时预览 ⇒ 必须把类型复位成"未知（当 HTML）"，
+    // 否则上一次点开的 md/docx 会让新内容仍按旧类型渲染。
+    setPreviewKind('')
     previewTs.value = Date.now()
   }
   // AI 生成图片预览（生图产物）：对话内 image 段 + 右侧 preview tab 共用
@@ -363,6 +390,9 @@ export const useAppStore = defineStore('app', () => {
     previewContent,
     previewTs,
     previewFiles,
+    previewKind,
+    previewDocUrl,
+    setPreviewKind,
     setPreview,
     fileChanges,
     addFileChange,

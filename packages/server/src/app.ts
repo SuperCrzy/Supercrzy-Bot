@@ -19,7 +19,7 @@ import { getSseStats } from './services/sse-health'
 import { createTerminalServer } from './services/terminal'
 import { startTunnel, stopTunnel, renderPreviewPage, getTunnelUrl, createPreviewLink } from './services/tunnel'
 // 文件「能不能当文本预览」的唯一判定（2026-09-29：图片乱码的根因收敛在这里）
-import { mediaMimeOf, isNonPreviewableBinary } from './services/file-kind'
+import { mediaMimeOf, isNonPreviewableBinary, docxMimeOf } from './services/file-kind'
 import { chatRouter } from './routes/chat'
 import { fsRouter } from './routes/filesystem'
 import { settingsRouter } from './routes/settings'
@@ -498,6 +498,13 @@ async function bootstrap() {
         ctx.set('X-Content-Type-Options', 'nosniff')
         if (previewMime.startsWith('image/')) ctx.set('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'")
         ctx.body = createReadStream(absPath)
+        return
+      }
+      if (docxMimeOf(absPath)) {
+        // 这一层是"直链预览页"（手机扫码用），把 docx 当 HTML 渲染没有意义；
+        // 明确 415，别让它走下面的 utf-8 读完吐一屏乱码（2026-10-20）。
+        ctx.status = 415
+        ctx.body = `Word document is not previewable as a page: ${filePath}`
         return
       }
       if (isNonPreviewableBinary(absPath)) {

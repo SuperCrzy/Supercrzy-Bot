@@ -9,7 +9,7 @@ import { readdir, readFile, stat } from 'fs/promises'
 import { join, resolve } from 'path'
 import { config } from '../config'
 import { getDB } from '../services/database'
-import { mediaMimeOf, isNonPreviewableBinary } from '../services/file-kind'
+import { mediaMimeOf, isNonPreviewableBinary, docxMimeOf, isMarkdownPath } from '../services/file-kind'
 
 export const workspaceRouter = new Router({ prefix: '/api/workspace' })
 
@@ -179,12 +179,27 @@ workspaceRouter.get('/files/content', async (ctx: Context) => {
       }
       return
     }
+    if (docxMimeOf(filePath)) {
+      // 与 /api/filesystem/read 同款：docx 不是"不支持的二进制"，而是有专用渲染器的类型。
+      // 这里一并堵住，否则这条对外 API 的 docx 预览仍是 42% 乱码（2026-10-20）。
+      ctx.body = {
+        path: filePath,
+        kind: 'docx',
+        mime: docxMimeOf(filePath),
+        url: `/api/filesystem/raw?path=${encodeURIComponent(filePath)}`,
+      }
+      return
+    }
     if (isNonPreviewableBinary(filePath)) {
       ctx.body = { path: filePath, kind: 'binary', message: '二进制文件不支持文本预览' }
       return
     }
     const content = await readFile(filePath, 'utf-8')
-    ctx.body = { content: content.slice(0, 100000), path: filePath, kind: 'text' }
+    ctx.body = {
+      content: content.slice(0, 100000),
+      path: filePath,
+      kind: isMarkdownPath(filePath) ? 'markdown' : 'text',
+    }
   } catch (err: any) {
     ctx.status = 500
     ctx.body = { error: err.message }

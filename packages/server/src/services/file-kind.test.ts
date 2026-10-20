@@ -7,7 +7,7 @@
  *     同源可执行 SVG 的通道（直接打开 URL 时文件里的 `<script>` 会在 App 源上跑）。
  */
 import { describe, expect, it } from 'vitest'
-import { mediaMimeOf, isBinaryPath, isNonPreviewableBinary } from './file-kind'
+import { mediaMimeOf, isBinaryPath, isNonPreviewableBinary, docxMimeOf, isMarkdownPath, isSvgPath } from './file-kind'
 
 describe('mediaMimeOf（能当媒体内嵌渲染的类型）', () => {
   it('位图与 PDF 给出正确 MIME', () => {
@@ -56,5 +56,50 @@ describe('isBinaryPath / isNonPreviewableBinary', () => {
 
   it('没有扩展名的路径当文本处理（不猜）', () => {
     expect(isBinaryPath('/tmp/Makefile')).toBe(false)
+  })
+})
+
+/**
+ * 2026-10-20：Office 文档的乱码修复（老板报「md / word 能不能看」）。
+ *
+ * 这条测试钉的是**症状**：`.docx` 一旦落回"未列出 ⇒ 按 UTF-8 读"的兜底，
+ * 真机就是 42.2% 的 `U+FFFD`。判据不能只看 kind 名字 —— 所以同时断言
+ * `docxMimeOf` 有值（⇒ `/read` 会返回 url 而不是 content）且它**不在**
+ * "不可预览二进制"里（否则走不到 docx 分支）。
+ */
+describe('docx / markdown 通道（2026-10-20）', () => {
+  it('.docx 有专用 MIME，且不会被当成"文本预览无意义"', () => {
+    expect(docxMimeOf('/tmp/报告.DOCX')).toBe(
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    )
+    // 关键：若 .docx 被并进 BINARY_ONLY_EXT，前端就只会拿到一句"不支持"，
+    // 永远进不了 docx-preview（顺序依赖，见 routes/filesystem.ts 的注释）
+    expect(isNonPreviewableBinary('/tmp/a.docx')).toBe(false)
+    expect(mediaMimeOf('/tmp/a.docx')).toBeNull()
+  })
+
+  it('老 .doc / 表格 / 演示文稿一律不给 docx 通道（没有渲染器，只给提示）', () => {
+    for (const p of ['a.doc', 'a.xlsx', 'a.xls', 'a.pptx', 'a.ppt']) {
+      expect(docxMimeOf(`/tmp/${p}`), p).toBeNull()
+      expect(isNonPreviewableBinary(`/tmp/${p}`), p).toBe(true)
+    }
+  })
+
+  it('markdown 判定覆盖 .md/.markdown/.mdx，且大小写不敏感', () => {
+    for (const p of ['a.md', 'a.markdown', 'a.mdx', 'README.MD']) {
+      expect(isMarkdownPath(`/tmp/${p}`), p).toBe(true)
+    }
+    for (const p of ['a.txt', 'a.mdx.bak', 'a.html', 'README']) {
+      expect(isMarkdownPath(`/tmp/${p}`), p).toBe(false)
+    }
+  })
+
+  it('svg 单独一档：要看图，但**不许**进 /raw（同源可执行 SVG）', () => {
+    expect(isSvgPath('/tmp/logo.svg')).toBe(true)
+    expect(isSvgPath('/tmp/LOGO.SVG')).toBe(true)
+    expect(isSvgPath('/tmp/a.png')).toBe(false)
+    // 两条安全前提：不是媒体（⇒ 不进 /raw），也不是"不可预览二进制"（⇒ /read 会返回内容）
+    expect(mediaMimeOf('/tmp/logo.svg')).toBeNull()
+    expect(isNonPreviewableBinary('/tmp/logo.svg')).toBe(false)
   })
 })

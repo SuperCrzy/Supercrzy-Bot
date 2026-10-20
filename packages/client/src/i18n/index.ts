@@ -1277,6 +1277,8 @@ const messages = {
       editor: '代码',
       pptxHint: 'PPT 文件暂不支持内嵌预览，请下载后在本机打开',
       downloadFile: '下载文件',
+      docxLoading: '正在渲染 Word 文档…',
+      docxFailed: 'Word 文档渲染失败（文件可能损坏，或受密码保护）',
     },
 
     channel: {
@@ -2755,6 +2757,8 @@ const messages = {
       editor: 'Code',
       pptxHint: 'PPT preview is not supported inline, download and open locally',
       downloadFile: 'Download',
+      docxLoading: 'Rendering Word document…',
+      docxFailed: 'Failed to render the Word document (corrupted or password-protected?)',
     },
     channel: {
       root: 'Root',
