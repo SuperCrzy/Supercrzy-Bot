@@ -218,14 +218,74 @@ export interface AttachReport {
 let lastAttachReport: AttachReport | null = null
 export function getAttachReport(): AttachReport | null { return lastAttachReport }
 
+/**
+ * 建立 attach 连接。
+ *
+ * 手机端的硬约束：整个 Chrome 被系统压到后台后会进入冻结态，它的 DevTools abstract
+ * socket 直接 `ECONNRESET`，`connectOverCDP` 连都连不上（2026-10-20 实机：回桌面后
+ * navigate 报 `read ECONNRESET`），根本走不到"截图为空"那一步。
+ *
+ * ⚠️ 这种情况**本机修不了**：拉前台要靠 `am`，而从 service.d 启动的进程域调不动
+ * ActivityManager（详见 `snap` 上方注释）。CDP 侧只能重试 —— Chrome 若只是被短暂
+ * 挂起，解冻后 socket 会重建；真被系统回收就只能等用户 / AI 用 `android_action` 拉起。
+ *
+ * 所以这里只做"Android 上多试一次"，不做任何 App 层拉起动作。
+ */
+async function connectAttachEndpoint(s: Session): Promise<void> {
+  const ep = attachEndpoint()
+  const attempts = isAndroid() ? 2 : 1
+  let lastErr: unknown
+  for (let i = 0; i < attempts; i++) {
+    if (i > 0) await new Promise((r) => setTimeout(r, 1200)) // 等解冻 + socket 重建
+    try {
+      s.b = await chromium.connectOverCDP(ep, { timeout: 15000 })
+      return
+    } catch (e) {
+      lastErr = e
+      s.b = null
+    }
+  }
+  throw lastErr
+}
+
+/** 从一次连接里挑出可接管的页面（纯粹是 attachToRealPage 的两阶段复用） */
+function pickAdoptable(b: Browser) {
+  const pages = b.contexts().flatMap((c) => c.pages())
+  const judged = pages.map((p) => ({ p, v: judgePage(p) }))
+  return { pages, judged, picked: judged.find((j) => j.v.ok) }
+}
+
 /** connectOverCDP 到 Electron，并在它的 target 列表里挑出"AI 浏览器的那一页" */
 async function attachToRealPage(s: Session): Promise<Page> {
   if (!s.b || !s.b.isConnected()) {
-    s.b = await chromium.connectOverCDP(attachEndpoint(), { timeout: 15000 })
+    await connectAttachEndpoint(s)
   }
-  const pages = s.b.contexts().flatMap((c) => c.pages())
-  const judged = pages.map((p) => ({ p, v: judgePage(p) }))
-  const picked = judged.find((j) => j.v.ok)
+  let b = s.b
+  if (!b) throw new Error(`attach 失败：CDP 端点 ${attachEndpoint()} 未建立连接`)
+  let r = pickAdoptable(b)
+
+  // 手机端兜底：真实 Chrome 里可能**一个可接管页面都没有** —— BOT 在手机上通常以 PWA
+  // （WebappActivity）形态运行，它自己那个 target 会被 judgeUrl ④ 正确排掉，于是一个都不剩。
+  // 桌面端这里是 desktop 的 WebContentsView 负责建视图，手机端没有宿主 ⇒ 自己开一个。
+  //
+  // 🔴 必须走 CDP 的 `ctx.newPage()`（内部是 Target.createTarget），**不能调 `am start`**：
+  // 从 Magisk service.d 启动的进程域调不动 ActivityManager —— 实测报
+  // `cmd: Failure calling service activity: Failed transaction (2147483646)`，
+  // 即使补全 ANDROID_DATA / ANDROID_ROOT、改走 `sh -c` 也一样（手动 su -c 执行则成功，
+  // 差异在 SELinux 域）。CDP 不经过 binder，这条路才是通的。
+  if (!r.picked && isAndroid()) {
+    const ctx = b.contexts()[0]
+    if (ctx) {
+      const fresh = await ctx.newPage().catch(() => null)
+      if (fresh) {
+        await fresh.goto(browserStartPageUrl(), { timeout: 15000, waitUntil: 'domcontentloaded' }).catch(() => {})
+        await new Promise((res) => setTimeout(res, 500))
+        r = pickAdoptable(b)
+      }
+    }
+  }
+
+  const { pages, judged, picked } = r
   lastAttachReport = {
     mode: 'attach',
     endpoint: attachEndpoint(),
@@ -302,7 +362,11 @@ function notify(s: Session, f: BrowserSnapshot) {
 }
 async function getPage(s: Session): Promise<Page> {
   s.idle = Date.now()
-  if (!s.p || s.p.isClosed()) {
+  // attach 模式下连接可能在任何时刻断掉（手机端 Chrome 被系统冻结 / 回收），
+  // 此时 s.p 是个**死句柄**：`isClosed()` 仍返回 false，但任何操作都 ECONNRESET。
+  // 所以判据不能只看页面，必须同时看 browser 连接还活着没。
+  const attachDead = browserMode() === 'attach' && (!s.b || !s.b.isConnected())
+  if (!s.p || s.p.isClosed() || attachDead) {
     // attach：接管 Electron 窗口里那个真网页（不新建 context/page —— 就是在用它那一个）
     if (browserMode() === 'attach') {
       s.p = await attachToRealPage(s)
@@ -318,8 +382,38 @@ async function getPage(s: Session): Promise<Page> {
   }
   return s.p
 }
+/**
+ * 是否运行在 Android 上（判据同 android_screen 工具：有 /system/bin/screencap）。
+ */
+function isAndroid(): boolean {
+  return existsSync('/system/bin/screencap')
+}
+
+// 🔴 手机端「把 Chrome 拉回前台」只能靠 CDP，**不能靠 `am start`**（2026-10-20 实测）：
+// 从 Magisk service.d 启动的进程域调不动 ActivityManager，报
+// `cmd: Failure calling service activity: Failed transaction (2147483646)`；
+// 补全 ANDROID_DATA / ANDROID_ROOT、改走 `sh -c` 都一样（手动 `su -c` 执行则成功，
+// 差异在 SELinux 域）。所以：
+//   · tab 不在活动位 → `page.bringToFront()`（CDP Target.activateTarget）解决；
+//   · 整个 Chrome 被系统压后台冻结 → 只能由用户/AI 通过 `android_action` 自己拉起，
+//     CDP 侧无解，此时连接会 ECONNRESET，`connectAttachEndpoint` 重试一次后如实报错。
+// 不要再往这里加 am 调用。
+
 async function snap(s: Session, p: Page): Promise<BrowserSnapshot> {
-  const shot = await p.screenshot({ type: 'jpeg', quality: 60, fullPage: false }).catch(() => Buffer.alloc(0))
+  // 🔴 截图前必须先把这一页变成活动 tab：非活动 tab 的 `captureScreenshot` 不是返回空，
+  // 而是**超时 30 秒**（2026-10-20 手机端实测），等它失败再补救的代价不可接受。
+  // `bringToFront()` 走 CDP 的 `Target.activateTarget`，不依赖 Android binder，一定调得动。
+  // ⚠️ 用 try/catch 而不是 `.catch()`：单测注入的假 page 没有 bringToFront，
+  // `p.bringToFront()` 会先抛 TypeError，链式 .catch 根本接不到。
+  try { await p.bringToFront() } catch { /* 没有该方法就跳过，截图仍会尝试 */ }
+  // 显式短超时：真失败（页面崩了/渲染进程冻结）要快速降级成空帧，不能拖住整个请求。
+  const grab = () => p.screenshot({ type: 'jpeg', quality: 60, fullPage: false, timeout: 8000 }).catch(() => Buffer.alloc(0))
+  let shot = await grab()
+  if (!shot.length) {
+    // 渲染进程刚解冻时首帧仍可能空，再给一次机会（不再兜 am，理由见上）。
+    await new Promise((r) => setTimeout(r, 700))
+    shot = await grab()
+  }
   // 视口尺寸向页面本身要，别用 shot 的像素尺寸反推（retina 下会被放大 2 倍 → 点击坐标全偏）
   const vp = await p.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }))
     .catch(() => null) as { width: number; height: number } | null

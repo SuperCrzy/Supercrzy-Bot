@@ -99,6 +99,38 @@ export function useSpeech(options: UseSpeechOptions = {}) {
   let queueIndex = 0
   let currentAudio: HTMLAudioElement | null = null
   let currentUrl: string | null = null
+
+  /**
+   * 本 composable 创建过、且可能仍在播的所有 `<audio>`。
+   *
+   * 🔴 2026-10-20 修老板实机 bug「上一段还在朗读，下一段回答已生成并开始朗读，
+   *    两个语音重叠在一起」。
+   *
+   * 根因：`currentAudio` 是**单指针，只指向最新那个**。两轮朗读交叠时（上一轮还在播、
+   * 下一轮已经把 `currentAudio` 覆盖掉），旧的那个就**永久失去句柄** —— 之后任何
+   * `stop` / `resetPro` 都只停得到新的那个，旧的会一直播到自然结束。
+   * 只靠单指针无法表达"同时存在多个"这个事实，所以改用集合兜住全部。
+   *
+   * 不变量：**任何时刻只要调用 stop/resetPro，liveAudios 必须被清空**。
+   */
+  const liveAudios = new Set<HTMLAudioElement>()
+
+  /** 彻底关掉一个 audio：摘事件 → 停播 → 断流（不清 src 的话下载会继续把整段拉完） */
+  function killAudio(a: HTMLAudioElement) {
+    a.onended = null
+    a.onerror = null
+    a.onplaying = null
+    try { a.pause() } catch { /* 已断开 */ }
+    try { a.removeAttribute('src'); a.load() } catch { /* 已断开 */ }
+    liveAudios.delete(a)
+  }
+
+  /** 兜底全停 —— 不管哪条路径漏了 stop，这一步保证"不会再有两个声音同时响" */
+  function killAllAudios() {
+    for (const a of [...liveAudios]) killAudio(a)
+    liveAudios.clear()
+  }
+
   /**
    * 预取槽：记 **在途 promise**（而不是"等拿到 URL 才记"）。
    *
@@ -174,16 +206,11 @@ export function useSpeech(options: UseSpeechOptions = {}) {
     streamMode = false
     synthesizing.value = false
     blockRetries = 0
-    if (currentAudio) {
-      currentAudio.onended = null
-      currentAudio.onerror = null
-      currentAudio.onplaying = null
-      currentAudio.pause()
-      // 🔴 流式 URL 必须**清掉 src** 才算真断开：`pause()` 只停播放，下载会继续把整段拉完
-      //（等于上游白合成一整段、我们白占内存）。blob URL 时代没有这一步，所以容易被漏掉。
-      try { currentAudio.removeAttribute('src'); currentAudio.load() } catch { /* 已经断开 */ }
-      currentAudio = null
-    }
+    // 全停：不只 currentAudio，而是**所有活着的 audio**（漏停的那个会被这里兜住）。
+    // 原来的 `if (currentAudio) { pause(); removeAttribute('src') }` 在"两轮交叠、
+    // currentAudio 已指向新的"时停不到旧的 —— 那就是重叠朗读的来源。
+    killAllAudios()
+    currentAudio = null
     currentUrl = null
     dropPrefetch()
   }
@@ -258,6 +285,8 @@ export function useSpeech(options: UseSpeechOptions = {}) {
         if (speakingId.value !== id || gen !== generation) return
         currentUrl = url
         const audio = new Audio(url)
+        // 先登记再赋值：从这一刻起它受 killAllAudios 管辖，不会再出现"失去句柄还在响"
+        liveAudios.add(audio)
         currentAudio = audio
         // 这一块**是否真的出过声**。`onerror` 能不能重试完全由它决定：
         // 出过声再重播就是叠音，一声没出才可能是票据失效这类可自愈的失败。
@@ -274,6 +303,9 @@ export function useSpeech(options: UseSpeechOptions = {}) {
           proDegraded.value = false
         }
         audio.onended = () => {
+          // 先摘登记再判过期：这一块已经播完，无论本轮回调是否还有效（gen 可能已过期），
+          // 都不该继续留在 liveAudios 里 —— 否则引用不释放，killAllAudios 还会重复处理。
+          liveAudios.delete(audio)
           if (speakingId.value !== id || gen !== generation) return
           currentUrl = null
           currentAudio = null
@@ -282,6 +314,7 @@ export function useSpeech(options: UseSpeechOptions = {}) {
           playProIndex(id, gen)
         }
         audio.onerror = () => {
+          liveAudios.delete(audio)
           if (speakingId.value !== id || gen !== generation) return
           currentUrl = null
           currentAudio = null

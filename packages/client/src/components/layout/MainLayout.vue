@@ -1294,13 +1294,29 @@ onMounted(() => {
   /* Hide desktop elements */
   .sidebar-header { padding: 12px 14px; }
 
-  /* Keep nav groups expanded for quick access on mobile */
-  .nav-groups { flex: 1; max-height: none; }
+  /* 导航区不再吃掉全部高度：抽屉里要给会话列表留空间（2026-10-20 老板报「手机端侧边栏没有对话历史」） */
+  .nav-groups { flex: 0 0 auto; max-height: none; }
 
   .nav-item { min-height: 48px; font-size: 14px; }
 
-  /* Hide chat history in sidebar — use History page instead */
-  .sidebar-chats { display: none !important; }
+  /* 会话历史必须在抽屉里可用：此前 display:none 直接砍掉入口，手机上无处进历史会话 */
+  .sidebar-chats { display: flex !important; flex: 1 1 auto; min-height: 0; }
+  .chats-header { padding: 10px 12px 6px; }
+  .chats-list { -webkit-overflow-scrolling: touch; }
+  .chat-group-header { min-height: 36px; }
+  .chat-item { min-height: 44px; padding: 8px; }              /* 触控目标 ≥44px */
+  .chat-item-del { opacity: .55; width: 28px; height: 28px; }  /* 触屏无 hover，常显可点 */
+
+  /**
+   * 🔴 老设备光栅化补丁（Kirin 930 / Mali-T628 + Chrome 138 / Android 10）
+   *
+   * 现象：抽屉滑入结束后 path/polyline 描边整体消失（circle/line/rect 正常），
+   *      打开动画的第一帧反而能看到全部图标 —— 是被缓存的图层重光栅化时丢了路径。
+   * 实测（设备内元素级截图像素统计）：message/star 暗像素 0；加 translateZ(0)
+   *      后变 313/317，与桌面渲染一致。设备侧仅此一处差异，与颜色/主题无关。
+   * 代价：图标各自成一个合成层（抽屉内 11 个，可接受）；只作用于移动端断点内。
+   */
+  .svg-icon { transform: translateZ(0); }
 
   /* Main content fills rest */
   .main-content {
@@ -1309,13 +1325,34 @@ onMounted(() => {
     -webkit-overflow-scrolling: touch;
   }
 
-  /* Detail panel on mobile: bottom sheet */
+  /* Detail panel on mobile: 竖屏准全屏（2026-10-20 修老板报「手机端右侧面板适配有问题」）
+     三个病根（真机截图实证）：
+     ① height:50vh 只占下半屏 ⇒ AI 浏览器画面被压成扁条；
+     ② 桌面规则的 .detail-panel.visible{width:420px} 在 fixed 下仍生效 ⇒ 右侧 180px 露出聊天层；
+     ③ maximized 的 min-width:720px 超过 600px 视口、且 position:absolute;top:0 相对 body 定位
+        ⇒ 点「放大」后面板跑到屏幕顶部且横向溢出。
+     方案：顶栏以下全屏覆盖（顶栏保留，随时可切 tab / 回聊天）。不引入横屏：
+        6 英寸竖屏把浏览器画面横置没有收益。z-index 90：盖过聊天层(20)、不挡顶栏(100)。 */
   :deep(.detail-panel) {
     position: fixed;
-    bottom: 0; left: 0; right: 0;
-    height: 50vh;
-    border-radius: 16px 16px 0 0;
-    box-shadow: 0 -4px 20px rgba(0,0,0,0.2);
+    top: 48px; bottom: 0; left: 0; right: 0;
+    height: auto;
+    border-radius: 0;
+    z-index: 90;
+  }
+  /* 桌面的 width:420px / min-width:420px 和 maximized 的 min-width:720px 全部作废。
+     !important 是必须的：scoped :deep 编译后与 DetailPanel 自身样式特异性相同，
+     生效顺序取决于打包产物里两份样式的前后，不能赌。 */
+  :deep(.detail-panel.visible),
+  :deep(.detail-panel.visible.maximized) {
+    width: auto !important;
+    min-width: 0 !important;
+  }
+  /* 覆盖桌面的 absolute——它在手机上找不到 positioned 祖先会相对 body，造成"跑到顶部" */
+  :deep(.detail-panel.visible.maximized) {
+    position: fixed;
+    top: 48px; bottom: 0; left: 0; right: 0;
+    box-shadow: none;
   }
 
   :deep(.detail-panel-slide-enter-active),

@@ -5,9 +5,10 @@
     viewBox="0 0 24 24"
     fill="none"
     stroke="currentColor"
-    stroke-width="2"
+    :stroke-width="strokeWidth"
     stroke-linecap="round"
     stroke-linejoin="round"
+    shape-rendering="geometricPrecision"
     class="svg-icon"
     :class="`svg-icon--${name}`"
   >
@@ -28,6 +29,21 @@ const props = withDefaults(defineProps<{
 }>(), {
   size: 16,
 })
+
+/**
+ * 笔画宽度按尺寸补偿。
+ *
+ * 问题（2026-10-20 老板报「侧边栏和横栏图标白天模式下显示不完整」）：
+ *   viewBox 是 24×24，stroke-width=2 会被等比缩放到 size/24。
+ *   size=12 时实际笔画只有 1px；在 DPR 2.x 屏幕上大量落在半像素上，
+ *   抗锯齿会把细笔画吃掉一半 —— 视觉表现是图标「断裂 / 缺角 / 发虚」，
+ *   而不是真的缺像素。
+ *
+ * 策略：<16px 的小图标把笔画加粗到 2.4（实际约 1.2px），保住视觉重量；
+ *       >=16px 保持 2（实际 >=1.33px，本来就不会糊）。
+ * 同时模板上加了 shape-rendering="geometricPrecision"，让浏览器按几何精度抗锯齿。
+ */
+const strokeWidth = computed(() => (props.size && props.size < 16 ? 2.4 : 2))
 
 interface IconDef {
   paths?: string[]

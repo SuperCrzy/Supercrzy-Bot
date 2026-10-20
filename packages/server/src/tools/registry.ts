@@ -51,6 +51,9 @@ import gitStatus from './git-status'
 import gitDiff from './git-diff'
 import gitCommit from './git-commit'
 import askUser from './ask-user'
+// ---- 手机端专用（2026-10-20）：Android 侧「眼睛 + 手」 ----
+import androidScreen from './android-screen'
+import androidAction from './android-action'
 
 /**
  * 全部工具定义（供 toolDefinitions 合并）。
@@ -106,6 +109,9 @@ export const directoryTools: ToolDef[] = [
   browser,
   webSearch,
   readMe,
+  // ---- 手机端专用：Android 原生截屏/界面操作（桌面端调用会明确报不可用）----
+  androidScreen,
+  androidAction,
 ]
 
 /** 执行器映射：name → execute（供 toolExecutors 合并） */

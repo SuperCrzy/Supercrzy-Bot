@@ -13,18 +13,20 @@ import { describe, it, expect } from 'vitest'
 import { classifySensitiveTool, extractShellCommand, SENSITIVE_TOOLS } from './tools'
 
 describe('SENSITIVE_TOOLS（I2：由 requiresApproval 派生）', () => {
-  it('包含本次纳入的 7 个工具，其中 3 个是此前漏掉的', () => {
+  it('包含本次纳入的 8 个工具，其中 4 个是此前漏掉的', () => {
     for (const n of ['shell_exec', 'file_write', 'file_delete', 'memory_consolidate']) {
       expect(SENSITIVE_TOOLS.has(n), `${n} 是原有的高危项，必须在集合里`).toBe(true)
     }
     for (const n of ['computer_use', 'skill_install', 'multi_edit']) {
       expect(SENSITIVE_TOOLS.has(n), `${n} 声明了危险却此前不走审批 —— I2 要补上的正是它`).toBe(true)
     }
-    expect(SENSITIVE_TOOLS.size).toBe(7)
+    // 2026-10-20 手机端「手」：会真的点在用户手机界面上（可能误触拨号/转账）
+    expect(SENSITIVE_TOOLS.has('android_action'), 'android_action 归入"操作本机类"，必须走审批').toBe(true)
+    expect(SENSITIVE_TOOLS.size).toBe(8)
   })
 
   it('只读工具不该进集合（否则每个查询都要弹窗）', () => {
-    for (const n of ['file_read', 'file_exists', 'web_search', 'tool_search', 'get_goal', 'task_list']) {
+    for (const n of ['file_read', 'file_exists', 'web_search', 'tool_search', 'get_goal', 'task_list', 'android_screen']) {
       expect(SENSITIVE_TOOLS.has(n), `${n} 是只读/低危，不该弹审批`).toBe(false)
     }
   })

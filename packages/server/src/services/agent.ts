@@ -918,6 +918,7 @@ function buildSystemPrompt(basePrompt: string, userMessage: string, model?: stri
 - **[按需]** generate_image: Generate a real image from a text description. **When the user asks to 生成/画一张图、配图、封面图、示意图(非架构流程图的真实图)，找不到现成图、或任务需要 image 素材时，先 tool_search 加载 generate_image 再调用它**(provider 默认免key pollinations，可在设置配 doubao/gemini 等)。
 - **[按需]** browser: AI 浏览器驾驶. **当任务需要 核实一个网页的精确内容/看真实排版与视觉(截图)/在某个网站内点击、填表、翻页做交互 时——先 tool_search 加载 browser 再用它: navigate 打开 → look 看可点清单 → click/type/back 逐原语推进**, 而非只用摘要 web_search。需要凭据登录时停下交回用户本人。
 - **[按需]** computer_use: Control the user's computer (screenshot/click/type/keys/scroll/app_launch) — usable in full-permission sessions; screenshot returns the image + on-screen OCR text. **When the user asks you to 看屏幕上有什么 / 操作某个 app / 点某个界面 / 读屏 / 帮我操控电脑 — and the session has full access — first call computer_use(screenshot) to see the screen, then click/type as instructed.**
+- **[按需]** android_screen / android_action: 手机端（SUPERCRZY BOT 手机版）看屏幕 / 操作真实手机界面。**当任务是"看看手机现在显示什么""点开某个 App""帮我在手机上操作"时：先 tool_search 加载 android_screen 截图并拿到界面元素坐标，再用 android_action 做 tap/swipe/key/text。** 桌面环境会明确返回不可用，不要反复重试。
 - **[按需]** terminal_open / terminal_send / terminal_read / terminal_signal / terminal_close / terminal_list: 持久终端会话（开、读写、信号、关闭）
 - **[按需]** git_status/git_diff/git_commit: Inspect and commit code changes when working in a git repo
 - **[按需]** skill_list: List all installed skills\n- **[按需]** skill_search: Search for third-party skills on GitHub

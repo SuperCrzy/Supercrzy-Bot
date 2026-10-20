@@ -55,7 +55,9 @@ const {
 </script>
 
 <template>
-  <div v-show="active" class="tab-content browser-tab">
+  <!-- `fullscreen` 只在移动端生效（见样式末尾的 @media）：放大 = 画面整页铺满，
+       而不是原来"面板加宽到 92%"。桌面端 maximized 的语义保持不变。 -->
+  <div v-show="active" class="tab-content browser-tab" :class="{ fullscreen: maximized }">
     <div class="browser-live">
       <span class="browser-live-dot" :class="{ active: browserStatus === '导航中' }" />
       <span class="browser-live-text">{{ statusText(browserStatus) }}</span>
@@ -202,6 +204,73 @@ const {
 .bc-input::placeholder { color: var(--text-tertiary); }
 .bc-btn { flex-shrink: 0; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-primary); color: var(--text-secondary); font-size: 11px; padding: 4px 8px; cursor: pointer; white-space: nowrap; }
 .bc-btn:hover { border-color: var(--border-strong); color: var(--text-primary); background: var(--bg-hover); }
+
+/* 🔴 2026-10-20 手机端「AI 浏览器画面是扁的」根治。
+ *
+ * 事实（真机实测，不是推断）：手机端 attach 到的系统 Chrome 视口是 **516×697（竖版）**，
+ * 截图 1200×1621 同样竖版 —— 也就是说**后端给的帧本来就是竖的**。
+ * 扁的原因全在前端高度链断裂：
+ *   ① 根节点 `.tab-content` 没有 flex:1（高度由内容决定）；
+ *   ② `.browser-canvas` 只有 `min-height:140px`，没有高度来源；
+ *   ③ 无帧时只剩那 140px，就是一条扁缝；有帧时 `img{width:100%;height:auto}`
+ *      虽然比例正确，但会把整块内容顶出面板，用户只看到被裁掉的一截。
+ *
+ * 修法：让画面区吃满「面板剩余高度」，图片用 contain 等比完整显示 ——
+ * 竖版页面填满高度、横版页面上下留白，**画幅始终跟随被浏览页面自己的比例**，
+ * 既不会把竖版页面压扁，也不会把横版页面拉长。桌面端保持原样。 */
+@media (max-width: 768px) {
+  .tab-content.browser-tab {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+  .browser-view {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .browser-canvas {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+  .browser-shot-wrap {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  .browser-shot {
+    width: auto;
+    height: auto;
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+  }
+  /* 操作日志在手机上让位给画面：90px 太高，砍到 64px */
+  .browser-console { max-height: 64px; }
+
+  /* ===== 放大 = 画面占满（2026-10-20 老板口述修正）=====
+     手机端「放大」不走桌面的「面板加宽到 92%」（面板本来就全屏了）。
+     ⚠️ 一版曾做成 `position:fixed; inset:0` 整页覆盖 —— 那是错的：
+     tab 栏被盖住 ⇒ 切不到产物/文件，用户也被困在浏览器 tab 里出不来。
+     正确做法：**留在面板内**，只把状态行/操作台/日志收起来，画面吃满 tab 栏以下的高度。
+     顶栏与 tab 栏始终可见可点，放大按钮就地还原。 */
+  .tab-content.browser-tab.fullscreen .browser-live,
+  .tab-content.browser-tab.fullscreen .browser-cmd,
+  .tab-content.browser-tab.fullscreen .browser-console,
+  .tab-content.browser-tab.fullscreen .browser-native-note,
+  .tab-content.browser-tab.fullscreen .browser-hit-hint {
+    display: none;
+  }
+  /* 放大时把地址栏拉宽：图标按钮不再把长 URL 挤成 65% */
+  .tab-content.browser-tab.fullscreen .browser-url-input {
+    flex: 1 1 auto;
+    width: auto;
+    max-width: none;
+  }
+}
 .bc-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .bc-btn.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); color: #fff; }
 .bc-btn.key { min-width: 34px; text-align: center; font-family: var(--font-mono, monospace); }

@@ -549,6 +549,9 @@ export function classifySensitiveTool(toolName: string, argText: string): 'allow
   if (toolName === 'file_delete') return 'block'   // 删除永不可逆：任何档位/白名单都拦（老板"除删除外全放行"）
   if (toolName === 'skill_install') return 'block' // 装的是可执行代码，对齐主流实现恒问集合
   if (toolName === 'computer_use') return 'block'  // 操作本机（操作本机类工具恒问）
+  // 2026-10-20：手机端「手」同理 —— 会真的点在用户手机界面上（可能误触拨号/转账），
+  // 归入"操作本机类"，首次必问；会话内显式允许后不再逐次打断。
+  if (toolName === 'android_action') return 'block'
 
   if (toolName === 'shell_exec') return classifyShellCommand(extractShellCommand(argText))
 

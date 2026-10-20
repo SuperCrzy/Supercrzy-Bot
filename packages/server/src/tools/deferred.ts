@@ -24,6 +24,8 @@ export const DEFERRED_TOOLS = new Set<string>([
   // ---- 交互式外部环境：需要 Chrome / 桌面权限，且是长流程 ----
   'browser',
   'computer_use',
+  // 手机端「眼睛+手」：桌面会话里用不到，手机端才需要 —— 一律按需，不占常驻名额
+  'android_screen', 'android_action',
   'terminal_open', 'terminal_send', 'terminal_read', 'terminal_signal', 'terminal_close', 'terminal_list',
   // ---- 扩展能力：技能与记忆（记忆已自动注入上下文，显式检索属按需） ----
   'skill_list', 'skill_search', 'skill_view', 'skill_install',

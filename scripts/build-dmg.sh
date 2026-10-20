@@ -143,8 +143,15 @@ rsync -a --delete --exclude '.tmp-*' --exclude '.DS_Store' \
   packages/server/.agents/skills/ "$SEED_DIR/" 2>/dev/null || true
 # 清掉历史遗留的凭据/DB（增量同步不会删旧文件，这里按名字精确清）
 # 两处都清：老的整目录拷贝落在 packages/server/data/，2026-09-21 起的 rsync 落在 data/
+# 🔴 2026-10-20 加两处 `data/skills`：`.tmp-anthropics-skills` 实际落在 `data/skills/` 下
+#    （比原来的清理路径多一层 skills/），所以历史清理**一直没命过**，15MB 临时克隆
+#    （内含 .git 3.6MB + canvas 字体 5.7MB）就这样混在打包目录里。
+#    `.tmp-*` 还活着的原因是 `rsync --exclude '.tmp-*'` 的 exclude **同时豁免 --delete**
+#    —— 已存在的临时目录永远不会被增量同步删掉，只能按路径显式点名。
 for d in packages/desktop/.deploy-server/data \
-         packages/desktop/.deploy-server/packages/server/data; do
+         packages/desktop/.deploy-server/data/skills \
+         packages/desktop/.deploy-server/packages/server/data \
+         packages/desktop/.deploy-server/packages/server/data/skills; do
   rm -f "$d/supercrzy.db" "$d/supercrzy.db-wal" "$d/supercrzy.db-shm" "$d/ilink-credentials.json"
   empty_dir "$d/checkpoints"
   empty_dir "$d/.tmp-anthropics-skills"
@@ -162,6 +169,19 @@ if [ -n "$leaked" ]; then
   exit 1
 fi
 echo "  出厂检查通过：包内技能 $(ls "$SEED_DIR" 2>/dev/null | wc -l | tr -d ' ') 份（$(dirname "$SEED_DIR")），无凭据/DB"
+
+# 卫生断言（2026-10-20 加）：包内不许残留临时克隆 / .git。
+# 为什么不只靠上面点名清理：那条路已经漏过一次（路径差一层 skills/），
+# 断言的作用是"再冒出新位置时立刻拦住"，而不是等包发出去了才发现里面带了个 .git 仓库。
+# node_modules 用 -prune 跳过（253MB，全遍历只为找 .tmp 不划算）。
+junk=$(find packages/desktop/.deploy-server -path '*/node_modules' -prune -o \
+         \( -name '.tmp-*' -o -name '.git' \) -print 2>/dev/null | head -5)
+if [ -n "$junk" ]; then
+  echo "✘ 拒绝打包：包内含临时克隆 / .git 残留" >&2
+  echo "$junk" >&2
+  exit 1
+fi
+echo "  卫生检查通过：无 .tmp-* / .git 残留"
 
 # node_modules 每次全量重装（2026-09-21 修）：
 # `npm install --omit=dev` **不会**剪掉已经装好的 devDependencies —— npm 认为它们仍在

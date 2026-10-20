@@ -5,6 +5,42 @@
   box-sizing: border-box;
 }
 
+/* ===== SVG 笔画补偿（2026-10-20） =====
+   现象：老板报「侧边栏和横栏的 SVG/icon 白天模式下显示不完整」。
+   根因：图标 viewBox 是 24×24、stroke-width=2，笔画会等比缩放到 size/24。
+        内联 SVG 里 width=10~15 的有 123 处，实际笔画只有 0.83~1.25px；
+        在 DPR 2.x 屏幕上大量落在半像素上，抗锯齿吃掉一半 ⇒ 视觉上像「断裂/缺角/发虚」。
+   （已核实：全部图标路径都在 viewBox 安全范围内，无触边裁切；name 引用也全部存在。）
+   处理：按 width 属性分档加粗，并启用几何精度抗锯齿。
+        SvgIcon 组件走内部的 computed strokeWidth，这里用 :not(.svg-icon) 排除，避免双重覆盖。 */
+svg:not(.svg-icon) {
+  shape-rendering: geometricPrecision;
+}
+svg:not(.svg-icon)[width="10"],
+svg:not(.svg-icon)[width="11"],
+svg:not(.svg-icon)[width="12"],
+svg:not(.svg-icon)[width="13"] {
+  stroke-width: 2.7;
+}
+svg:not(.svg-icon)[width="14"],
+svg:not(.svg-icon)[width="15"] {
+  stroke-width: 2.4;
+}
+
+/* ===== 老设备光栅化补丁（2026-10-20，第二处） =====
+   现象：老板报「对话区底部的复制/引用/朗读/重新生成这些 icon 看不见，只看到文字」。
+   根因：**这些内联 <svg> 没有 class="svg-icon"**，上午给 `.svg-icon` 加的
+        translateZ(0) 完全没覆盖到它们；而它们同样处在会被提升为合成层的容器里，
+        Mali-T628 上 path/polyline 描边被缓存成空白栅格（circle/line/rect 正常）。
+   处理：移动端断点内对所有内联 svg 统一提层。桌面端没有这个失效模式，
+        不启用 —— 免得给每个小图标白建合成层。SvgIcon 组件自带补丁，用 :not() 排除。
+   判据一致：与 MainLayout.vue 的 `.svg-icon` 补丁同一事故、同一断点（768px）。 */
+@media (max-width: 768px) {
+  svg:not(.svg-icon) {
+    transform: translateZ(0);
+  }
+}
+
 html, body, #app {
   width: 100%;
   height: 100%;

@@ -256,6 +256,15 @@ async function openUpstream(connectionId: string): Promise<UpstreamSocket> {
     agent: proxy ? new HttpsProxyAgent(proxy) : undefined,
   })
 
+  // 🔴 永久哑监听器（2026-10-20 事故修复）：`ws` 在握手被拒（429/403）时会走
+  // abortHandshake → `req.destroy()` → 随后 `emit('error')`。而 EventEmitter 对 `'error'`
+  // 在**没有监听器**时不是静默丢弃，而是**直接 throw** ⇒ 冒成 uncaughtException ⇒ 整个
+  // BOT 进程退出（实机现场：连打几次 ticket 撞上游 429，`/api/health` 直接返回 000）。
+  // 这里挂一个永不移除的监听器兜底，覆盖两个裸奔窗口：
+  //   ① openUpstream 已 settle、listener 被摘掉之后；
+  //   ② openUpstream resolve 到 streamOnce 注册监听之间的微任务间隙。
+  ws.on('error', () => { /* 兜底吞掉，真正的错误由下面 promise 里的 onError 上报 */ })
+
   await new Promise<void>((resolve, reject) => {
     let timer: NodeJS.Timeout | null = null
     let settled = false
@@ -266,6 +275,7 @@ async function openUpstream(connectionId: string): Promise<UpstreamSocket> {
       ws.off('open', onOpen)
       ws.off('error', onError)
       ws.off('unexpected-response', onUnexpected)
+      // 只摘"有语义"的那三个；上面那个哑监听器必须留着（理由见它在注册处的注释）。
       if (e) reject(e); else resolve()
     }
     function onOpen() { finish() }
@@ -497,6 +507,12 @@ export function isTransientTtsError(msg: string): boolean {
   //    不可重试 ⇒ **一次都不重试**、3s 内直接 502 ⇒ 真机上表现为"点朗读，朗读条跳一下
   //    就变成用系统音色"。教训同上面那条：清单按**症状**列，我们加的每种措辞都要进来。
   if (/连接上游超时|首块超时|上游数据中断/.test(m)) return true
+  // 🔴 握手被拒（2026-10-20 事故）：上游限流时消息是 `上游握手失败 HTTP 429`，
+  // 原清单**一个模式都不匹配** ⇒ 一次都不重试 ⇒ 整轮朗读回落系统音色（听感机械）；
+  // 更糟的是那次 ws 错误还打死了进程（见 openUpstream 的哑监听器注释）。
+  // 但只有 **429 / 5xx** 是瞬时的、值得重试；403（token 失效）/404（路径错）属配置问题，
+  // 重试只是把同一结果拖慢 1.6s —— tts.test.ts 明确要求 403 必须 <1s 快速失败。
+  if (/上游握手失败/.test(m)) return /HTTP (429|5\d\d)/.test(m)
   return /ECONNRESET|ECONNREFUSED|ECONNABORTED|ETIMEDOUT|EPIPE|EAI_AGAIN|socket hang up|Client network socket disconnected|socket disconnected|secure TLS connection|Timed out|timed out|timeout|fetch failed|UND_ERR/i
     .test(m)
 }
