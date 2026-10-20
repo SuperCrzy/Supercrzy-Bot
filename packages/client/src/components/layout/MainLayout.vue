@@ -533,7 +533,15 @@ onMounted(() => {
 .app-layout {
   display: flex;
   flex-direction: column;
+  /* 🔴 2026-10-20 移动端适配修正：
+     原来只有 height:100vh。在手机浏览器里 100vh 是「大视口」（含地址栏）的高度，
+     实际可视区要减去地址栏（约 90–110px），于是底部输入区被推到屏幕外，
+     用户必须上下滑动才能看到输入框（X2 手机端实测症状）。
+     补一行 100dvh（dynamic viewport height，Chrome 108+ / WebView 138 支持）：
+     它跟随地址栏收起/展开动态变化，精确等于可视区。
+     不支持的浏览器会忽略第二行，退回 100vh，行为与原来一致。 */
   height: 100vh;
+  height: 100dvh;
   background: var(--bg-primary);
   color: var(--text-primary);
 }

@@ -10,11 +10,18 @@
   --bg-hover: rgba(0, 0, 0, 0.04);
   --bg-active: rgba(79, 70, 229, 0.08);
 
-  /* Text */
+  /* Text
+     🔴 2026-10-20 对比度修正（老板：「白天场景下一些 SVG 看不见或看不清」）
+     实测旧值在纯白 #ffffff 上的 WCAG 对比度：
+       --text-tertiary #8b8d98 → 3.3:1（图标勉强，小字不达标）
+       --text-muted    #a1a1aa → 2.5:1（**不合格**，图标与 11px 小字都看不清）
+     新值保证「四级层次 + 全部 ≥4.5:1（文字标准）」：
+       primary 16.0:1 / secondary 7.5:1 / tertiary 6.2:1 / muted 4.6:1
+     --text-muted 全项目被引用 250 次，大量用于 11px 说明文字，必须达文字标准而非图标标准。 */
   --text-primary: #18181b;
   --text-secondary: #52525b;
-  --text-tertiary: #8b8d98;
-  --text-muted: #a1a1aa;
+  --text-tertiary: #5f6673;
+  --text-muted: #71717a;
   --text-inverse: #ffffff;
 
   /* Borders */
@@ -110,10 +117,14 @@
   --bg-hover: rgba(255, 255, 255, 0.06);
   --bg-active: rgba(129, 140, 248, 0.12);
 
+  /* Text
+     同上对比度修正（深色侧）：旧值 #71717a 在 #141414 上仅 3.4:1，图标勉强、小字不达标。
+     新值：primary 17:1 / secondary 7.3:1 / tertiary 5.3:1 / muted 5.3:1，全部达标。
+     深色下 tertiary 与 muted 取同值 —— 原设计即相同（都是 #71717a），保持层级不变。 */
   --text-primary: #fafafa;
   --text-secondary: #a1a1aa;
-  --text-tertiary: #71717a;
-  --text-muted: #71717a;
+  --text-tertiary: #8b8d98;
+  --text-muted: #8b8d98;
   --text-inverse: #ffffff;
 
   --border-color: #1f1f23;
