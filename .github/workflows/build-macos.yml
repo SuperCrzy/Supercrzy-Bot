@@ -69,5 +69,9 @@ jobs:
           path: |
             packages/desktop/dist/*.dmg
             packages/desktop/dist/*-mac.zip
+            # blockmap 必须一起带走：没有它，electron-updater 只能整包下载（~170MB），
+            # 有它才能只补差异块。缺了不会报错，只是用户每次更新都白等十几分钟。
+            packages/desktop/dist/*-mac.zip.blockmap
+            packages/desktop/dist/*.dmg.blockmap
             packages/desktop/dist/latest-mac.yml
           if-no-files-found: error
