@@ -160,9 +160,18 @@ for d in packages/desktop/.deploy-server/data \
 done
 
 # 出厂前硬门禁：包内出现凭据/DB 直接失败，别等发出去了才发现
+#
+# ⚠️ 2026-10-22 修（CI 上踩到）：`find` 的目标目录**必须都存在**，否则 find 自身返回 1，
+#   叠加脚本头部 `set -euo pipefail`，`leaked=$(find … | head -5)` 会把整条管道判成失败，
+#   脚本**静默退出**（日志里只剩一行 `Process completed with exit code 1`，没有任何报错文本）。
+#   本机因为 `.deploy-server/data/` 是历史构建留下的，一直存在 ⇒ 这个坑从没暴露；
+#   GitHub Actions 的干净 checkout 上没有该目录 ⇒ 首次云端打包就死在这一步。
+#   两处都 mkdir -p，并给管道补 `|| true`（`head` 提前关闭管道也会让上游 find 拿到 SIGPIPE）。
+mkdir -p packages/desktop/.deploy-server/data \
+         packages/desktop/.deploy-server/packages/server/data
 leaked=$(find packages/desktop/.deploy-server/data \
              packages/desktop/.deploy-server/packages/server/data \
-             \( -name '*.db' -o -name '*.db-*' -o -name 'ilink-credentials.json' -o -name '.env*' \) 2>/dev/null | head -5)
+             \( -name '*.db' -o -name '*.db-*' -o -name 'ilink-credentials.json' -o -name '.env*' \) 2>/dev/null | head -5 || true)
 if [ -n "$leaked" ]; then
   echo "✘ 拒绝打包：包内 data 含凭据/数据库文件" >&2
   echo "$leaked" >&2
