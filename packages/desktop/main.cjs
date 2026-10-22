@@ -162,6 +162,10 @@ async function startBackend() {
       PORT: String(PORT),
       WORKSPACE_DIR: USER_WORKSPACE,
       ELECTRON_RUN_AS_NODE: '1',
+      // 版本口径（2026-10-22 统一）：把 App 版本显式交给后端，`/api/system/version` 与
+      // app.getVersion()（app:info / 设置-关于）因此同源。打包形态 .app 里没有根 package.json，
+      // 后端读不到文件，只能靠这个注入 —— 否则又会退回某个写死的假版本号。
+      APP_VERSION: app.getVersion(),
       ...attach.env,
     },
     stdio: ['ignore', 'pipe', 'pipe'],

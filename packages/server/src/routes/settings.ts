@@ -2,6 +2,7 @@ import Router from 'koa-router'
 import type { Context } from 'koa'
 import { randomBytes } from 'crypto'
 import { getDB } from '../services/database'
+import { resolveEffectiveTier } from '../services/permission'
 
 export const settingsRouter = new Router({ prefix: '/api/settings' })
 
@@ -14,7 +15,7 @@ export function maskSecret(value: string, headLen: number): string {
 const FLOAT_KEYS = ['temperature', 'maxTokens', 'maxTurns', 'gatewayTimeout', 'memoryCharLimit', 'idleTimeout', 'ttsRate', 'completionSoundVolume']
 
 // Boolean keys that should be parsed as boolean
-const BOOL_KEYS = ['streamingEnabled', 'compactMode', 'showReasoning', 'showCost', 'completionSound', 'busyInputMode', 'memoryEnabled', 'piiMaskingEnabled', 'memoryAutoConsolidate', 'streamRead']
+const BOOL_KEYS = ['streamingEnabled', 'compactMode', 'showReasoning', 'showCost', 'completionSound', 'busyInputMode', 'memoryEnabled', 'piiMaskingEnabled', 'memoryAutoConsolidate', 'streamRead', 'ttsLive']
 
 // Get all settings
 settingsRouter.get('/', (ctx: Context) => {
@@ -30,6 +31,10 @@ settingsRouter.get('/', (ctx: Context) => {
       settings[row.key] = row.value
     }
   }
+  // 🔴 2026-10-22 D4：档位决策只留在服务端（services/permission.ts 的 resolveEffectiveTier）。
+  // 这里把库里可能存在的历史值（auto / accept-edits / prompt / deny / 空）统一投影成
+  // 用户面向的两档再返回，前端拿到的就是"生效值"，不再自己算一遍映射。
+  settings.permissionTier = resolveEffectiveTier(settings.permissionTier, settings.toolApprovalMode)
   // 脱敏：不返回明文密钥，只返回 masked + 布尔标记（ModelsView/SettingsView 已适配）
   if (settings.apiKey) {
     settings.apiKeyMasked = maskSecret(settings.apiKey, 8)

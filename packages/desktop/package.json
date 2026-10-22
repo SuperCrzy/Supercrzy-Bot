@@ -1,6 +1,6 @@
 {
   "name": "@supercrzy/desktop",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "private": true,
   "description": "SUPERCRZY BOT desktop shell (Electron)",
   "main": "main.cjs",
@@ -8,8 +8,12 @@
   "scripts": {
     "start": "env -u ELECTRON_RUN_AS_NODE electron .",
     "dev": "env -u ELECTRON_RUN_AS_NODE electron . --dev",
-    "pack": "electron-builder --dir",
-    "dist": "electron-builder"
+    "sync:version": "node ../../scripts/version.mjs",
+    "check:version": "node ../../scripts/version.mjs --check",
+    "sync:backend": "node scripts/sync-backend.mjs",
+    "check:backend": "node scripts/sync-backend.mjs --check",
+    "pack": "node ../../scripts/version.mjs && node scripts/sync-backend.mjs && electron-builder --dir",
+    "dist": "node ../../scripts/version.mjs && node scripts/sync-backend.mjs && electron-builder"
   },
   "dependencies": {
     "electron-store": "^8.2.0",

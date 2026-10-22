@@ -14,7 +14,11 @@ export function initDatabase() {
 
   // 2026-08-26：数据迁移——若统一用户目录 DB 不存在，但旧的仓库内 data/supercrzy.db 有数据，则首次启动搬运一次。
   // 保证 Web 历史数据无缝过度到 ~/.supercrzy（App/Web 同机共享同一份）。
-  if (!existsSync(config.db.path)) {
+  //
+  // 2026-10-22：显式设置 DB_PATH 时**不做搬运**。DB_PATH 的语义就是「用这个库」，
+  // 搬运会让测试库变成仓库里那份 dev 库的副本 —— 带着别人的会话、甚至真实 API Key，
+  // 断言就被污染了（实测 balance 测试拿到了旧库里的 key，而不是自己设的测试 key）。
+  if (!process.env.DB_PATH && !existsSync(config.db.path)) {
     const legacyCandidates = [
       // 仓库内旧位置（dev 相对 cwd 曾落在这）
       'data/supercrzy.db',
@@ -61,6 +65,10 @@ export function initDatabase() {
       token_count INTEGER,
       cost REAL,
       elapsed_ms INTEGER,
+      -- 1 = token_count 是前端按字符估算的（模型未返回 usage）；0 = 模型返回的真实值
+      token_estimated INTEGER NOT NULL DEFAULT 0,
+      -- 真正产生这条回复的模型（fallback 后的模型）。NULL/'' = 迁移前老数据，归因不可靠
+      model TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -313,6 +321,30 @@ export function initDatabase() {
   try {
     db.exec("ALTER TABLE messages ADD COLUMN elapsed_ms INTEGER")
   } catch { /* already exists */ }
+
+  // Migration: add token_estimated column to messages（1 = 前端估算，0 = 模型真实 usage）
+  try {
+    db.exec("ALTER TABLE messages ADD COLUMN token_estimated INTEGER NOT NULL DEFAULT 0")
+  } catch { /* already exists */ }
+
+  // Migration: add model column to messages（逐条消息的真实模型，修「用了 flash 却记成 pro」）
+  // 为什么必须逐条存：sessions.model 是**建会话那一刻**的模型，之后在设置页换模型不会改写它，
+  // 而 /api/stats 原来按 s.model 分组 ⇒ 模型名与 token/费用永久错配。
+  // fallback 会临时换成备用模型，也只有逐条记录才落得准。
+  try {
+    db.exec("ALTER TABLE messages ADD COLUMN model TEXT")
+  } catch { /* already exists */ }
+
+  // Migration: 权限档位三档 → 两档（2026-10-22 老板裁决）。
+  // 存量 `permissionTier='auto'` 落到 `ask`：两者在 10-22 阈值抬到 block 之后行为完全等价，
+  // 客户端 `isPermissionTier('auto')` 变 false 时也会经 resolvePermissionTier 投影到 ask，
+  // 这里落库是为了让读库的人不再看到已不存在的档位。
+  retireAutoPermissionTier(db)
+
+  // Migration: DeepSeek-V4 系列上下文窗口 128K → 1M（2026-10-22）。
+  // 旧默认把整个 deepseek 家族都写成 128000，而 V4 全系官方就是 1M；
+  // 这个值优先级最高（盖过内置映射），不改的话压缩阈值会一直在 70.4K 触发。
+  upgradeDeepseekV4ContextWindow(db)
 
   // Migration: add feedback column to messages（消息点赞/点踩，'up'/'down'/NULL）
   try {
@@ -581,4 +613,58 @@ export function initDatabase() {
 export function getDB(): Database.Database {
   if (!db) throw new Error('Database not initialized. Call initDatabase() first.')
   return db
+}
+
+/**
+ * 权限档位三档 → 两档的存量迁移（2026-10-22 老板裁决）。
+ *
+ * 单独导出是为了能被测试真正执行到（迁移写在 `initDatabase()` 里就只能在真库上验证，
+ * 而"改了 SQL 但跑错表"这类错误在真库上看不出来）。返回被改写的行数。
+ *
+ * 只改 `permissionTier='auto'` 这一种值：
+ *   - `readonly` / `ask` 本来就合法，不动；
+ *   - `toolApprovalMode` 是历史内部键，语义等价，故意不动（回滚旧包时仍要对得上）。
+ */
+export function retireAutoPermissionTier(database: Database.Database = db): number {
+  if (!database) return 0
+  try {
+    const info = database
+      .prepare("UPDATE settings SET value = 'ask' WHERE key = 'permissionTier' AND value = 'auto'")
+      .run()
+    return info.changes || 0
+  } catch {
+    /* settings 表不存在则忽略 */
+    return 0
+  }
+}
+
+/** DeepSeek-V4 全系官方上下文窗口（1M）。用 1_048_576 而非 1_000_000，
+ *  与前端 `client/src/data/models.ts` 的 `contextWindow` 保持一致（同一数字不能在两处显示不同）。 */
+export const DEEPSEEK_V4_CONTEXT_WINDOW = 1_048_576
+
+/**
+ * 把 DeepSeek-V4 系列的上下文窗口从旧的 128000 抬到 1M（2026-10-22）。
+ *
+ * 为什么必须改库而不是只改内置映射：`getContextWindowForModel` 里
+ * `custom_models.context_window` **优先级最高**（用户可配），DB 里存着 128000 时，
+ * 内置映射改成 1M 也不会生效。
+ *
+ * 只动两类行，且**只在值恰好等于旧默认 128000 时**才改（用户手改成别的值 = 有意为之，不覆盖）：
+ *   - `deepseek-v4%`：v4-pro / v4-flash / v4-flash-vision-exp …
+ *   - `deepseek-flash`：官方新名（= V4.1-Flash）
+ * v3.x / r1 / chat 等旧世代真的是 128K，**不能**跟着放大。返回改动行数。
+ */
+export function upgradeDeepseekV4ContextWindow(database: Database.Database = db): number {
+  if (!database) return 0
+  try {
+    const info = database
+      .prepare(`UPDATE custom_models SET context_window = ?
+                WHERE context_window = 128000
+                  AND (model_id LIKE 'deepseek-v4%' OR model_id = 'deepseek-flash')`)
+      .run(DEEPSEEK_V4_CONTEXT_WINDOW)
+    return info.changes || 0
+  } catch {
+    /* custom_models 表/列不存在（迁移前）则忽略 */
+    return 0
+  }
 }

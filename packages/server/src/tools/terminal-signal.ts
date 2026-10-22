@@ -9,6 +9,8 @@ const tool: ToolDef = {
     name: 'terminal_signal',
     description: '向终端会话发送信号：SIGINT 中断当前命令（Ctrl-C）、SIGTERM 终止等。',
     category: 'terminal',
+    // SIGINT 放行，其余信号会直接杀掉会话进程 ⇒ 参与授权判定（2026-10-22 P0-1）
+    requiresApproval: true,
     parameters: {
       type: 'object',
       properties: {

@@ -1,6 +1,6 @@
 /**
- * 三档权限映射单测（P0-04）
- * 重点验证：收敛到三档后**行为不放宽**，且历史配置能被正确投影。
+ * 两档权限映射单测（P0-04 立，2026-10-22 三档 → 两档）
+ * 重点验证：合并后**行为不放宽**，且历史配置（含已废弃的 auto）能被正确投影。
  */
 import { describe, it, expect } from 'vitest'
 import {
@@ -12,9 +12,9 @@ import {
   TIER_META,
 } from './permission'
 
-describe('三档定义', () => {
-  it('恰好三档，顺序为 readonly → ask → auto', () => {
-    expect(PERMISSION_TIERS).toEqual(['readonly', 'ask', 'auto'])
+describe('两档定义', () => {
+  it('恰好两档，顺序为 readonly → ask', () => {
+    expect(PERMISSION_TIERS).toEqual(['readonly', 'ask'])
   })
 
   it('每档都有名称、说明与内部映射', () => {
@@ -25,14 +25,16 @@ describe('三档定义', () => {
     }
   })
 
-  it('类型守卫', () => {
+  it('类型守卫：auto 已不是合法档位', () => {
     expect(isPermissionTier('ask')).toBe(true)
+    expect(isPermissionTier('readonly')).toBe(true)
+    expect(isPermissionTier('auto')).toBe(false)
     expect(isPermissionTier('accept-edits')).toBe(false)
     expect(isPermissionTier(null)).toBe(false)
   })
 })
 
-describe('历史 4 档 → 三档投影', () => {
+describe('历史 4 档 → 两档投影', () => {
   it('deny → readonly', () => {
     expect(resolvePermissionTier('deny')).toBe('readonly')
   })
@@ -42,33 +44,33 @@ describe('历史 4 档 → 三档投影', () => {
   it('accept-edits → ask（问得更多，不放宽）', () => {
     expect(resolvePermissionTier('accept-edits')).toBe('ask')
   })
-  it('auto → auto', () => {
-    expect(resolvePermissionTier('auto')).toBe('auto')
+  it('🔴 存量 auto → ask（三者行为已等价，合并后不再是独立档位）', () => {
+    expect(resolvePermissionTier('auto')).toBe('ask')
   })
-  it('未配置时按会话权限档兜底', () => {
+  it('未配置时按会话权限档兜底（full 不再等于"自动执行"）', () => {
     expect(resolvePermissionTier(null, 'workspace-only')).toBe('readonly')
     expect(resolvePermissionTier(null, 'sandbox')).toBe('ask')
-    expect(resolvePermissionTier(null, 'full')).toBe('auto')
+    expect(resolvePermissionTier(null, 'full')).toBe('ask')
     expect(resolvePermissionTier(undefined, undefined)).toBe('ask')
   })
 })
 
-describe('三档 → 内部档位', () => {
+describe('两档 → 内部档位', () => {
   it('映射到对应历史档位', () => {
     expect(tierToLegacyMode('readonly')).toBe('deny')
     expect(tierToLegacyMode('ask')).toBe('prompt')
-    expect(tierToLegacyMode('auto')).toBe('auto')
   })
 })
 
 describe('resolveApprovalMode（最终生效档位）', () => {
-  it('三档设置优先于历史四档', () => {
+  it('两档设置优先于历史四档', () => {
     expect(resolveApprovalMode('readonly', 'auto')).toBe('deny')
     expect(resolveApprovalMode('ask', 'auto')).toBe('prompt')
-    expect(resolveApprovalMode('auto', 'deny')).toBe('auto')
+    // 'auto' 已不是合法档位 ⇒ 被忽略，回退历史配置（这里给 deny，验证"不放宽"）
+    expect(resolveApprovalMode('auto', 'deny')).toBe('deny')
   })
 
-  it('无三档设置时回退历史四档（老配置不被破坏，含 accept-edits）', () => {
+  it('无两档设置时回退历史四档（老配置不被破坏，含 accept-edits）', () => {
     expect(resolveApprovalMode(undefined, 'accept-edits')).toBe('accept-edits')
     expect(resolveApprovalMode(null, 'deny')).toBe('deny')
     expect(resolveApprovalMode('', 'auto')).toBe('auto')
@@ -76,7 +78,7 @@ describe('resolveApprovalMode（最终生效档位）', () => {
 
   it('两者都无 → 按会话权限档推导', () => {
     expect(resolveApprovalMode(undefined, undefined, 'workspace-only')).toBe('deny')
-    expect(resolveApprovalMode(undefined, undefined, 'full')).toBe('auto')
+    expect(resolveApprovalMode(undefined, undefined, 'full')).toBe('prompt')
     expect(resolveApprovalMode(undefined, undefined, 'sandbox')).toBe('prompt')
   })
 

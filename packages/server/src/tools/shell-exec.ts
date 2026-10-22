@@ -6,8 +6,17 @@ import type { ToolDef } from './types'
 import { rm } from 'fs/promises'
 import { exec, spawn } from 'child_process'
 import { resolve } from 'path'
-import { scanDangerousPath, sandboxify, WORKSPACE_ROOT } from '../services/sandbox'
+import { scanDangerousPath, sandboxify, markSandboxUnavailable, WORKSPACE_ROOT } from '../services/sandbox'
 import { scanDirFiles, diffFileSnapshots } from './shared'
+
+/** 单次执行的结果（硬沙箱失败要能识别并重跑，所以不能直接返回字符串） */
+interface ShellRun {
+  text: string
+  ok: boolean
+  stderr: string
+  /** 失败原因是"沙箱自己起不来"，不是命令失败 */
+  sandboxBlocked: boolean
+}
 
 const tool: ToolDef = {
   name: 'shell_exec',
@@ -56,7 +65,7 @@ const tool: ToolDef = {
     const scanRoot = ctx?.cwd || WORKSPACE_ROOT
     const beforeSnap = ctx?.onArtifacts ? scanDirFiles(scanRoot) : null
 
-    return new Promise((resolve) => {
+    const runOnce = (useSandbox: boolean) => new Promise<ShellRun>((done) => {
       const timeout = args.timeout || 30000
       // 会话级工作目录：AI 在用户指定的文件夹里执行命令（默认项目工作区）
       const cwd = ctx?.cwd || WORKSPACE_ROOT
@@ -75,18 +84,22 @@ const tool: ToolDef = {
             if (arts.length > 0) ctx.onArtifacts(arts)
           } catch {}
         }
+        // 硬沙箱自身起不来（不是命令失败）：exit 71 + "sandbox_apply: Operation not permitted"
+        const sandboxBlocked = !!useSandbox && (code === 71 || /sandbox_apply|sandbox-exec:/i.test(stderrBuf) || !!spawnErr && /sandbox-exec/i.test(spawnErr.message))
+        let text: string
         if (spawnErr) {
-          resolve(`❌ 命令启动失败: ${spawnErr.message}`)
+          text = `❌ 命令启动失败: ${spawnErr.message}`
         } else if (code !== 0) {
           // 部分成功回传（主流实现 isPartial 同款）：失败也保留已产生的部分输出
-          resolve(`❌ 命令执行失败 (exit code ${code}):\n${stderrBuf || '无错误输出'}${stdoutBuf ? `\n--- 已产生的部分输出 ---\n${stdoutBuf.slice(0, 4000)}` : ''}`)
+          text = `❌ 命令执行失败 (exit code ${code}):\n${stderrBuf || '无错误输出'}${stdoutBuf ? `\n--- 已产生的部分输出 ---\n${stdoutBuf.slice(0, 4000)}` : ''}`
         } else {
           const output = stdoutBuf + (stderrBuf ? `\n[stderr]\n${stderrBuf}` : '')
-          resolve(output.slice(0, 8000) || '(无输出)')
+          text = output.slice(0, 8000) || '(无输出)'
         }
+        done({ text, ok: !spawnErr && code === 0, stderr: stderrBuf, sandboxBlocked })
       }
       const opts = { cwd, env: { ...process.env } as NodeJS.ProcessEnv }
-      const child = (sb.sandboxed && sb.args)
+      const child = (useSandbox && sb.args)
         ? spawn(sb.exec, sb.args, opts)
         : spawn(cmd, { ...opts, shell: true })
       const killTimer = setTimeout(() => { child.kill(); finish(-1, null) }, timeout)
@@ -95,6 +108,16 @@ const tool: ToolDef = {
       child.on('error', (err) => { clearTimeout(killTimer); finish(-1, null, err) })
       child.on('close', (code, signal) => { clearTimeout(killTimer); finish(code, signal) })
     })
+
+    const first = await runOnce(sb.sandboxed)
+    if (!first.sandboxBlocked) return first.text
+
+    // 2026-10-22（老板实测）：探测通过 ≠ 能收紧。嵌套沙箱里真实执行会 71，
+    // 旧代码把这条命令当"执行失败"返回 ⇒ 模型据此判断"沙箱坏了"，改用**没有沙箱**的
+    // 持久终端绕开（安全旁路）。正确做法是当场降级重跑，并把降级事实说清楚。
+    markSandboxUnavailable(first.stderr)
+    const retry = await runOnce(false)
+    return `[已降级：硬沙箱不可用，本次命令以软沙箱（L1 黑名单 + L2 路径扫描）执行]\n${retry.text}`
   },
 }
 

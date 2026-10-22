@@ -40,9 +40,56 @@ export interface UseChatSpeechOptions {
   mode?: () => unknown
   /** 是否开启「边生成边朗读」（读设置） */
   streamRead?: () => boolean
+  /**
+   * 是否走**会话式朗读**（一条消息一条流，2026-10-21）。
+   *
+   * 默认关闭是刻意的：这是"另一条路"，不是开关；调用方不传就完全保持旧行为，
+   * 单测与老客户端都不受影响。开启后行为见 feedStream 的 live 分支。
+   */
+  live?: () => boolean
   /** 窗口是否在前台（默认 isWindowForeground；测试可注入） */
   foreground?: () => boolean
 }
+
+/**
+ * 会话流首段门槛的**下限**（2026-10-21 改为自适应）。
+ *
+ * 阈值不是拍出来的，是按「每轮产出必须大于每轮成本」算的：
+ *   中文朗读 ≈ 4.8 字/秒；一轮合成耗时 = 首块延迟 T
+ *   盈亏平衡字数 = T × 4.8；再乘 1.5 安全系数
+ * ⇒ T=0.5s 时只要 3.6 字（取 8 兜底），T=2.3s（弱网）时要 16.6 字。
+ * 所以同一条代码在快链路上"出现几个字就读"，在弱网上自动攒够再开口。
+ *
+ * ⚠️ 下限不能太低：低于 4 字时切点几乎必然落在词中间，听感会"一个字一顿"。
+ */
+export const LIVE_FIRST_MIN_CHARS = 8
+/** 自适应上限：再慢的链路也不该攒超过这么多字才开口 */
+export const LIVE_FIRST_MAX_CHARS = 40
+
+/**
+ * 按实测首块延迟算两个门槛（字）。
+ *
+ * 为什么 next 的门槛用 3 倍系数：一轮合成里**只有第一轮**付握手，后续轮更便宜，
+ * 但上游抖动/重连随时可能补一次，所以宁可比"刚好够"多留一倍余量。
+ */
+export function liveChunkThresholds(latencyMs: number): { first: number; next: number } {
+  const t = Number.isFinite(latencyMs) && latencyMs > 0 ? latencyMs / 1000 : 1.2
+  const CPS = 4.8 // 中文朗读字/秒（实测 18 字 = 3.768s）
+  const clamp = (lo: number, hi: number, v: number) => Math.min(hi, Math.max(lo, Math.round(v)))
+  return {
+    first: clamp(LIVE_FIRST_MIN_CHARS, LIVE_FIRST_MAX_CHARS, t * CPS * 1.5),
+    next: clamp(24, LIVE_CHUNK_MAX_CHARS, t * CPS * 3),
+  }
+}
+/**
+ * 会话流后续切块：最少 40 字、最多 120 字（切点仍优先落在句/行边界）。
+ *
+ * 为什么不是"每句一推"：一段 3000 字回复按 15 字一句会推 200 次，
+ * 每次都是一轮上游合成 —— 请求数就是暴露面。40 字 ≈ 6 秒音频，
+ * 而一轮合成只要 0.3~2 秒，所以**合成永远追得上播放**，不会缺料。
+ */
+export const LIVE_NEXT_MIN_CHARS = 40
+export const LIVE_CHUNK_MAX_CHARS = 120
 
 export function useChatSpeech(options: UseChatSpeechOptions = {}) {
   const speech = useSpeech({ voice: options.voice, rate: options.rate })
@@ -58,12 +105,26 @@ export function useChatSpeech(options: UseChatSpeechOptions = {}) {
   /** 本轮是否已送出过块 —— 后续块的门槛要抬高（见 drainStream） */
   let streamEmitted = false
 
+  // ---- 会话流状态（2026-10-21，一条消息一条流）----
+  /** 会话已开（audio 已指向 /api/tts/live/stream） */
+  let liveOn = false
+  /** 正在异步开会话，期间的 chunk 先攒在 streamBuf 里 */
+  let liveStarting = false
+  /** 开会话的在途 promise（极短回复时 turnEnd 要等它开好再补推残余） */
+  let liveStartPromise: Promise<boolean> | null = null
+  /** 是否已经推过第一段（决定用 16 字门槛还是 40 字门槛） */
+  let livePushed = false
+
   function resetStream() {
     streamMsgId = null
     streamBuf = ''
     streamOn = false
     streamGaveUp = false
     streamEmitted = false
+    liveOn = false
+    liveStarting = false
+    liveStartPromise = null
+    livePushed = false
   }
 
   /** 本轮现在是否"本来就会读"（与 turnEnd 同一套判定，ok/hasText 先按成立预判） */
@@ -98,6 +159,62 @@ export function useChatSpeech(options: UseChatSpeechOptions = {}) {
     }
   }
 
+  // ===== 会话式（一条消息一条流，2026-10-21）=====
+
+  /** 本轮是否走会话流（调用方没传 = 关闭，保持旧行为） */
+  function liveEnabled(): boolean {
+    return options.live?.() === true
+  }
+
+  /**
+   * 把缓冲里的文本推进会话流。
+   *
+   * 门槛是两级的（与会话流的成本结构对应）：
+   *   · 首段 `LIVE_FIRST_MIN_CHARS`（16 字）—— 一句话就开读，这是"第一段落地就出声"的落点
+   *   · 后续 `LIVE_CHUNK_MAX_CHARS`（120 字）—— 每推一次就是上游一轮合成；
+   *     120 字 ≈ 20 秒音频，远大于一轮合成耗时，因此不会缺料
+   */
+  function drainLive() {
+    const th = liveChunkThresholds(speech.latencyMs())
+    for (;;) {
+      // 首段按实测延迟自适应（快链路 8 字就开口），之后攒批少打上游
+      const min = livePushed ? th.next : th.first
+      const cut = takeStreamChunk(streamBuf, min, LIVE_CHUNK_MAX_CHARS)
+      if (!cut) return
+      streamBuf = cut.rest
+      const text = ensureSentenceEnd(markdownToSpeech(cut.chunk))
+      if (text) { speech.pushLive(text); livePushed = true }
+    }
+  }
+
+  /** 开会话；失败就把本轮让回给 turnEnd 的整条读（不硬撑） */
+  function startLive(msg: ChatMessage) {
+    if (liveOn || liveStarting) return
+    liveStarting = true
+    const p = speech.beginLive(msg.id)
+    liveStartPromise = p
+    void p.then((ok) => {
+      liveStarting = false
+      if (!ok) {
+        // 开会话失败（后端不可用 / Pro 冷却）→ 放弃流式，别每个 chunk 反复重试
+        streamGaveUp = true
+        streamBuf = ''
+        return
+      }
+      liveOn = true
+      drainLive()
+    })
+  }
+
+  /** 收尾：把残余文本推进去，再告诉服务端"没有更多了" */
+  function flushLive() {
+    if (streamBuf) {
+      for (const pack of packForTts(markdownToSpeech(streamBuf))) speech.pushLive(pack)
+      streamBuf = ''
+    }
+    speech.endLive()
+  }
+
   /**
    * 正文增量到达 —— **流式朗读唯一的入口**（ChatView 只调这一个函数）。
    *
@@ -114,15 +231,19 @@ export function useChatSpeech(options: UseChatSpeechOptions = {}) {
     if (streamGaveUp) return
     streamBuf += chunk
 
-    if (!streamOn) {
+    if (!streamOn && !liveOn && !liveStarting) {
       // 兜底：条件长期不成立（如一直在前台 + background 档）时别无限攒字符串
       if (streamBuf.length > STREAM_BUFFER_HARD_MAX) {
         streamGaveUp = true
         streamBuf = ''
         return
       }
-      if (streamBuf.length < STREAM_FIRST_MIN_CHARS) return
+      const live = liveEnabled()
+      // 会话流：首段门槛按实测延迟自适应（8~40 字）；逐段流仍是 60 字
+      const firstMin = live ? liveChunkThresholds(speech.latencyMs()).first : STREAM_FIRST_MIN_CHARS
+      if (streamBuf.length < firstMin) return
       if (!options.streamRead?.() || !readsThisTurn()) return
+      if (live) { startLive(msg); return } // 异步开会话，期间的 chunk 继续攒在 streamBuf
       if (!speech.beginStream(msg.id)) {
         // Pro 冷却中 → 本轮只能走 Lite，而系统 TTS 没有增量能力
         streamGaveUp = true
@@ -131,6 +252,8 @@ export function useChatSpeech(options: UseChatSpeechOptions = {}) {
       }
       streamOn = true
     }
+    if (liveOn) { drainLive(); return }
+    if (liveStarting) return
     drainStream()
   }
 
@@ -156,14 +279,26 @@ export function useChatSpeech(options: UseChatSpeechOptions = {}) {
    */
   function turnEnd(msg: ChatMessage, ok: boolean): void {
     const streamed = streamOn
+    const live = liveOn || liveStarting
+    if (liveOn) {
+      flushLive() // 残余文本推进去 + 告诉服务端收尾
+    } else if (liveStarting && liveStartPromise) {
+      // 会话还没开好就结束了（极短回复）：等它开好再补推残余 + 收尾，
+      // 否则这条回复一个字都不会读（比读得晚更糟）。
+      const p = liveStartPromise
+      void p.then((startedOk) => {
+        if (!startedOk) { speech.stop(); return }
+        flushLive()
+      })
+    }
     flushStream()
     resetStream()
     if (!ok) {
-      if (streamed) speech.stop()
+      if (streamed || live) speech.stop()
       return
     }
     // 已经边生成边读过了 → 绝不再整条重读一遍
-    if (streamed) return
+    if (streamed || live) return
     const text = extractSpeakText((msg as any).content)
     if (!shouldAutoRead({ mode: options.mode?.(), ok, hasText: !!text, foreground: foreground() })) return
     speech.speak(msg.id, text)

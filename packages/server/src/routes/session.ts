@@ -260,8 +260,12 @@ sessionRouter.post('/:id/messages', (ctx: Context) => {
     role: string
     content: string
     token_count?: number
+    /** true = token_count 由前端按字符估算；false/缺省 = 模型返回的真实 usage */
+    token_estimated?: boolean
     cost?: number
     elapsed_ms?: number
+    /** 真正产出这条回复的模型（usage 事件下发，fallback 后是备用模型） */
+    model?: string
     attachments?: Array<{ id: string; name: string; type: string; size: number; url: string; thumbnailUrl?: string }>
   }
 
@@ -281,18 +285,22 @@ sessionRouter.post('/:id/messages', (ctx: Context) => {
   // 接受前端传入的 ID，没有则自动生成
   const id = body.id || uuidv4()
   const attachmentsJson = body.attachments ? JSON.stringify(body.attachments) : null
+  // 估算标记：只有前端明确声明估算时才置 1，避免把真实 usage 标成估算
+  const tokenEstimated = body.token_estimated === true ? 1 : 0
+  // 模型归属：只认前端从 usage 事件拿到的真实模型；缺省 NULL（= 归因不可靠）
+  const model = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : null
 
   // 检查消息是否已存在（幂等）
   const existing = db.prepare('SELECT id FROM messages WHERE id = ?').get(id)
   if (existing) {
     // 更新已有消息内容
     db.prepare(
-      'UPDATE messages SET content = ?, token_count = ?, cost = ?, elapsed_ms = ?, attachments = ?, created_at = datetime(\'now\') WHERE id = ?'
-    ).run(body.content, body.token_count || null, body.cost || null, body.elapsed_ms || null, attachmentsJson, id)
+      'UPDATE messages SET content = ?, token_count = ?, token_estimated = ?, cost = ?, elapsed_ms = ?, model = ?, attachments = ?, created_at = datetime(\'now\') WHERE id = ?'
+    ).run(body.content, body.token_count || null, tokenEstimated, body.cost || null, body.elapsed_ms || null, model, attachmentsJson, id)
   } else {
     db.prepare(
-      'INSERT INTO messages (id, session_id, role, content, token_count, cost, elapsed_ms, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(id, ctx.params.id, body.role, body.content, body.token_count || null, body.cost || null, body.elapsed_ms || null, attachmentsJson)
+      'INSERT INTO messages (id, session_id, role, content, token_count, token_estimated, cost, elapsed_ms, model, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(id, ctx.params.id, body.role, body.content, body.token_count || null, tokenEstimated, body.cost || null, body.elapsed_ms || null, model, attachmentsJson)
   }
 
   // Update session timestamp

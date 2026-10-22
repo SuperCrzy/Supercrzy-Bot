@@ -13,7 +13,7 @@ import { describe, it, expect } from 'vitest'
 import { classifySensitiveTool, extractShellCommand, SENSITIVE_TOOLS } from './tools'
 
 describe('SENSITIVE_TOOLS（I2：由 requiresApproval 派生）', () => {
-  it('包含本次纳入的 8 个工具，其中 4 个是此前漏掉的', () => {
+  it('集合成员与 expected 完全一致（多一个少一个都要在这里显式改）', () => {
     for (const n of ['shell_exec', 'file_write', 'file_delete', 'memory_consolidate']) {
       expect(SENSITIVE_TOOLS.has(n), `${n} 是原有的高危项，必须在集合里`).toBe(true)
     }
@@ -22,11 +22,28 @@ describe('SENSITIVE_TOOLS（I2：由 requiresApproval 派生）', () => {
     }
     // 2026-10-20 手机端「手」：会真的点在用户手机界面上（可能误触拨号/转账）
     expect(SENSITIVE_TOOLS.has('android_action'), 'android_action 归入"操作本机类"，必须走审批').toBe(true)
-    expect(SENSITIVE_TOOLS.size).toBe(8)
+    // 2026-10-22 P0-1：terminal_send 能把任意命令写进用户终端 ⇒ 与 shell_exec 同级；
+    // terminal_signal 能发 SIGTERM/SIGKILL 打断用户进程 ⇒ 也要审批（SIGINT 在中风险档放行）。
+    expect(SENSITIVE_TOOLS.has('terminal_send'), 'terminal_send 是 shell_exec 的旁路，必须同权').toBe(true)
+    expect(SENSITIVE_TOOLS.has('terminal_signal'), 'terminal_signal 能杀用户进程，必须审批').toBe(true)
+
+    // 写死成员表而不是 size：size 只会在失败时报一个数字，看不出是谁混进来的。
+    expect([...SENSITIVE_TOOLS].sort()).toEqual(
+      [
+        'android_action', 'computer_use', 'file_delete', 'file_write', 'memory_consolidate',
+        'multi_edit', 'shell_exec', 'skill_install', 'terminal_send', 'terminal_signal',
+      ].sort(),
+    )
   })
 
   it('只读工具不该进集合（否则每个查询都要弹窗）', () => {
-    for (const n of ['file_read', 'file_exists', 'web_search', 'tool_search', 'get_goal', 'task_list', 'android_screen']) {
+    // 检索/查询类必须留在这里：把它们塞进 requiresApproval 会让"搜资料"变成一路弹窗
+    for (const n of [
+      'file_read', 'file_exists', 'tool_search', 'get_goal', 'task_list', 'android_screen',
+      'web_search', 'web_fetch', 'deep_research', 'news_search', // 2026-10-22 补全检索类
+      // 2026-10-22 P0-1：terminal 家族里只有 send/signal 有副作用，读写类不许跟着弹
+      'terminal_open', 'terminal_read', 'terminal_list', 'terminal_close',
+    ]) {
       expect(SENSITIVE_TOOLS.has(n), `${n} 是只读/低危，不该弹审批`).toBe(false)
     }
   })
@@ -148,6 +165,30 @@ describe('shell_exec —— 引号 / heredoc 感知切段（2026-09-25，真实�
   })
   it('2>&1 重定向不被切碎（旧正则只切 &&，回归保护）', () => {
     expect(classifySensitiveTool('shell_exec', 'npm run build > /tmp/build.log 2>&1')).toBe('allow')
+  })
+})
+
+describe('shell_exec —— 系统路径写入与 file_write 同级 block（2026-10-22 补洞）', () => {
+  // 发现路径：把弹窗阈值抬到 block 后跑真实分类器探针，`echo x > /etc/hosts` 判的是 `ask`（中风险）
+  // ⇒ 阈值抬高后它就不弹了，等于"用 shell 覆盖系统文件"比 file_write 更容易。
+  it('重定向到系统路径 → block', () => {
+    expect(classifySensitiveTool('shell_exec', 'echo x > /etc/hosts')).toBe('block')
+    expect(classifySensitiveTool('shell_exec', 'echo x >> /usr/local/etc/x.conf')).toBe('block')
+    expect(classifySensitiveTool('shell_exec', '{"command":"echo 1 > /private/etc/hosts"}')).toBe('block')
+  })
+  it('搬到系统路径（写目标在末尾）→ block', () => {
+    expect(classifySensitiveTool('shell_exec', 'cp x /usr/local/bin/y')).toBe('block')
+    expect(classifySensitiveTool('shell_exec', 'sudo cp x /usr/local/bin/y')).toBe('block')
+    expect(classifySensitiveTool('shell_exec', 'mv x /etc/x.conf')).toBe('block')
+    expect(classifySensitiveTool('shell_exec', 'dd if=/tmp/a of=/usr/local/x')).toBe('block')
+  })
+  it('🔴 不许过度拦截：从系统路径读、写项目文件、日志重定向仍然 allow/ask', () => {
+    // 反向组：把上面两条规则写成"看见 /usr 就拦"的话，这三条会立刻红
+    expect(classifySensitiveTool('shell_exec', 'cp /usr/local/bin/x ./x')).toBe('allow')
+    expect(classifySensitiveTool('shell_exec', 'ln -s /usr/local/bin/node ./node')).toBe('allow')
+    expect(classifySensitiveTool('shell_exec', 'ls /usr/local/bin')).toBe('allow')
+    expect(classifySensitiveTool('shell_exec', 'echo x > src/a.ts')).toBe('ask')
+    expect(classifySensitiveTool('shell_exec', 'pnpm test > /tmp/x.log 2>&1')).toBe('allow')
   })
 })
 

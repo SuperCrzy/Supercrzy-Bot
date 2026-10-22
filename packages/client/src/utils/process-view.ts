@@ -37,6 +37,12 @@ export interface ProcessNodeLike {
     status?: string
     arguments?: string
     progress?: ToolProgress
+    /** 执行耗时（秒）—— 痕迹行显示"抓帧 45s"用 */
+    duration?: number
+    /** 开始时刻（ms） */
+    startedAt?: number
+    /** 工具真实执行时刻（ms） */
+    createTime?: number
   }
 }
 

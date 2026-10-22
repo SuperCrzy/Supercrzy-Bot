@@ -222,7 +222,7 @@ pnpm cli
 服务启动时发**一次**极小请求,用于了解安装量与版本分布。只含四个字段,别无其他:
 
 ```json
-{ "iid": "<随机 UUID>", "version": "0.4.1", "platform": "darwin 27.0.0", "firstRun": true }
+{ "iid": "<随机 UUID>", "version": "<应用版本>", "platform": "darwin 27.0.0", "firstRun": true }
 ```
 
 - `iid` 是**随机生成的 UUID**,存在本地数据库。不基于硬件、网卡 MAC、主机名或账号,

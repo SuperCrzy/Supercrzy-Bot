@@ -252,6 +252,13 @@ export function extractToolTarget(name: string, argsRaw: string | undefined): st
       const c = (args.command || '').trim().replace(/\s+/g, ' ')
       return c.length > 40 ? c.slice(0, 40) + '…' : c
     }
+    // 持久终端一族（2026-10-22）：terminal_send 的宾语是命令本身；open/read 退到 cwd / 会话 id。
+    // 不补这一段的话，无宾语的 terminal_* 会在状态行退化成裸"执行"/"读取"（老板实测反馈）。
+    if (String(name).startsWith('terminal_')) {
+      const c = String(args.command || '').trim().replace(/\s+/g, ' ')
+      if (c) return c.length > 40 ? c.slice(0, 40) + '…' : c
+      return String(args.cwd || args.id || '').trim()
+    }
   } catch {
     if (isFileToolName(name)) return extractPartialFilePath(argsRaw)
   }

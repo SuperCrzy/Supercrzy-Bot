@@ -309,6 +309,21 @@ const IRREVERSIBLE_PATTERNS: RegExp[] = [
   /\bchmod\s+(-R\s+)?777\s+\//, /\bchown\s+-R\b/,
   /\bgit\s+push\b[^\n]*--force/, /\bgit\s+reset\s+--hard\b/, /\bgit\s+clean\b[^\n]*-[fFdDxX]+/,
   />\s*\/dev\/(sd|disk|rdisk)/,
+  // 2026-10-22：**系统路径写入**必须与 file_write 同级 block。
+  //   此前只有 `> /dev/sd*` 与凭据类被拦，`echo x > /etc/hosts` 判的是 `ask`（中风险）；
+  //   把弹窗阈值抬到 block 之后，这类命令就成了"悄悄覆盖系统文件"的口子 —— 而用 shell 覆盖
+  //   比 file_write 更容易撞上。两条：① 重定向目标是系统路径 ② cp/mv/ln/install/tee/dd 搬到系统路径。
+  />\s*\/(?:etc|System|usr|bin|sbin|private\/etc)\//,
+  /\b(?:cp|mv|ln|install|tee|dd|rsync)\b[^\n;|&]*[=\s]\/(?:etc|System|usr|bin|sbin|private\/etc)\/\S*\s*$/,
+
+  // 2026-10-22：删除的"换皮"写法。此前只认命令名 `rm` 开头的段，于是下面这些判 allow：
+  //   find . -delete            —— 另一种删除，一个文件都不剩
+  //   find . -name '*.ts' -exec rm {} \;  —— 遍历删除
+  //   ls | xargs rm             —— xargs 转手删除
+  // 这三类都没有"可恢复"的余地，与 rm -rf 同级。
+  /\bfind\b[^\n;|&]*\s-delete\b/,
+  /\bfind\b[^\n;|&]*\s-exec(dir)?\s+(\S*\/)?rm\b/,
+  /\bxargs\b[^\n;|&]*\s(\S*\/)?rm\b/,
 ]
 
 // ---- rm 段级分级（2026-09-25，老板"先优化"裁决）----
@@ -337,9 +352,15 @@ function classifyRmSegment(seg: string): 'block' | 'allow' | null {
   const bare = seg.replace(/^(\w+=\S*\s+)+/, '').replace(/^\s*(do|then)\s+/, '').trim()
   const sudo = /^sudo\s+/.test(bare)
   const rest = sudo ? bare.slice(5).trimStart() : bare
-  if (!/^rm(\s|$)/.test(rest)) return null
+  // 2026-10-22：命令名归一。用完整路径调 rm（`/bin/rm -rf ~/x`）此前不匹配 `^rm`，
+  // 直接漏成 allow —— 这是最容易被模型"顺手"写出来的绕过形式（Tab 补全就是全路径）。
+  // macOS 上 `\rm` 还用来绕过 alias，一并归一。
+  const normalized = rest
+    .replace(/^(?:[~.\w-]*\/)+rm(?=\s|$)/, 'rm')
+    .replace(/^\\rm(?=\s|$)/, 'rm')
+  if (!/^rm(\s|$)/.test(normalized)) return null
   if (sudo) return 'block' // 提权删除：任何情况都拦
-  const tokens = rest.split(/\s+/).slice(1)
+  const tokens = normalized.split(/\s+/).slice(1)
   const targets: string[] = []
   let recursive = false
   for (const t of tokens) {
@@ -360,39 +381,119 @@ function classifyRmSegment(seg: string): 'block' | 'allow' | null {
 }
 
 /** 可恢复但值得看一眼：auto 档询问，会话白名单后放行
- *  （rmdir 只能删空目录，已在 AUTO_SAFE_PREFIX，2026-09-25 从这里移除避免自相矛盾） */
+ *  （rmdir 只能删空目录，2026-09-25 从这里移除避免自相矛盾） */
 const SUSPICIOUS_PATTERNS: RegExp[] = [
   /\bsudo\b/, /\b(crontab|cron)\b/, /\bchmod\b/, /\bchown\b/, /\bkill(all)?\b/,
   /\bsandbox-exec\b/, /\b(launchctl|systemctl)\b/, /\bscp\b|\brsync\b/, /\bcrontab\b/,
 ]
 
-/** 明显安全的命令前缀（auto 档直接放行，不弹窗） */
-const AUTO_SAFE_PREFIX = [
-  'ls', 'pwd', 'echo', 'cat', 'head', 'tail', 'grep', 'find', 'which', 'whoami', 'date',
-  'wc', 'stat', 'file', 'printenv', 'env', 'getconf', 'uname', 'true', 'false',
-  'git status', 'git log', 'git diff', 'git branch', 'git remote -v', 'git diff --stat',
-  // 2026-09-24 扩充：真实会话里 9/13 条被误问的命令是这些（构建/测试/脚本/提交），
-  // 对齐主流实现 command-risk.ts —— 构建、管道、重定向、&& 链一律 low，不拦。
-  'npm', 'pnpm', 'npx', 'yarn', 'bun', 'node', 'deno', 'tsc', 'tsx',
-  'vitest', 'jest', 'pytest', 'python', 'python3', 'pip', 'pip3', 'uv',
-  'make', 'cargo', 'go', 'rustc', 'gradle', 'mvn', 'javac',
-  'mkdir', 'touch', 'cp', 'mv', 'ln', 'rmdir', 'tee',
-  'sed', 'awk', 'sort', 'uniq', 'cut', 'tr', 'xargs', 'jq', 'comm', 'diff', 'split',
-  'git add', 'git commit', 'git checkout', 'git switch', 'git stash', 'git fetch',
-  'git pull', 'git merge', 'git rebase', 'git tag', 'git show', 'git blame',
-  'git ls-files', 'git rev-parse', 'git describe', 'git worktree',
-  'sqlite3', 'curl', 'wget', 'open', 'pbcopy', 'pbpaste', 'defaults', 'plutil',
-  'sw_vers', 'df', 'du', 'ps', 'lsof', 'sleep', 'printf', 'test', 'basename', 'dirname',
-  'realpath', 'md5', 'shasum', 'md5sum', 'mdfind', 'tree', 'zip', 'unzip', 'tar',
-  // 2026-09-25 补：真实会话日志里被误问的（pgrep 查进程 / seq 生成序列）
-  'pgrep', 'seq',
-  // 2026-09-25 二次补：cd 前缀（模型几乎所有命令都 cd 进子包）；for/while/if 是 shell
-  // 语法关键字，其体内的每个子段都会被独立判定（rm/危险模式段级仍拦），关键字本身无副作用
-  'cd', 'for', 'while', 'until', 'if',
-]
+/**
+ * 命令段的"写意图"识别（2026-10-22，对标 WorkBuddy 的 `classifyCommandOps`）。
+ *
+ * 起因：`classifyShellCommand` 对未知段一律 allow（2026-10-18 裁决），而写文件的命令
+ * （`echo x > src/a.ts`、`sed -i`、`tee out.log`）恰好都属于"未知"
+ * ⇒ **静默绕过 `file_write` 的 approval**，即"改项目文件的命令不用问，用工具改才问"。
+ *
+ * 对照 WorkBuddy（`cli.mjs@4884514` 反查原文），它把命令按静态名表分成四类：
+ *   delete: rm/rmdir/unlink/del/erase/rd
+ *   write : `>`/`>>` 重定向 + mkdir/touch/cp/mv/tee/install/sed/copy/set-content/out-file
+ *   read  : cat/ls/grep/find/head/tail/less/more/stat/type/dir
+ *   access: 其余
+ * 然后 write 走 needsApproval 策略。
+ *
+ * 我们只补**改内容**那一类（`delete` 已有 `classifyRmSegment`，`read` 无需拦）：
+ * `mkdir/touch/cp/mv/ln` 这类结构性操作**不纳入**——构建链路里太常见，一拦就退回
+ * "步步弹框"（老板 2026-10-22 刚投诉的那个问题）。
+ * 日志重定向（`> /tmp/x.log`、`2>&1`、`> /dev/null`）必须继续放行，否则
+ * `pnpm test > /tmp/x.log 2>&1` 又要弹。
+ */
 
-/** 纯重定向 / 赋值片段（`2>&1`、`> /dev/null`、`FOO=bar`）——安全 */
-const REDIRECT_ONLY_RE = /^([0-9]?>>?\s*\S+|&>+\s*\S+|\w+=\S*|\|[&]?)$/
+/** 只写内容的命令（`head 锚定`：`pnpm install` / `npm install` 不算写） */
+const CONTENT_WRITE_HEAD_RE = /^(?:sudo\s+)?(tee|truncate|install|set-content|out-file)(?:\s|$)/
+
+/** 原地改文件：`sed -i`、`sed -i.bak`、`sed -n -i` */
+const INPLACE_SED_RE = /(?:^|\s)sed\s+[^|;]*?-[a-zA-Z]*i(?:[.\s]|$)/
+
+/** 目标路径是否属于"随手写"（临时/黑洞）——这类重定向不算改文件 */
+function isScratchPath(p: string): boolean {
+  const s = p.trim().replace(/^['"]|['"]$/g, '')
+  if (!s) return true
+  if (s === '/dev/null' || s === '/dev/stdout' || s === '/dev/stderr') return true
+  if (/^\d+$/.test(s) || /^&\d+$/.test(s)) return true // 2>&1 里的 &1
+  return s === '/tmp' || s.startsWith('/tmp/') || s === '/private/tmp' || s.startsWith('/private/tmp/')
+}
+
+/**
+ * 扫出段里所有重定向目标（`>` / `>>` / `&>`）。
+ *
+ * 不能用正则直接扫：`python3 -c "if a > b: …"`、`grep ">" f`、`node -e 'x=>y'` 里的
+ * `>` 都在引号内，正则会误判成写文件（heredoc 同理，见 `stripHeredocBody`）。
+ * 这里走一个引号感知的小扫描器；`2>&1` 这类目标以 `&` 开头 → 读不出目标 → 跳过。
+ */
+function findRedirectTargets(seg: string): string[] {
+  const out: string[] = []
+  let quote: '"' | "'" | null = null
+  for (let i = 0; i < seg.length; i++) {
+    const ch = seg[i]!
+    if (quote) { if (ch === quote) quote = null; continue }
+    if (ch === '"' || ch === "'") { quote = ch; continue }
+    if (ch !== '>') continue
+    let j = i + 1
+    if (seg[j] === '>') j++ // `>>`
+    while (j < seg.length && /\s/.test(seg[j]!)) j++
+    let target = ''
+    if (seg[j] === '"' || seg[j] === "'") {
+      const tq = seg[j]!
+      j++
+      while (j < seg.length && seg[j] !== tq) target += seg[j++]!
+      j++
+    } else {
+      while (j < seg.length && !/[\s;&|)]/.test(seg[j]!)) target += seg[j++]!
+    }
+    if (target) out.push(target)
+    i = j - 1
+  }
+  return out
+}
+
+/**
+ * 去掉 heredoc 体，只留宿主命令行。
+ * 模型高频写文件的手法就是 `cat > f <<'EOF' … EOF` / `python3 - <<EOF … EOF`；
+ * 体里的 `if a > b:` 会被当成写重定向（实测误报），故先切掉。
+ */
+function stripHeredocBody(seg: string): string {
+  const start = seg.search(/<<-?\s*['"]?\w/)
+  if (start < 0) return seg
+  const tag = seg.slice(start).match(/<<-?\s*['"]?(\w+)/)?.[1]
+  const nl = seg.indexOf('\n', start)
+  if (!tag || nl < 0) return seg.slice(0, nl < 0 ? seg.length : nl)
+  const head = seg.slice(0, nl)
+  const lines = seg.slice(nl + 1).split('\n')
+  const end = lines.findIndex((l) => l.trim() === tag)
+  const tail = end >= 0 ? lines.slice(end + 1).join('\n') : ''
+  return tail ? `${head}\n${tail}` : head
+}
+
+/** 段是否"会改文件内容"。true 表示需要确认（ask）。 */
+function isContentWriteSegment(seg: string): boolean {
+  const bare = stripHeredocBody(seg)
+    .replace(/^(\w+=\S*\s+)+/, '')
+    .replace(/^\s*(do|then|else)\s+/, '')
+    .trim()
+  if (!bare) return false
+  // ① 重定向写真实文件
+  if (findRedirectTargets(bare).some((t) => !isScratchPath(t))) return true
+  // ② 原地改文件
+  if (INPLACE_SED_RE.test(bare)) return true
+  // ③ 只写内容的命令；参数全是临时路径时放行（`tee /tmp/x.log`）
+  const m = bare.match(CONTENT_WRITE_HEAD_RE)
+  if (m) {
+    const args = bare.slice(m[0].length).split(/\s+/).filter((a) => a && !a.startsWith('-'))
+    if (args.length === 0) return false
+    return !args.every(isScratchPath)
+  }
+  return false
+}
 
 /**
  * 从一个 shell 工具调用参数里取出**真正的命令文本**。
@@ -481,17 +582,57 @@ function splitShellSegments(cmd: string): string[] {
 export function classifyShellCommand(command: string): 'allow' | 'ask' | 'block' {
   const cmd = String(command || '').trim()
   if (!cmd) return 'ask'
-  for (const p of IRREVERSIBLE_PATTERNS) if (p.test(cmd)) return 'block'
+  return judgeCommand(cmd, 2)
+}
 
+/**
+ * 把 `sh -c '…'` / `bash -c "…"` / `zsh -lc '…'` 的内层命令取出来（只拆一层）。
+ *
+ * 2026-10-22：这是最省事的一条绕过 —— `sh -c 'rm -rf ~/x'` 整段的命令名是 `sh`，
+ * 判「未知 → allow」，而内层是真删除。模型也确实爱这么写（拼管道、设环境变量时）。
+ */
+function unwrapShellC(seg: string): string | null {
+  const m = seg.match(/^\s*(?:(?:[~.\w-]*\/)+)?(?:ba|z|da|k|fi)?sh\s+-[a-zA-Z]*c\s+([\s\S]+)$/)
+  if (!m) return null
+  let inner = m[1].trim()
+  const q = inner[0]
+  if ((q === "'" || q === '"') && inner.length > 1 && inner[inner.length - 1] === q) {
+    inner = inner.slice(1, -1)
+  }
+  return inner.trim() || null
+}
+
+/** 单段判定（含 shell 包装展开）；depth = 还能往下展开几层 */
+function judgeSegment(seg: string, depth: number): 'allow' | 'ask' | 'block' {
+  if (IRREVERSIBLE_PATTERNS.some((p) => p.test(seg))) return 'block'
+  // rm 段级分级（2026-09-25）：非递归 + /tmp 或工作区内 → allow；递归/越界 → block
+  const rmVerdict = classifyRmSegment(seg)
+  if (rmVerdict === 'block') return 'block'
+  if (rmVerdict === 'allow') return 'allow'
+  // 包了一层 shell 的写法：内层更坏就取内层（内层清白不代表整段清白，也不额外加严）
+  if (depth > 0) {
+    const inner = unwrapShellC(seg)
+    if (inner && inner !== seg) {
+      const innerVerdict = judgeCommand(inner, depth - 1)
+      if (innerVerdict !== 'allow') return innerVerdict
+    }
+  }
+  // 明确可疑（sudo/chmod/chown/kill/launchctl/rsync…）→ 必须问
+  if (SUSPICIOUS_PATTERNS.some((p) => p.test(seg))) return 'ask'
+  // 改文件内容的段（`> 真实路径`、`sed -i`、`tee`）→ 问。
+  // 必须排在「未知 → allow」之前：否则这条命令绕过 file_write 的审批（2026-10-22）
+  if (isContentWriteSegment(seg)) return 'ask'
+  return 'allow'
+}
+
+/** 整条命令判定：任一段 block 即 block；否则有 ask 就 ask；全清白才 allow */
+function judgeCommand(cmd: string, depth: number): 'allow' | 'ask' | 'block' {
+  for (const p of IRREVERSIBLE_PATTERNS) if (p.test(cmd)) return 'block'
   let worst: 'allow' | 'ask' = 'allow'
   for (const seg of splitShellSegments(cmd)) {
-    if (IRREVERSIBLE_PATTERNS.some((p) => p.test(seg))) return 'block'
-    // rm 段级分级（2026-09-25）：非递归 + /tmp 或工作区内 → allow；递归/越界 → block
-    const rmVerdict = classifyRmSegment(seg)
-    if (rmVerdict === 'block') return 'block'
-    if (rmVerdict === 'allow') continue
-    // 明确可疑（sudo/chmod/chown/kill/launchctl/rsync…）→ 必须问
-    if (SUSPICIOUS_PATTERNS.some((p) => p.test(seg))) { worst = 'ask'; continue }
+    const v = judgeSegment(seg, depth)
+    if (v === 'block') return 'block'
+    if (v === 'ask') worst = 'ask'
     // 🔴 2026-10-18 决策（老板：「1+3」）：**未知命令默认放行，不再询问**。
     //
     //   改前：`if (!isSafeSegment(seg)) worst = 'ask'` —— 凡不在 AUTO_SAFE_PREFIX 白名单里的
@@ -501,29 +642,16 @@ export function classifyShellCommand(command: string): 'allow' | 'ask' | 'block'
     //         `needsApproval.some(t => "unknown" !== t.level)`
     //         —— 它把 level==="unknown" **排除**在触发条件之外，即未知 = 放行。
     //
-    //   安全不倒退的理由：真正危险的东西在**上面两步已经拦死**，与本白名单无关 ——
+    //   安全不倒退的理由：真正危险的东西在**上面几步已经拦死**，与白名单无关 ——
     //     ① IRREVERSIBLE_PATTERNS（含 `curl … | sh` 跨段组合）→ block
     //     ② classifyRmSegment（递归 rm / 越界 rm）→ block
     //     ③ SUSPICIOUS_PATTERNS（提权、改权限、改所有者、杀进程、装守护进程）→ ask
-    //   白名单从此只是"已知安全"的**快捷说明**，不再是"未知即危险"的隐式规则。
+    //     ④ isContentWriteSegment（写项目文件内容）→ ask
+    //   ⚠️ 那份 AUTO_SAFE_PREFIX 白名单（23 行、90 余条前缀）随本条裁决一起**删除**：它已无引用，
+    //      留着只会让人误以为"未知=危险"还生效（2026-10-22 复盘：白名单变死代码后，
+    //      写文件类命令就成了审批盲区，见 ④）。
   }
   return worst
-}
-
-function isSafeSegment(seg: string): boolean {
-  const s = seg.replace(/^[()]+|[()]+$/g, '').trim()
-  if (!s) return true
-  if (REDIRECT_ONLY_RE.test(s)) return true
-  // 剥掉前置环境变量赋值：`NODE_ENV=test npm test`
-  let bare = s.replace(/^(\w+=\S*\s+)+/, '')
-  // 剥 shell 语法关键字前缀与纯关键字残段（for/while 切段产物）：`do echo $x`、`done`、`then …`
-  bare = bare.replace(/^(do|then|else)\s+/, '')
-  if (/^(done|fi|esac)$/.test(bare)) return true
-  if (REDIRECT_ONLY_RE.test(bare)) return true
-  for (const p of AUTO_SAFE_PREFIX) {
-    if (bare === p || bare.startsWith(p + ' ')) return true
-  }
-  return false
 }
 
 /**
@@ -555,7 +683,36 @@ export function classifySensitiveTool(toolName: string, argText: string): 'allow
 
   if (toolName === 'shell_exec') return classifyShellCommand(extractShellCommand(argText))
 
+  // ---- 持久终端（2026-10-22 P0-1）----
+  // 病根：`terminal_send` 会往真终端里打字并回车，**它就是执行命令**，但这条路径
+  // 既不在 SENSITIVE_TOOLS 里、也没有分类器 —— 同一句 `rm -rf ~/x` 走 shell_exec 被 block，
+  // 走 terminal_send 却静默执行。等于给授权闸门开了个后门。
+  // 因此这里必须复用**同一套**按段分类（含不可逆模式、rm 分级、可疑命令、写文件段）。
+  if (toolName === 'terminal_send') return classifyShellCommand(extractShellCommand(argText))
+
+  if (toolName === 'terminal_signal') {
+    // Ctrl-C 是"停下当前命令"，几乎总是用户想要的那一下（且可再跑）；
+    // 其余信号（KILL/TERM/HUP/QUIT）会直接杀掉会话里的进程，未保存的状态一起没。
+    const sig = extractSignalName(argText)
+    return sig === 'SIGINT' ? 'allow' : 'ask'
+  }
+
+  // ⚠️ 只有 terminal_send / terminal_signal 声明了 requiresApproval ⇒ 只有它们会走到这里。
+  //    terminal_open/read/list/close 不进敏感集（开会话、读输出、关自己开的会话都不算不可逆），
+  //    给它们写分支等于死代码 —— 2026-10-22 第一版就写了，已删。
+
   return 'ask' // 未知敏感工具：保守询问（但白名单可放行）
+}
+
+/** 从 terminal_signal 的参数里取信号名（缺省 SIGINT，与工具默认值一致） */
+function extractSignalName(argText: string): string {
+  try {
+    const parsed = JSON.parse(String(argText ?? ''))
+    const sig = typeof parsed?.signal === 'string' ? parsed.signal.trim().toUpperCase() : ''
+    return sig || 'SIGINT'
+  } catch {
+    return 'SIGINT'
+  }
 }
 
 

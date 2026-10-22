@@ -25,7 +25,7 @@
 
     <!-- hover tooltip（顶部栏下方弹出，不遮挡横栏内容） -->
     <div v-if="hover && !showDetail" class="ctx-tip">
-      {{ tipLabel }} · {{ usedK }}K / {{ windowK }}K
+      {{ tipLabel }} · {{ usedEstimated ? '~' : '' }}{{ usedK }}K / {{ windowK }}K
       <span v-if="lastCompressedAt" class="ctx-tip-compress">{{ $t('chat.ctxLastCompress') }} {{ lastCompressedAt }}</span>
     </div>
 
@@ -113,8 +113,18 @@ const ringColor = computed(() => {
 
 const usedK = computed(() => Math.round(usedTokens.value / 1024))
 const windowK = computed(() => Math.round(windowTokens.value / 1024))
+/**
+ * 当前数字是估算还是真值（2026-10-22）。
+ * `ctxUsed` 只在收到 `usage` 事件时被写；没有该事件（流式中断 / 模型不返回 usage）时
+ * 回落到"字符 × 0.6"的估算 —— 那种情况下必须让用户知道这是估的，不能当真值读。
+ */
+const usedEstimated = computed(() => appStore.ctxUsed <= 0)
 // 注意：$t 的插值参数必须传数值（不能传 computed ref，否则 i18n 序列化 ref 触发 circular JSON → 渲染崩溃白屏）
-const tipLabel = computed(() => t('chat.ctxUsage', { pct: pctNum.value }))
+const tipLabel = computed(() =>
+  usedEstimated.value
+    ? t('chat.ctxUsageEstimated', { pct: pctNum.value })
+    : t('chat.ctxUsage', { pct: pctNum.value }),
+)
 
 // ---- 分类用量（对齐主流实现 usage-by-category-popover：用户/AI 正文/工具过程 各占多少，前端估算 0.6 token/字符） ----
 const catTokens = computed(() => {

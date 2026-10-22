@@ -6,8 +6,9 @@ import Router from 'koa-router'
 import type { Context } from 'koa'
 import { exec } from 'child_process'
 import { promisify } from 'util'
-import { existsSync } from 'fs'
+import { existsSync, readFileSync } from 'fs'
 import { join, dirname } from 'path'
+import { fileURLToPath } from 'url'
 import { safeWriteSse, endSseStream, registerSseStream, getSseStats, resetSseStats } from '../services/sse-health'
 import { getEventLoopStats, resetEventLoopStats } from '../services/event-loop-lag'
 
@@ -27,6 +28,38 @@ function findProjectRoot(start: string): string {
 const PROJECT_ROOT = findProjectRoot(process.cwd())
 
 export const systemRouter = new Router({ prefix: '/api/system' })
+
+/**
+ * 产品版本（2026-10-22 统一口径）。
+ *
+ * 优先级：
+ * 1. `APP_VERSION` —— 桌面主进程 spawn 后端时注入 `app.getVersion()`，
+ *    打包形态下这就是 Info.plist 里的版本，与 app:info 同源；部署脚本也可显式注入。
+ * 2. 本包 package.json 的 version —— 源码/dev 形态（由 scripts/version.mjs 从根派生）。
+ * 3. `'unknown'` —— 读不到就说读到不到，**不再假装一个版本号**。
+ *
+ * 旧实现兜底写死 `'0.3.0'`：那是个从没发布过的号，于是「关于页显示 0.3.0」
+ * 与「更新横幅说发现 1.0.6」并排打架，还被当成"已是最新"的判断依据。
+ *
+ * `ENGINE_VERSION` 保留兼容：老部署脚本设的是它，但不再是首选。
+ */
+let _productVersion: string | null = null
+
+export function resolveProductVersion(env: NodeJS.ProcessEnv = process.env): string {
+  const fromEnv = String(env.APP_VERSION || env.ENGINE_VERSION || '').trim()
+  if (fromEnv) return fromEnv
+  if (_productVersion) return _productVersion
+  try {
+    const pkgPath = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'package.json')
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'))
+    const v = String(pkg?.version || '').trim()
+    if (v) {
+      _productVersion = v
+      return v
+    }
+  } catch { /* 打包形态可能没有 package.json —— 交给 APP_VERSION */ }
+  return 'unknown'
+}
 
 /** 仅 localhost 访问保护 */
 function isLocalhost(ctx: Context): boolean {
@@ -60,10 +93,13 @@ systemRouter.get('/version', async (ctx: Context) => {
   } catch { /* 非 git 目录/命令不可用 → 保持 unknown */ }
 
   ctx.body = {
-    // 引擎（代码仓库）版本 —— 供前端显示「引擎 vX.Y.Z」。
-    // 注意：这**不是** App 二进制版本；App 版本在桌面主进程 app.getVersion()（见 desktop/main.cjs 的 app:info）。
-    // 环境变量优先 ENGINE_VERSION，保留 APP_VERSION 兼容旧部署。
-    version: process.env.ENGINE_VERSION || process.env.APP_VERSION || '0.3.0',
+    // 产品版本（一个产品一个号，2026-10-22 统一）。
+    // 唯一源 = 根 package.json 的 version，由 scripts/version.mjs 派生到各子包；
+    // 桌面端启动后端时注入 APP_VERSION = app.getVersion()，因此打包形态下
+    // 这里的值与 app:info / 设置-关于 完全同源。
+    // 旧实现在这里兜底写 '0.3.0' —— 一个从来没发布过的号，才导致"关于页 0.3.0、
+    // 横幅说 1.0.6、tag 是 v1.2.0"三处打架。
+    version: resolveProductVersion(),
     gitHead: await getGitHead(),
     branch,
   }

@@ -11,7 +11,16 @@
  * 一个"永远 allow"或"永远 confirm"的实现必须在这张表上挂掉。
  */
 import { describe, it, expect } from 'vitest'
-import { decideToolApproval, type ApprovalContext, type ToolRisk } from './permission'
+import {
+  decideToolApproval,
+  resolveConfirmationWait,
+  resolvePermissionTier,
+  isPermissionTier,
+  PERMISSION_TIERS,
+  CONFIRMATION_TIMEOUT_MS,
+  type ApprovalContext,
+  type ToolRisk,
+} from './permission'
 
 const Risk = (r: ToolRisk) => (_n: string, _a: string): ToolRisk => r
 
@@ -101,23 +110,128 @@ describe('decideToolApproval —— auto 档（自动执行：除 block 外全�
   })
 })
 
-describe('decideToolApproval —— ask 档（执行前询问）', () => {
-  it('未授权：ask 类要确认（该档承诺"每个敏感操作都先问"）', () => {
-    expect(decideToolApproval('shell_exec', 'unknown-cmd', ctx({ mode: 'prompt', classify: Risk('ask') }))).toBe('confirm')
-    expect(decideToolApproval('shell_exec', 'ls', ctx({ mode: 'prompt', classify: Risk('allow') }))).toBe('confirm')
+describe('decideToolApproval —— ask 档：只在不可逆时打断（2026-10-22 老板裁决）', () => {
+  // 老板原话：「等级为中，减少弹窗，workbuddy 只有在删除文件的时候才弹出」
+  // ⇒ 阈值从 ask 抬到 block：中风险只是"有副作用"，不再打断用户。
+  // bug 存在时（闸门停在 ask 级）下面这一组全部是 confirm。
+  it('中风险（sudo / chmod / kill / 写文件 / 记忆合并）→ 直接放行', () => {
+    for (const [name, risk] of [
+      ['shell_exec', 'ask'],
+      ['file_write', 'ask'],
+      ['multi_edit', 'ask'],
+      ['memory_consolidate', 'ask'],
+    ] as const) {
+      expect(
+        decideToolApproval(name, '{}', ctx({ mode: 'prompt', classify: Risk(risk) })),
+        `${name} 是中风险，不该弹窗`,
+      ).toBe('allow')
+    }
   })
-  it('★ 「本会话全部允许」后：ask 类放行（按钮的语义就在这）', () => {
+
+  it('只读/测试类本来就不问', () => {
+    expect(decideToolApproval('shell_exec', 'pnpm test', ctx({ mode: 'prompt', classify: Risk('allow') }))).toBe('allow')
+    expect(decideToolApproval('shell_exec', 'git status', ctx({ mode: 'prompt', classify: Risk('allow') }))).toBe('allow')
+  })
+
+  it('🔴 真正不可逆的仍然打断（抬阈值 ≠ 拆护栏）', () => {
+    expect(
+      decideToolApproval('shell_exec', 'rm -rf /x', ctx({ mode: 'prompt', sessionApproved: true, classify: Risk('block') })),
+    ).toBe('confirm')
+    expect(decideToolApproval('skill_install', '{}', ctx({ mode: 'prompt', classify: Risk('block') }))).toBe('confirm')
+    expect(decideToolApproval('computer_use', '{}', ctx({ mode: 'prompt', classify: Risk('block') }))).toBe('confirm')
+    expect(decideToolApproval('file_write', '{"path":"/etc/hosts"}', ctx({ mode: 'prompt', classify: Risk('block') }))).toBe('confirm')
+  })
+
+  it('「本会话全部允许」在此档已无额外作用（非 block 本来就放行）', () => {
     expect(
       decideToolApproval('shell_exec', 'unknown-cmd', ctx({ mode: 'prompt', sessionApproved: true, classify: Risk('ask') })),
     ).toBe('allow')
   })
 })
 
+describe('🔴 两档模型（2026-10-22 合并：三档 → 两档）', () => {
+  it('PERMISSION_TIERS 只有 readonly / ask，auto 不再是档位', () => {
+    expect([...PERMISSION_TIERS]).toEqual(['readonly', 'ask'])
+    expect(isPermissionTier('auto')).toBe(false)
+  })
+
+  it('存量 auto / accept-edits / prompt 一律投影到 ask（行为本来就等价）', () => {
+    for (const legacy of ['auto', 'accept-edits', 'prompt'] as const) {
+      expect(resolvePermissionTier(legacy), `legacy=${legacy} 应投影到 ask`).toBe('ask')
+    }
+    expect(resolvePermissionTier('deny')).toBe('readonly')
+  })
+
+  it('会话权限档 full 不再映射成 auto（归档到 ask）', () => {
+    expect(resolvePermissionTier(null, 'full')).toBe('ask')
+    expect(resolvePermissionTier(null, 'workspace-only')).toBe('readonly')
+  })
+
+  it('只有 deny（仅查看）档仍与其它档不同', () => {
+    expect(decideToolApproval('shell_exec', '', ctx({ mode: 'deny', classify: Risk('allow') }))).toBe('deny')
+  })
+
+  it('三个历史档位分支仍等价（防有人重新拉开差异）', () => {
+    const modes = ['auto', 'prompt', 'accept-edits'] as const
+    const risks: ToolRisk[] = ['allow', 'ask', 'block']
+    for (const risk of risks) {
+      const verdicts = modes.map((mode) =>
+        decideToolApproval(risk === 'block' ? 'rm_tool' : 'shell_exec', '', ctx({ mode, classify: Risk(risk) })),
+      )
+      expect(new Set(verdicts).size, `${risk} 档在三个历史档位下出现不同裁决：${verdicts.join('/')}`).toBe(1)
+    }
+  })
+})
+
+describe('🔴 不可逆操作永不自动放行（resolveConfirmationWait）', () => {
+  it('autoApproveSeconds > 0 时，普通操作确实自动放行（保持旧语义）', () => {
+    const w = resolveConfirmationWait(5)
+    expect(w.autoAllow).toBe(true)
+    expect(w.effectiveMs).toBe(5000)
+    expect(w.irreversible).toBe(false)
+  })
+
+  it('🔴 不可逆时忽略设置，走满超时且不自动放行', () => {
+    const w = resolveConfirmationWait(5, { irreversible: true })
+    expect(w.autoAllow, 'rm -rf / file_delete 绝不能倒计时自动执行').toBe(false)
+    expect(w.effectiveMs).toBe(CONFIRMATION_TIMEOUT_MS)
+    expect(w.irreversible).toBe(true)
+  })
+
+  it('不可逆 + 设置为 0 也是走满超时（两种来源不能有分歧）', () => {
+    expect(resolveConfirmationWait(0, { irreversible: true })).toEqual({
+      autoAllow: false,
+      effectiveMs: CONFIRMATION_TIMEOUT_MS,
+      irreversible: true,
+    })
+  })
+
+  it('设置为 0 / 负数 / NaN ⇒ 不自动放行，走满超时', () => {
+    for (const sec of [0, -5, Number.NaN, undefined, null]) {
+      const w = resolveConfirmationWait(sec as any)
+      expect(w.autoAllow, `sec=${sec} 不应自动放行`).toBe(false)
+      expect(w.effectiveMs).toBe(CONFIRMATION_TIMEOUT_MS)
+    }
+  })
+
+  it('超时可注入（测试不靠真等 120 秒）', () => {
+    const w = resolveConfirmationWait(5, { timeoutMs: 10, irreversible: true })
+    expect(w.effectiveMs).toBe(10)
+  })
+
+  it('autoApproveSeconds 为小数时取整到毫秒（不产生 2.5s 这种半秒）', () => {
+    expect(resolveConfirmationWait(2.5).effectiveMs).toBe(2500)
+  })
+})
+
 describe('decideToolApproval —— accept-edits 档', () => {
-  it('文件编辑放行，命令要确认（旧行为回归）', () => {
+  it('文件编辑与只读命令放行，中风险命令也放行（与 ask 档一致）', () => {
     expect(decideToolApproval('file_write', '{}', ctx({ mode: 'accept-edits', classify: Risk('allow') }))).toBe('allow')
     expect(decideToolApproval('multi_edit', '{}', ctx({ mode: 'accept-edits', classify: Risk('allow') }))).toBe('allow')
-    expect(decideToolApproval('shell_exec', 'npm run build', ctx({ mode: 'accept-edits', classify: Risk('allow') }))).toBe('confirm')
+    // accept-edits 在 UI 上归属"执行前询问"档（resolvePermissionTier），行为必须与 ask 档一致，
+    // 否则同一个档位标签下会出现两套行为
+    expect(decideToolApproval('shell_exec', 'npm run build', ctx({ mode: 'accept-edits', classify: Risk('allow') }))).toBe('allow')
+    expect(decideToolApproval('shell_exec', 'sudo npm i -g x', ctx({ mode: 'accept-edits', classify: Risk('ask') }))).toBe('allow')
   })
   it('★ 白名单也生效（旧实现 loadSessionApprovals() 是死调用，白名单被忽略）', () => {
     expect(

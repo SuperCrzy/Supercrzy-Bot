@@ -485,17 +485,22 @@
 
             <!-- 任务总计时：运行中"已用时 Xs"实时增长；done 后"已完成 Xs"。
                  计时器封装在 ElapsedBadge 内部（整秒边界对齐），不再用页面级 nowTs —— 见该组件注释。 -->
-            <div v-if="msg.role === 'assistant' && (msg.elapsedMs || (msg.startedAt && chatStore.isLoading))" class="message-tokens">
+            <div v-if="msg.role === 'assistant' && (msg.elapsedMs || msg.isAborted || (msg.startedAt && chatStore.isLoading))" class="message-tokens">
               <ElapsedBadge
                 :started-at="msg.startedAt"
                 :elapsed-ms="msg.elapsedMs"
                 :running="chatStore.isLoading"
+                :aborted="msg.isAborted"
               />
             </div>
 
             <!-- Token usage（受设置"显示成本"控制） -->
-            <div v-if="appStore.showCost && msg.role === 'assistant' && msg.tokenCount" class="message-tokens">
-              <span>{{ msg.tokenCount }} tokens</span>
+            <div
+              v-if="appStore.showCost && msg.role === 'assistant' && msg.tokenCount"
+              class="message-tokens"
+              :title="msg.tokenEstimated ? t('chat.tokensEstimated') : undefined"
+            >
+              <span>{{ formatTokenCount(msg) }} tokens</span>
               <span v-if="msg.cost"> · {{ formatCurrency(msg.cost) }}</span>
             </div>
 
@@ -935,12 +940,14 @@ import { getModelShortName } from '@/data/models'
 import type { ChatMessage, Attachment, ToolCallEvent, ChatFlowNode } from '@/types'
 import { applyToolArgsChunk, applyToolDuration, applyToolOutput, applyToolProgress, applyToolResult, toolStatusLabel, extractToolTarget, nextNodeId } from '@/utils/agent-flow'
 import { errMsg } from '@/utils/i18n-error'
+import { resolveErrorDisplay } from '@/utils/api-error-display'
 import { l10n } from '@/utils/i18n-field'
 import { playCompletionTone } from '@/utils/sound'
 // P1-04：以下纯逻辑从本文件下沉到 utils（原先堆在 6500 行里且无测试）
 import { isImageType, isPdfType, isDocType, isSheetType, formatFileSize, formatArtifactSize } from '@/utils/attachment'
 import { hasDelivery, deliveryHeadClass, fmtDeliveryDuration, fmtDeliveryCost } from '@/utils/delivery'
 import { textOf, searchContent } from '@/utils/message-text'
+import { estimateTokens, fillEstimatedTokens, fillMeasuredTokens, formatTokenCount } from '@/utils/token-usage'
 import { parseTrigger } from '@/utils/trigger'
 import { copyRichText, copyToClipboard, stripMarkdown } from '@/utils/clipboard'
 import MarkdownIt from 'markdown-it'
@@ -973,6 +980,7 @@ import { formatTtsRate } from '@/composables/useSpeechPreview'
 import { useWelcomePanel } from '@/composables/useWelcomePanel'
 import ContextUsageRing from '@/components/chat/ContextUsageRing.vue'
 import ElapsedBadge from '@/components/chat/ElapsedBadge.vue'
+import { markTurnAborted } from '@/utils/turn-abort'
 import PlanCapsule from '@/components/chat/PlanCapsule.vue'
 import MessageFlowRenderer from '@/components/chat/MessageFlowRenderer.vue'
 import ToolApprovalFloating from '@/components/chat/ToolApprovalFloating.vue'
@@ -1388,20 +1396,9 @@ function deleteQueued(id: string) {
 
 /** 停止当前 AI 回复（停止后若有队列会自动发布） */
 function stopGeneration() {
-  // P0-6：把当前轮未完成的工具节点标记为 cancelled（主流实现 ToolState.cancelled 同款）
   const msgs = messages.value
-  for (let i = msgs.length - 1; i >= 0; i--) {
-    const m = msgs[i]
-    if (m.role !== 'assistant' || !m.flow) continue
-    let touched = false
-    for (const n of m.flow) {
-      if (n.kind === 'tool' && ['running', 'stream_executing', 'pending', 'approved'].includes(n.tool.status)) {
-        n.tool.status = 'cancelled'
-        touched = true
-      }
-    }
-    if (touched) break
-  }
+  // A3：取消落成消息级事实（标记 isAborted + 在跑工具置 cancelled）；判据与边界在 utils/turn-abort.ts
+  markTurnAborted(msgs)
   // 2026-08-27 修复：任务中止后清除挂起的提问（否则 ask_user/ask_question 的询问窗残留不消失）
   for (const m of msgs) {
     if (m.pendingQuestion) m.pendingQuestion = undefined
@@ -1779,6 +1776,7 @@ const {
   rate: () => formatTtsRate(appStore.ttsRate),
   mode: () => appStore.autoReadMode,
   streamRead: () => appStore.streamRead,
+  live: () => appStore.ttsLive, // 会话式朗读（一条消息一条流）；关掉回退旧通道
 })
 
 /** 「本轮结束」的唯一出口 —— 完成提示音 + 自动朗读都走这里。
@@ -2033,9 +2031,7 @@ async function sendGhostMessage(suggestion: string) {
     chatStore.setLoading(false)
     abortController.value = null
     if (session) {
-      if (!assistantMsg.tokenCount) {
-        assistantMsg.tokenCount = Math.ceil(textOf(assistantMsg.content).length * 0.6)
-      }
+      fillEstimatedTokens(assistantMsg, textOf(assistantMsg.content).length)
       chatStore.persistLastMessage(session.id)
     }
   }
@@ -2079,9 +2075,7 @@ async function resumeFromCheckpoint(ckptId: string) {
     chatStore.setLoading(false)
     abortController.value = null
     if (session) {
-      if (!assistantMsg.tokenCount) {
-        assistantMsg.tokenCount = Math.ceil(textOf(assistantMsg.content).length * 0.6)
-      }
+      fillEstimatedTokens(assistantMsg, textOf(assistantMsg.content).length)
       chatStore.persistLastMessage(session.id)
     }
   }
@@ -2294,9 +2288,7 @@ async function doSend(text: string, files: Attachment[]) {
     abortController.value = null
     if (session) {
       // 估算 token 数兜底（usage 事件未提供真实值时）：中英混合粗略 0.6 token/字符
-      if (!assistantMsg.tokenCount) {
-        assistantMsg.tokenCount = Math.ceil(textOf(assistantMsg.content).length * 0.6)
-      }
+      fillEstimatedTokens(assistantMsg, textOf(assistantMsg.content).length)
       chatStore.persistLastMessage(session.id)
     }
     // AI 回复完成 → 自动发布队列中的内容（一次请求，多条用户消息）
@@ -2359,9 +2351,7 @@ async function sendQueued(texts: string[]) {
     abortController.value = null
     if (session) {
       // 真实 usage 已由 usage 事件写入则不覆盖；否则用估算值兜底
-      if (!assistantMsg.tokenCount) {
-        assistantMsg.tokenCount = Math.ceil(textOf(assistantMsg.content).length * 0.6)
-      }
+      fillEstimatedTokens(assistantMsg, textOf(assistantMsg.content).length)
       chatStore.persistLastMessage(session.id)
     }
     // 若用户在自动发布期间又排队了内容 → 继续自动发布，直到队列清空
@@ -2451,7 +2441,8 @@ async function sendCompare(assistantMsg: ChatMessage, apiMessages: Array<{ role:
     cur.content = JSON.stringify(data)
     cur.status = 'complete'
     const totalLen = data.results.reduce((s: number, r: any) => s + (r.content || '').length, 0)
-    cur.tokenCount = Math.ceil(totalLen * 0.6)
+    cur.tokenCount = estimateTokens(totalLen)
+    cur.tokenEstimated = true
     if (sessionId) chatStore.persistLastMessage(sessionId)
   }
   // 清理打字状态
@@ -2626,6 +2617,7 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage, sessionId?
         existingTool.tool.name = data.name
         existingTool.tool.arguments = data.arguments
         existingTool.tool.status = data.status === 'pending' ? 'pending' : 'running'
+        existingTool.tool.risk = data.risk  // 服务端算好的风险等级（唯一实现，别在前端猜）
       } else {
         msg.flow.push({
           kind: 'tool',
@@ -2636,6 +2628,7 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage, sessionId?
             status: data.status === 'pending' ? 'pending' : 'running',
             startedAt: Date.now(),
             createTime: data.createTime || Date.now(),  // P0-7：工具真实执行时刻（持久化供历史订正）
+            risk: data.risk,
           },
         })
       }
@@ -2745,10 +2738,10 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage, sessionId?
       break
     }
     case 'content': {
-      // 后端在流读完后的完整内容：同步 content（持久化/历史），
-      // 但不打断打字机——让限速 flush 自然播完剩余（保证视觉流式）
+      // 后端在流读完后的完整内容：同步 content（持久化/历史），但不打断打字机。
+      // A1：`error: true` 的 content 是错误提示，绝不能写进 content（那是答案的唯一真相）——后端已改走 error.hint。
+      if (data.error) break
       msg.content = data.content
-      // 2026-08-25：与 content_chunk 一致，不在此收起思考（等 done 统一标记）
       break
     }
     case 'file_created': {
@@ -2803,12 +2796,15 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage, sessionId?
       break
     }
     case 'usage': {
-      // 真实 token 用量（DeepSeek 流式结束时的 usage 字段）——覆盖前端估算值
-      msg.tokenCount = data.totalTokens || msg.tokenCount
+      // 真值优先：usage 事件已给真值时不被覆盖，且清掉估算标记
+      fillMeasuredTokens(msg, data.totalTokens)
       msg.promptTokens = data.promptTokens || 0
       msg.completionTokens = data.completionTokens || 0
       // 费用（后端按模型单价估算，¥）——随消息持久化
       if (typeof data.cost === 'number') msg.cost = data.cost
+      // 模型归属：后端按「本轮真正跑的模型」下发（fallback 后是备用模型）。
+      // 不记这个值，用量页只能按 sessions.model 分组 → 换过模型就永久错配。
+      if (typeof data.model === 'string' && data.model) msg.model = data.model
       // 上下文用量（顶部圆环数据源）：已用上下文 = prompt_tokens（会话累计上下文）
       if (typeof data.promptTokens === 'number') {
         appStore.setCtxUsage(data.promptTokens)
@@ -3009,17 +3005,15 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage, sessionId?
         msg.retrying = data.message || t('chat.retrying')
         aiStatus.value = 'chat.statusRetrying'
       } else {
-        // 2026-09-24 修复：**不再用错误文本覆盖 content**。
-        // content 是对外唯一真相（复制/导出/搜索/重载对账都读它），覆盖成 `❌ …` 会把
-        // "本轮已经产出的答案"在重载时整体顶掉（永久数据丢失）。有正文时错误改挂 stopReason 横幅。
+        // 2026-09-24 / 10-22（A1）：**绝不用错误文本覆盖 content**（答案的唯一真相）。判定见 utils/api-error-display.ts。
         const hadText = !!lastAnswerText(msg.flow).trim()
         markAllThinkingDone(msg)
         aiStatus.value = null
         aiStatusTarget.value = ''
-        if (!hadText) {
-          msg.content = `❌ ${data.message}`
-        } else {
-          msg.stopReason = { reason: 'error', message: data.message || t('chat.stopReasonDefault') }
+        const disp = resolveErrorDisplay({ hadText, hint: data.hint, message: data.message, fallback: t('chat.stopReasonDefault'), reason: data.reason })
+        if (disp.content) msg.content = disp.content
+        if (disp.stopReason) msg.stopReason = disp.stopReason
+        if (hadText) {
           void flushed.then(() => {
             // 等打字机刷完再取：保持 content == flow 末段（对账不变量）
             const tail = lastAnswerText(msg.flow)
@@ -3131,9 +3125,11 @@ async function sendSimpleStream(assistantMsg: ChatMessage, apiMessages: Array<{ 
           const chunk = JSON.parse(data)
           // 真实 token 用量（流式结束时的 usage 字段）
           if (chunk.usage?.total_tokens) {
-            assistantMsg.tokenCount = chunk.usage.total_tokens
+            fillMeasuredTokens(assistantMsg, chunk.usage.total_tokens)
             assistantMsg.promptTokens = chunk.usage.prompt_tokens || 0
             assistantMsg.completionTokens = chunk.usage.completion_tokens || 0
+            // 简单模式由前端指定模型（请求体里就是它），归属直接取当前模型
+            assistantMsg.model = appStore.currentModel
           }
           const content = chunk.choices?.[0]?.delta?.content
           if (content) {

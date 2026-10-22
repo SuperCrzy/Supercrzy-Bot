@@ -47,6 +47,17 @@ const EMPHASIS_RES: Array<[RegExp, string]> = [
   [/~~([^~]+)~~/g, '$1'],
 ]
 const INLINE_CODE_RE = /`([^`]+)`/g
+/**
+ * 残留标记（2026-10-22 老板实测：朗读把"星号""符号"念出来了）。
+ *
+ * 为什么成对替换不够：流式朗读按块送合成（`takeStreamChunk` 优先切在行边界/句末），
+ * `**加粗**` 很容易被切成 `**加粗` + `**`，两边**都配不上对** ⇒ 上面那组 EMPHASIS_RES
+ * 全部落空 ⇒ 星号原样进合成器。同理被切断的 `` ` ``、`~~`、`__` 也会漏。
+ * 这些字符在口语里没有任何信息量，所以按"清了不会错"的原则兜底剔除：
+ *   · `*`、反引号、`|`：整类清掉（正文里没有"必须念出来"的用法；`|` 只剩被切断的半截表格行）
+ *   · `~` `_`：只清连续 2 个及以上（`__x__`/`~~x~~` 的残骸），保住 `user_id`、`~5` 这类正常写法
+ */
+const RESIDUAL_MARKERS_RE = /[*`|]+|~{2,}|_{2,}/g
 
 export function markdownToSpeech(md: string): string {
   if (!md) return ''
@@ -76,6 +87,8 @@ export function markdownToSpeech(md: string): string {
     t = t.replace(LIST_PREFIX_RE, '')
     t = t.replace(INLINE_CODE_RE, '$1')
     for (const [re, rep] of EMPHASIS_RES) t = t.replace(re, rep)
+    // 兜底：成对替换后仍残留的标记（跨块切断的 ** / ` 等）一律剔除，别让合成器去念符号
+    t = t.replace(RESIDUAL_MARKERS_RE, '')
     out.push(t)
   }
   s = out.join('\n')
@@ -237,14 +250,16 @@ export function ensureSentenceEnd(s: string): string {
 /**
  * 首块最小字数：不足就先攒着再判定。
  *
- * ⚠️ **只用于首块**。首块的唯一目标是"尽快出声"，所以门槛压到 200；
+ * ⚠️ **只用于首块**。首块的唯一目标是"尽快出声"，所以门槛压到 **60 字**
+ * （2026-10-21 由 200 降下来：200 字意味着"第一段已经显示出来了但不开口"，
+ * 用户会觉得根本没在做边生成边读）。60 字 ≈ 一句话，正好对应"第一段落地就出声"。
  * 后续块的门槛抬到 `STREAM_MAX_CHARS`（见 useChatSpeech.drainStream 的两级门槛）——
- * 若后续块也按 200 切，一条 900 字回复会切成 4~5 次请求，等于又回到
- * "把固定成本付 N 次"的老路。
+ * 若后续块也按几十字切，一条 900 字回复会切成十几次请求，等于又回到
+ * "把固定成本付 N 次"的老路（手机端每次固定成本 7~10s）。
  *
  * 另一个作用：让 `isWindowForeground()` 的调用频率从"每 chunk 一次"降到"够一块一次"。
  */
-export const STREAM_FIRST_MIN_CHARS = 200
+export const STREAM_FIRST_MIN_CHARS = 60
 
 /**
  * 单块上限。攒到这里必须切，否则"第一声"的延迟没有上界。

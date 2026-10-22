@@ -211,6 +211,10 @@ export interface ChatMessage {
   /** 是否被用户中止 */
   isAborted?: boolean
   tokenCount?: number
+  /** true = tokenCount 是按字符估算的（模型未返回 usage），UI 需加 ~ 前缀 */
+  tokenEstimated?: boolean
+  /** 真正产出这条回复的模型（usage 事件下发，fallback 后是备用模型） */
+  model?: string
   cost?: number
   /** 真实 token 用量（DeepSeek usage 字段，usage 事件写入） */
   promptTokens?: number
@@ -406,6 +410,13 @@ export interface ToolCallEvent {
   streamOutput?: string
   /** 工具结构化进度（tool_progress 事件，执行中实时覆盖） */
   progress?: ToolProgress
+  /**
+   * 授权风险等级（服务端 `services/approval-risk.ts` 唯一实现，仅需审批的工具携带）。
+   * 客户端**不自行推断**：等级取决于参数（`shell_exec` 跑 `pnpm test` 是低、跑 `rm -rf` 是高），
+   * 按工具名猜必然错（旧实现 `name === 'file_delete' ? 'high' : 'medium'` 就是）。
+   * 历史消息/旧事件没有该字段 → 前端回退到保守显示。
+   */
+  risk?: { level: 'low' | 'medium' | 'high'; reason: 'read-only' | 'side-effect' | 'irreversible' }
 }
 
 export interface ApiRequest {

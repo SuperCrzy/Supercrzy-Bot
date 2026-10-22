@@ -442,7 +442,7 @@ import { useRouter } from 'vue-router'
 import { useMessage, NButton } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { detectLocale } from '@/utils/locale'
-import { PERMISSION_TIERS, TIER_I18N, isPermissionTier, resolvePermissionTier } from '@/utils/permission'
+import { PERMISSION_TIERS, TIER_I18N, isPermissionTier, DEFAULT_PERMISSION_TIER } from '@/utils/permission'
 import { useReasoningDisplay } from '@/utils/reasoning-display'
 import { useAppStore } from '@/stores/app'
 import { getModelSelectOptions } from '@/data/models'
@@ -983,11 +983,12 @@ onMounted(async () => {
     if (!res.ok) throw new Error('Failed to fetch')
     const data = await res.json()
     Object.assign(form, data)
-    // P0-04：三档回显——优先用已存的 permissionTier，否则从历史 toolApprovalMode 投影
-    // （老用户只配过 4 档，必须正确投影到对应档位，不能一律显示默认值）
+    // P0-04 / D4：档位回显直接用服务端算好的生效值。
+    // `GET /api/settings` 已把历史值（auto / accept-edits / prompt / deny / 空）投影成两档，
+    // 这里**不再**本地推一遍（以前两边各写一份映射，漂移就会显示错档位而不自知）。
     form.permissionTier = isPermissionTier(data.permissionTier)
       ? data.permissionTier
-      : resolvePermissionTier(data.toolApprovalMode)
+      : DEFAULT_PERMISSION_TIER
     // 语言按钮高亮恢复为客户端实际语言（忽略后端历史值）
     form.language = detectLocale(localStorage.getItem('supercrzy-lang'), (() => { try { return navigator.language || '' } catch { return '' } })())
     // 访问令牌状态（后端只返回掩码，明文仅在生成时一次性展示）

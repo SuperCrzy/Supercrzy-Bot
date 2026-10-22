@@ -29,6 +29,7 @@
 
 import { rankMemories } from './memory-search'
 import { isMemoryCategory, type MemoryCategory } from './memory-category'
+import { resolveSnapshotDir, writeMemorySnapshot, discardMemorySnapshot, type MemorySnapshotInfo } from './memory-snapshot'
 
 /** 合并相似度阈值（Jaccard）。0.62 = 词元重合度约 2/3 才判为同一主题 */
 export const DEFAULT_MERGE_THRESHOLD = 0.62
@@ -130,6 +131,10 @@ export interface ConsolidateReport {
   removed: number
   /** 合并迭代了几轮才到不动点（>1 说明存在"A~B、B~C 各自成簇"的残留，已内部收敛） */
   mergePasses: number
+  /** 动手前落盘的整表快照；dryRun / 内存库时为 null */
+  snapshot: MemorySnapshotInfo | null
+  /** snapshot 为 null 的原因（给模型/人话摘要用） */
+  snapshotSkipped: string
   /** 人话摘要，供工具结果直接回给模型 */
   summary: string
 }
@@ -142,6 +147,8 @@ export interface ConsolidateOptions {
   /** 关掉淘汰（只做合并） */
   noEvict?: boolean
   dryRun?: boolean
+  /** 快照目录（默认跟着 DB 文件走；测试传临时目录，免得写进用户真实数据目录） */
+  snapshotDir?: string
 }
 
 /**
@@ -157,7 +164,8 @@ export function consolidateMemories(db: any, opts: ConsolidateOptions = {}): Con
   const dryRun = !!opts.dryRun
 
   const report: ConsolidateReport = {
-    dryRun, before: 0, after: 0, mergedGroups: [], evicted: [], removed: 0, mergePasses: 0, summary: '',
+    dryRun, before: 0, after: 0, mergedGroups: [], evicted: [], removed: 0, mergePasses: 0,
+    snapshot: null, snapshotSkipped: '', summary: '',
   }
 
   let rows: any[] = []
@@ -174,6 +182,29 @@ export function consolidateMemories(db: any, opts: ConsolidateOptions = {}): Con
   if (rows.length === 0) {
     report.summary = '记忆表为空，无需整理。'
     return report
+  }
+
+  // ── ⓪ 动手前先落盘整表快照（P2-2，2026-10-22）──────────────────────
+  //
+  // 后面的删除全是不可逆的：合并不保留被并入者的 content（只留簇首表述），淘汰直接 DELETE，
+  // 都不进回收站也没有 undo。所以非 dryRun 一律先存一份整表。
+  // 快照写失败 → **本轮一条都不删**（试算报表照出，人话摘要里说明原因）：
+  // 相比"记忆多留一轮"，裸删之后无法恢复是更坏的结果。
+  if (!dryRun) {
+    const dir = resolveSnapshotDir(db, opts.snapshotDir)
+    if (!dir) {
+      report.snapshotSkipped = '内存库不落快照（数据本身不持久化）'
+    } else {
+      try {
+        report.snapshot = writeMemorySnapshot(db, dir, 'consolidate')
+      } catch (e: any) {
+        report.snapshotSkipped = `快照写入失败，本轮未删除任何行：${e?.message || e}`
+        report.after = report.before
+        report.summary = report.snapshotSkipped
+        console.log(`[MemoryConsolidate] ${report.snapshotSkipped}`)
+        return report
+      }
+    }
   }
 
   const removedIds = new Set<string>()
@@ -349,11 +380,19 @@ export function consolidateMemories(db: any, opts: ConsolidateOptions = {}): Con
 
   report.removed = removedIds.size
   report.after = report.before - report.removed
+  // 一条都没删 → 这份快照没有价值，撤掉（否则定期整理的空快照会把有用的挤出去）
+  if (report.snapshot && report.removed === 0) {
+    discardMemorySnapshot(report.snapshot.path)
+    report.snapshot = null
+    report.snapshotSkipped = '本轮无删除，未保留快照'
+  }
   const mergedCount = report.mergedGroups.reduce((n, g) => n + g.merged.length, 0)
   const parts: string[] = []
   parts.push(`合并 ${report.mergedGroups.length} 组 / 归并 ${mergedCount} 条`)
   parts.push(`淘汰 ${report.evicted.length} 条`)
   parts.push(`总量 ${report.before} → ${report.after}`)
+  if (report.snapshot) parts.push(`已备份 ${report.snapshot.rows} 条到 ${report.snapshot.path}`)
+  else if (report.snapshotSkipped) parts.push(report.snapshotSkipped)
   report.summary = (dryRun ? '（试算，未落库）' : '') + parts.join('，')
   return report
 }

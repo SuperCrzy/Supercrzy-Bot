@@ -3,6 +3,7 @@ import i18n from '@/i18n'
 import { ref, computed } from 'vue'
 import type { ChatSession, ChatMessage, ContentBlock, TextBlock, ChatFlowNode } from '@/types'
 import { reconcileAnswerText } from '@/utils/flow-reconcile'
+import { useAppStore } from './app'
 
 /** 加载端对账补建的正文节点 id 序号（避免同毫秒内重复） */
 let restoreSeq = 0
@@ -269,15 +270,25 @@ export const useChatStore = defineStore('chat', () => {
               if (maxCreate > 0 && minStart !== Number.MAX_SAFE_INTEGER) elapsedMs = maxCreate - minStart
               else if (maxCreate > 0) elapsedMs = maxCreate - m.created_at
             }
+            // A3（2026-10-22）：还原"被用户停止"这一事实。
+            // 停止时前端会把在跑的工具节点置 cancelled，随 attachments.flow 落库；交付摘要也会
+            // 带 cancelled 终态。刷新后若只按 elapsedMs 渲染，中断的那轮会被说成「已完成」。
+            const deliverySummary = parseDeliveryFromAttachments(m.attachments)
+            const isAborted = (Array.isArray(flow)
+              && flow.some((n: any) => n.kind === 'tool' && n.tool?.status === 'cancelled'))
+              || deliverySummary?.status === 'cancelled'
             return {
               ...m,
               createdAt: m.created_at || m.createdAt,
               elapsedMs,
+              isAborted,
               tokenCount: m.token_count,
+              tokenEstimated: m.token_estimated === 1,
+              model: m.model || undefined,
               content: normalizeContent(m.content),
               flow,
               // 2026-08-26：从 attachments 还原 deliverySummary，AI 回复底部"本会话产物"刷新后不丢
-              deliverySummary: parseDeliveryFromAttachments(m.attachments),
+              deliverySummary,
               // 2026-09-29：空回复（被中断/失败且无任何产出）刷新后只剩空白气泡 ⇒ 补回"中断"横幅
               ...(isBlankAssistantTurn(m, flow)
                 ? { stopReason: { reason: 'interrupted' as const, message: '', checkpointId: '' } }
@@ -332,6 +343,8 @@ export const useChatStore = defineStore('chat', () => {
   function resetToWelcome() {
     currentSessionId.value = null
     localStorage.removeItem(SESSION_KEY)
+    // 顶部上下文环归零：新会话没有任何已用上下文，留着上个会话的数字等于撒谎
+    useAppStore().resetCtxUsage()
     persistCurrentSession()
   }
 
@@ -348,6 +361,8 @@ export const useChatStore = defineStore('chat', () => {
 
   // ---- 选择会话并加载消息 ----
   async function selectSession(id: string) {
+    // 切会话先清上下文用量：`ctxUsed` 是全局值，不清会把上个会话的"已用"带过来
+    if (currentSessionId.value !== id) useAppStore().resetCtxUsage()
     currentSessionId.value = id
     localStorage.setItem(SESSION_KEY, id)
     persistCurrentSession()
@@ -505,6 +520,8 @@ export const useChatStore = defineStore('chat', () => {
           role: message.role,
           content: contentStr,
           token_count: message.tokenCount,
+          token_estimated: message.tokenEstimated === true,
+          model: message.model,
           cost: message.cost,
           elapsed_ms: message.elapsedMs,
           attachments: serializeWithFlow(message),
@@ -629,6 +646,8 @@ export const useChatStore = defineStore('chat', () => {
           role: last.role,
           content: contentStr,
           token_count: last.tokenCount,
+          token_estimated: last.tokenEstimated === true,
+          model: last.model,
           cost: last.cost,
           elapsed_ms: last.elapsedMs,
           attachments: serializeWithFlow(last),

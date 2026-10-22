@@ -226,3 +226,109 @@ describe('任务级可观测（P2-02）', () => {
     expect(st.totalTokens).toBe(0)
   })
 })
+
+/**
+ * B4（2026-10-22）：任务统计此前接受 days 参数却不过滤，路由把 ?days=N 原样回显，
+ * 于是页面上的「近 7 天」永远是全历史。这组测试钉住「窗口真生效」+「明细可下钻」。
+ */
+describe('任务统计的时间窗（B4）', () => {
+  const DAY = 24 * 60 * 60 * 1000
+
+  it('days 未传 / 0 / 负数 / NaN ⇒ windowDays=0 且不过滤', () => {
+    createTask({ sessionId: 's1', status: 'running' })
+    for (const days of [undefined, 0, -3, Number.NaN]) {
+      const st = aggregateTaskStats({ days: days as any })
+      expect(st.windowDays, `days=${days} 应视为全量`).toBe(0)
+      expect(st.total).toBe(1)
+    }
+  })
+
+  it('days 超过 365 会被夹到 365（不许用超大窗口绕过过滤）', () => {
+    expect(aggregateTaskStats({ days: 99999 }).windowDays).toBe(365)
+  })
+
+  it('🔴 窗口真生效：8 天前的任务在近 7 天窗口里不可见', () => {
+    const t = createTask({ sessionId: 's1', status: 'running' })
+    const updatedAt = getTask(t.task_id)!.updated_at
+    const st = aggregateTaskStats({ days: 7, now: updatedAt + 8 * DAY })
+    expect(st.windowDays).toBe(7)
+    expect(st.total, '8 天前更新的任务不该出现在近 7 天统计里').toBe(0)
+    expect(st.tasks).toEqual([])
+  })
+
+  it('窗口边界：3 天前仍在近 7 天内可见', () => {
+    const t = createTask({ sessionId: 's1', status: 'running' })
+    const updatedAt = getTask(t.task_id)!.updated_at
+    const st = aggregateTaskStats({ days: 7, now: updatedAt + 3 * DAY })
+    expect(st.total).toBe(1)
+    expect(st.tasks[0].task_id).toBe(t.task_id)
+  })
+
+  it('全量口径下同一任务仍可见（过滤只由 days 决定）', () => {
+    const t = createTask({ sessionId: 's1', status: 'running' })
+    const updatedAt = getTask(t.task_id)!.updated_at
+    expect(aggregateTaskStats({ now: updatedAt + 400 * DAY }).total).toBe(1)
+  })
+
+  it('指标跟着窗口走，不是"窗口外的也照算"', () => {
+    const a = createTask({ sessionId: 's1', status: 'running' })
+    recordTaskOutcome(a.task_id, { tokens: 100, costUsd: 0.01, durationMs: 5000 })
+    completeTask(a.task_id)
+    const updatedAt = getTask(a.task_id)!.updated_at
+
+    const inWindow = aggregateTaskStats({ days: 7, now: updatedAt + DAY })
+    const outWindow = aggregateTaskStats({ days: 7, now: updatedAt + 30 * DAY })
+    expect(inWindow.totalTokens).toBe(100)
+    expect(inWindow.successRate).toBe(1)
+    expect(outWindow.totalTokens).toBe(0)
+    expect(outWindow.successRate).toBe(0)
+  })
+})
+
+describe('任务统计的明细列表（B4）', () => {
+  it('tasks 条数 = 窗口内任务数，字段齐全', () => {
+    const a = createTask({ sessionId: 's1', status: 'running', label: '代码审计' })
+    recordTaskOutcome(a.task_id, { tokens: 120, costUsd: 0.02, durationMs: 8000 })
+    failTask(a.task_id, 'billing', '额度不足')
+
+    const st = aggregateTaskStats()
+    expect(st.tasks).toHaveLength(1)
+    const row = st.tasks[0]
+    expect(row).toMatchObject({
+      task_id: a.task_id,
+      session_id: 's1',
+      label: '代码审计',
+      status: 'failed',
+      tokens: 120,
+      duration_ms: 8000,
+    })
+    expect(row.cost_usd).toBeCloseTo(0.02)
+    expect(row.failure_message, '失败任务要带调用方给的人话原因').toBe('额度不足')
+    expect(typeof row.updated_at).toBe('number')
+  })
+
+  it('按 updated_at 倒序（最近的在最前）', () => {
+    const a = createTask({ sessionId: 's1', status: 'running' })
+    const b = createTask({ sessionId: 's2', status: 'running' })
+    // 显式把 a 的更新时间推早，避免同毫秒导致的顺序不确定
+    const aRec = getTask(a.task_id)!
+    ;(aRec as any).updated_at = b.updated_at - 1000
+    const st = aggregateTaskStats()
+    expect(st.tasks.map((t) => t.task_id)).toEqual([b.task_id, a.task_id])
+  })
+
+  it('limit 生效且被夹在 1..500', () => {
+    for (let i = 0; i < 5; i++) createTask({ sessionId: `s${i}`, status: 'running' })
+    expect(aggregateTaskStats({ limit: 2 }).tasks).toHaveLength(2)
+    expect(aggregateTaskStats({ limit: 0 }).tasks).toHaveLength(5) // 0 → 默认 50，不裁
+    expect(aggregateTaskStats({ limit: 9999 }).tasks).toHaveLength(5) // 夹到 500，仍不裁
+    expect(aggregateTaskStats({ limit: -5 }).tasks).toHaveLength(5) // 负数 → 默认值
+  })
+
+  it('空注册表时 tasks 是空数组而不是 undefined', () => {
+    const st = aggregateTaskStats({ days: 7 })
+    expect(Array.isArray(st.tasks)).toBe(true)
+    expect(st.tasks).toHaveLength(0)
+    expect(st.windowDays).toBe(7)
+  })
+})

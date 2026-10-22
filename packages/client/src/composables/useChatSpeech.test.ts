@@ -12,7 +12,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { effectScope } from 'vue'
-import { useChatSpeech, type UseChatSpeechOptions } from './useChatSpeech'
+import { useChatSpeech, liveChunkThresholds, LIVE_FIRST_MIN_CHARS, LIVE_FIRST_MAX_CHARS, type UseChatSpeechOptions } from './useChatSpeech'
 
 const h = vi.hoisted(() => ({
   calls: {
@@ -21,8 +21,11 @@ const h = vi.hoisted(() => ({
     append: [] as string[],
     endStream: 0,
     stop: 0,
+    beginLive: [] as string[],
+    push: [] as string[],
+    endLive: 0,
   },
-  opts: { beginStreamOk: true },
+  opts: { beginStreamOk: true, beginLiveOk: true, latencyMs: 1200 },
 }))
 
 vi.mock('./useSpeech', async () => {
@@ -52,6 +55,16 @@ vi.mock('./useSpeech', async () => {
       endStream: () => {
         h.calls.endStream += 1
       },
+      beginLive: async (id: string) => {
+        h.calls.beginLive.push(id)
+        if (!h.opts.beginLiveOk) return false
+        speakingId.value = id
+        return true
+      },
+      pushLive: (t: string) => { h.calls.push.push(t) },
+      endLive: () => { h.calls.endLive += 1 },
+      isLive: () => speakingId.value !== null,
+      latencyMs: () => h.opts.latencyMs,
       stop: () => {
         h.calls.stop += 1
         speakingId.value = null
@@ -82,7 +95,12 @@ beforeEach(() => {
   h.calls.append = []
   h.calls.endStream = 0
   h.calls.stop = 0
+  h.calls.beginLive = []
+  h.calls.push = []
+  h.calls.endLive = 0
   h.opts.beginStreamOk = true
+  h.opts.beginLiveOk = true
+  h.opts.latencyMs = 1200
 })
 
 describe('useChatSpeech 流式开读判定', () => {
@@ -216,5 +234,84 @@ describe('useChatSpeech 失败/中断收尾（防止按钮卡死）', () => {
     // 而不是把残块续到已被丢弃的旧轮后面
     api.feedStream(msg('m1', LONG), LONG)
     expect(h.calls.beginStream).toEqual(['m1', 'm1'])
+  })
+})
+
+/**
+ * 会话式朗读（2026-10-21）：一条消息一条流。
+ *
+ * 与逐段流式的差别全在"几时开读"和"段间是否重新连"上：
+ *   · 首段门槛 16 字（一句话就出声），不再是 60/200 字
+ *   · 中途只 push，不新建任何音频元素 —— 段间没有新连接，也就没有空档
+ */
+describe('useChatSpeech 会话式朗读（一条消息一条流）', () => {
+  const tick = () => new Promise((r) => setTimeout(r, 10))
+
+  it('首句就开流，之后按句推，turnEnd 收尾（且不再整条重读）', async () => {
+    const { api } = mount({ live: () => true, mode: () => 'always', foreground: () => false })
+    const m = msg('m1')
+    api.feedStream(m, '这是第一句话，一共超过十六个字了。')
+    await tick()
+    expect(h.calls.beginLive).toEqual(['m1'])
+    expect(h.calls.push.length).toBe(1)
+    expect(h.calls.beginStream).toEqual([]) // 没有走旧的逐段通道
+
+    // 后续切块最少 40 字 → 这句只有十几个字，先攒着
+    api.feedStream(m, '第二句继续补充一点内容。')
+    await tick()
+    expect(h.calls.push.length).toBe(1)
+
+    api.turnEnd(msg('m1', '合起来的全文。'), true)
+    expect(h.calls.push.length).toBe(2) // 残余在收尾时补推
+    expect(h.calls.endLive).toBe(1)
+    expect(h.calls.speak).toEqual([]) // 已经边生成边读过 → 绝不整条重读
+  })
+
+  it('开会话失败 → 本轮放弃朗读，且不反复重试（每个 chunk 都撞一次）', async () => {
+    h.opts.beginLiveOk = false
+    const { api } = mount({ live: () => true, mode: () => 'always', foreground: () => false })
+    const m = msg('m1')
+    api.feedStream(m, '这是第一句话，一共超过十六个字了。')
+    await tick()
+    api.feedStream(m, '第二句继续补充一点内容。')
+    await tick()
+    expect(h.calls.beginLive.length).toBe(1) // 只试了一次
+    expect(h.calls.push.length).toBe(0)
+  })
+
+  it('全程不在前台 + background 档 → 不开会话（不打扰看屏幕的人）', async () => {
+    const { api } = mount({ live: () => true, mode: () => 'background', foreground: () => true })
+    api.feedStream(msg('m1'), '这是第一句话，一共超过十六个字了。')
+    await tick()
+    expect(h.calls.beginLive).toEqual([])
+  })
+})
+
+/**
+ * 自适应切块门槛（2026-10-21）。
+ *
+ * 依据：中文 4.8 字/秒，一轮合成耗时 T ⇒ 盈亏平衡字数 = T×4.8，再乘 1.5 安全系数。
+ * 快链路要"出现几个字就读"，弱网必须攒够，否则每轮都落后一点 → 越读越断。
+ */
+describe('liveChunkThresholds — 门槛跟着链路走', () => {
+  it('快链路（0.5s）→ 首段 8 字就够（下限兜底，不能低于一句）', () => {
+    expect(liveChunkThresholds(500).first).toBe(LIVE_FIRST_MIN_CHARS)
+  })
+
+  it('弱网（2.3s）→ 首段要 17 字左右，否则一轮追不上播放', () => {
+    const { first } = liveChunkThresholds(2300)
+    expect(first).toBeGreaterThanOrEqual(16)
+    expect(first).toBeLessThanOrEqual(LIVE_FIRST_MAX_CHARS)
+  })
+
+  it('极慢链路也有上限（40 字），不能无限攒着不开口', () => {
+    expect(liveChunkThresholds(9000).first).toBe(LIVE_FIRST_MAX_CHARS)
+  })
+
+  it('后续块门槛 ≥ 首段门槛（后续要攒批，少打上游）', () => {
+    for (const ms of [300, 1200, 2300]) {
+      const { first, next } = liveChunkThresholds(ms)
+      expect(next).toBeGreaterThanOrEqual(first)
+    }
   })
 })

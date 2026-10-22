@@ -65,6 +65,15 @@ const EXACT_MAP: Record<string, ToolMeta> = {
   memoryrecall: { icon: 'memory', nameKey: 'chat.toolMemory' },
   // ── 技能（Sparkle）──
   skilllist: { icon: 'skill', nameKey: 'chat.toolSkill' },
+  // ── 持久终端（Terminal）──
+  // 2026-10-22（老板实测反馈）：terminal_* 一个都不在表里 ⇒ 归一化后无前缀可匹配 ⇒ 全部落 FALLBACK
+  // （扳手 + 「工具」），痕迹行/卡片都认不出这是什么动作。
+  terminalopen: { icon: 'cmd', nameKey: 'chat.toolTermOpen' },
+  terminalsend: { icon: 'cmd', nameKey: 'chat.toolTermSend' },
+  terminalread: { icon: 'cmd', nameKey: 'chat.toolTermRead' },
+  terminallist: { icon: 'cmd', nameKey: 'chat.toolTermList' },
+  terminalclose: { icon: 'cmd', nameKey: 'chat.toolTermClose' },
+  terminalsignal: { icon: 'cmd', nameKey: 'chat.toolTermSignal' },
 }
 
 /** 前缀匹配（归一化后 startsWith，按长度降序——长前缀优先，对齐主流实现 prefixEntries.sort） */
@@ -80,6 +89,8 @@ const PREFIX_MAP: Array<{ prefix: string; meta: ToolMeta }> = ([
   { prefix: 'git', meta: { icon: 'git', nameKey: 'chat.toolGit' } },
   { prefix: 'task', meta: { icon: 'task', nameKey: 'chat.toolTask' } },
   { prefix: 'skill', meta: { icon: 'skill', nameKey: 'chat.toolSkill' } },
+  // 2026-10-22：终端的兜底前缀（服务端以后加 terminal_xxx 不会再掉进 FALLBACK）
+  { prefix: 'terminal', meta: { icon: 'cmd', nameKey: 'chat.toolTerminal' } },
   { prefix: 'memory', meta: { icon: 'memory', nameKey: 'chat.toolMemory' } },
   { prefix: 'computer', meta: { icon: 'computer', nameKey: 'chat.toolComputer' } },
   { prefix: 'image', meta: { icon: 'image', nameKey: 'chat.toolImageGen' } },

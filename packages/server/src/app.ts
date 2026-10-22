@@ -20,6 +20,9 @@ import { createTerminalServer } from './services/terminal'
 import { startTunnel, stopTunnel, renderPreviewPage, getTunnelUrl, createPreviewLink } from './services/tunnel'
 // 文件「能不能当文本预览」的唯一判定（2026-09-29：图片乱码的根因收敛在这里）
 import { mediaMimeOf, isNonPreviewableBinary, docxMimeOf } from './services/file-kind'
+// TTS 启动预热：手机实测"进程刚起来的第一条朗读"要付冷 TLS 成本（见 warmUpTts 注释）
+import { warmUpTts } from './services/tts'
+import { pickTtsRoute } from './services/tts-route'
 import { chatRouter } from './routes/chat'
 import { fsRouter } from './routes/filesystem'
 import { settingsRouter } from './routes/settings'
@@ -404,7 +407,10 @@ async function bootstrap() {
     // `/api/tts/stream` 必须豁免：它由 <audio src> 直接请求，而 **<audio> 标签无法携带
     // 自定义请求头**（带不上 Authorization），照原样判就会让非 localhost 的每次朗读直接 401。
     // 鉴权改由该 URL 上的一次性 token 承担：48 位 hex、TTL 60s、限取 5 次（见 routes/tts.ts）。
-    if (!API_TOKEN || !ctx.path.startsWith('/api/') || ctx.path === '/api/health' || ctx.path === '/api/tts/stream') return next()
+    // 同理 `/api/tts/live/stream`（2026-10-21 会话式朗读）也要豁免：它是同一种
+    // "<audio src> 直连"，鉴权同样由 48 位 token 承担。
+    const ttsStreamPaths = ['/api/tts/stream', '/api/tts/live/stream']
+    if (!API_TOKEN || !ctx.path.startsWith('/api/') || ctx.path === '/api/health' || ttsStreamPaths.includes(ctx.path)) return next()
     const origin = ctx.request.header.origin || ''
     const isLocal = !origin || origin.includes('localhost') || origin.includes('127.0.0.1')
     if (isLocal) return next()
@@ -558,6 +564,12 @@ async function bootstrap() {
 
     // 超级协作平台：重启后标记上次未完成任务为"进程中断"（可恢复提示）
     recoverInterruptedTasks()
+
+    // TTS 预热（2026-10-21）：手机端冷启动首条朗读实测要 >8s 握手，预热一次把
+    // DNS 缓存与 TLS 会话热起来，避免用户第一次点朗读就吃到冷启动成本。
+    // 先选出口（直连 vs 中继），再预热连接 —— 顺序不能反：
+    // 预热到错误出口等于白建一条连接，而且它会被当成"可用"干扰后续判断。
+    void pickTtsRoute().finally(() => warmUpTts())
 
     // 恢复已启用的各平台通道（常驻后台）
     startAllTelegramChannels().catch((err: any) => {

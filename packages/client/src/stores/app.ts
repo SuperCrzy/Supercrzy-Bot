@@ -25,6 +25,19 @@ export const useAppStore = defineStore('app', () => {
   function setCtxUsage(used: number) { ctxUsed.value = used }
   function setCtxWindow(window: number) { if (window > 0) ctxWindow.value = window }
   function markCtxCompressed() { ctxCompressedAt.value = Date.now() }
+  /**
+   * 切换/新建会话时清空上下文用量（2026-10-22）。
+   *
+   * 修掉的问题：`ctxUsed` 是全局 ref，只在收到 `usage` 事件时被写（全仓唯一调用点在
+   * ChatView 的 SSE 处理里），**切会话不清零** ⇒ 打开一个新会话，顶部环还显示上一个
+   * 会话的"已用上下文"，百分比完全对不上。
+   *
+   * 窗口大小（`ctxWindow`）不清：模型没变，清了反而会闪回默认 128K。
+   */
+  function resetCtxUsage() {
+    ctxUsed.value = 0
+    ctxCompressedAt.value = null
+  }
 
   // 实时预览（L1/L2：AI 生成 html/css/js → 右侧边栏实时渲染）
   // 数据源：ChatView SSE preview_update 事件写入；DetailPanel preview tab 读取
@@ -138,6 +151,13 @@ export const useAppStore = defineStore('app', () => {
    * 即本来就不出声的场景行为完全未变。
    */
   const streamRead = ref(true)
+  /**
+   * 会话式朗读（2026-10-21）：一条消息一条流。
+   *
+   * 与 `streamRead` 正交：`streamRead` 管"要不要边生成边读"，它管"用哪种通道读"。
+   * 默认开 —— 关掉就回到旧的逐段通道（每段一个 <audio>），留给问题排查用。
+   */
+  const ttsLive = ref(true)
   // 个人资料（用户昵称 + 头像）
   const userName = ref('')
   const userAvatar = ref('')
@@ -174,6 +194,8 @@ export const useAppStore = defineStore('app', () => {
         if (data.autoReadMode !== undefined) autoReadMode.value = normalizeAutoReadMode(data.autoReadMode)
         // 边生成边朗读（老库无此键 → 保持默认）
         if (data.streamRead !== undefined) streamRead.value = data.streamRead === true || data.streamRead === 'true'
+        // 会话式朗读（老库无此键 → 保持默认 true）
+        if (data.ttsLive !== undefined) ttsLive.value = data.ttsLive === true || data.ttsLive === 'true'
         // 恢复主题（侧边栏切换已持久化到 settings 表，启动时从后端恢复）
         if (data.theme) darkMode.value = data.theme === 'dark'
         applyThemeClass()
@@ -386,6 +408,7 @@ export const useAppStore = defineStore('app', () => {
     setCtxUsage,
     setCtxWindow,
     markCtxCompressed,
+    resetCtxUsage,
     previewPath,
     previewContent,
     previewTs,
@@ -414,6 +437,7 @@ export const useAppStore = defineStore('app', () => {
     ttsVoice,
     ttsRate,
     autoReadMode,
+    ttsLive,
     streamRead,
     // 个人资料
     userName,

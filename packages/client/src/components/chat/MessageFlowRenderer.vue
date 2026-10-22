@@ -82,8 +82,9 @@
             <svg class="pc-arrow" :class="{ down: segMode(si) === 'detail' }" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
           </div>
 
-          <!-- ② 流式态：单行原地演进（动作变化 → 旧滑出 + 新滑入 + 扫光）+ 实时 ± 数字 -->
+          <!-- ② 流式态：已完成动作留痕（B1）+ 单行原地演进（动作变化 → 旧滑出 + 新滑入 + 扫光）+ 实时 ± 数字 -->
           <template v-if="segMode(si) === 'live'">
+            <ActionTrail :nodes="seg.nodes" />
             <ProcessStatusLine :nodes="seg.nodes" @toggle="toggleSegment(si)" />
             <!-- 待审批必须**脱出状态行**：30px 的单行塞不下 allow / allow-session / deny 三按钮 + 倒计时
                  + 风险标签 + 权限档标签，而这些标签是安全可感知性的一部分，塞进弹层等于降级。
@@ -176,6 +177,7 @@ import ThinkingBlock from './ThinkingBlock.vue'
 import ToolCallBlock from './ToolCallBlock.vue'
 import ToolErrorBoundary from './ToolErrorBoundary.vue'
 import ProcessStatusLine from './ProcessStatusLine.vue'
+import ActionTrail from './ActionTrail.vue'
 
 const props = defineProps<{
   msg: ChatMessage
@@ -540,6 +542,10 @@ function toolBlockAttrs(node: Extract<FlowDisplayNode, { kind: 'tool' }>) {
     fileDiff: (node.tool as any).fileDiff,
     permission: props.permission,
     autoApproveSeconds: props.autoApproveSeconds,
+    // 🔴 不可逆（高风险 / 删除）永不倒计时、也不自动提交放行（2026-10-22 老板裁决）。
+    //   后端 `resolveConfirmationWait` 已对不可逆操作忽略 `toolAutoApproveSeconds`，
+    //   这里同步关掉倒计时 —— 否则 UI 在倒数结束后 emit('allow')，等于前端替后端放行。
+    irreversible: node.tool.risk?.level === 'high' || node.tool.name === 'file_delete',
     progress: node.tool.progress,
   }
 }
@@ -1040,7 +1046,8 @@ function shouldCollapse(msg: ChatMessage): boolean {
 /* 结构化停止原因横幅（轮次超限等） */
 .stop-reason-banner {
   display: flex;
-  align-items: center;
+  /* 2026-10-22（A1）：错误提示改成多行（带排查步骤），图标必须顶对齐而不是垂直居中 */
+  align-items: flex-start;
   gap: 6px;
   margin: 4px 0 8px;
   padding: 6px 10px;
@@ -1052,7 +1059,7 @@ function shouldCollapse(msg: ChatMessage): boolean {
   line-height: 1.5;
 }
 .stop-reason-banner svg { flex-shrink: 0; color: var(--warning, #f59e0b); }
-.stop-reason-banner .sr-text { flex: 1; min-width: 0; }
+.stop-reason-banner .sr-text { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .stop-reason-banner .sr-checkpoint {
   font-family: var(--font-mono);
   font-size: 11px;

@@ -35,10 +35,16 @@ export interface UseSpeechOptions {
 
 /**
  * Pro 一次失败后的冷却时长（ms）。到期自动重试 Pro —— 这是"不永久回落"的落点。
- * 取 60s：够长到不把上游抖动期间的每一句都拖成"请求 → 等退避 → 再失败"，
- * 又够短到用户下一次朗读大概率已经恢复。
+ *
+ * 2026-10-21 由 **60s → 15s**。原值 60s 的致命副作用不是"少读一段"，而是
+ * `beginStream()` 在冷却期内直接返回 false ⇒ `useChatSpeech` 里的 `streamGaveUp = true`
+ * ⇒ **本轮彻底放弃边生成边朗读**，退化成"等输出完再整条读"。
+ * 于是"偶发一次失败"被放大成"接下来一分钟全部不流式"，用户观感就是
+ * 「为什么每次都要等 AI 全说完才开始读」。
+ * 15s 仍能挡住上游抖动期内的连环请求（一个失败回合本身就要 3~16s），
+ * 又不至于把下一次朗读也一起拖下水。
  */
-export const PRO_COOLDOWN_MS = 60_000
+export const PRO_COOLDOWN_MS = 15_000
 
 /**
  * Lite 档音色优选顺序（名字子串匹配）。
@@ -138,10 +144,14 @@ export function useSpeech(options: UseSpeechOptions = {}) {
    * ⇒ 当前包恰好在预取返回前播完时，`playProIndex` 会以为"没有预取"而**把同一个包再请求一次**。
    * 上游本来就是瓶颈，重复请求会让下一包更晚就绪（实测抓到一个包两次请求）。
    *
-   * 同日起 `promise` 解析出的是**流式播放 URL**（不再是 blob URL）—— 预取内容从
-   * "整段音频"变成"一张 6ms 的票据"，见 `ensurePrefetch`。
+   * 2026-10-21 第二次改：预取物从「票据 URL」变成「**已经 load() 过的 `<audio>`**」。
+   * 旧实现只提前换票，音频流要等上一段播完（`onended` → `playProIndex`）才真正开始拉，
+   * 于是每段之间必然空等一次"握手 + 首个音频块"。手机实测这段是 **7.5 / 9.4 / 10.6s**，
+   * 长回复切 5 段 ⇒ 中间夹 40 秒静音（就是用户说的"卡壳"）。
+   * 现在提前把下一段的 `<audio>` 建好并 `preload='auto'; load()` —— 上一段播放的
+   * 几十上百秒里，下一段早已缓冲完成，切段时几乎零等待。
    */
-  type PrefetchSlot = { index: number; promise: Promise<string>; used: boolean }
+  type PrefetchSlot = { index: number; el: Promise<HTMLAudioElement>; used: boolean }
   let prefetch: PrefetchSlot | null = null
   let generation = 0 // 防竞态：每次 speak/stop 自增，异步回来时比对
   /**
@@ -164,31 +174,69 @@ export function useSpeech(options: UseSpeechOptions = {}) {
    * 所以这张唯一的宽容额度给票据类失败：换张新票重播同一块，还不成就当真的坏。
    */
   let blockRetries = 0
+  /**
+   * 本轮是否已经用过「整条一次请求」的重试额度。
+   *
+   * 2026-10-21 加。旧逻辑是 Pro 失败 ⇒ **立刻**换系统音色（`speakLite`）并进冷却。
+   * 那条路径的问题是"音色换了"这件事用户第一耳就听出来，却往往只是一次握手抖动
+   * （手机端 TLS 1.3~6.1s 抖动，实测 502 后手动再点一次就成功）。
+   * 现在改成**先换成整条一次请求再试一次 Pro**，只有这次也失败才降到系统音色 ——
+   * 换音色应该是最后手段，而不是第一次失败的反应。
+   * 额度**每轮一次**（在 speak / beginStream 里复位），避免变成无限重试。
+   */
+  let wholeRetried = false
+  /**
+   * **当前这一块**是否已经真的出过声。
+   *
+   * 2026-10-21 随「整条重试」一起加：整条重试的前提是"这一轮用户还什么都没听到"。
+   * 若已经出过声再重读整条，听到的就是**同一段被念第二遍** —— 那比降级更糟。
+   * 粒度必须是"块"而不是"轮"：第 0 块播完、第 1 块失败时，重试第 1 块起的内容是**正确的**
+   * （没重复），所以每进入一个新块就复位。
+   */
+  let blockHeard = false
 
   // ---- Lite 档内部状态 ----
   let keepAliveTimer: ReturnType<typeof setInterval> | null = null
 
-  /** 丢掉预取槽。预取物只是"票据"，丢掉不占任何资源，无需释放 */
+  /** 丢掉预取槽：**未使用的那条音频要真的掐掉**，否则它会继续在后台拉流占带宽 */
   function dropPrefetch() {
+    const p = prefetch
     prefetch = null
+    if (!p) return
+    p.el
+      .then((a) => { if (!p.used) killAudio(a) })
+      .catch(() => { /* 换票失败，本来就没元素 */ })
   }
 
   /**
-   * 确保第 index 包已被预取 —— **预取的是"票据"，不是音频**。
+   * 换票 → 立刻建 `<audio>` 并开始缓冲，返回**尚未挂钩子**的元素。
    *
-   * 2026-09-28 改。原来这里会把整段音频先下成 blob 再播（一条 5501 字回复切 3 包 ≈ 10MB），
-   * 而播放其实只需要一个 URL，音频交给 `<audio>` 自己流式拉。预取于是退化成"提前换票"：
-   * 一次 ~6ms 的 POST，换来"切到下一包时零等待"。
+   * 关键在 `preload='auto'` + `load()`：这两步让浏览器马上发起请求，
+   * 而不是等我们调 `play()` 才去握手。段间那 7~10 秒就是靠这个提前量填掉的。
+   * 元素一建好就进 `liveAudios`，保证任何 stop/resetPro 都能停到它（防"两段同时响"）。
+   */
+  async function createAudioFor(text: string): Promise<HTMLAudioElement> {
+    const token = await fetchTtsTicket(text)
+    const a = new Audio(streamUrlFor(token))
+    a.preload = 'auto'
+    liveAudios.add(a)
+    try { a.load() } catch { /* 某些环境不支持预加载，退回被动拉流 */ }
+    return a
+  }
+
+  /**
+   * 确保第 index 包已被预取 —— 预取的是**真正在缓冲的音频元素**。
    *
-   * 为什么不把下一包的 `<audio>` 提前建好：那等于把整包音频提前拉完（内存 + 上游并发合成），
-   * 而**首声由上游首块决定（实测 335~602ms），提前拉并不会让声音更早出来**，只是多占资源。
+   * 2026-10-21 从"只换票"改成"提前拉流"：换票只要 6ms，省不下任何时间；
+   * 真正贵的是上游握手 + 首块（手机 7~10s）。必须让音频**在上段播放期间就开始流**，
+   * 否则每段之间必然空一次。
    */
   function ensurePrefetch(index: number) {
     if (!queue[index]) return
     if (prefetch && prefetch.index === index) return
     dropPrefetch()
-    const slot: PrefetchSlot = { index, promise: fetchTtsTicket(queue[index]), used: false }
-    slot.promise.catch(() => { /* 预取失败无所谓，用到时现换票 */ })
+    const slot: PrefetchSlot = { index, el: createAudioFor(queue[index]), used: false }
+    slot.el.catch(() => { /* 预取失败无所谓，用到时现建 */ })
     prefetch = slot
   }
 
@@ -206,6 +254,10 @@ export function useSpeech(options: UseSpeechOptions = {}) {
     streamMode = false
     synthesizing.value = false
     blockRetries = 0
+    // 会话式流：把 <audio> 掐掉就等于断开会话（服务端在线路 close 时会 destroy），
+    // 所以这里只需要清指针，不需要额外发请求。
+    liveToken = null
+    liveAudio = null
     // 全停：不只 currentAudio，而是**所有活着的 audio**（漏停的那个会被这里兜住）。
     // 原来的 `if (currentAudio) { pause(); removeAttribute('src') }` 在"两轮交叠、
     // currentAudio 已指向新的"时停不到旧的 —— 那就是重叠朗读的来源。
@@ -268,24 +320,27 @@ export function useSpeech(options: UseSpeechOptions = {}) {
       return
     }
     proBusy = true
+    // 每取一个新块 = 用户此刻还没听到它 → 允许"整条重试"（见 blockHeard 注释）
+    blockHeard = false
 
-    // 用预取的票据（若正好是这一包），否则现换 —— 两者都只是 ~6ms 的 POST，音频交给 <audio> 去流
-    let urlPromise: Promise<string>
+    // 用预取的**音频元素**（若正好是这一包），否则现场建一个
+    // 2026-10-21：预取物从"票据 URL"改成"已经 set preload=auto 并 load() 过的 <audio>"。
+    let elPromise: Promise<HTMLAudioElement>
     if (prefetch && prefetch.index === queueIndex) {
       prefetch.used = true
-      urlPromise = prefetch.promise
+      elPromise = prefetch.el
       prefetch = null
     } else {
-      // 槽里是别的包（或空）→ 直接现换票，别把可能已落地的预取丢掉（稍后按新位置校正）
-      urlPromise = fetchTtsTicket(text).then(streamUrlFor)
+      // 槽里是别的包（或空）→ 直接现建，别把可能已落地的预取丢掉（稍后按新位置校正）
+      elPromise = createAudioFor(text)
     }
 
-    urlPromise
-      .then((url) => {
+    elPromise
+      .then((audio) => {
         if (speakingId.value !== id || gen !== generation) return
-        currentUrl = url
-        const audio = new Audio(url)
-        // 先登记再赋值：从这一刻起它受 killAllAudios 管辖，不会再出现"失去句柄还在响"
+        currentUrl = audio.src
+        // liveAudios 已在 createAudioFor 里登记（预取时提前建的元素也必须在集合里，
+        // 否则 stop/resetPro 停不到它 —— 那就是"两段同时响"的老 bug）。
         liveAudios.add(audio)
         currentAudio = audio
         // 这一块**是否真的出过声**。`onerror` 能不能重试完全由它决定：
@@ -296,6 +351,7 @@ export function useSpeech(options: UseSpeechOptions = {}) {
         audio.onplaying = () => {
           if (speakingId.value !== id || gen !== generation) return
           everPlayed = true
+          blockHeard = true
           synthesizing.value = false
           // 能出声 = 上游是通的（冷却到期后的重试走到这里）→ 撤下降级提示。
           // 放在这里而不是"换票成功"时：换票只是本地一次 POST，**不能**证明上游通了；
@@ -357,10 +413,22 @@ export function useSpeech(options: UseSpeechOptions = {}) {
    */
   function failPro(id: string, gen: number) {
     if (speakingId.value !== id || gen !== generation) return
-    proCooldownUntil = Date.now() + PRO_COOLDOWN_MS
-    proDegraded.value = true
     const wasStream = streamMode
     const rest = queue.slice(queueIndex).join('')
+    // ① **先别换音色**：非流式路径下，用「整条一次请求」再试一次 Pro。
+    //    一次握手抖动不值得把神经音色换成系统拼接音色 —— 实测（手机）
+    //    同一句 502 之后手动再点一次就成功，说明失败是握手层而非内容层。
+    if (!wasStream && !wholeRetried && !blockHeard && rest) {
+      wholeRetried = true
+      resetPro()
+      // ⚠️ 必须写在 resetPro() **之后**：resetPro 会把 blockRetries 归零。
+      // 整条重试已是第二次机会，再给它一份块内宽容额度就变成 4 次上游握手的尝试。
+      blockRetries = 1
+      if (speakPro(id, rest)) return
+    }
+    // ② 这一步才真的降级：进冷却 + 亮提示 + 按模式收场
+    proCooldownUntil = Date.now() + PRO_COOLDOWN_MS
+    proDegraded.value = true
     resetPro()
     if (wasStream) {
       // 流式中途失败：**已经念出去的部分撤不回来**，所以既不能重读 rest、
@@ -414,11 +482,177 @@ export function useSpeech(options: UseSpeechOptions = {}) {
     if (!supported.value || !id) return false
     if (Date.now() < proCooldownUntil) return false
     stopInternal()
+    wholeRetried = false // 新的一轮 → 归还额度
     generation += 1
     speakingId.value = id
     paused.value = false
     streamMode = true
     return true
+  }
+
+  // ===== 会话式朗读（2026-10-21，一条消息一条流）=====
+  //
+  // 与上面的「逐段流式」是**两条互斥的路**：
+  //   · 逐段：客户端切块 → 每块一个 `<audio>`（历史方案，留作回退）
+  //   · 会话：一个 `<audio>` 连着一条永不换连接的 mp3 流 ← 段间零空档
+  //
+  // 为什么能做到：上游同一条 ws 能连续多轮合成，且 96k mp3 是**无 ID3 头的纯帧流**
+  // （首 4 字节 fff3），多轮音频拼起来就是一条连续 mp3（已实测 afinfo 解出 7.68s 连续时长）。
+  let liveToken: string | null = null
+  let liveAudio: HTMLAudioElement | null = null
+
+  /**
+   * 会话流的码率档（'96' | '48'），**自适应**。
+   *
+   * 为什么需要降档：96k 音频 = 12KB/s，实测弱网（手机热点）出口只有 13KB/s，
+   * 缓冲必然见底；48k 只要 6KB/s，同样的链路就有一倍余量。
+   * 触发条件是**真的播起来之后**出现 `waiting`/`stalled`（缓冲见底），
+   * 不在首次加载阶段误判 —— 那时候等缓冲是正常的。
+   * 恢复策略：连续 3 轮无 underrun 才升回 96k，避免"抖动一下就永久降质"。
+   */
+  type LiveQuality = '96' | '48'
+  const QUALITY_KEY = 'supercrzy:ttsQuality'
+  function readQuality(): LiveQuality {
+    try { return localStorage.getItem(QUALITY_KEY) === '48' ? '48' : '96' } catch { return '96' }
+  }
+  let liveQuality: LiveQuality = readQuality()
+
+  /**
+   * 「开会话 → 真的出声」的耗时（EWMA，2026-10-21）。
+   *
+   * 用途不是显示，而是给 `useChatSpeech` 算**首段该攒多少字**：
+   * 快链路 0.5s ⇒ 8 字就能开读；弱网 2.3s ⇒ 要 16 字以上才不会断粮。
+   * 冷启动没有历史值时用 1200ms 兜底（既不激进也不拖沓）。
+   */
+  const LATENCY_KEY = 'supercrzy:ttsLatencyMs'
+  function readLatency(): number {
+    try {
+      const v = Number(localStorage.getItem(LATENCY_KEY))
+      return Number.isFinite(v) && v >= 200 && v <= 5000 ? v : 1200
+    } catch { return 1200 }
+  }
+  let latencyEwma = readLatency()
+  function latencyMs(): number { return latencyEwma }
+  function noteLatency(ms: number): void {
+    const v = Math.min(5000, Math.max(200, ms))
+    latencyEwma = Math.round(latencyEwma * 0.6 + v * 0.4)
+    try { localStorage.setItem(LATENCY_KEY, String(latencyEwma)) } catch { /* 忽略 */ }
+  }
+  let goodTurns = 0
+
+  function setLiveQuality(q: LiveQuality): void {
+    if (liveQuality === q) return
+    liveQuality = q
+    goodTurns = 0
+    try { localStorage.setItem(QUALITY_KEY, q) } catch { /* 隐私模式写不了，忽略 */ }
+  }
+
+  /**
+   * 开一条会话流。返回 `false` = 走不通，调用方应回退到逐段流式 / 整条读。
+   *
+   * 成功即代表：一个新的 `<audio>` 已经指向 `/api/tts/live/stream`，之后所有
+   * `pushLive()` 的文本都会合成进**同一条流**里，段间没有新连接、没有新 mp3 头。
+   */
+  async function beginLive(id: string): Promise<boolean> {
+    if (!supported.value || !id) return false
+    if (Date.now() < proCooldownUntil) return false
+    stopInternal()
+    wholeRetried = false
+    generation += 1
+    const gen = generation
+    const t0 = Date.now()
+    let latencyNoted = false
+    try {
+      const res = await fetch('/api/tts/live', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ voice: options.voice?.(), rate: options.rate?.(), quality: liveQuality }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const j: any = await res.json()
+      const token = String(j?.token || '')
+      if (!token) throw new Error('未取到朗读会话')
+      if (gen !== generation) return false // 期间被 stop/换轮次
+      liveToken = token
+      const a = new Audio(String(j?.url || `/api/tts/live/stream?t=${token}`))
+      a.preload = 'auto'
+      liveAudio = a
+      liveAudios.add(a)
+      currentAudio = a
+      speakingId.value = id
+      paused.value = false
+      synthesizing.value = true
+      let playedOnce = false
+      let underran = false
+      a.onplaying = () => {
+        if (gen !== generation) return
+        if (!latencyNoted) {
+          latencyNoted = true
+          noteLatency(Date.now() - t0) // 「开会话 → 出声」的真实耗时，供自适应切块用
+        }
+        playedOnce = true
+        synthesizing.value = false
+        proDegraded.value = false
+      }
+      /** 播起来之后又断粮 = 链路带宽不够 → 下一轮降档 */
+      const onUnderrun = () => {
+        if (gen !== generation || !playedOnce || underran) return
+        underran = true
+        setLiveQuality('48')
+      }
+      a.onwaiting = onUnderrun
+      a.onstalled = onUnderrun
+      a.onended = () => {
+        if (gen !== generation) return
+        // 这一轮全程没断粮 → 计入"可以尝试升回 96k"
+        if (!underran && liveQuality === '48') {
+          goodTurns += 1
+          if (goodTurns >= 3) setLiveQuality('96')
+        }
+        finish(id)
+      }
+      a.onerror = () => {
+        if (gen !== generation) return
+        // 流已经吐过音频就不该重播（会叠音）——这里只做降级收尾
+        proCooldownUntil = Date.now() + PRO_COOLDOWN_MS
+        proDegraded.value = true
+        resetPro()
+        if (speakingId.value === id) { speakingId.value = null; paused.value = false }
+      }
+      try { a.load() } catch { /* 不支持预加载 */ }
+      a.play().catch(() => { /* 自动播放被拦：等用户再点 */ })
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /** 往当前会话追加一段文本（服务端会把它合成进同一条流） */
+  function pushLive(text: string): void {
+    const t = String(text || '').trim()
+    if (!liveToken || !t) return
+    void fetch('/api/tts/live/push', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ t: liveToken, text: t }),
+    }).catch(() => { /* 单段丢失不影响整条流 */ })
+  }
+
+  /** 文本发完了：让服务端在队列播空后结束整条流（客户端会收到 audio 的 ended） */
+  function endLive(): void {
+    const token = liveToken
+    if (!token) return
+    liveToken = null
+    void fetch('/api/tts/live/end', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ t: token }),
+    }).catch(() => { /* 忽略 */ })
+  }
+
+  /** 当前是否处于会话流模式 */
+  function isLive(): boolean {
+    return liveToken !== null
   }
 
   /** 追加一块（已清洗的）可朗读文本；当前没在播就立刻起播 */
@@ -474,6 +708,23 @@ export function useSpeech(options: UseSpeechOptions = {}) {
     return zh[0]
   }
 
+  /**
+   * 把 Pro 的 rate 串（`'default' | '+20%' | '-10%'`）折算成 Web Speech 的倍率。
+   *
+   * 2026-10-21 修：`speakLite` 原来硬写 `u.rate = 1`，于是**降级时连语速都变了**
+   * （用户在设置里调了 +20%，回落系统音色后回到正常速度）。音色变了 + 语速变了两件事
+   * 同时发生，听感就是"这不是同一个朗读功能"。
+   * 夹在 [0.5, 2]：Web Speech 对极端值行为不一致（Safari 会把 >2 当 2，Chrome 可能报错）。
+   */
+  function liteRate(): number {
+    const raw = String(options.rate?.() || '')
+    const m = raw.match(/([+-]?\d+(?:\.\d+)?)\s*%/)
+    if (!m) return 1
+    const pct = Number(m[1])
+    if (!Number.isFinite(pct)) return 1
+    return Math.min(2, Math.max(0.5, 1 + pct / 100))
+  }
+
   function speakLite(id: string, text: string) {
     // 系统 TTS 没有"合成期"这个概念，一 speak 就出声 → 顺手清掉合成态
     synthesizing.value = false
@@ -492,7 +743,7 @@ export function useSpeech(options: UseSpeechOptions = {}) {
     } else {
       u.lang = 'zh-CN'
     }
-    u.rate = 1
+    u.rate = liteRate()
     u.pitch = 1
     u.onend = () => finish(id)
     u.onerror = () => finish(id)
@@ -516,6 +767,7 @@ export function useSpeech(options: UseSpeechOptions = {}) {
   function speak(id: string, text: string) {
     if (!supported.value || !text || !text.trim()) return
     stopInternal()
+    wholeRetried = false // 新的一轮 → 归还「整条重试」额度
     generation += 1
     if (Date.now() >= proCooldownUntil) {
       if (speakPro(id, text)) return
@@ -610,6 +862,13 @@ export function useSpeech(options: UseSpeechOptions = {}) {
     beginStream,
     appendStreamText,
     endStream,
+    /** 会话式（一条消息一条流）：beginLive → pushLive* → endLive */
+    beginLive,
+    pushLive,
+    endLive,
+    isLive,
+    /** 实测「开会话→出声」的 EWMA（ms），供自适应切块算首段门槛 */
+    latencyMs,
     pause,
     resume,
     stop,

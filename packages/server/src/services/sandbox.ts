@@ -77,13 +77,25 @@ function allowedPrefixes(level: PermissionLevel = 'sandbox', workspaceDir?: stri
 // L3: sandbox-exec 硬沙箱
 // ============================
 
-/** 探测 sandbox-exec 是否真实可用（最小 profile 实测，非仅检查文件存在），结果缓存 */
+/**
+ * 探测 sandbox-exec 是否**真能应用收紧策略**，结果缓存。
+ *
+ * ⚠️ 2026-10-22 修：旧探针用 `(version 1) (allow default)` —— 那等于"什么都不收紧"，
+ * 在被更外层沙箱包住的进程树里（嵌套沙箱）**照样能跑通**，于是探测通过、真实执行时
+ * `sandbox_apply: Operation not permitted` 退出 71 ⇒ 每条 shell 命令直接失败。
+ * 实测对照（macOS，宿主沙箱内）：
+ *   ① `(allow default)` → exit 0
+ *   ② `(allow default) (deny file-read* (subpath "/etc"))` → exit 71
+ * 所以探针必须**带一条 deny**：能收紧才算可用，否则降级 L2（软沙箱）。
+ */
 let sandboxDetected: boolean | null = null
+export const SANDBOX_PROBE_PROFILE = '(version 1) (allow default) (deny file-read* (subpath "/etc"))'
+
 export function detectSandboxExec(): Promise<boolean> {
   if (sandboxDetected !== null) return Promise.resolve(sandboxDetected)
   return new Promise((resolveFn) => {
     try {
-      exec(`sandbox-exec -p '(version 1) (allow default)' /bin/echo ok`, { timeout: 3000 }, (err) => {
+      exec(`sandbox-exec -p '${SANDBOX_PROBE_PROFILE}' /bin/echo ok`, { timeout: 3000 }, (err) => {
         sandboxDetected = !err
         resolveFn(!err)
       })
@@ -92,6 +104,16 @@ export function detectSandboxExec(): Promise<boolean> {
       resolveFn(false)
     }
   })
+}
+
+/**
+ * 运行期才发现沙箱不可用（探测通过、实际 `sandbox_apply` 失败）时调用：
+ * 把这个进程的探测结果置为不可用，后续命令直接走软沙箱，不再每条都撞一次 71。
+ */
+export function markSandboxUnavailable(reason?: string): void {
+  if (sandboxDetected === false) return
+  sandboxDetected = false
+  console.warn(`[Sandbox] 运行期发现硬沙箱不可用，已全局降级为软沙箱（L1/L2 仍生效）${reason ? `：${reason.slice(0, 160)}` : ''}`)
 }
 
 /** 仓库内需禁止读取的凭据文件（SBPL literal 兜底；其余 .env 类由软沙箱 + home deny 覆盖） */

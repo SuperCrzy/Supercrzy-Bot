@@ -40,8 +40,11 @@ taskStateRouter.get('/', (ctx) => {
  * 注意：必须注册在 /:id 之前，否则 'stats' 会被当成 task_id 匹配掉。
  */
 taskStateRouter.get('/stats', (ctx) => {
+  // days 不再只是回显：真正的过滤条件进聚合，窗口以实际生效值为准返回
   const days = Number(ctx.query.days || 0)
-  ctx.body = { ok: true, stats: aggregateTaskStats(), days }
+  const limit = Number(ctx.query.limit || 0)
+  const stats = aggregateTaskStats({ days, ...(limit > 0 ? { limit } : {}) })
+  ctx.body = { ok: true, stats, days: stats.windowDays }
 })
 
 /** 单个任务 */

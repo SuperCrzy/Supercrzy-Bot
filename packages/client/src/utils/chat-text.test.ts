@@ -62,9 +62,11 @@ describe('createChatText', () => {
     expect(c.messageRoleLabel({ role: 'assistant' })).toBe('__chat.roleAssistant__')
   })
 
-  it('formatCurrency 跟随界面语言', () => {
+  it('formatCurrency 不跟随语言：落库是人民币，换符号等于把金额除以汇率', () => {
+    // 2026-10-22 修：以前 en 界面把 ¥12.50 显示成 $12.50（数值不变、符号变），
+    // 等于把人民币当美元报，少算 7.2 倍。现在只认存储口径。
     expect(mk(true).formatCurrency(12.5)).toBe('¥12.50')
-    expect(mk(false).formatCurrency(12.5)).toBe('$12.50')
+    expect(mk(false).formatCurrency(12.5)).toBe('¥12.50')
   })
 
   it('msgDayKey 按**本地日期**分组（resolveRealTime 按 UTC 解析，跨日判定必须回到本地日）', () => {
@@ -117,10 +119,12 @@ describe('createChatText', () => {
   })
 
   it('依赖是 getter：语言切换后无需重建实例即可生效', () => {
+    // 用 formatTime 做载体：它真的按语言换格式（货币已改成不跟随语言）
     let zh = false
     const c = createChatText({ isZh: () => zh, visibleMessages: () => [], t: (k) => k })
-    expect(c.formatCurrency(1)).toBe('$1.00')
+    const yesterday = new Date(Date.now() - 86400000).toISOString()
+    expect(c.formatTime(yesterday)).toMatch(/^Yesterday /)
     zh = true
-    expect(c.formatCurrency(1)).toBe('¥1.00')
+    expect(c.formatTime(yesterday)).toMatch(/^昨天 /)
   })
 })

@@ -9,6 +9,8 @@ const tool: ToolDef = {
     name: 'terminal_send',
     description: '向终端会话发送命令（追加换行执行）。适合长任务后台运行（如启动 dev server）、交互式程序。',
     category: 'terminal',
+    // 会真的在终端里执行命令 ⇒ 必须走授权分类（2026-10-22 P0-1，与 shell_exec 同一套按段判定）
+    requiresApproval: true,
     parameters: {
       type: 'object',
       properties: {

@@ -44,6 +44,15 @@ const TOOL_DESCRIPTORS: Record<string, ToolDescriptor> = {
   ask_question: { actionKey: 'chat.sumAsk', objectFields: ['question'] },
   ask_user: { actionKey: 'chat.sumAsk', objectFields: ['question'] },
   computer_use: { actionKey: 'chat.sumComputer', objectFields: [] },
+  // 2026-10-22（老板实测反馈）：持久终端一族原先整族缺失 ⇒ 命中 FALLBACK（"继续处理任务过程"，
+  // 无宾语）⇒ 状态行/痕迹行只剩阶段名"读取"/"执行"，看不出读了什么、跑了什么命令。
+  // terminal_send 的宾语就是命令本身（最有信息量）；terminal_read 的宾语是会话 id（多会话时分得清）。
+  terminal_open: { actionKey: 'chat.sumTermOpen', objectFields: ['cwd'] },
+  terminal_send: { actionKey: 'chat.sumTermSend', objectFields: ['command'] },
+  terminal_read: { actionKey: 'chat.sumTermRead', objectFields: ['id'] },
+  terminal_list: { actionKey: 'chat.sumTermList', objectFields: [] },
+  terminal_close: { actionKey: 'chat.sumTermClose', objectFields: ['id'] },
+  terminal_signal: { actionKey: 'chat.sumTermSignal', objectFields: ['signal'] },
 }
 
 const FALLBACK_ACTION_KEY = 'chat.sumFallback'

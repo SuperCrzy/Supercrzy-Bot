@@ -1,29 +1,33 @@
 /**
- * 用户面向的三档权限（P0-04，2026-09-17）
+ * 用户面向的两档权限（P0-04 2026-09-17 立，2026-10-22 合并为两档）
  *
  * 背景：权限概念对普通用户过多——历史上并存两套轴：
  *   ① settings.toolApprovalMode（全局 4 档裸概念）：auto / accept-edits / prompt / deny
  *   ② session.permissionLevel（会话级 3 档）：workspace-only / sandbox / full
  * 用户既不知道 accept-edits 和 prompt 差在哪，也不知道该配哪一层。
  *
- * 本模块把「用户能理解的」收敛为三档：
- *   readonly 仅查看   —— 只读，不执行任何写/删/命令类敏感操作
- *   ask      执行前询问 —— 每个敏感操作都先确认（默认）
- *   auto     自动执行   —— 安全操作自动放行，危险操作仍会确认
+ * 🔴 2026-10-22 老板裁决（第二次）：**三档合并成两档**。
+ *   原因：同日把弹窗阈值抬到 `block` 之后，`prompt` / `accept-edits` / `auto` 三者行为
+ *   **完全等价**（只差 `deny`），设置页上"执行前询问"和"自动执行"是两个一样的选择，
+ *   留着等于让用户做无意义的选择。
+ *
+ * 现在的两档：
+ *   readonly 仅查看   —— 只读，不执行任何写/删/命令类敏感操作（内部 = deny）
+ *   ask      执行前询问 —— 只在**不可逆**操作前提问；改文件与普通命令直接执行（内部 = prompt）
  *
  * 设计原则：
- *   - **收敛只发生在呈现层**。三档在内部映射回历史 4 档，行为完全不变，
- *     历史配置不会被破坏（旧的 accept-edits 仍走 accept-edits 分支，只是 UI 归入"执行前询问"）。
- *   - 三档恒等价或更安全：accept-edits → ask 方向是"问得更多"，不会静默放宽权限。
+ *   - **收敛只发生在呈现层**。两档在内部仍映射回历史 4 档，历史配置不会被破坏
+ *     （旧的 accept-edits / auto 一律投影到 ask，行为不变：它们本来就等价）。
+ *   - 存量 `permissionTier='auto'` 由 `database.ts` 的迁移改成 `ask`，行为零变化。
  */
 
-/** 用户面向的三档 */
-export type PermissionTier = 'readonly' | 'ask' | 'auto'
+/** 用户面向的两档 */
+export type PermissionTier = 'readonly' | 'ask'
 
 /** 历史内部档位（保持原语义，勿删） */
 export type LegacyApprovalMode = 'auto' | 'accept-edits' | 'prompt' | 'deny'
 
-export const PERMISSION_TIERS: readonly PermissionTier[] = ['readonly', 'ask', 'auto']
+export const PERMISSION_TIERS: readonly PermissionTier[] = ['readonly', 'ask']
 
 export interface TierMeta {
   tier: PermissionTier
@@ -45,14 +49,8 @@ export const TIER_META: Record<PermissionTier, TierMeta> = {
   ask: {
     tier: 'ask',
     label: '执行前询问',
-    description: '每次要改文件或执行命令前先问你（默认，最稳妥）',
+    description: '只在不可逆操作前提问（删除、覆盖系统文件、装可执行代码、操作本机）；改文件与普通命令直接执行',
     legacy: 'prompt',
-  },
-  auto: {
-    tier: 'auto',
-    label: '自动执行',
-    description: '安全操作自动执行，危险操作仍会先确认',
-    legacy: 'auto',
   },
 }
 
@@ -61,9 +59,9 @@ export function isPermissionTier(v: unknown): v is PermissionTier {
 }
 
 /**
- * 把历史配置投影成用户面向的三档。
- * 注意 accept-edits → ask：它本质是"编辑自动批准、命令仍询问"，
- * 在用户视角属于"执行前询问"档的细分，故归入 ask（问得更多，不会放宽）。
+ * 把历史配置投影成用户面向的两档。
+ * `auto` / `accept-edits` / `prompt` 三者行为已等价 ⇒ 一律投影到 `ask`。
+ * ⚠️ 这意味着旧配置里的 `auto` **不再是一个独立档位**，读回来就是 `ask`。
  */
 export function resolvePermissionTier(
   legacyMode?: string | null,
@@ -71,17 +69,57 @@ export function resolvePermissionTier(
 ): PermissionTier {
   const m = String(legacyMode || '').trim()
   if (m === 'deny') return 'readonly'
-  if (m === 'auto') return 'auto'
-  if (m === 'prompt' || m === 'accept-edits') return 'ask'
+  if (m === 'auto' || m === 'prompt' || m === 'accept-edits') return 'ask'
   // 未配置历史档位时，按会话权限档兜底
   if (permissionLevel === 'workspace-only') return 'readonly'
-  if (permissionLevel === 'full') return 'auto'
+  if (permissionLevel === 'full') return 'ask'
   return 'ask'
 }
 
 /** 三档 → 历史内部档位（决定实际执行行为） */
 export function tierToLegacyMode(tier: PermissionTier): LegacyApprovalMode {
   return TIER_META[tier]?.legacy || 'prompt'
+}
+
+/** 历史四档（同一组值既可能存在于 `toolApprovalMode`，也可能残留在 `permissionTier` 列里） */
+const LEGACY_MODES: readonly LegacyApprovalMode[] = ['auto', 'accept-edits', 'prompt', 'deny']
+
+/** 值是不是历史四档之一；不是则返回 null */
+function asLegacyMode(v: unknown): LegacyApprovalMode | null {
+  const s = String(v ?? '').trim()
+  return (LEGACY_MODES as readonly string[]).includes(s) ? (s as LegacyApprovalMode) : null
+}
+
+/**
+ * 存库的档位值 → 用户可见档位（**唯一决策点**，2026-10-22 D4）。
+ *
+ * 为什么要有它：库里 `permissionTier` 的值可能是
+ *   ① 合法两档（readonly / ask）；
+ *   ② 历史四档（auto / accept-edits / prompt / deny）—— 4 档时代的遗留，
+ *      `database.ts` 的迁移只把 `auto` 改成了 `ask`，其余三种可能还在；
+ *   ③ 压根没有（全新安装，只有历史 `toolApprovalMode`）。
+ * 这个"该显示哪一档"的判断以前**前端也抄了一份**（`client/src/utils/permission.ts`），
+ * 两份一旦漂移，UI 显示"仅查看"而实际按"执行前询问"跑 —— 用户以为锁上了，其实没锁。
+ * 所以决策只留服务端这一处，前端只负责翻译成标签。
+ *
+ * ⚠️ 历史值**写在 `permissionTier` 列里**时优先于 `legacyMode` 参数：
+ *    它才是用户当时在那个位置上做的选择。只有该列不是任何已知档位时，才回退到
+ *    `toolApprovalMode`。（`deny` 尤其重要：回退到别的列等于悄悄把用户的"仅查看"解开。）
+ */
+export function resolveEffectiveTier(
+  storedTier?: unknown,
+  legacyMode?: string | null,
+): PermissionTier {
+  // ① `deny` 永不放宽：两列里任何一列还写着 deny，就按"仅查看"显示。
+  //    否则会出现"界面显示执行前询问、agent 却一律拒绝"（或相反）的错位。
+  if (asLegacyMode(storedTier) === 'deny' || asLegacyMode(legacyMode) === 'deny') return 'readonly'
+  // ② 合法两档：原样返回
+  if (isPermissionTier(storedTier)) return storedTier
+  // ③ 历史四档残留在档位列里：它才是用户当时在那个位置做的选择
+  const leftover = asLegacyMode(storedTier)
+  if (leftover) return resolvePermissionTier(leftover)
+  // ④ 回退历史 toolApprovalMode；都没有 → 默认档（ask，不锁）
+  return resolvePermissionTier(legacyMode)
 }
 
 /**
@@ -93,9 +131,14 @@ export function resolveApprovalMode(
   legacyModeSetting?: string | null,
   permissionLevel?: string | null,
 ): LegacyApprovalMode {
+  // 顺序与 `resolveEffectiveTier` 一一对应（显示与执行必须同源，D4）：
+  // ① deny 永不放宽 ② 合法两档 ③ 残留在档位列里的历史档 ④ 回退 toolApprovalMode ⑤ 会话权限档
+  const leftoverInTier = asLegacyMode(tierSetting)
+  if (leftoverInTier === 'deny' || asLegacyMode(legacyModeSetting) === 'deny') return 'deny'
   if (isPermissionTier(tierSetting)) return tierToLegacyMode(tierSetting)
-  const m = String(legacyModeSetting || '').trim()
-  if (m === 'auto' || m === 'accept-edits' || m === 'prompt' || m === 'deny') return m as LegacyApprovalMode
+  if (leftoverInTier) return leftoverInTier
+  const m = asLegacyMode(legacyModeSetting)
+  if (m) return m
   // 都没有 → 从会话权限档推导
   return tierToLegacyMode(resolvePermissionTier(null, permissionLevel))
 }
@@ -134,18 +177,26 @@ export interface ApprovalContext {
 /**
  * 敏感工具的授权决策（纯函数，可逐格单测）。
  *
+ * 🔴 2026-10-22 老板裁决（对齐 WorkBuddy：**只有删除类才弹**）：
+ *   把"要不要打断用户"的阈值从 `ask` 抬到 **`block`**。中风险（`ask`：sudo/chmod/kill/
+ *   写工作区文件/写项目文件内容/memory_consolidate）**不再弹窗**，直接执行。
+ *
+ *   依据（`cli.mjs` 反查）：他们 `classifyCenterFileBlocks@4882289` 把没有命中策略规则的
+ *   动作标成 `level:"unknown"`，而闸门 `hasAsk = needsApproval.some(t => "unknown" !== t.level)`
+ *   （`@4880092`）**排除 unknown** ⇒ 默认不弹；写文件被 allow 规则覆盖成 `low`，
+ *   删除命中 ask 规则成 `high`，于是"只有删除弹"。
+ *
  * 判定顺序（顺序本身是承诺，改动前先看断言）：
  *   1. `deny`（= 仅查看档）→ 一律拒绝，任何记住/白名单都不能推翻
- *   2. `block` 已被本会话**显式允许过一次** → 放行（"拦一次后记住"）
- *   3. `block`（不可逆/高危：删除、磁盘、凭据、系统路径写入…）→ 一律**确认**
- *      —— 普通会话白名单（「本会话全部允许」）**不**覆盖 block
- *   4. 会话白名单 → **放行**（这是「本会话全部允许」的语义：除 block 外全放行）
- *   5. `auto` 档 / `full` 权限 → 放行
- *   6. `accept-edits` 档 → 文件编辑放行，其余确认
- *   7. 其余（`prompt` = 执行前询问档）→ 确认
+ *   2. 删除类（`file_delete`）→ **恒确认**，任何档位/白名单都不能跳过（2026-10-18 裁决）
+ *   3. 本会话已对 block 类显式允许过 → 放行（"拦一次后记住"）
+ *   4. `block`（不可逆/高危：递归删除、下载即执行、凭据、系统路径写入、装代码、操作本机）→ 确认
+ *   5. 其余（`ask` / `allow`）→ **放行**
  *
- * ⚠️ `mode === 'auto'` 下 `ask` 类**直接放行**（"除删除外全放行"）；想要"未知命令也问"，
- *    请把档位调回 ask（执行前询问）—— 那才是该档的承诺。
+ * ✅ 因此 `prompt` / `accept-edits` / `auto` 三档**行为完全一致**（只差 `deny`）。
+ *    2026-10-22 已据此把用户面向的档位合并为两档（见文件头），这三者现在只是同一档的不同历史写法。
+ *    `sessionApproved`（「本会话全部允许」）亦不再影响任何路径——只有
+ *    `sessionBlockApproved`（对 block 类点过一次允许）还有效。
  */
 export function decideToolApproval(
   toolName: string,
@@ -171,10 +222,44 @@ export function decideToolApproval(
   // block 恒拦：**放在普通白名单之前**，会话级"全部允许"不能推翻不可逆操作
   if (risk === 'block') return 'confirm'
 
-  if (ctx.sessionApproved) return 'allow'
-  if (ctx.mode === 'auto') return 'allow'
-  if (ctx.permissionLevel === 'full') return 'allow'
-  if (ctx.mode === 'accept-edits' && (toolName === 'file_write' || toolName === 'multi_edit')) return 'allow'
-  return 'confirm'
+  // 🔴 2026-10-22：中风险（ask）不再打断 —— 这条取代了上一版"只放宽 shell_exec"的写法。
+  //   分类器仍然输出 ask（它回答的是"有没有副作用"），但闸门回答的是"值不值得打断用户"。
+  //   实测影响面：sudo / chmod / kill / 写工作区文件 / `echo x > src/a.ts` 不再弹。
+  return 'allow'
+}
+
+/**
+ * 等待用户确认的时长策略（**唯一实现**，2026-10-22）。
+ *
+ * 修掉的问题：`toolAutoApproveSeconds > 0` 时，此前**任何**待确认操作到了秒数
+ * 都自动放行 —— 包括 `rm -rf` 和 `file_delete`。老板库实测该值为 **5**，
+ * 意味着删除弹窗 5 秒没人点就**静默执行**，与 2026-10-18「删除永远必问」直接冲突。
+ *
+ * 规则（顺序即承诺）：
+ *   1. **不可逆操作（block / 删除）永不自动放行**：忽略自动放行设置，走满超时，
+ *      超时按 `timeout` 返回（下游按拒绝处理，并给出"没人确认"的文案而不是"用户拒绝"）。
+ *   2. 其余情况沿用旧语义：`autoApproveSeconds > 0` → 到点自动放行；否则走满超时。
+ */
+export const CONFIRMATION_TIMEOUT_MS = 120_000
+
+export interface ConfirmationWait {
+  /** 到点后是否自动放行 */
+  autoAllow: boolean
+  /** 实际等待时长（ms） */
+  effectiveMs: number
+  /** 是否因为不可逆而强制走满超时 */
+  irreversible: boolean
+}
+
+export function resolveConfirmationWait(
+  autoApproveSeconds?: number | null,
+  opts: { irreversible?: boolean; timeoutMs?: number } = {},
+): ConfirmationWait {
+  const timeoutMs = opts.timeoutMs && opts.timeoutMs > 0 ? opts.timeoutMs : CONFIRMATION_TIMEOUT_MS
+  const irreversible = opts.irreversible === true
+  if (irreversible) return { autoAllow: false, effectiveMs: timeoutMs, irreversible: true }
+  const sec = Number(autoApproveSeconds) || 0
+  const autoAllow = sec > 0
+  return { autoAllow, effectiveMs: autoAllow ? Math.round(sec * 1000) : timeoutMs, irreversible: false }
 }
 

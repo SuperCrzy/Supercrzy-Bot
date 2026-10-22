@@ -17,12 +17,19 @@ import { createHash, randomBytes } from 'node:crypto'
 import type { ClientRequest, IncomingMessage } from 'node:http'
 import WebSocket from 'ws'
 import { HttpsProxyAgent } from 'https-proxy-agent'
+// 自动选路的共享状态（手工 TTS_PROXY 优先，其次用这里的结果）
+import { getChosenRelay } from './tts-route-state'
 
 export interface TtsOptions {
   /** 音色（默认晓晓；英文内容建议 en-US-AriaNeural） */
   voice?: string
   /** 语速：'default' | '+10%' | '-10%' 等 */
   rate?: string
+  /**
+   * 码率档（2026-10-21）：`'96'`（默认，音质好）/ `'48'`（弱网，体积与带宽减半）。
+   * 弱网实测：手机热点出口只有 13KB/s，而 96k 音频要 12KB/s ⇒ 48k 才有余量。
+   */
+  quality?: TtsQuality
 }
 
 /** 单次合成上限（超出让前端分句，避免一次 WS 合成过长导致超时） */
@@ -32,6 +39,54 @@ export const TTS_MAX_CHARS = 2000
 //   详见 `synthesizeOnce` 注释。原来那个 12s 的"整个合成"超时会让长文本更容易被误杀。）
 /** 最大尝试次数（1 次原始 + 2 次重试）；与 TTS_RETRY_BACKOFF_MS 长度强耦合 */
 export const TTS_MAX_ATTEMPTS = 3
+/**
+ * **握手超时**，与首块超时**分开**（2026-10-21）。
+ *
+ * 🔴 为什么必须拆开：手机实测（HUAWEI M2，同一 wifi）到 `api.msedgeservices.com` 的
+ * TLS 握手是 **1.3 / 1.5 / 3.7 / 6.1s**（冷启动那发 6.1s），而 Mac 同一时刻只有 **0.6s**。
+ * 旧实现把「握手」和「首块」共用一个 3000ms 常量 ⇒ 手机端**冷连接必挂**，实机症状是
+ * `POST /api/tts → 502，10.79s，连接上游超时`（3 次 × 3s + 退避 ≈ 10.6s），前端随即
+ * 回落系统音色并进 60s 冷却，连带把「边生成边朗读」也顶掉（冷却期内 beginStream 返回 false）。
+ *
+ * 取舍：**12s**。手机实测有两个数：暖连接 TLS 1.3~3.7s、**冷启动首连 > 8s**（8s 版本下
+ * 第一条请求仍然 502、总耗时 16.52s）。配合 `warmUpTts()` 开机预热，正常路径根本不会
+ * 走到这个上限；它是给"冷 + 慢"叠加时的兜底。
+ * **首块仍留在 3s** —— 它与文本长度无关（实测恒定 335~602ms），放宽只会让真挂住的多等。
+ */
+export const TTS_HANDSHAKE_TIMEOUT_MS = 12000
+/**
+ * 握手超时**单独封顶 2 次**（1 原始 + 1 重试）。
+ *
+ * 为什么不是 3 次：握手慢是**链路属性**，不是抖动，重试的收益远低于代价 ——
+ * 3 × 8s + 退避 ≈ 25.6s，用户只会觉得"点了朗读没反应"。2 次最坏 8 + 0.4 + 8 ≈ 16.4s。
+ * 其它瞬时错误（RST / 5xx）仍走 TTS_MAX_ATTEMPTS = 3，因为它们重试的命中率高得多。
+ */
+export const TTS_HANDSHAKE_MAX_ATTEMPTS = 2
+
+/**
+ * 启动预热（2026-10-21）。
+ *
+ * 🔴 手机实测（HUAWEI M2，同一 wifi，8s 版本）：后端**刚重启后的第一条**朗读请求
+ * 即使给到 8s 也仍然 502（`16.52s` = 两次 8s 握手超时），同一进程的第 2、3 条只要
+ * **2.46s / 1.88s**。也就是说冷启动成本（musl 下首次 TLS 握手 + 冷 DNS）不该由
+ * 用户第一次点朗读来承担。
+ *
+ * 做法：开机后自己先握一次手，把 DNS 缓存与 TLS 会话票据热起来。
+ * fire-and-forget —— 失败静默、不重试、不阻塞启动（预热失败不代表朗读不可用）。
+ */
+export function warmUpTts(): void {
+  const t = setTimeout(() => {
+    synthesizeSpeech('语音预热').catch(() => { /* 预热失败无关紧要 */ })
+  }, 3000)
+  // 别因为这个定时器拖住进程退出
+  if (typeof t.unref === 'function') t.unref()
+  // 同时补连接进预热池（真正省握手的是它）；两个码率档各一条
+  const w = setTimeout(() => {
+    prewarmTts(TTS_FORMATS['96'])
+    prewarmTts(TTS_FORMATS['48'])
+  }, 3500)
+  if (typeof w.unref === 'function') w.unref()
+}
 /** 每次重试前的退避（ms），长度必须 = TTS_MAX_ATTEMPTS - 1 */
 export const TTS_RETRY_BACKOFF_MS = [400, 1200] as const
 
@@ -86,7 +141,7 @@ export const TTS_STREAM_FLUSH_BYTES = 16384
  *   · 单测的假 socket 只需实现这 5 个方法（形状一变就红，而不是静默漂移）
  *   · 换连接实现（如 2026-10-12 迁 v2）只波及 `openUpstream` 一处，不扩散到消费方
  */
-interface UpstreamSocket {
+export interface UpstreamSocket {
   on(event: string, listener: (...args: any[]) => void): unknown
   send(data: string): void
   close(): void
@@ -195,7 +250,7 @@ function edgeTimestamp(d: Date = new Date()): string {
  * `code=1007 Unsupported Edge output format` 直接关闭连接（2026-10-12 实测）。
  * 旧 host 对这个默认值宽容，所以这条约束在迁移前根本不存在 —— 属于"换了 host 才暴露的隐性契约"。
  */
-function speechConfigFrame(requestId: string, outputFormat: string): string {
+export function speechConfigFrame(requestId: string, outputFormat: string): string {
   return (
     `X-RequestId:${requestId}\r\n` +
     `Content-Type:application/json; charset=utf-8\r\n` +
@@ -224,7 +279,7 @@ function escapeXml(s: string): string {
  * `X-Timestamp` 是协议字段（格式见 `edgeTimestamp`）；`X-RequestId` 由调用方传入，
  * 与 `speech.config` 帧共用同一个 `ConnectionId`，服务端回帧里会带上它。
  */
-function ssmlFrame(requestId: string, text: string, voice: string, lang: string, rate: string): string {
+export function ssmlFrame(requestId: string, text: string, voice: string, lang: string, rate: string): string {
   return (
     `X-RequestId:${requestId}\r\n` +
     `Content-Type:application/ssml+xml\r\n` +
@@ -247,8 +302,17 @@ function ssmlFrame(requestId: string, text: string, voice: string, lang: string,
  *     不监听就会一路挂到我们自己超时，把"快速失败"伪装成"网络慢"
  *   · `open` 之前的 `error` —— TLS/DNS 层失败走这里
  */
-async function openUpstream(connectionId: string): Promise<UpstreamSocket> {
-  const proxy = ttsProxyFromEnv()
+export async function openUpstream(
+  connectionId: string,
+  /**
+   * 显式指定出口：
+   *   · `undefined` = 用当前选路结果（`ttsProxyFromEnv()`，含自动选中的中继）
+   *   · `null` = **强制直连**（探测直连基线时用）
+   *   · `string` = 强制走这个代理（探测各中继时用）
+   */
+  proxyOverride?: string | null,
+): Promise<UpstreamSocket> {
+  const proxy = proxyOverride === undefined ? ttsProxyFromEnv() : proxyOverride === null ? undefined : proxyOverride
   const ws = new WebSocket(buildUpstreamUrl(connectionId), {
     origin: TTS_UPSTREAM_ORIGIN,
     headers: { Pragma: 'no-cache', 'Cache-Control': 'no-cache' },
@@ -283,13 +347,106 @@ async function openUpstream(connectionId: string): Promise<UpstreamSocket> {
     function onUnexpected(_req: ClientRequest, res: IncomingMessage) {
       finish(new Error(`上游握手失败 HTTP ${res.statusCode ?? '?'}`))
     }
-    timer = setTimeout(() => finish(new Error('连接上游超时')), TTS_FIRST_CHUNK_TIMEOUT_MS)
+    timer = setTimeout(() => finish(new Error('连接上游超时')), TTS_HANDSHAKE_TIMEOUT_MS)
     ws.on('open', onOpen)
     ws.on('error', onError)
     ws.on('unexpected-response', onUnexpected)
   })
 
   return ws as unknown as UpstreamSocket
+}
+
+/**
+ * ===== 连接预热池（2026-10-21）=====
+ *
+ * 🔴 为什么需要：手机实测同一段 418 字，
+ *   · 走 `POST /api/tts`（整包，连接已热）→ **1.9~2.6s**
+ *   · 走 `/api/tts/stream`（每段一条新 ws）→ **首字节 7.5 / 9.4 / 10.6s**
+ * 差额就是"每段现场握手 + 首个音频块"的固定成本。长回复被切成 N 段就要付 N 次，
+ * 用户听到的就是"读一段、停七八秒、再读一段"（卡壳）。
+ *
+ * 做法：常备**一条已握手完成、已发过 speech.config** 的连接；
+ * 有合成请求进来就直接接管，省掉 1.3~10s 的握手。用完立刻在后台补一条，
+ * 让"下一段"也能白拿。
+ *
+ * 三个保守约定（都是踩过坑的）：
+ *   ① **TTL 60s**：上游对空闲连接会主动关，超龄的连接不敢用（用了等于白等一次 RST）。
+ *   ② **关闭即作废**：挂 `close`/`error` 监听，连接一断就把槽清空，绝不让死连接留在池里。
+ *   ③ **预热失败静默**：它只是优化，不能因为预热门失败就让正常朗读报错（也绝不打日志噪音）。
+ */
+const WARM_TTL_MS = 60_000
+/**
+ * 槽位按 `outputFormat` 分桶（2026-10-21）。
+ *
+ * 为什么必须分桶：`speech.config` 一旦发出，这条连接的输出格式就定死了。
+ * 只备一条 96k 的池，弱网用户降档到 48k 时**白等一次完整握手**（手机实测 18 秒）——
+ * 而弱网用户恰恰是最付不起握手成本的那批人。所以两种档各备一条。
+ */
+const warmPool = new Map<string, WarmSlot>()
+interface WarmSlot {
+  sock: UpstreamSocket
+  connectionId: string
+  openedAt: number
+  /** 这条连接上**已经发过**的 speech.config 的 outputFormat —— 码率不同的请求不能复用 */
+  format: string
+}
+let warmInFlight = new Set<string>()
+/** 预热连续失败时的退避截止时间（避免上游挂着时被我们反复握手打） */
+let warmBackoffUntil = 0
+
+/** 补一条预热连接（幂等：已有槽或在途就直接返回） */
+export function prewarmTts(format: string = TTS_OUTPUT_FORMAT): void {
+  // 单测里默认关掉：预热会额外建一条连接，把「重试了几次」这类断言的计数打乱。
+  // 需要专门验证预热池的用例把 TTS_TEST_PREWARM=1 打开。
+  if (process.env.VITEST && process.env.TTS_TEST_PREWARM !== '1') return
+  if (warmPool.has(format) || warmInFlight.has(format)) return
+  if (Date.now() < warmBackoffUntil) return
+  warmInFlight.add(format)
+  const job = (async () => {
+    const connectionId = randomBytes(16).toString('hex')
+    try {
+      const sock = await openUpstream(connectionId)
+      // speech.config 必须在任何 ssml 之前，预热阶段就先发掉（它不依赖文本）
+      sock.send(speechConfigFrame(connectionId, format))
+      const slot: WarmSlot = { sock, connectionId, openedAt: Date.now(), format }
+      // 连接一断就作废：绝不让死连接留在池里被下一次合成捡到
+      sock.on('close', () => { if (warmPool.get(format)?.sock === sock) warmPool.delete(format) })
+      sock.on('error', () => { if (warmPool.get(format)?.sock === sock) warmPool.delete(format) })
+      warmPool.set(format, slot)
+    } catch {
+      // 预热失败：退避 30s，别把上游的抖动放大成握手风暴
+      warmBackoffUntil = Date.now() + 30_000
+    } finally {
+      warmInFlight.delete(format)
+    }
+  })()
+  void job
+}
+
+/** 清空预热池 —— **仅供单测**（模块级状态，测试之间必须复位，否则用例互相污染） */
+export function resetTtsWarmPool(): void {
+  for (const w of warmPool.values()) { try { w.sock.close() } catch { /* 已关 */ } }
+  warmPool.clear()
+  warmInFlight.clear()
+  warmBackoffUntil = 0
+}
+
+/**
+ * 取一条可用连接（超龄直接丢弃）。**导出给会话式朗读复用**（见 services/tts-session.ts）
+ *
+ * ⚠️ 必须按 `format` 匹配：连接上的 `speech.config` 已经把输出格式定死了，
+ * 拿一条 96k 的连接去合成 48k 会得到 96k 的音频（或直接被上游判 1007），
+ * 而这种错**不会报错**，只会让人听到"怎么还是那么费流量"。
+ */
+export function takeWarmConnection(format: string = TTS_OUTPUT_FORMAT): WarmSlot | null {
+  const w = warmPool.get(format)
+  if (!w) return null
+  warmPool.delete(format)
+  if (Date.now() - w.openedAt > WARM_TTL_MS) {
+    try { w.sock.close() } catch { /* 已关 */ }
+    return null
+  }
+  return w
 }
 
 /**
@@ -309,14 +466,25 @@ async function streamOnce(
   const voice = opts.voice || DEFAULT_VOICE
   const lang = voice.startsWith('zh') ? 'zh-CN' : 'en-US'
   const rate = opts.rate || 'default'
+  const fmt = formatForQuality(opts.quality) ?? TTS_OUTPUT_FORMAT
   // 一次连接一个 ConnectionId：它同时充当 speech.config / ssml 两帧的 X-RequestId，
   // 与服务端回帧里的 X-RequestId 对得上，排查时能把一次合成串成一条线。
-  const connectionId = randomBytes(16).toString('hex')
+  // （捡预热连接时会被换成那条连接自己的 ConnectionId —— 两帧必须同源，不能混。）
+  let connectionId = randomBytes(16).toString('hex')
 
   let sock: UpstreamSocket | null = null
+  /** 这条连接是不是从预热池捡的（捡来的**已经发过 speech.config**，不能再发一遍） */
+  let preConfigured = false
   try {
     // 握手本身也要有超时：403/404 是快速失败，但中间盒也可能让它**挂住**
-    sock = await openUpstream(connectionId)
+    const w = takeWarmConnection(fmt)
+    if (w) {
+      sock = w.sock
+      connectionId = w.connectionId
+      preConfigured = true
+    } else {
+      sock = await openUpstream(connectionId)
+    }
     const socket = sock
 
     await new Promise<void>((resolve, reject) => {
@@ -399,11 +567,14 @@ async function streamOnce(
       })
 
       // ⚠️ speech.config 必须在 SSML 之前 —— 漏了它服务端会用隐式默认格式并以 code=1007 关连接
-      socket.send(speechConfigFrame(connectionId, TTS_OUTPUT_FORMAT))
+      // 捡来的预热连接**已经发过**这一帧，重复发会让服务端把第二条配置当新请求处理。
+      if (!preConfigured) socket.send(speechConfigFrame(connectionId, fmt))
       socket.send(ssmlFrame(connectionId, text, voice, lang, rate))
     })
   } finally {
     try { sock?.close() } catch { /* 已经关了 */ }
+    // 用完立刻补一条，让"下一段"直接白拿握手 —— 这一步是长回复不再卡壳的关键
+    prewarmTts()
   }
 }
 
@@ -441,7 +612,7 @@ export async function synthesizeSpeechStream(
       lastErr = e instanceof Error ? e : new Error(String(e))
       // 已经吐过字节 ⇒ 响应侧不可能回滚，重试只会产生重复音频
       if (emitted) throw lastErr
-      const canRetry = attempt < TTS_MAX_ATTEMPTS && isTransientTtsError(lastErr.message)
+      const canRetry = attempt < maxAttemptsFor(lastErr.message) && isTransientTtsError(lastErr.message)
       if (!canRetry) throw lastErr
       await delay(TTS_RETRY_BACKOFF_MS[attempt - 1] ?? 1200)
     }
@@ -476,6 +647,29 @@ const DEFAULT_VOICE = 'en-US-AvaMultilingualNeural'
  * （这条由 tts.test.ts 的不变量钉住：改动容器格式会让 PWA 在 Safari 上直接没声音。）
  */
 export const TTS_OUTPUT_FORMAT = 'audio-24khz-96kbitrate-mono-mp3'
+
+/**
+ * 可选码率档（2026-10-21）。
+ *
+ * 为什么要分档：96k 是默认（齿音清晰），但**弱网下它就是不可用** ——
+ * 实测手机热点出口 13KB/s，而 96k 音频 = 12KB/s，只剩 1KB/s 余量，必然 underrun。
+ * 48k 只要 6KB/s，同样的链路就有一倍缓冲。
+ *
+ * ⚠️ 只列上游**实测支持**的两种 mp3 档（都是无 ID3 头的纯帧流，可拼接）。
+ * webm-opus 虽然也存在，但每轮带 EBML 头，拼不成一条流 —— 不能用于会话式朗读。
+ */
+export const TTS_FORMATS = {
+  '96': 'audio-24khz-96kbitrate-mono-mp3',
+  '48': 'audio-24khz-48kbitrate-mono-mp3',
+} as const
+
+export type TtsQuality = keyof typeof TTS_FORMATS
+
+/** 解析码率档 → 上游 outputFormat；非法值返回 null（调用方据此回 400） */
+export function formatForQuality(q: unknown): string | null {
+  const k = String(q ?? '').trim()
+  return (TTS_FORMATS as Record<string, string>)[k] ?? null
+}
 
 /**
  * 这个错误值不值得重试。
@@ -515,6 +709,16 @@ export function isTransientTtsError(msg: string): boolean {
   if (/上游握手失败/.test(m)) return /HTTP (429|5\d\d)/.test(m)
   return /ECONNRESET|ECONNREFUSED|ECONNABORTED|ETIMEDOUT|EPIPE|EAI_AGAIN|socket hang up|Client network socket disconnected|socket disconnected|secure TLS connection|Timed out|timed out|timeout|fetch failed|UND_ERR/i
     .test(m)
+}
+
+/**
+ * 这次失败最多允许尝试几次。
+ *
+ * 只有**握手超时**单独封顶（2 次）：它是链路属性而不是抖动，重试命中率低而代价高。
+ * 其它瞬时错误仍用 TTS_MAX_ATTEMPTS —— 它们重试一次救回来的概率很高（RST / 5xx 都是）。
+ */
+export function maxAttemptsFor(lastErrMsg: string): number {
+  return /连接上游超时/.test(String(lastErrMsg || '')) ? TTS_HANDSHAKE_MAX_ATTEMPTS : TTS_MAX_ATTEMPTS
 }
 
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
@@ -578,18 +782,22 @@ let warnedBadProxy = false
 
 export function ttsProxyFromEnv(env: NodeJS.ProcessEnv = process.env): string | undefined {
   const raw = String(env.TTS_PROXY || '').trim()
-  if (!raw) return undefined
-  if (!PROXY_SCHEME_RE.test(raw)) {
-    if (!warnedBadProxy) {
-      warnedBadProxy = true
-      console.warn(
-        `[tts] 忽略 TTS_PROXY="${raw}"：只支持 HTTP CONNECT 代理（http:// 或 https://），` +
-          `SOCKS5 不在 https-proxy-agent 的支持范围内。本次朗读走直连。`
-      )
+  if (raw) {
+    if (!PROXY_SCHEME_RE.test(raw)) {
+      if (!warnedBadProxy) {
+        warnedBadProxy = true
+        console.warn(
+          `[tts] 忽略 TTS_PROXY="${raw}"：只支持 HTTP CONNECT 代理（http:// 或 https://），` +
+            `SOCKS5 不在 https-proxy-agent 的支持范围内。本次朗读走直连。`
+        )
+      }
+      return undefined
     }
-    return undefined
+    // 手工指定优先级最高：它就是最终答案，不去看自动选路结果
+    return raw
   }
-  return raw
+  // 没手工指定 → 用自动选路的结果（未探测过时 getChosenRelay 返回 undefined = 直连）
+  return getChosenRelay()
 }
 
 /**
@@ -625,7 +833,7 @@ export async function synthesizeSpeech(text: string, opts: TtsOptions = {}): Pro
       return await synthesizeOnce(clean, opts)
     } catch (e: any) {
       lastErr = e instanceof Error ? e : new Error(String(e))
-      const canRetry = attempt < TTS_MAX_ATTEMPTS && isTransientTtsError(lastErr.message)
+      const canRetry = attempt < maxAttemptsFor(lastErr.message) && isTransientTtsError(lastErr.message)
       if (!canRetry) throw lastErr
       await delay(TTS_RETRY_BACKOFF_MS[attempt - 1] ?? 1200)
     }

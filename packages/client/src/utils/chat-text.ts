@@ -95,9 +95,13 @@ export function createChatText(deps: ChatTextDeps) {
       : d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
   }
 
-  /** 货币格式化：中文界面 ¥，英文界面 $（按当前语言） */
+  /**
+   * 货币格式化。
+   * messages.cost 落库是**人民币**（后端按官方 USD 价 × 7.2 折算），
+   * 以前按语言把同一数字换 $ 显示 —— 等于把费用缩小 7.2 倍展示。只认存储口径。
+   */
   function formatCurrency(amount: number): string {
-    return (deps.isZh() ? '¥' : '$') + amount.toFixed(2)
+    return '¥' + amount.toFixed(2)
   }
 
   // ===== 历史消息体系：按天分隔线（2026-08-27 加，会话长消息按日期分组） =====

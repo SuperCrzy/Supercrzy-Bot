@@ -9,6 +9,9 @@ import {
   TTS_RETRY_BACKOFF_MS,
   TTS_OUTPUT_FORMAT,
   TTS_FIRST_CHUNK_TIMEOUT_MS,
+  TTS_HANDSHAKE_TIMEOUT_MS,
+  TTS_HANDSHAKE_MAX_ATTEMPTS,
+  maxAttemptsFor,
   TTS_STREAM_FIRST_FLUSH_BYTES,
   TTS_STREAM_FLUSH_BYTES,
   defaultVoice,
@@ -17,6 +20,10 @@ import {
   synthesizeSpeech,
   synthesizeSpeechStream,
   ttsProxyFromEnv,
+  prewarmTts,
+  resetTtsWarmPool,
+  TTS_FORMATS,
+  formatForQuality,
 } from './tts'
 import { HttpsProxyAgent } from 'https-proxy-agent'
 
@@ -586,6 +593,26 @@ describe('流式阈值不变量（改一不改二会退化成"逐块抖 2897 次
     expect(TTS_FIRST_CHUNK_TIMEOUT_MS).toBeLessThanOrEqual(3000)
   })
 
+  /**
+   * 握手超时与首块超时**必须是两个量**（2026-10-21 手机实测）。
+   *
+   * 旧实现共用一个 3000ms：手机到上游的 TLS 握手实测 1.3 / 1.5 / 3.7 / **6.1s**（冷启动），
+   * 而**进程刚起来的第一条**请求即使给到 8s 也仍然超时（实测总耗时 16.52s = 两次 8s）。
+   * 于是定为 12s 并用 `warmUpTts()` 在开机时预热。
+   * 这条断言钉的是「不要再把两者合并」：合并的那天，手机端就又开始整轮回落系统音色。
+   */
+  it('握手超时必须 ≥ 10s 且严格大于首块超时（手机冷启动实测 > 8s）', () => {
+    expect(TTS_HANDSHAKE_TIMEOUT_MS).toBeGreaterThanOrEqual(10000)
+    expect(TTS_HANDSHAKE_TIMEOUT_MS).toBeGreaterThan(TTS_FIRST_CHUNK_TIMEOUT_MS)
+  })
+
+  it('握手超时单独封顶 2 次；其它瞬时错误仍用 3 次', () => {
+    expect(TTS_HANDSHAKE_MAX_ATTEMPTS).toBe(2)
+    expect(maxAttemptsFor('连接上游超时')).toBe(TTS_HANDSHAKE_MAX_ATTEMPTS)
+    expect(maxAttemptsFor('read ECONNRESET')).toBe(TTS_MAX_ATTEMPTS)
+    expect(maxAttemptsFor('上游握手失败 HTTP 429')).toBe(TTS_MAX_ATTEMPTS)
+  })
+
   it('输出格式仍必须是 mp3（<audio> 直连流式播放依赖它是可渐进解析的容器）', () => {
     expect(TTS_OUTPUT_FORMAT).toMatch(/^audio-.+mono-mp3$/)
   })
@@ -741,5 +768,73 @@ describe('Sec-MS-GEC 签名', () => {
     expect(secMsGec(t)).toBe(expected)
     // 顺带钉住回归基准值（上游一致，2026-10-12 实测）
     expect(expected).toBe('558259C3BE2277D2A7D25EC9C3411408933FFC3C14610478374178F724166276')
+  })
+})
+
+/**
+ * 连接预热池（2026-10-21）。
+ *
+ * 为什么值得单测：手机实测每段朗读的固定成本是「握手 + 首块」**7.5~10.6s**，
+ * 长回复切 N 段就付 N 次 —— 这是"读一段停七八秒"的直接原因。
+ * 预热池把这段成本从用户第一次点击里挪走，所以"复用真发生了"必须有断言钉住，
+ * 否则它退化成"每次都新建连接"也照样全绿。
+ */
+describe('连接预热池（省掉每段 7~10s 的握手）', () => {
+  const OLD = process.env.TTS_TEST_PREWARM
+  beforeEach(() => {
+    process.env.TTS_TEST_PREWARM = '1'
+    resetTtsStub()
+    resetTtsWarmPool()
+  })
+  afterEach(() => {
+    resetTtsWarmPool()
+    if (OLD === undefined) delete process.env.TTS_TEST_PREWARM
+    else process.env.TTS_TEST_PREWARM = OLD
+  })
+
+  it('预热后合成直接复用那条连接：只握手一次，且 speech.config 不会重复发', async () => {
+    prewarmTts()
+    await new Promise((r) => setTimeout(r, 20))
+    expect(state.connectAttempts).toBe(1)
+    const configsBefore = state.sentFrames.filter((f) => f.includes('Path:speech.config')).length
+    expect(configsBefore).toBe(1) // 预热阶段就把 config 发掉了
+
+    await synthesizeSpeech('一句测试文本。')
+
+    // 关键：ssml 到了，但 config 仍然只有 1 条 —— 说明是**同一条**连接被复用
+    //（新建连接会由 streamOnce 再发一次 config）
+    expect(state.sentFrames.filter((f) => f.includes('Path:ssml')).length).toBe(1)
+    expect(state.sentFrames.filter((f) => f.includes('Path:speech.config')).length).toBe(1)
+  })
+
+  it('没有预热连接时照常自己握手（预热只是优化，不能成为依赖）', async () => {
+    await synthesizeSpeech('一句测试文本。')
+    expect(state.connectAttempts).toBeGreaterThanOrEqual(1)
+    expect(state.sentFrames.filter((f) => f.includes('Path:ssml')).length).toBe(1)
+  })
+})
+
+/**
+ * 码率档（2026-10-21）。
+ *
+ * 为什么要有：96k = 12KB/s，弱网出口（实测手机热点 13KB/s）缓冲必见底；
+ * 48k 只要 6KB/s。降档是"能不能听"的问题，不是省流量。
+ */
+describe('码率档（弱网降到 48k）', () => {
+  it('白名单只认 96 / 48，其它一律 null（路由据此 400，不静默回默认）', () => {
+    expect(formatForQuality('96')).toBe(TTS_FORMATS['96'])
+    expect(formatForQuality('48')).toBe(TTS_FORMATS['48'])
+    expect(formatForQuality('32')).toBeNull()
+    expect(formatForQuality('')).toBeNull()
+    expect(formatForQuality(undefined)).toBeNull()
+    expect(formatForQuality('audio-24khz-96kbitrate-mono-mp3')).toBeNull()
+  })
+
+  it('两档都必须是可拼接的 mp3 帧流（webm 会带 EBML 头，拼不成一条流）', () => {
+    for (const f of Object.values(TTS_FORMATS)) expect(f).toMatch(/^audio-.+mono-mp3$/)
+  })
+
+  it('默认档就是 96k（不传 quality 时行为不变）', () => {
+    expect(formatForQuality('96')).toBe(TTS_OUTPUT_FORMAT)
   })
 })

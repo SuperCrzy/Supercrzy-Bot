@@ -53,8 +53,24 @@ describe('markdownToSpeech', () => {
     expect(s).not.toContain('>')
   })
 
-  it('剔除 SVG 与图片', () => {
-    const md = '图如下：\n\n<svg viewBox="0 0 10 10"><rect/></svg>\n\n![截图](a.png)\n\n结束。'
+  it('跨块切断的孤立标记也要清掉（回归：老板听到"星号"）', () => {
+    // 流式朗读按块送合成，**加粗** 常被切成两半 ⇒ 两边都配不上对，成对替换全部落空
+    expect(markdownToSpeech('**这是一段被切断的粗体')).toBe('这是一段被切断的粗体')
+    expect(markdownToSpeech('前半段**\n后半段')).not.toContain('*')
+    expect(markdownToSpeech('残留反引号`和 ~~删除线')).not.toContain('`')
+    expect(markdownToSpeech('残留反引号`和 ~~删除线')).not.toContain('~')
+    expect(markdownToSpeech('残骸 __')).not.toContain('_')
+    // 被切断的半截表格行（没以 | 收尾，TABLE_ROW_RE 认不出）→ 竖线也不能念
+    expect(markdownToSpeech('| 名称 | 数值')).not.toContain('|')
+  })
+
+  it('正常写法不被误伤（下划线标识符、单个波浪号）', () => {
+    const s = markdownToSpeech('修改 user_id 字段，约 5~8 处。')
+    expect(s).toContain('user_id')
+    expect(s).toContain('5~8')
+  })
+
+  it('剔除 SVG 与图片', () => {    const md = '图如下：\n\n<svg viewBox="0 0 10 10"><rect/></svg>\n\n![截图](a.png)\n\n结束。'
     const s = markdownToSpeech(md)
     expect(s).not.toContain('svg')
     expect(s).not.toContain('rect')

@@ -1,6 +1,6 @@
 {
   "name": "supercrzy-bot",
-  "version": "0.4.1",
+  "version": "1.2.1",
   "private": true,
   "description": "SUPERCRZY BOT - AI Agent Platform: unified brain + Agent Loop + multi-tool + multi-platform gateway",
   "author": "SuperCrzy",
@@ -26,8 +26,10 @@
     "cli": "pnpm --filter @supercrzy/server cli",
     "lint": "pnpm -r lint",
     "check:clean": "node scripts/check-clean-tree.mjs",
+    "version:sync": "node scripts/version.mjs",
+    "version:check": "node scripts/version.mjs --check",
     "export:clean": "node scripts/check-clean-tree.mjs --export ../supercrzy-clean",
-    "verify": "node scripts/check-clean-tree.mjs && pnpm lint && pnpm test && pnpm --filter @supercrzy/server validate:tools && pnpm build",
+    "verify": "node scripts/version.mjs --check && node scripts/check-clean-tree.mjs && pnpm lint && pnpm test && pnpm --filter @supercrzy/server validate:tools && pnpm build",
     "clean": "pnpm -r clean",
     "test": "pnpm -r test"
   },

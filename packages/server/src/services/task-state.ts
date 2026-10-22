@@ -492,14 +492,57 @@ export interface TaskStats {
   totalCostUsd: number
   /** 平均任务耗时（ms，仅统计有耗时的任务） */
   avgDurationMs: number
+  /** 实际生效的时间窗（天）；0 = 不限窗口（全量） */
+  windowDays: number
+  /** 窗口内的任务明细（按 updated_at 倒序），供用量页展开看单个任务 */
+  tasks: TaskStatsRow[]
 }
+
+/** 任务明细行（用量页表格：只看决策需要的字段，不搬运整个 record） */
+export interface TaskStatsRow {
+  task_id: string
+  session_id: string
+  label: string
+  source: TaskSource
+  status: TaskStatus
+  tokens: number
+  cost_usd: number
+  duration_ms: number
+  started_at: number
+  updated_at: number
+  failure_message: string | null
+}
+
+export interface AggregateTaskStatsOptions {
+  /** 只看最近 N 天（按 updated_at）；<=0 或未传 = 全量 */
+  days?: number
+  /** 明细最多返回多少行（默认 50，上限 500） */
+  limit?: number
+  /** 当前时间戳（测试注入用；默认 Date.now()） */
+  now?: number
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000
+const DEFAULT_TASK_ROW_LIMIT = 50
+const MAX_TASK_ROW_LIMIT = 500
 
 /**
  * 任务级聚合统计（P2-02）。纯函数语义：只读内存注册表，便于单测。
  * 只统计非 created 态（即真正跑过的任务），避免把刚建的任务算进完成率分母。
+ *
+ * 2026-10-22（B4）：此前不看时间窗——路由把 ?days=N 原样回显，指标却是全量，
+ * 页面上的「近 7 天」实际是全历史。现在按 updated_at 过滤，并把生效窗口回给调用方。
  */
-export function aggregateTaskStats(): TaskStats {
-  const all = [...TASKS.values()]
+export function aggregateTaskStats(opts: AggregateTaskStatsOptions = {}): TaskStats {
+  const now = opts.now ?? Date.now()
+  const rawDays = Number(opts.days ?? 0)
+  const days = Number.isFinite(rawDays) && rawDays > 0 ? Math.min(Math.floor(rawDays), 365) : 0
+  const since = days > 0 ? now - days * DAY_MS : null
+  // 非正数/NaN 一律回落默认值：limit=-5 返回 1 行是调用方的意外，不是本函数的语义
+  const rawLimit = Math.floor(Number(opts.limit) || 0)
+  const limit = rawLimit > 0 ? Math.min(rawLimit, MAX_TASK_ROW_LIMIT) : DEFAULT_TASK_ROW_LIMIT
+
+  const all = [...TASKS.values()].filter((r) => (since === null ? true : (r.updated_at || 0) >= since))
   const byStatus: Record<string, number> = {}
   let totalTokens = 0
   let totalCostUsd = 0
@@ -518,6 +561,24 @@ export function aggregateTaskStats(): TaskStats {
 
   const total = all.length
   const rate = (n: number) => (total > 0 ? n / total : 0)
+  const tasks: TaskStatsRow[] = all
+    .slice()
+    .sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0))
+    .slice(0, limit)
+    .map((r) => ({
+      task_id: r.task_id,
+      session_id: r.session_id,
+      label: r.label,
+      source: r.source,
+      status: r.status,
+      tokens: r.tokens || 0,
+      cost_usd: r.cost_usd || 0,
+      duration_ms: r.duration_ms || 0,
+      started_at: r.started_at || 0,
+      updated_at: r.updated_at || 0,
+      failure_message: r.failure_message ?? null,
+    }))
+
   return {
     total,
     byStatus,
@@ -527,6 +588,8 @@ export function aggregateTaskStats(): TaskStats {
     totalTokens,
     totalCostUsd: Number(totalCostUsd.toFixed(6)),
     avgDurationMs: durationCount > 0 ? Math.round(durationSum / durationCount) : 0,
+    windowDays: days,
+    tasks,
   }
 }
 

@@ -246,7 +246,7 @@ On startup the server sends **one** tiny request so we can see how many installs
 and which versions are in use. It contains exactly four fields and nothing else:
 
 ```json
-{ "iid": "<random uuid>", "version": "0.4.1", "platform": "darwin 27.0.0", "firstRun": true }
+{ "iid": "<random uuid>", "version": "<app version>", "platform": "darwin 27.0.0", "firstRun": true }
 ```
 
 - `iid` is a **randomly generated UUID** stored in your local database. It is not derived

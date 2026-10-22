@@ -8,6 +8,7 @@
         <span class="taf-risk" :class="`taf-risk-tag-${riskLevel}`">{{ riskLabel }}</span>
       </div>
       <div class="taf-command" :title="summaryText">{{ summaryText }}</div>
+      <div v-if="riskLevel !== 'low'" class="taf-hint">{{ riskHint }}</div>
       <div class="taf-options">
         <button class="taf-option taf-opt-deny" @click="$emit('deny', tool)">
           <span class="taf-opt-index">1</span>{{ $t('chatui.deny') }}
@@ -42,12 +43,25 @@ defineEmits<{
   (e: 'allow-session', tool: ToolCallEvent): void
 }>()
 
-/** 风险等级：删除=高，写文件/命令=中（对齐主流实现 riskTag level） */
-const riskLevel = computed<'high' | 'medium'>(() => (props.tool.name === 'file_delete' ? 'high' : 'medium'))
-
-const riskLabel = computed(() =>
-  riskLevel.value === 'high' ? (t('chatui.riskHigh') || '高风险') : (t('chatui.riskMedium') || '中风险'),
+/**
+ * 风险等级 = **服务端算好的**（`services/approval-risk.ts` 唯一实现），前端只负责显示。
+ *
+ * 旧实现按工具名猜：`name === 'file_delete' ? 'high' : 'medium'` —— 于是
+ * `shell_exec` 跑 `rm -rf /`、`file_write` 写 `/etc/hosts` 全都显示"中风险"，等级没有信息量。
+ * 等级取决于**参数**，一个工具可以是任意一级，所以只能由服务端按调用算。
+ *
+ * 回退（旧事件 / 历史消息没有 `risk` 字段）：删除类按高、其余按中（保守，宁高不低）。
+ */
+const riskLevel = computed<'low' | 'medium' | 'high'>(
+  () => props.tool.risk?.level ?? (props.tool.name === 'file_delete' ? 'high' : 'medium'),
 )
+
+const RISK_LABEL_KEY = { low: 'chatui.riskLow', medium: 'chatui.riskMedium', high: 'chatui.riskHigh' } as const
+const RISK_HINT_KEY = { low: 'chatui.riskHintLow', medium: 'chatui.riskHintMedium', high: 'chatui.riskHintHigh' } as const
+
+const riskLabel = computed(() => t(RISK_LABEL_KEY[riskLevel.value]))
+/** 一行说明"为什么是这个等级"——只给颜色不够，用户要知道自己在批准什么 */
+const riskHint = computed(() => t(RISK_HINT_KEY[riskLevel.value]))
 
 /** 标题：按工具类型给动作词（Run Command? / Delete file? / Write file? 同款） */
 const titleText = computed(() => {
@@ -76,12 +90,14 @@ const summaryText = computed(() => {
 })
 
 // 自动允许倒计时（对齐 ToolCallBlock countdown：pending 时 5s 递减，真正放行由后端超时策略决定）
+// 🔴 高风险（不可逆）不倒计时：后端 `resolveConfirmationWait` 对不可逆操作忽略
+//    `toolAutoApproveSeconds`，UI 若还显示"5s 后自动允许"就是在撒谎。
 const countdown = ref(0)
 let timer: ReturnType<typeof setInterval> | null = null
 watch(
   () => props.tool.status,
   (s) => {
-    if (s === 'pending' && props.autoApproveSeconds > 0) {
+    if (s === 'pending' && props.autoApproveSeconds > 0 && riskLevel.value !== 'high') {
       countdown.value = props.autoApproveSeconds
       if (!timer) {
         timer = setInterval(() => {
@@ -158,6 +174,14 @@ onUnmounted(() => {
 }
 .taf-risk-tag-high { background: rgba(209, 36, 47, 0.12); color: #d1242f; }
 .taf-risk-tag-medium { background: rgba(180, 83, 9, 0.12); color: #b45309; }
+.taf-risk-tag-low { background: rgba(128, 128, 128, 0.12); color: var(--text-tertiary, rgba(128, 128, 128, 0.9)); }
+/* 一行等级说明：告诉用户"批准的是什么"，而不是只给一个颜色 */
+.taf-hint {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-tertiary, rgba(128, 128, 128, 0.9));
+  margin: -3px 0 8px;
+}
 .taf-command {
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 12px;

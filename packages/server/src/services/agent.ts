@@ -36,7 +36,11 @@ import {
   recordTaskOutcome,
   type TaskRecord,
 } from './task-state'
-import { resolveApprovalMode, decideToolApproval } from './permission'
+import { resolveApprovalMode, decideToolApproval, resolveConfirmationWait, CONFIRMATION_TIMEOUT_MS } from './permission'
+import { resolveContextWindow, DEFAULT_CONTEXT_WINDOW } from './model-context-window'
+import { estimateCostCny, type UsageLike } from './model-pricing'
+import { resolveApprovalRisk } from './approval-risk'
+import { planToolApprovals } from './tool-approval-plan'
 import { isFfmpegAvailable, refreshFfmpegAvailability, ffmpegInstallHint } from './ffmpeg'
 
 // ---- 敏感工具确认机制（先确认后执行）----
@@ -128,12 +132,22 @@ export function resolveToolConfirmation(id: string, decision: 'allow' | 'deny') 
   pendingConfirmations.delete(id)
 }
 
-function waitForToolConfirmation(id: string, timeoutMs = 120000): Promise<'allow' | 'deny' | 'timeout'> {
+function waitForToolConfirmation(
+  id: string,
+  timeoutMs = CONFIRMATION_TIMEOUT_MS,
+  opts: { irreversible?: boolean } = {},
+): Promise<'allow' | 'deny' | 'timeout'> {
   // 自动允许等待（设置 toolAutoApproveSeconds：>0 秒后无人确认自动放行；0=关闭，保持超时拒绝兜底）
+  //
+  // 🔴 2026-10-22 老板裁决：**不可逆操作（block / 删除）永不自动放行**。
+  //   改前：`autoSec > 0` 即对任何待确认操作到点放行 —— 老板库该值为 5，
+  //   于是 `rm -rf` / `file_delete` 弹窗 5 秒没人点就静默执行，与 10-18「删除永远必问」冲突。
+  //   现在由 `resolveConfirmationWait` 统一裁决：irreversible ⇒ 忽略该设置、走满超时。
   let autoSec = 0
   try { autoSec = Number(readSetting('toolAutoApproveSeconds') || 0) } catch { autoSec = 0 }
-  const autoAllow = autoSec > 0
-  const effective = autoAllow ? autoSec * 1000 : timeoutMs
+  const wait = resolveConfirmationWait(autoSec, { irreversible: opts.irreversible, timeoutMs })
+  const autoAllow = wait.autoAllow
+  const effective = wait.effectiveMs
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
       pendingConfirmations.delete(id)
@@ -198,6 +212,14 @@ function normalizeQuestionOptions(options: any): string[] {
  */
 export function humanizeApiError(c: { reason: string; message: string }): string {
   const detail = (c.message || '').slice(0, 300)
+  // 兜底文案里不要把机器标识（unknown / tool_sequence）直接抛给用户
+  const REASON_LABEL: Record<string, string> = {
+    unknown: '未能归类的错误',
+    tool_sequence: '消息序列不符合协议',
+    connection: '网络连接失败',
+    timeout: '请求超时',
+  }
+  const reasonLabel = REASON_LABEL[c.reason] || c.reason
   switch (c.reason) {
     case 'billing':
       return [
@@ -237,9 +259,43 @@ export function humanizeApiError(c: { reason: string; message: string }): string
         '',
         `详情: ${detail}`,
       ].join('\n')
-    default:
+    // 2026-10-22 补：这三类此前落 default，文案断言"重试不会变好"，
+    // 而分类器给它们标的是 retryable:true（实际会退避重试 3 次）——提示与行为自相矛盾。
+    case 'connection':
       return [
-        `**请求被拒绝**（${c.reason}）。这类错误重试不会变好，请按下方详情排查。`,
+        '**连不上服务商**（DNS 解析失败 / 连接被拒 / 代理不通）。',
+        '',
+        '已自动重试仍失败，请检查网络是否可用；若系统或桌面端设了代理（HTTP_PROXY / HTTPS_PROXY），确认该代理能访问服务商域名。',
+        '',
+        '网络恢复后重发即可，本轮进度已保存。',
+        '',
+        `详情: ${detail}`,
+      ].join('\n')
+    case 'timeout':
+      return [
+        '**请求超时**（等不到服务商响应）。',
+        '',
+        '已自动重试仍超时：常见原因是上下文太长或任务太重。可以换一个更快的模型，或把任务拆小后重试。',
+        '',
+        '本轮进度已保存，可直接继续。',
+        '',
+        `详情: ${detail}`,
+      ].join('\n')
+    case 'tool_sequence':
+      return [
+        '**消息序列不符合协议**（工具调用没配上结果，或思考内容没原样回传）。',
+        '',
+        'BOT 已尝试清洗消息序列后重试，仍失败说明这轮记录已无法自愈。建议新开一个会话重试；需要保留上下文的话，先把当前结果复制出来。',
+        '',
+        `详情: ${detail}`,
+      ].join('\n')
+    default:
+      // 2026-10-22 改：不再断言"重试不会变好"——unknown 在分类器里也可能 retryable，
+      // 那句话会与"连续 4 次失败"的实际重试行为冲突。只陈述事实 + 给排查方向。
+      return [
+        `**请求失败**（${reasonLabel}）。`,
+        '',
+        '可能是模型服务或请求参数的问题。可以先重发一次；仍失败请切换模型，或用下方详情定位。',
         '',
         `详情: ${detail}`,
       ].join('\n')
@@ -683,62 +739,26 @@ function emitSSE(ctx: Context, event: string, data: any) {
   safeWriteSse(ctx, `id: ${seq}\nevent: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
 }
 
-// ---- 上下文窗口：按模型动态配置（体验补强 1）----
-// 内置常见模型窗口映射（按模型名前缀匹配，命中即用）
-const MODEL_CONTEXT_WINDOWS: Array<[RegExp, number]> = [
-  [/gemini/i, 1_000_000],
-  [/grok/i, 1_000_000],
-  [/qwen/i, 1_000_000],
-  [/glm-4\.6/i, 200_000],
-  [/claude/i, 200_000],
-  [/gpt-4\.1/i, 1_000_000],
-  [/kimi/i, 128_000],
-  [/deepseek/i, 128_000],
-  [/moonshot/i, 128_000],
-]
-const DEFAULT_CONTEXT_WINDOW = 128_000
-
-/**
- * 解析模型上下文窗口（tokens）：
- * 1. custom_models 表 context_window 字段（用户可配）优先
- * 2. 内置模型名映射
- * 3. 默认 128K
- */
+// ---- 上下文窗口：按模型动态配置 ----
+// 映射表与优先级逻辑已抽到 `model-context-window.ts`（纯函数、可单测）。
+// 这里只剩"查库 + 交给纯函数"两件事，避免同一张表在两处各写一遍。
 export function getContextWindowForModel(model: string): number {
   if (!model) return DEFAULT_CONTEXT_WINDOW
+  let dbValue: number | null = null
   try {
-    const db = getDB()
-    const row = db.prepare('SELECT context_window FROM custom_models WHERE model_id = ? LIMIT 1').get(model) as any
-    const cw = row?.context_window
-    if (cw && Number(cw) > 0) return Number(cw)
+    const row = getDB()
+      .prepare('SELECT context_window FROM custom_models WHERE model_id = ? LIMIT 1')
+      .get(model) as any
+    dbValue = row?.context_window ?? null
   } catch { /* 表可能无此列（迁移前），走内置映射 */ }
-  for (const [re, win] of MODEL_CONTEXT_WINDOWS) {
-    if (re.test(model)) return win
-  }
-  return DEFAULT_CONTEXT_WINDOW
+  return resolveContextWindow(model, dbValue)
 }
 
-// 模型单价（¥/1M tokens，近似公开定价；未收录模型用默认值，费用为估算值）
-const MODEL_PRICES: Record<string, { prompt: number; completion: number }> = {
-  'deepseek-v4-pro': { prompt: 2, completion: 8 },
-  'deepseek-v4-flash': { prompt: 1, completion: 4 },
-  'deepseek-chat': { prompt: 0.5, completion: 2 },
-  'kimi-k2.6': { prompt: 4, completion: 16 },
-  'moonshot-v1-8k': { prompt: 4, completion: 16 },
-  'gpt-4o': { prompt: 18, completion: 72 },
-  'gpt-4.1': { prompt: 15, completion: 60 },
-  'claude-sonnet-4-20250514': { prompt: 21, completion: 105 },
-  'glm-4.7': { prompt: 2, completion: 6 },
-  'mimo-v2.5-pro': { prompt: 2, completion: 8 },
-}
-const DEFAULT_PRICE = { prompt: 2, completion: 8 }
-
-/** 按模型单价估算本轮费用（¥，保留 3 位小数） */
-export function estimateCost(model: string | undefined, usage: { prompt_tokens?: number; completion_tokens?: number }): number {
-  const p = MODEL_PRICES[model || ''] || DEFAULT_PRICE
-  const promptTokens = usage.prompt_tokens || 0
-  const completionTokens = usage.completion_tokens || 0
-  return Math.round(((promptTokens * p.prompt + completionTokens * p.completion) / 1e6) * 1000) / 1000
+// 模型单价：唯一来源 = services/model-pricing.ts（官方 USD 价 + 峰谷 + 缓存命中拆分）。
+// 这里只保留一个薄封装，别再往这个文件里塞价格数字。
+/** 按模型单价估算本轮费用（¥，保留 4 位小数） */
+export function estimateCost(model: string | undefined, usage: UsageLike): number {
+  return estimateCostCny(model, usage)
 }
 
 /**
@@ -843,11 +863,15 @@ function buildSystemPrompt(basePrompt: string, userMessage: string, model?: stri
     ? `\n\n## 时效性强制要求（必须遵守）\n检测到用户问题涉及时效性（"最新/今天/本周/2026年"等）。你必须**首先调用 web_search**（时效性问题传 timeRange 参数）获取最新信息后再回答，绝对禁止只凭训练数据回答可能过时的内容。搜索后每条事实性结论必须标注来源 URL 与真实发布日期，来源必须真实存在，禁止编造。`
     : ''
 
-  // 2026-08-25 13:5x：输出风格约束——模型常在正文里写"我先搜索/搜到几条候选/我排除了旧闻"这类过程叙述，
-  // 用户看到"正式结果出来了上面还平铺着一堆过程"。过程通过工具调用自然发生，正文只给最终结果。
-  // 17:2x 追加：来源格式规范——引用来源统一 markdown 链接 [媒体名](url) 置于消息末尾（多条空格分隔），
-  // 前端自动提取为"来源"卡片；不要在正文段落内内联来源链接串（会挤成一行）。
-  const outputStyleSection = `\n\n## 输出风格（必须遵守）\n不要在回复正文中叙述你的执行过程（如"我先搜索了…"、"搜索结果显示…"、"我排除了旧闻…"、"让我核实一下…"、"找到了候选新闻…"）。工具调用过程用户自会看到，正文直接给出最终结果/结论（标题、要点、来源）。若多轮工具后有需要补充的最终结论，直接补充结论本身，不要回顾过程。引用来源统一用 markdown 链接格式 \`[媒体名](url)\` 放在消息末尾（多条来源用空格分隔、不要写在正文段落中间），前端会自动把末尾的来源链接提取成"来源"卡片，正文只留说明文字。`
+  // 2026-10-21 修订：原文与下方「每轮工具调用前后输出 1-2 句说明」**直接冲突**，
+  // 模型通常服从这条（更靠前、措辞更强）⇒ 过程里一片沉默，只剩开头一句 + 结尾总结。
+  // 现在按「不回顾、可预告」划界：允许执行前预告下一步（用户靠它知道在干什么），
+  // 禁止执行后回顾（"我先搜了…结果显示…"会与工具卡片重复）。
+  const outputStyleSection = `\n\n## 输出风格（必须遵守）
+- **执行前可以预告，执行后不要回顾**：准备调工具时，先用**一句话（≤20 字）**说明要做什么（如"先看一下项目结构"、"改完跑一遍测试"）；工具返回后**不要复述过程**（"我搜索了…""结果显示…""我排除了…"这类一律禁止）——工具卡片已经展示细节，正文只给结论。
+- 同一阶段的连续多个工具，只在**阶段开始时**说一次，不要每个工具都说一句。
+- 遇到失败、重试、方向调整：**必须**用一句话说明（用户需要知道为什么慢、为什么换方案）。
+- 最终结论放在**所有工具执行完之后**：直接给结果/结论（标题、要点、来源），不要回顾过程。引用来源统一用 markdown 链接格式 \`[媒体名](url)\` 放在消息末尾（多条来源用空格分隔、不要写在正文段落中间），前端会自动把末尾的来源链接提取成"来源"卡片，正文只留说明文字。`
 
 
   // 读取记忆开关
@@ -1224,6 +1248,10 @@ export async function runAgentLoop(
   // P2-1 模型 fallback 标记（主模型失败切备用，只切一次避免循环）
   let modelFallbackUsed = false
 
+  // 本轮**真正**在跑的模型：fallback 会临时换掉请求体的 model，但 agentConfig.model 不变。
+  // 费用估算与消息归属都必须读这个变量，否则「用 flash 干活、按 pro 记账」。
+  let activeModel = agentConfig.model
+
   // ---- 上下文窗口：按模型动态配置（体验补强 1）----
   const contextWindow = getContextWindowForModel(agentConfig.model)
 
@@ -1591,8 +1619,10 @@ export async function runAgentLoop(
     try {
       const plainTurn = forcePlainOnce
       forcePlainOnce = false // 消费一次后复位,便于后续轮恢复用工具
+      // 每轮重置：除非本轮 fallback，否则就是配置里的模型
+      activeModel = agentConfig.model
       let requestBody = JSON.stringify({
-        model: agentConfig.model,
+        model: activeModel,
         messages: apiMessages,
         temperature: agentConfig.temperature,
         max_tokens: agentConfig.maxTokens,
@@ -1643,6 +1673,7 @@ export async function runAgentLoop(
         modelFallbackUsed = true
         console.warn(`[Fallback] 主模型 ${agentConfig.model} 失败（${err.message}），切备用 ${fb} 重试`)
         emitSSE(ctx, 'fallback', { from: agentConfig.model, to: fb, reason: String(err.message).slice(0, 200) })
+        activeModel = fb
         requestBody = JSON.stringify({ ...JSON.parse(requestBody), model: fb })
         response = await doFetch(requestBody)
         if (!response.ok) {
@@ -1666,7 +1697,8 @@ export async function runAgentLoop(
       let reasoningBuffer = ''
       const toolCallBuffer: Map<number, { id: string; name: string; args: string }> = new Map()
       // 本轮真实 token 用量（流式结束时的 usage 字段）
-      let lastUsage: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | null = null
+      // 缓存命中/未命中字段必须一起带上：官方两者差 50 倍，丢了就只能按未命中计（高估）
+      let lastUsage: (UsageLike & { total_tokens?: number }) | null = null
 
       while (true) {
         const { done, value } = await reader.read()
@@ -1824,17 +1856,46 @@ export async function runAgentLoop(
           })
         }
 
-        for (const tc of toolCalls) {
+        // 🔴 2026-10-22：**先把裁决算完，再播给前端**。
+        //   旧顺序：先给所有敏感工具发 `status:'pending'` → 再算 `decideToolApproval`。
+        //   于是低/中风险（判 allow、立刻执行）也会先闪一次授权框（老板实测：一条只读的
+        //   `grep -q` 循环弹框 + 1s 倒计时）。裁决是纯函数，没有理由放在播报之后。
+        loadSessionApprovals()
+        loadSessionBlockApprovals()
+        const approvalCtx = {
+          mode: resolveApprovalMode(
+            readSetting('permissionTier'),
+            readSetting('toolApprovalMode'),
+            permissionLevel,
+          ),
+          permissionLevel,
+          sessionApproved: !!(sessionId && sessionApprovedTools.has(sessionId)),
+          sessionBlockApproved: !!(sessionId && sessionApprovedBlockTools.has(sessionId)),
+          classify: classifySensitiveTool,
+        }
+        const approvalPlan = planToolApprovals(toolCalls, {
+          isSensitive: (n) => SENSITIVE_TOOLS.has(n),
+          decide: (n, a) => decideToolApproval(n, a, approvalCtx),
+          risk: (n, a) => resolveApprovalRisk(n, a),
+        })
+
+        for (let ti = 0; ti < toolCalls.length; ti++) {
+          const tc = toolCalls[ti]
+          const planned = approvalPlan[ti]
           totalToolCalls.push(tc.function.name)
-          const isSensitive = SENSITIVE_TOOLS.has(tc.function.name)
           // P0-03: 统一状态机记录当前步骤（前端"当前执行"从这里派生，不再各自猜）
           if (taskRec) { try { setTaskStep(taskRec.task_id, `执行工具：${tc.function.name}`) } catch { /* 非关键 */ } }
           emitSSE(ctx, 'tool_call', {
             name: tc.function.name,
             arguments: tc.function.arguments,
             id: tc.id,
-            status: isSensitive ? 'pending' : 'running',
+            // 只有真要问用户的才是 pending（计划里已定好，见 tool-approval-plan.ts）
+            status: planned.status,
             createTime: Date.now(),  // P0-7：工具真实执行时刻（前端持久化，历史重放订正耗时）
+            // 风险等级（2026-10-22）：唯一实现在 services/approval-risk.ts。
+            // 只对需要审批的工具算——等级 = 分类器三值（block→高 / ask→中 / allow→低），
+            // 前端据此显示标签与一行说明；此前前端按工具名硬编码，`rm -rf /` 会显示"中风险"。
+            ...(planned.risk ? { risk: planned.risk } : {}),
           })
         }
 
@@ -1874,35 +1935,22 @@ export async function runAgentLoop(
         const regularCalls = toolCalls.filter((tc: any) => !SENSITIVE_TOOLS.has(tc.function.name))
         let allowSensitive: ('allow' | 'deny' | 'timeout')[] = []
         if (sensitiveCalls.length > 0) {
-          // P0-04：授权档位统一为三档（仅查看/执行前询问/自动执行），内部映射回历史 4 档，行为不变。
-          // permissionTier 优先；未设置时回退历史 toolApprovalMode；再回退按会话权限档推导。
-          const approvalMode = resolveApprovalMode(
-            readSetting('permissionTier'),
-            readSetting('toolApprovalMode'),
-            permissionLevel,
-          )
-          // 2026-09-24 / I14：四档各自为政的分支收敛为**一个纯函数**（permission.ts）。
-          // 旧实现的三个坑（都在这里被修掉）：
-          //  ① `auto` 档全程不读 sessionApprovedTools → 点过「本会话全部允许」照样逐个弹窗；
-          //  ② `accept-edits` 档 loadSessionApprovals() 调了但从不用返回值（死调用）；
-          //  ③ 只有 `prompt` 档读白名单 → 同一个按钮在不同档位行为不一致。
-          loadSessionApprovals()
-          loadSessionBlockApprovals()
-          const sessionApproved = !!(sessionId && sessionApprovedTools.has(sessionId))
-          const sessionBlockApproved = !!(sessionId && sessionApprovedBlockTools.has(sessionId))
+          // 裁决已在播报前算好（见上方 approvalPlan）—— 这里只按计划执行，**不再重算**，
+          // 否则"播报时判 allow、执行时判 confirm"这类漂移会重新出现。
+          const planById = new Map(approvalPlan.map((p) => [p.id, p]))
+          const fallbackAction = (tc: any) =>
+            decideToolApproval(tc.function.name, tc.function?.arguments || '', approvalCtx)
           allowSensitive = await Promise.all(
             sensitiveCalls.map(async (tc: any) => {
               const args = tc.function?.arguments || ''
-              const action = decideToolApproval(tc.function.name, args, {
-                mode: approvalMode,
-                permissionLevel,
-                sessionApproved,
-                sessionBlockApproved,
-                classify: classifySensitiveTool,
-              })
+              const action = planById.get(tc.id)?.action ?? fallbackAction(tc)
               if (action === 'deny') return 'deny' as const
               if (action === 'allow') return 'allow' as const
-              const verdict = await waitForToolConfirmation(tc.id)
+              // 🔴 不可逆（block / 删除）永不自动放行：即使 toolAutoApproveSeconds > 0 也走满超时。
+              //   两级判定取并集：planned.risk 是播报前算好的（可能缺失），分类器是当场真值。
+              const irreversible = planById.get(tc.id)?.risk?.level === 'high'
+                || classifySensitiveTool(tc.function.name, args) === 'block'
+              const verdict = await waitForToolConfirmation(tc.id, CONFIRMATION_TIMEOUT_MS, { irreversible })
               // "拦一次后记住"：block 类被用户显式允许 → 本会话记住，后续不再拦（拒绝不记）
               if (verdict === 'allow' && sessionId && classifySensitiveTool(tc.function.name, args) === 'block') {
                 approveSessionBlockTools(sessionId)
@@ -2188,7 +2236,7 @@ export async function runAgentLoop(
 
       // 本轮结束：把真实 token 用量发给前端（有 usage 时），cost 按模型单价估算
       if (lastUsage && lastUsage.total_tokens) {
-        const roundCost = estimateCost(agentConfig.model, lastUsage)
+        const roundCost = estimateCost(activeModel, lastUsage)
         totalUsage.prompt += lastUsage.prompt_tokens || 0
         totalUsage.completion += lastUsage.completion_tokens || 0
         totalUsage.total += lastUsage.total_tokens || 0
@@ -2198,6 +2246,9 @@ export async function runAgentLoop(
           completionTokens: lastUsage.completion_tokens || 0,
           totalTokens: lastUsage.total_tokens || 0,
           cost: roundCost,
+          // 逐条消息的模型归属（前端随消息落库）——没有它，用量页只能按 sessions.model
+          // 分组，而那个值是建会话时的模型，换过模型就永久错配。
+          model: activeModel,
         })
       }
 
@@ -2239,17 +2290,16 @@ export async function runAgentLoop(
 
       // ---- 需要 fallback：通知用户但不重试 ----
       if (classified.shouldFallback) {
+        // 2026-10-22 修（A1）：错误提示**不再走 content 通道**。
+        // 历史实现 `emitSSE('content', {content: humanizeApiError(...), error: true})` 会被前端
+        // `ChatView case 'content'` 无条件写进 `msg.content`（它不看 error 标记），
+        // 顺序又是 error→content ⇒ 本轮已产出的答案在持久化时被错误文案整体替换。
+        // 现改为随 error 事件下发 `hint`，前端只渲染成 stopReason 横幅，正文一个字都不动。
         emitSSE(ctx, 'error', {
           message: `[${classified.reason}] ${classified.message.slice(0, 200)}`,
           needFallback: true,
           reason: classified.reason,
-        })
-        // 2026-08-28：按错误原因给"看得懂、能动手"的提示。此前一律"API 服务异常，建议切换模型"，
-        // 余额不足时用户根本不知道要充值，只会觉得"这么简单的任务都搞不定"。
-        const userHint = humanizeApiError(classified)
-        emitSSE(ctx, 'content', {
-          content: userHint,
-          error: true,
+          hint: humanizeApiError(classified),
         })
         interrupted = classified.reason  // 2026-08-26：费用耗尽/需切换模型 → 中断，保存检查点
         finished = true
@@ -2289,16 +2339,17 @@ export async function runAgentLoop(
         }
         consecutiveApiErrors++
         if (consecutiveApiErrors > 3) {
-          emitSSE(ctx, 'error', { message: `连续 ${consecutiveApiErrors} 次失败 (${classified.reason})，停止重试` })
-          emitSSE(ctx, 'content', {
-            content: [
-              `抱歉，连续 ${consecutiveApiErrors} 次 API 失败 (${classified.reason})。`,
+          // 2026-10-22 修（A1）：同 shouldFallback 分支——提示走 error.hint，不写 content。
+          emitSSE(ctx, 'error', {
+            message: `连续 ${consecutiveApiErrors} 次失败 (${classified.reason})，停止重试`,
+            reason: classified.reason,
+            hint: [
+              `连续 ${consecutiveApiErrors} 次 API 失败（${classified.reason}）。`,
               '',
               humanizeApiError(classified),
               '',
-              '进度已保存，可切换模型后继续。',
+              '本轮进度已保存，可切换模型或恢复网络后继续。',
             ].join('\n'),
-            error: true,
           })
           interrupted = classified.reason  // 2026-08-26：连续 API 失败 → 中断，保存检查点
           finished = true
@@ -2314,8 +2365,12 @@ export async function runAgentLoop(
         }
       } else {
         // 不可重试的错误
-        emitSSE(ctx, 'error', { message: `[${classified.reason}] ${classified.message.slice(0, 200)}` })
-        emitSSE(ctx, 'content', { content: humanizeApiError(classified), error: true })
+        // 2026-10-22 修（A1）：提示走 error.hint，不再写 content（同前两处）。
+        emitSSE(ctx, 'error', {
+          message: `[${classified.reason}] ${classified.message.slice(0, 200)}`,
+          reason: classified.reason,
+          hint: humanizeApiError(classified),
+        })
         interrupted = classified.reason  // 2026-08-26：不可重试错误 → 中断，保存检查点
         finished = true
       }
@@ -2446,7 +2501,7 @@ export async function runAgentLoop(
       summary: lastContent,
       toolCount: totalToolCalls.length,
       turns: turn,
-      model: agentConfig.model,
+      model: activeModel,
     }).catch((e) => console.log(`[TaskLog] 异常: ${e?.message || e}`))
   }
 

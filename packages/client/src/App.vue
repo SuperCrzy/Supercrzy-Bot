@@ -7,6 +7,8 @@
             <router-view />
             <!-- PWA 安装引导（桌面可安装 + iOS 添加到主屏幕） -->
             <InstallPrompt />
+            <!-- API 低余额提醒：启动查一次，低了给一条 toast（非模态） -->
+            <BalanceAlert />
           </n-loading-bar-provider>
         </n-dialog-provider>
       </n-message-provider>
@@ -20,6 +22,7 @@ import { zhCN, enUS, darkTheme } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import InstallPrompt from '@/components/layout/InstallPrompt.vue'
+import BalanceAlert from '@/components/layout/BalanceAlert.vue'
 
 const appStore = useAppStore()
 const { locale } = useI18n({ useScope: 'global' })

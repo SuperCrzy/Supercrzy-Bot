@@ -120,10 +120,14 @@ describe('useSpeech (Pro: Edge TTS)', () => {
     const longText = '这是一段用于测试分句播放的长文本。'.repeat(250)
     api.speak('m1', longText)
     await new Promise((r) => setTimeout(r, 30))
-    expect(mock.audios.length).toBe(1)
+    // 2026-10-21：预取已改成"提前建 <audio> 并 load()"⇒ 此时是
+    // 第 1 包在播 + 第 2 包已在缓冲（不是抢播，audioPlay 仍为 1）
+    expect(mock.audios.length).toBe(2)
+    expect(mock.calls.audioPlay).toBe(1)
     mock.audios[0].onended()
     await new Promise((r) => setTimeout(r, 30))
-    expect(mock.audios.length).toBe(2)
+    expect(mock.calls.audioPlay).toBe(2)   // 第 2 包接着播（用的是预取好的元素）
+    expect(mock.audios.length).toBe(3)     // 同时第 3 包已开始预取
     expect(api.speakingId.value).toBe('m1')
   })
 
@@ -156,6 +160,31 @@ describe('useSpeech (Pro: Edge TTS)', () => {
     expect(mock.calls.speak).toBe(1)
     expect(mock.getUtterance().text).toContain('第一句')
     expect(api.speakingId.value).toBe('m1')
+  })
+
+  /**
+   * 2026-10-21：Lite 曾硬写 `u.rate = 1`，于是降级时**音色和语速同时变**
+   * （用户在设置里选了 +20%，回落系统音色后回到 1.0），听感像"换了个功能"。
+   */
+  it('降级到 Lite 时保留设置语速（+20% → rate 1.2）', async () => {
+    mock = installMocks({ fetchOk: false })
+    const scope = effectScope()
+    const api = scope.run(() => useSpeech({ rate: () => '+20%' }))!
+    api.speak('m1', '第一句。')
+    await new Promise((r) => setTimeout(r, 40))
+    expect(mock.calls.speak).toBe(1)
+    expect(mock.getUtterance().rate).toBeCloseTo(1.2, 5)
+    scope.stop()
+  })
+
+  it('rate 缺省/无法解析 → 保持 1.0（不能因为解析失败就静默降速）', async () => {
+    mock = installMocks({ fetchOk: false })
+    const scope = effectScope()
+    const api = scope.run(() => useSpeech({ rate: () => 'default' }))!
+    api.speak('m1', '第一句。')
+    await new Promise((r) => setTimeout(r, 40))
+    expect(mock.getUtterance().rate).toBe(1)
+    scope.stop()
   })
 
   it('单例：读新的自动停旧的', async () => {
@@ -227,29 +256,46 @@ describe('useSpeech Pro 冷却（不再一次失败永久回落）', () => {
   })
   afterEach(() => vi.useRealTimers())
 
-  it('失败后 proDegraded 置位，且剩余文本立刻用 Lite 读完', async () => {
+  it('第一次失败**不换音色**：改用整条一次请求再试 Pro，成功后不降级', async () => {
     const { api } = withSpeech()
     api.speak('m1', '第一句。')
     await new Promise((r) => setTimeout(r, 40))
-    expect(api.proDegraded.value).toBe(true)
+    // 2026-10-21 改：一次失败只是握手抖动，换系统音色是最后手段
+    expect(mock.calls.fetch).toBe(2)          // ← 换票失败 1 次 + 整条重试 1 次
+    expect(mock.calls.speak).toBe(0)          // 没有走系统 TTS
+    expect(api.proDegraded.value).toBe(false) // 提示不亮：音色没变
+    expect(api.isPro()).toBe(true)            // 也没有进冷却
+    expect(api.speakingId.value).toBe('m1')
+  })
+
+  it('连续两次失败 → 才降到 Lite，并进冷却', async () => {
+    mock = installMocks({ failFirstN: 2 }) // 换票失败 + 整条重试也失败
+    const { api } = withSpeech()
+    api.speak('m1', '第一句。')
+    await new Promise((r) => setTimeout(r, 40))
+    expect(mock.calls.fetch).toBe(2)
     expect(mock.calls.speak).toBe(1)
+    expect(api.proDegraded.value).toBe(true)
+    expect(api.isPro()).toBe(false)
     expect(api.speakingId.value).toBe('m1')
   })
 
   it('冷却期内再朗读 → 不再空试 Pro（省掉注定失败的那次请求）', async () => {
+    mock = installMocks({ failFirstN: 2 })
     const { api } = withSpeech()
     api.speak('m1', '第一句。')
     await new Promise((r) => setTimeout(r, 40))
-    expect(mock.calls.fetch).toBe(1)
+    expect(mock.calls.fetch).toBe(2)
 
     api.speak('m2', '第二句。')
     await new Promise((r) => setTimeout(r, 40))
-    expect(mock.calls.fetch).toBe(1) // ← 关键：没有再多发一次
+    expect(mock.calls.fetch).toBe(2) // ← 关键：没有再多发一次
     expect(mock.calls.speak).toBe(2)
     expect(api.speakingId.value).toBe('m2')
   })
 
   it('冷却到期 → 自动重试 Pro，成功后撤下降级态', async () => {
+    mock = installMocks({ failFirstN: 2 })
     const { api } = withSpeech()
     api.speak('m1', '第一句。')
     await new Promise((r) => setTimeout(r, 40))
@@ -258,7 +304,7 @@ describe('useSpeech Pro 冷却（不再一次失败永久回落）', () => {
     vi.setSystemTime(Date.now() + PRO_COOLDOWN_MS + 1)
     api.speak('m2', '第二句。')
     await new Promise((r) => setTimeout(r, 40))
-    expect(mock.calls.fetch).toBe(2)          // ← 关键：真的又试了 Pro
+    expect(mock.calls.fetch).toBe(3)          // ← 关键：真的又试了 Pro
     expect(mock.calls.speak).toBe(1)          // 没有再走 Lite（仍是首次失败那 1 次）
     // 撤下降级态的时机是**真的出声**，不是"换票成功"：换票只是本地一次 POST，
     // 上游还挂着时票据照样换得到 —— 那时就撤提示会"先消失再弹回来"。
@@ -269,6 +315,7 @@ describe('useSpeech Pro 冷却（不再一次失败永久回落）', () => {
   })
 
   it('冷却期内 isPro() 为 false（供设置项等非响应式场景判断）', async () => {
+    mock = installMocks({ failFirstN: 2 })
     const { api } = withSpeech()
     api.speak('m1', '第一句。')
     await new Promise((r) => setTimeout(r, 40))
@@ -316,7 +363,7 @@ describe('useSpeech 流式（边生成边朗读）', () => {
    *   ② 再追加不重复请求：请求数不增（按 index 去重，不 drop 在途预取）
    *   ③ 切块时复用预取：audio 变 2 且**没有任何文本被请求两次**
    */
-  it('追加新块时**立即**预取下一块（不等当前块播完），且不重复请求同一包', async () => {
+  it('追加新块时**立即预取下一块的音频**（不等当前块播完），且不重复请求同一包', async () => {
     const { api } = withSpeech()
     api.beginStream('m1')
     api.appendStreamText('第一块。')
@@ -327,8 +374,10 @@ describe('useSpeech 流式（边生成边朗读）', () => {
     // 第一块还在播（**不**调 onended）时追加第二块
     api.appendStreamText('第二块。')
     await new Promise((r) => setTimeout(r, 30))
-    expect(mock.requestedTexts).toContain('第二块。') // ① 提前取了
-    expect(mock.audios.length).toBe(1)                // 但没有抢播
+    expect(mock.requestedTexts).toContain('第二块。') // ① 提前换票
+    // ② 而且已经建好 <audio> 在缓冲（≥2：可能还叠了一个刚落地的槽）
+    expect(mock.audios.length).toBeGreaterThanOrEqual(2)
+    expect(mock.calls.audioPlay).toBe(1)              // 但没有抢播
 
     // 继续追加第三块：预取的仍是 queueIndex+1（同一包）→ 不得重复请求
     const nAfterSecond = mock.calls.fetch
@@ -339,8 +388,8 @@ describe('useSpeech 流式（边生成边朗读）', () => {
     // 第一块播完 → 切到第二块，应当直接吃掉预取结果（不会再为它请求一次）
     mock.audios[0].onended()
     await new Promise((r) => setTimeout(r, 30))
-    expect(mock.audios.length).toBe(2)
-    expect(mock.calls.audioPlay).toBe(2)
+    expect(mock.calls.audioPlay).toBe(2)              // 第二块接着播
+    expect(mock.audios.length).toBe(3)                // 第三块已在预取缓冲
     // ③ 全局不变量：同一段文本绝不被请求两次
     expect(new Set(mock.requestedTexts).size).toBe(mock.requestedTexts.length)
     expect(mock.requestedTexts.filter((t) => t === '第二块。').length).toBe(1)
@@ -368,7 +417,7 @@ describe('useSpeech 流式（边生成边朗读）', () => {
   it('Pro 冷却中 beginStream 返回 false，且**不打断**正在进行的朗读', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     try {
-      mock = installMocks({ failFirstN: 1 })
+      mock = installMocks({ failFirstN: 2 }) // 两次失败才进冷却（一次失败会走整条重试）
       const { api } = withSpeech()
       api.speak('m0', '第一句。')
       await new Promise((r) => setTimeout(r, 40))
@@ -582,20 +631,26 @@ describe('useSpeech Pro 整条 → 流式 URL（2026-09-28）', () => {
     expect(new Set(mock.requestedTexts).size).toBe(1)
   })
 
-  it('重试后仍然 error → 才认定真故障：进冷却 + 回落 Lite 读完剩余', async () => {
+  it('块内重试也失败 → 整条再重试一次；仍失败才降级（换音色是最后手段）', async () => {
     const { api } = withSpeech()
     api.speak('m1', '第一句。')
     await new Promise((r) => setTimeout(r, 30))
 
-    mock.audios[0].onerror?.() // 第一次：给一次重试
+    mock.audios[0].onerror?.() // 第一次：换票重播同一块
     await new Promise((r) => setTimeout(r, 30))
     expect(mock.audios.length).toBe(2)
     expect(mock.calls.speak).toBe(0)
 
-    mock.audios[1].onerror?.() // 第二次：不再宽容
+    mock.audios[1].onerror?.() // 第二次：块内额度用完 → 改用整条一次请求再试 Pro
+    await new Promise((r) => setTimeout(r, 30))
+    expect(mock.audios.length).toBe(3)
+    expect(mock.calls.speak).toBe(0)          // ← 仍然没换音色
+    expect(api.proDegraded.value).toBe(false)
+
+    mock.audios[2].onerror?.() // 第三次：整条重试也失败 → 这一步才降级
     await new Promise((r) => setTimeout(r, 30))
 
-    expect(mock.audios.length).toBe(2)        // ← 不再新建（没完没了地重试）
+    expect(mock.audios.length).toBe(3)        // ← 不再新建（没完没了地重试）
     expect(api.proDegraded.value).toBe(true)  // ← 降级提示亮起
     expect(api.isPro()).toBe(false)           // ← 进冷却，短期内不再空试
     expect(mock.calls.speak).toBe(1)          // ← 剩余文本交给系统 TTS，不是静音结束
@@ -614,5 +669,179 @@ describe('useSpeech Pro 整条 → 流式 URL（2026-09-28）', () => {
     expect(mock.calls.audioPlay).toBe(1)
     expect(api.proDegraded.value).toBe(true)
     expect(mock.calls.speak).toBe(1)
+  })
+})
+
+/**
+ * 会话式朗读（2026-10-21）：一条消息一条流。
+ *
+ * 这里只钉"接线对不对"：**只建一个 <audio>**、指向会话流、push/end 打到对应接口。
+ * 真正的无缝性由服务端保证（连续 mp3 帧流），前端不该出现第二个音频元素。
+ */
+describe('useSpeech 会话式流（一条消息一条流）', () => {
+  const TOKEN = 'a'.repeat(48)
+  let calls: { url: string; body: any }[] = []
+
+  function installLiveFetch(opts: { createOk?: boolean } = {}) {
+    calls = []
+    globalThis.fetch = vi.fn(async (u: any, init?: any) => {
+      const body = init?.body ? JSON.parse(String(init.body)) : null
+      calls.push({ url: String(u), body })
+      if (String(u) === '/api/tts/live') {
+        if (opts.createOk === false) return { ok: false, status: 500, json: async () => ({}) } as any
+        return { ok: true, json: async () => ({ token: TOKEN, url: `/api/tts/live/stream?t=${TOKEN}` }) } as any
+      }
+      return { ok: true, json: async () => ({ ok: true }) } as any
+    }) as any
+  }
+
+  it('beginLive 只建一个 <audio> 指向会话流；push/end 打到对应接口', async () => {
+    const mock = installMocks()
+    installLiveFetch()
+    const { api } = withSpeech()
+
+    const ok = await api.beginLive('m1')
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(ok).toBe(true)
+    expect(mock.audios.length).toBe(1)                       // ← 关键：只有一个音频元素
+    expect(mock.audios[0].src).toContain('/api/tts/live/stream')
+    expect(api.speakingId.value).toBe('m1')
+    expect(api.isLive()).toBe(true)
+
+    api.pushLive('第二段。')
+    api.pushLive('第三段。')
+    api.endLive()
+    await new Promise((r) => setTimeout(r, 10))
+
+    const urls = calls.map((c) => c.url)
+    expect(urls.filter((u) => u === '/api/tts/live/push').length).toBe(2)
+    expect(urls).toContain('/api/tts/live/end')
+    expect(api.isLive()).toBe(false) // end 之后不再持有 token
+  })
+
+  it('开会话失败 → 返回 false（调用方据此回退逐段/整条）', async () => {
+    const mock = installMocks()
+    installLiveFetch({ createOk: false })
+    const { api } = withSpeech()
+    const ok = await api.beginLive('m1')
+    expect(ok).toBe(false)
+    expect(mock.audios.length).toBe(0)
+  })
+
+  it('stop 会掐掉会话流（<audio> 一断，服务端就 destroy 会话）', async () => {
+    const mock = installMocks()
+    installLiveFetch()
+    const { api } = withSpeech()
+    await api.beginLive('m1')
+    await new Promise((r) => setTimeout(r, 10))
+    api.stop()
+    expect(api.isLive()).toBe(false)
+    expect(mock.audios[0].src).toBe('') // removeAttribute('src') = 真的断流
+  })
+})
+
+/**
+ * 自适应码率（2026-10-21）。
+ *
+ * 真实约束：96k = 12KB/s，实测弱网（手机热点出口 13KB/s）缓冲必见底；48k 只需 6KB/s。
+ * 这里钉三件事：默认 96k、播起来后断粮立刻降 48k 并持久化、连续 3 轮干净再升回 96k。
+ */
+describe('useSpeech 会话流自适应码率', () => {
+  const TOKEN = 'b'.repeat(48)
+  let bodies: any[] = []
+
+  function installFetch() {
+    bodies = []
+    globalThis.fetch = vi.fn(async (u: any, init?: any) => {
+      const body = init?.body ? JSON.parse(String(init.body)) : null
+      if (String(u) === '/api/tts/live') {
+        bodies.push(body)
+        return { ok: true, json: async () => ({ token: TOKEN, url: `/api/tts/live/stream?t=${TOKEN}` }) } as any
+      }
+      return { ok: true, json: async () => ({ ok: true }) } as any
+    }) as any
+  }
+
+  beforeEach(() => { try { localStorage.clear() } catch { /* jsdom 无 localStorage 时忽略 */ } })
+
+  it('默认按 96 档开会话', async () => {
+    installMocks(); installFetch()
+    const { api } = withSpeech()
+    await api.beginLive('m1')
+    expect(bodies[0]?.quality).toBe('96')
+  })
+
+  it('播起来之后断粮（waiting/stalled）→ 下一轮降到 48 并写进 localStorage', async () => {
+    const mock = installMocks(); installFetch()
+    const { api } = withSpeech()
+    await api.beginLive('m1')
+    await new Promise((r) => setTimeout(r, 10))
+
+    mock.audios[0].onplaying?.()      // 先真的出声
+    mock.audios[0].onwaiting?.()      // 然后断粮
+    api.stop()
+
+    await api.beginLive('m2')         // 下一轮
+    expect(bodies[bodies.length - 1]?.quality).toBe('48')
+    expect(localStorage.getItem('supercrzy:ttsQuality')).toBe('48')
+  })
+
+  it('首次加载阶段的 waiting 不算断粮（不误降档）', async () => {
+    const mock = installMocks(); installFetch()
+    const { api } = withSpeech()
+    await api.beginLive('m1')
+    await new Promise((r) => setTimeout(r, 10))
+    mock.audios[0].onwaiting?.()      // 还没 playing 过
+    api.stop()
+    await api.beginLive('m2')
+    expect(bodies[bodies.length - 1]?.quality).toBe('96')
+  })
+
+  it('48 档连续 3 轮无断粮 → 自动升回 96', async () => {
+    installMocks(); installFetch()
+    try { localStorage.setItem('supercrzy:ttsQuality', '48') } catch {}
+    const { api } = withSpeech()
+    for (let i = 0; i < 3; i++) {
+      const mock = installMocks(); installFetch()
+      const a = await api.beginLive(`m${i}`)
+      expect(a).toBe(true)
+      await new Promise((r) => setTimeout(r, 5))
+      mock.audios[mock.audios.length - 1].onplaying?.()
+      mock.audios[mock.audios.length - 1].onended?.()
+      await new Promise((r) => setTimeout(r, 5))
+    }
+    // 第 3 轮 ended 之后升回 96 —— 下一次开会话应当是 96
+    installMocks(); installFetch()
+    await api.beginLive('mX')
+    expect(bodies[bodies.length - 1]?.quality).toBe('96')
+  })
+})
+
+/**
+ * 首声延迟的测量（2026-10-21）。
+ *
+ * 这条决定了自适应切块有没有「真数据」可用：测错 → 门槛算错 → 要么白等、要么断粮。
+ * 时机的定义是「调 beginLive 那一刻 → 第一次 onplaying」，而不是「换到票」或「请求返回」。
+ */
+describe('useSpeech 首声延迟测量', () => {
+  it('记录 beginLive → onplaying 的耗时并持久化（供阈值计算）', async () => {
+    try { localStorage.clear() } catch {}
+    const mock = installMocks()
+    globalThis.fetch = vi.fn(async (u: any) => {
+      if (String(u) === '/api/tts/live') {
+        return { ok: true, json: async () => ({ token: 'c'.repeat(48), url: '/api/tts/live/stream?t=x' }) } as any
+      }
+      return { ok: true, json: async () => ({ ok: true }) } as any
+    }) as any
+    const { api } = withSpeech()
+    expect(api.latencyMs()).toBe(1200) // 冷启动兜底值
+    await api.beginLive('m1')
+    await new Promise((r) => setTimeout(r, 30))
+    mock.audios[0].onplaying?.()
+    const v = api.latencyMs()
+    expect(v).toBeGreaterThanOrEqual(200)   // 夹在合理区间
+    expect(v).toBeLessThanOrEqual(5000)
+    expect(Number(localStorage.getItem('supercrzy:ttsLatencyMs'))).toBe(v)
   })
 })

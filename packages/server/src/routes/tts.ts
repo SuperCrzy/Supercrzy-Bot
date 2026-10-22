@@ -9,6 +9,9 @@ import {
   defaultVoice,
   TTS_MAX_CHARS,
 } from '../services/tts'
+import { LiveTtsSession, LIVE_MAX_CHARS_PER_PUSH } from '../services/tts-session'
+import { formatForQuality, TTS_FORMATS } from '../services/tts'
+import { pickTtsRoute, routeSnapshot } from '../services/tts-route'
 
 /**
  * TTS API — AI 回复朗读的高质量音色通道（2026-09-27）。
@@ -201,6 +204,144 @@ ttsRouter.get('/stream', async (ctx: Context) => {
   const origin = ctx.request.header.origin
   ctx.set('Access-Control-Allow-Origin', origin || '*')
   ctx.body = out
+})
+
+/**
+ * ===== 会话式朗读（2026-10-21）=====
+ *
+ * `POST /api/tts/live`      → { token }（一条消息一条流）
+ * `POST /api/tts/live/push` → { t, text } 追加一段文本（模型还在生成时随时调）
+ * `POST /api/tts/live/end`  → { t } 没有更多文本了
+ * `GET  /api/tts/live/stream?t=...` → 连续的 audio/mpeg（chunked，永不换连接）
+ *
+ * 为什么不是"每段一次请求"：那等于把 ws 握手与 mp3 编码器起头按段数重复付（手机 7~10s/段）。
+ * 上游本身支持一条连接连续多轮合成（实测空闲 45s 仍可用），所以整条回复只用一条流。
+ */
+const LIVE_TTL_MS = 30 * 60_000
+const LIVE_IDLE_DROP_MS = 10 * 60_000
+const LIVE_MAX_SESSIONS = 8
+
+interface LiveEntry { s: LiveTtsSession; lastAt: number }
+const liveSessions = new Map<string, LiveEntry>()
+
+function sweepLive(now: number): void {
+  for (const [k, v] of liveSessions) {
+    const dead = v.s.isEnded || v.s.isDestroyed || now - v.lastAt > LIVE_IDLE_DROP_MS || v.s.ageMs > LIVE_TTL_MS
+    if (dead) {
+      v.s.destroy()
+      liveSessions.delete(k)
+    }
+  }
+}
+
+function takeLive(token: unknown): LiveTtsSession | null {
+  const t = String(token || '')
+  if (!TOKEN_RE.test(t)) return null
+  const e = liveSessions.get(t)
+  if (!e) return null
+  e.lastAt = Date.now()
+  return e.s
+}
+
+/**
+ * 出口自检（2026-10-21）：告诉客户端/运维"现在走直连还是中继、各自握手多少毫秒"。
+ * 没有它，选路就是个黑盒 —— 出问题时只能猜。
+ */
+ttsRouter.get('/route', (ctx: Context) => {
+  ctx.set('Cache-Control', 'no-store')
+  ctx.body = routeSnapshot()
+})
+
+ttsRouter.post('/route/refresh', async (ctx: Context) => {
+  const d = await pickTtsRoute(true)
+  ctx.set('Cache-Control', 'no-store')
+  ctx.body = { chosen: d.proxy ?? 'direct', ms: d.ms, probes: d.probes }
+})
+
+ttsRouter.post('/live', (ctx: Context) => {
+  const { voice, rate, quality } = (ctx.request.body as any) || {}
+  // 码率档（2026-10-21）：'96' 默认 / '48' 弱网。非法值直接 400，别静默回默认 ——
+  // 否则弱网用户会以为"降码率没生效"，而实际上是参数写错了。
+  if (quality !== undefined && formatForQuality(quality) === null) {
+    ctx.status = 400
+    ctx.body = { error: `quality 只支持 ${Object.keys(TTS_FORMATS).join(' / ')}` }
+    return
+  }
+  const now = Date.now()
+  sweepLive(now)
+  // 有界：超出按最久未活动淘汰（防止挂机把上游连接堆满）
+  while (liveSessions.size >= LIVE_MAX_SESSIONS) {
+    let oldestKey: string | null = null
+    let oldestAt = Infinity
+    for (const [k, v] of liveSessions) {
+      if (v.lastAt < oldestAt) { oldestAt = v.lastAt; oldestKey = k }
+    }
+    if (!oldestKey) break
+    liveSessions.get(oldestKey)?.s.destroy()
+    liveSessions.delete(oldestKey)
+  }
+  const s = new LiveTtsSession({
+    voice: typeof voice === 'string' ? voice : undefined,
+    rate: typeof rate === 'string' ? rate : undefined,
+    quality,
+  })
+  liveSessions.set(s.id, { s, lastAt: now })
+  ctx.set('Cache-Control', 'no-store')
+  ctx.body = {
+    token: s.id,
+    url: `/api/tts/live/stream?t=${s.id}`,
+    maxCharsPerPush: LIVE_MAX_CHARS_PER_PUSH,
+  }
+})
+
+ttsRouter.post('/live/push', (ctx: Context) => {
+  const { t, text } = (ctx.request.body as any) || {}
+  const s = takeLive(t)
+  if (!s) {
+    ctx.status = 410
+    ctx.body = { error: '朗读会话已失效' }
+    return
+  }
+  const { text: body, error } = validateText(text)
+  if (error) {
+    ctx.status = 400
+    ctx.body = { error }
+    return
+  }
+  const ok = s.push(body.trim())
+  ctx.set('Cache-Control', 'no-store')
+  ctx.body = { ok }
+})
+
+ttsRouter.post('/live/end', (ctx: Context) => {
+  const { t } = (ctx.request.body as any) || {}
+  const s = takeLive(t)
+  if (!s) {
+    ctx.status = 410
+    ctx.body = { error: '朗读会话已失效' }
+    return
+  }
+  s.end()
+  ctx.set('Cache-Control', 'no-store')
+  ctx.body = { ok: true }
+})
+
+ttsRouter.get('/live/stream', async (ctx: Context) => {
+  const s = takeLive((ctx.query as any)?.t)
+  if (!s) {
+    ctx.status = 410
+    ctx.body = { error: '朗读链接已失效，请重新点一次朗读' }
+    return
+  }
+  // 客户端断开 → 整条会话作废（否则上游会继续合成没人听的音频）
+  ctx.res.on('close', () => { s.destroy() })
+  ctx.type = 'audio/mpeg'
+  ctx.set('Cache-Control', 'no-store')
+  // 与 /stream 同理：nginx 默认缓冲会把流攒成整包，等于白改
+  ctx.set('X-Accel-Buffering', 'no')
+  const origin = ctx.request.header.origin
+  ctx.set('Access-Control-Allow-Origin', origin || '*')
+  ctx.body = s.out
 })
 
 /**
