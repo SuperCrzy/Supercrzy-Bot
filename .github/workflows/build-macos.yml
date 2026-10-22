@@ -1,0 +1,73 @@
+name: Build macOS
+
+# 为什么要放在云端：本机（macOS arm64）打 dmg 时，electron-builder 的 hdiutil 必须在
+# /Volumes 挂载一个临时卷、再往卷里写应用副本；AI 沙箱/安全层会把挂载卷内的删除操作全部拒掉
+# （`.BC.T_*` file-delete），`dangerouslyDisableSandbox` 也无效 —— 挂载卷不在任何白名单里。
+# 结果是 dmg 只能在真人终端里打，而这个动作没法远程代跑。
+# GitHub 的 macos-14 runner 是 arm64、原生有 hdiutil，且免费额度对我们够用，
+# 于是把这条链路搬到云端，从此 dmg 不再依赖"某台开发机上的某个人"。
+#
+# 跑的不是另一套构建，而是本仓**已验证过的脚本** `scripts/build-dmg.sh`：
+#   ① 前端 build ② .deploy-server 用 npm 装真实依赖 + better-sqlite3 rebuild 到 Electron ABI
+#   ③ 出厂门禁（凭据/DB 不入包、openclaw 等死重剪掉）④ electron-builder 出 dmg + zip
+# 与 build-windows.yml 的分工：那条只管 Windows，这条只管 macOS，互不拖慢。
+#
+# 触发：手动（workflow_dispatch）或打 tag。不挂 push —— 一次约 12~15 分钟。
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version label for the artifact (defaults to package.json version)"
+        required: false
+        default: ""
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: macOS dmg + zip
+    runs-on: macos-14
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      # 版本号：以根 package.json 为唯一源，打包前先自检，漂移直接失败
+      - name: Check version consistency
+        run: node scripts/version.mjs --check
+
+      # UPDATE_URL 决定包内 updater 的指向；不设会落回配置文件里的示例值。
+      # 无签名证书 ⇒ 显式关掉身份发现，避免 electron-builder 在 runner 上干等钥匙串。
+      - name: Build app (dmg + zip)
+        env:
+          UPDATE_URL: https://updates.supercrzy.com/releases
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: bash scripts/build-dmg.sh
+
+      - name: List artifacts
+        working-directory: packages/desktop/dist
+        run: ls -lh *.dmg *.zip *.yml 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: supercrzy-bot-macos-${{ github.event.inputs.version || github.ref_name }}
+          path: |
+            packages/desktop/dist/*.dmg
+            packages/desktop/dist/*-mac.zip
+            packages/desktop/dist/latest-mac.yml
+          if-no-files-found: error
