@@ -171,7 +171,7 @@ const {
 .browser-ico { border: none; background: transparent; cursor: pointer; color: var(--text-secondary); width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); flex-shrink: 0; }
 .browser-ico:hover { color: var(--text-primary); background: var(--bg-hover); }
 .browser-maxbtn { border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-primary); cursor: pointer; color: var(--text-secondary); display: inline-flex; align-items: center; justify-content: center; height: 20px; margin-left: 2px; padding: 0 5px; }
-.browser-maxbtn:hover { border-color: var(--border-strong); color: var(--text-primary); }
+.browser-maxbtn:hover { border-color: var(--border-hover); color: var(--text-primary); }
 .browser-view { border: 1px solid var(--border-color); border-radius: var(--radius-sm); overflow: hidden; }
 .browser-chrome-bar { display: flex; align-items: center; gap: 4px; padding: 4px 8px; background: #0f172a; }
 .bc-dot { width: 7px; height: 7px; border-radius: 50%; }
@@ -189,7 +189,7 @@ const {
 .browser-shot { display: block; width: 100%; height: auto; }
 .browser-shot.clickable { cursor: crosshair; }
 .browser-hit-hint { font-size: 10px; color: var(--text-tertiary); text-align: center; padding: 2px 0; }
-.browser-fail { font-size: 12px; color: var(--danger, #e24b4a); text-align: center; padding: 6px 10px; line-height: 1.5; }
+.browser-fail { font-size: 12px; color: var(--error); text-align: center; padding: 6px 10px; line-height: 1.5; }
 .browser-placeholder { font-size: 11px; color: var(--text-muted); padding: 10px; text-align: center; line-height: 1.5; }
 .browser-placeholder.loading { color: var(--text-secondary); }
 .browser-console { background: #0f172a; border-radius: var(--radius-sm); padding: 6px 8px; font-family: var(--font-mono, monospace); font-size: 10px; color: #6ee7a0; max-height: 90px; overflow-y: auto; }
@@ -203,7 +203,7 @@ const {
 .bc-input { flex: 1 1 auto; min-width: 0; border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 5px 8px; font-size: 12px; background: var(--bg-tertiary); color: var(--text-primary); caret-color: var(--text-primary); }
 .bc-input::placeholder { color: var(--text-tertiary); }
 .bc-btn { flex-shrink: 0; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-primary); color: var(--text-secondary); font-size: 11px; padding: 4px 8px; cursor: pointer; white-space: nowrap; }
-.bc-btn:hover { border-color: var(--border-strong); color: var(--text-primary); background: var(--bg-hover); }
+.bc-btn:hover { border-color: var(--border-hover); color: var(--text-primary); background: var(--bg-hover); }
 
 /* 🔴 2026-10-20 手机端「AI 浏览器画面是扁的」根治。
  *

@@ -4,7 +4,7 @@
     <!-- SVG 圆环（20px，顶部会话栏比例协调） -->
     <div class="ctx-ring" @click="showDetail = !showDetail" :title="tipLabel">
       <svg width="20" height="20" viewBox="0 0 20 20">
-        <circle cx="10" cy="10" r="8" fill="none" stroke="var(--border)" stroke-width="2.5" />
+        <circle cx="10" cy="10" r="8" fill="none" stroke="var(--border-color)" stroke-width="2.5" />
         <circle
           cx="10" cy="10" r="8" fill="none"
           :stroke="ringColor" stroke-width="2.5" stroke-linecap="round"
@@ -182,7 +182,7 @@ watch(() => appStore.ctxCompressedAt, (v, old) => {
 .ctx-flash {
   position: absolute; top: -20px; left: 50%; transform: translateX(-50%);
   font-size: 10px; color: var(--warning, #EF9F27); white-space: nowrap;
-  background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px;
+  background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; padding: 1px 5px;
 }
 .fade-enter-active, .fade-leave-active { transition: opacity .3s; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
@@ -190,7 +190,7 @@ watch(() => appStore.ctxCompressedAt, (v, old) => {
 .ctx-tip {
   /* 顶部会话栏下方弹出 */
   position: absolute; top: 26px; left: 50%; transform: translateX(-50%);
-  background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px;
   padding: 5px 8px; font-size: 11px; color: var(--text-secondary); white-space: nowrap; z-index: 60;
   pointer-events: none;
 }
@@ -198,7 +198,7 @@ watch(() => appStore.ctxCompressedAt, (v, old) => {
 
 .ctx-detail {
   position: absolute; top: 26px; left: 50%; transform: translateX(-50%);
-  background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px;
   padding: 8px 10px; font-size: 11px; color: var(--text-secondary); white-space: nowrap; z-index: 60;
   display: flex; flex-direction: column; gap: 4px;
 }

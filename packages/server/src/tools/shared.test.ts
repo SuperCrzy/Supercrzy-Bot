@@ -34,6 +34,15 @@ describe('diffLines 行数 diff', () => {
     expect(diffLines('a\nx', 'a\ny')).toEqual({ added: 1, deleted: 1 })
   })
 
+  it('结尾换行不算一行（G16：写 60 行带结尾换行 = +60，不是 +61）', () => {
+    const body = Array.from({ length: 60 }, (_, i) => `line${i + 1}`).join('\n') + '\n'
+    expect(diffLines('', body)).toEqual({ added: 60, deleted: 0 })
+    // 同一内容"带结尾换行"与"不带"视为相同 → 0/0
+    expect(diffLines('a\nb', 'a\nb\n')).toEqual({ added: 0, deleted: 0 })
+    // 但真正的空行仍然算一行
+    expect(diffLines('a', 'a\n\n')).toEqual({ added: 1, deleted: 0 })
+  })
+
   it('空字符串不抛错', () => {
     expect(diffLines('', '')).toEqual({ added: 0, deleted: 0 })
     expect(diffLines('', 'a')).toEqual({ added: 1, deleted: 0 })

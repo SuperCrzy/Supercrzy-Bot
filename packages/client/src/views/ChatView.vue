@@ -534,27 +534,27 @@
             </template>
             <!-- AI 消息：朗读 + 重新生成 + 更多（复制消息/复制请求 ID/删除） -->
             <template v-else>
-              <!-- 朗读（2026-09-26）：仅回复完成后可用（流式中内容未定稿）；三态 朗读→暂停→继续
-                   2026-09-28 加第四态「正在合成语音」：点下去到出声之间有一段 0.3~3s 的合成窗口，
-                   这段时间按钮必须**禁用并改名** —— 否则用户以为没反应去重复点击（旧实现下第二次
-                   点击会被判成"暂停"，直接导致永久静音）。 -->
+              <!-- 朗读（2026-10-23 收敛为**单键**）：点一下读、再点一下停；被中断过的那条点一下续读。
+                   没有「暂停」——一个键三个语义（读/暂停/继续）用户分不清，且长内容里暂停和停止难辨。
+                   ⚠️ 生成期（isLoading）**不渲染**：边生成边朗读靠声音反馈，按钮等正文定稿后才出现。
+                   合成窗口 0.3~3s 显示转圈并禁用；音色降级（Pro→系统）整键变橙黄，title 给文字说明。 -->
               <button
                 v-if="speechSupported && !chatStore.isLoading && msg.content"
                 class="msg-action"
-                :class="{ active: speakingMsgId === msg.id }"
+                :class="{ active: speakingMsgId === msg.id || speechInterrupted?.msgId === msg.id, degraded: speechProDegraded }"
                 :disabled="speakingMsgId === msg.id && speechSynthesizing"
-                :title="speakingMsgId === msg.id ? (speechSynthesizing ? $t('chat.speakingSynthesizing') : (speechPaused ? $t('chat.speakResume') : $t('chat.speakPause'))) : $t('chat.speak')"
+                :title="speechProDegraded ? $t('chat.speakDegraded') : $t(speakLabelKey(msg))"
                 @click="toggleSpeak(msg)"
               >
-                <!-- 未播放：喇叭 -->
-                <svg v-if="speakingMsgId !== msg.id" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
-                <!-- 合成中：环形（还没出声，暂停按钮此刻无意义） -->
-                <svg v-else-if="speechSynthesizing" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a9 9 0 1 0 9 9"/></svg>
-                <!-- 播放中：暂停 -->
-                <svg v-else-if="!speechPaused" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>
-                <!-- 已暂停：继续 -->
-                <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                <span>{{ speakingMsgId === msg.id ? (speechSynthesizing ? $t('chat.speakingSynthesizing') : (speechPaused ? $t('chat.speakResume') : $t('chat.speakPause'))) : $t('chat.speak') }}</span>
+                <!-- 未读：喇叭 -->
+                <svg v-if="speakState(msg) === 'idle'" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+                <!-- 合成中：转圈（还没出声，点了没意义 → 同时禁用） -->
+                <svg v-else-if="speakState(msg) === 'synthesizing'" class="speak-spin" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a9 9 0 1 0 9 9"/></svg>
+                <!-- 中断过：续读（喇叭 + 播放三角） -->
+                <svg v-else-if="speakState(msg) === 'interrupted'" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><polygon points="19 9 23 12 19 15 19 9" fill="currentColor" stroke="none"/></svg>
+                <!-- 读中：停止（方块） -->
+                <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+                <span>{{ $t(speakLabelKey(msg)) }}</span>
               </button>
               <button class="msg-action" :title="$t('chat.regenerate')" @click="regenerateMessage(msg)">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
@@ -628,7 +628,9 @@
     />
 
     <!-- Input area（欢迎页时隐藏，中央输入框替代；保留 DOM 供文件选择器使用） -->
-    <footer class="input-area" v-show="messages.length > 0">
+    <footer ref="footerRef" class="input-area" v-show="messages.length > 0">
+      <!-- 后台任务小浮条：挂在输入卡外侧右上方（绝对定位，零占位；任务再多也不顶输入框） -->
+      <BgTaskBar @done="onBgTaskDone" />
       <!-- 输入横幅（对齐主流实现 cb-input-banner：未配置模型时输入框上方提示 + 跳转配置，替代仅按钮 title 提示） -->
       <InputBanner
         v-if="showNoKeyBanner"
@@ -727,17 +729,6 @@
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
             </button>
           </div>
-        </div>
-
-        <!-- 朗读浮条（2026-09-27）：自动/手动朗读时在输入框上方现身（要一眼看到"还在念"+能一键停，所以必须比消息操作栏按钮更显眼） -->
-        <div v-if="speakingMsgId" class="speak-bar">
-          <span class="speak-bar-text">{{ speechSynthesizing ? $t('chat.speakingSynthesizing') : (speechPaused ? $t('chat.speakingPaused') : $t('chat.speaking')) }}</span>
-          <span v-if="speechProDegraded" class="speak-bar-hint">{{ $t('chat.speakDegraded') }}</span>
-          <span class="speak-bar-spacer"></span>
-          <button class="speak-bar-btn" :disabled="speechSynthesizing" @click="toggleSpeech(speakingMsgId, '')">
-            {{ speechPaused ? $t('chat.speakResume') : $t('chat.speakPause') }}
-          </button>
-          <button class="speak-bar-btn speak-bar-stop" @click="stopSpeech()">{{ $t('chat.speakStop') }}</button>
         </div>
 
         <div class="input-row">
@@ -928,7 +919,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, watch, onMounted, onUnmounted, h } from 'vue'
+import { ref, computed, nextTick, watch, onMounted, onUnmounted, onBeforeUnmount, h } from 'vue'
 import { useMessage } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useChatStore, isDefaultTitle } from '@/stores/chat'
@@ -979,6 +970,9 @@ import { useChatSpeech } from '@/composables/useChatSpeech'
 import { formatTtsRate } from '@/composables/useSpeechPreview'
 import { useWelcomePanel } from '@/composables/useWelcomePanel'
 import ContextUsageRing from '@/components/chat/ContextUsageRing.vue'
+import { useBgTaskResume } from '@/composables/useBgTaskResume'
+import { useFooterResizeStick } from '@/composables/useFooterResizeStick'
+import BgTaskBar from '@/components/chat/BgTaskBar.vue'
 import ElapsedBadge from '@/components/chat/ElapsedBadge.vue'
 import { markTurnAborted } from '@/utils/turn-abort'
 import PlanCapsule from '@/components/chat/PlanCapsule.vue'
@@ -1762,14 +1756,13 @@ async function deleteMessage(msg: ChatMessage) {
 const {
   supported: speechSupported,
   speakingId: speakingMsgId,
-  paused: speechPaused,
   proDegraded: speechProDegraded,
   synthesizing: speechSynthesizing,
+  interrupted: speechInterrupted,
   toggleSpeak,
   feedStream: feedSpeechStream,
   turnEnd: speechTurnEnd,
   stop: stopSpeech,
-  toggle: toggleSpeech,
 } = useChatSpeech({
   // 音色/语速读设置（设置页可改）：rate 串的格式化与设置页试听共用一处（formatTtsRate）
   voice: () => appStore.ttsVoice,
@@ -1777,6 +1770,7 @@ const {
   mode: () => appStore.autoReadMode,
   streamRead: () => appStore.streamRead,
   live: () => appStore.ttsLive, // 会话式朗读（一条消息一条流）；关掉回退旧通道
+  getMessage: (id) => messages.value.find((x) => x.id === id) as ChatMessage | undefined,
 })
 
 /** 「本轮结束」的唯一出口 —— 完成提示音 + 自动朗读都走这里。
@@ -1891,6 +1885,23 @@ const {
 // 原先这里的本地 formatElapsed 会输出 "1m 3s" 而折叠条输出 "1m3s"，同一条回复两处显示不一致。
 /** Routine 推荐：保存为例程（AI 主动建议，即"演示一次就学会"） */
 const savingRoutine = ref(false)
+/** 朗读按钮状态：单键四态 —— 未读 / 合成中 / 读中（点它=停）/ 中断（点它=续读） */
+type SpeakUiState = 'idle' | 'synthesizing' | 'playing' | 'interrupted'
+function speakState(msg: ChatMessage): SpeakUiState {
+  if (speechInterrupted.value?.msgId === msg.id) return 'interrupted'
+  if (speakingMsgId.value !== msg.id) return 'idle'
+  return speechSynthesizing.value ? 'synthesizing' : 'playing'
+}
+
+/** 按钮文案的 i18n key（ChatView 脚本层没有 t()，统一交给模板的 $t 渲染） */
+function speakLabelKey(msg: ChatMessage): string {
+  const s = speakState(msg)
+  if (s === 'playing') return 'chat.speakStop'
+  if (s === 'synthesizing') return 'chat.speakingSynthesizing'
+  if (s === 'interrupted') return 'chat.speakResumeReading'
+  return 'chat.speak'
+}
+
 async function saveRoutineSuggestion(msg: { routineSuggestion?: { sessionId: string; title: string } }) {
   const sugg = msg.routineSuggestion
   if (!sugg || !sugg.sessionId) return
@@ -1925,6 +1936,25 @@ const {
   nextIsAssistant, updateCanScroll, updateActiveQuestion, scrollToBottom, onScroll,
   resetRenderWindow, loadEarlier,
 } = useMessageWindow({ messages: () => messages.value, messagesRef })
+// 后台任务完成 → 自动续跑（逻辑在 composables/useBgTaskResume；ChatView 已卡 5500 行闸门）
+const { onBgTaskDone } = useBgTaskResume({
+  isLoading: () => chatStore.isLoading,
+  currentSessionId: () => chatStore.currentSessionId,
+  send: (assistantMsg, _msgs, bgResume) =>
+    sendAgentMessage(assistantMsg, messages.value
+      .filter((m) => m.id !== assistantMsg.id)
+      .slice(-HISTORY_WINDOW)
+      .map((m) => buildAPIMessage(m)), undefined, chatStore.currentSessionId || undefined, undefined, bgResume),
+  addMessage: (sid, msg) => chatStore.addMessage(sid, msg),
+  setLoading: (v) => chatStore.setLoading(v),
+  setAbort: (c) => { abortController.value = c },
+  newAbort: () => new AbortController(),
+})
+
+
+// 输入区高度变化（后台任务列表展开）→ 消息重新贴底，视觉上就是被顶上去
+const footerRef = ref<HTMLElement | null>(null)
+useFooterResizeStick(footerRef, () => stickToBottom.value, scrollToBottom)
 
 // 消息数量变化（新消息 / 切换会话）→ 重置渲染窗口（尾部优先）+ 强制滚到底部
 watch(() => messages.value.length, () => {
@@ -2455,7 +2485,7 @@ async function sendCompare(assistantMsg: ChatMessage, apiMessages: Array<{ role:
 /**
  * Agent 模式 — 使用 /api/chat/agent，处理 named SSE 事件
  */
-async function sendAgentMessage(assistantMsg: ChatMessage, apiMessages: Array<{ role: string; content: string }>, resumeCheckpoint?: string, sessionId?: string, images?: Array<{ name?: string; url?: string }>) {
+async function sendAgentMessage(assistantMsg: ChatMessage, apiMessages: Array<{ role: string; content: string }>, resumeCheckpoint?: string, sessionId?: string, images?: Array<{ name?: string; url?: string }>, bgResume?: { taskId: string; title?: string; exitCode?: number | null; tail?: string }) {
   // 关键：用 store 里的响应式对象作为流式更新目标。
   // assistantMsg 是原始对象，直接改它的 flow/text 不会触发 Vue 渲染
   // （Vue3 reactive 只追踪 proxy），导致所有更新合并到一次渲染 → 一次性出结果。
@@ -2476,7 +2506,7 @@ async function sendAgentMessage(assistantMsg: ChatMessage, apiMessages: Array<{ 
     const res = await fetch('/api/chat/agent', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: apiMessages, model: appStore.currentModel, resumeCheckpoint, sessionId, language: locale.value, images: images && images.length > 0 ? images : undefined }),
+      body: JSON.stringify({ messages: apiMessages, model: appStore.currentModel, resumeCheckpoint, sessionId, language: locale.value, images: images && images.length > 0 ? images : undefined, bgResume }),
       signal: abortController.value!.signal,
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`)
@@ -3277,10 +3307,10 @@ onMounted(async () => {
   gap: 6px;
   margin: 4px 0 8px;
   padding: 6px 10px;
-  border: 1px solid var(--warning-border, var(--border-color));
+  border: 1px solid var(--border-color);
   border-radius: 6px;
-  background: var(--bg-warning, var(--bg-tertiary));
-  color: var(--text-warning, var(--text-secondary));
+  background: var(--bg-tertiary);
+  color: var(--warning);
   font-size: 12px;
   line-height: 1.5;
 }
@@ -3684,8 +3714,14 @@ onMounted(async () => {
 }
 
 /* ===== Messages ===== */
+/* 有后台任务浮条时收窄底部留白：浮条本身已提供视觉分隔，再留 20px 会显得空一大截 */
+.chat-container:has(.bgtask-dock) .messages-area { padding-bottom: 8px; }
+
 .messages-area {
   flex: 1;
+  /* 显式 min-height:0：输入区展开（如后台任务列表）时，消息区必须能被压缩，
+     否则 flex 项默认按内容撑高，会把输入卡挤出屏幕（经典 flex 陷阱）。 */
+  min-height: 0;
   overflow-y: auto;
   padding: 20px;
   position: relative;
@@ -3784,7 +3820,7 @@ onMounted(async () => {
   font-size: 13px;
   position: relative;
   background: var(--bg-secondary, #f7f7f8);
-  border: 1px solid var(--border, #e3e3e6);
+  border: 1px solid var(--border-color, #e3e3e6);
   border-radius: 12px;
   padding: 14px 18px 16px;
   max-width: 420px;
@@ -4074,7 +4110,7 @@ onMounted(async () => {
   transition: border-color var(--duration-fast);
 }
 .wc-config:hover {
-  border-color: var(--border-color-strong, var(--accent));
+  border-color: var(--accent);
 }
 .wc-config.set {
   border-color: var(--accent);
@@ -4643,7 +4679,7 @@ onMounted(async () => {
   color: var(--text-muted);
   cursor: pointer;
 }
-.quote-block-remove:hover { background: var(--bg-hover, rgba(127,127,127,0.12)); color: var(--danger, #ef4444); }
+.quote-block-remove:hover { background: var(--bg-hover, rgba(127,127,127,0.12)); color: var(--error); }
 .quote-block-text {
   font-size: 12px;
   color: var(--text-secondary);
@@ -4662,8 +4698,8 @@ onMounted(async () => {
   gap: 5px;
   padding: 4px 10px;
   font-size: 12px;
-  color: var(--text-color);
-  background: var(--bg-input, rgba(127,127,127,0.12));
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
   border: 1px solid var(--border-color);
   border-radius: 8px;
   cursor: pointer;
@@ -4677,7 +4713,7 @@ onMounted(async () => {
   left: 0;
   z-index: 120;
   width: min(420px, 100%);
-  background: var(--bg-input, #fff);
+  background: var(--bg-primary);
   border: 1px solid var(--border-color);
   border-radius: 10px;
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.14);
@@ -4703,7 +4739,7 @@ onMounted(async () => {
   border: none;
   outline: none;
   background: transparent;
-  color: var(--text-color);
+  color: var(--text-primary);
   font-size: 12px;
 }
 .trigger-list {
@@ -4736,7 +4772,7 @@ onMounted(async () => {
   display: inline-flex;
   border-radius: 4px;
 }
-.artifact-picker-close:hover { color: var(--text-color); background: var(--bg-hover, rgba(127,127,127,0.1)); }
+.artifact-picker-close:hover { color: var(--text-primary); background: var(--bg-hover, rgba(127,127,127,0.1)); }
 .trigger-item {
   display: flex;
   align-items: center;
@@ -4749,7 +4785,7 @@ onMounted(async () => {
 .trigger-label {
   font-size: 12px;
   font-weight: 500;
-  color: var(--text-color);
+  color: var(--text-primary);
   font-family: var(--font-mono);
   white-space: nowrap;
 }
@@ -4926,6 +4962,12 @@ onMounted(async () => {
 }
 .msg-action:hover { background: var(--bg-hover, rgba(128,128,128,.1)); color: var(--text-primary); }
 .msg-action.active { color: #6366f1; }
+/* 音色降级：Pro 不可用已回落系统音色 —— 用橙黄而不是红色（不是错误，是降级） */
+.msg-action.degraded { color: var(--warning); }
+.msg-action.degraded:hover { color: var(--warning); }
+.msg-action:disabled { opacity: 0.6; cursor: default; }
+.speak-spin { animation: speak-spin 1.1s linear infinite; }
+@keyframes speak-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 .msg-action span { line-height: 1; }
 .msg-more-wrap { position: relative; }
 .msg-menu {
@@ -4953,7 +4995,7 @@ onMounted(async () => {
   cursor: pointer;
 }
 .msg-menu-item:hover { background: var(--bg-hover, rgba(128,128,128,.1)); }
-.msg-menu-item.danger { color: var(--danger, #ef4444); }
+.msg-menu-item.danger { color: var(--error); }
 .msg-menu-item.danger:hover { background: rgba(239,68,68,.1); }
 
 /* 代码块复制按钮样式已移至 MessageFlowRenderer 全局样式块（动态注入 DOM 无 scope，scoped 匹配不到） */
@@ -4992,6 +5034,8 @@ onMounted(async () => {
   /* v4：去掉顶部分割线（输入卡直接浮在页面上，对齐主流实现） */
   background: var(--bg-primary);
   flex-shrink: 0;
+  /* 后台任务小浮条的定位锚点（浮条浮在输入卡上沿外侧，不占布局高度） */
+  position: relative;
 }
 
 /* 输入高度记忆（对齐主流实现 resize-handle）：自定义高度时固定 textarea 高度（仅 chat-input-fixed 生效，不破坏 autosize；textarea 是 n-input 深层元素需 :deep） */
@@ -5087,51 +5131,6 @@ onMounted(async () => {
   color: var(--text-tertiary) !important;
 }
 
-/* ===== 朗读浮条（2026-09-27）===== 与"待发送队列"同一套视觉语言，不引入新视觉元素 */
-.speak-bar {
-  margin-bottom: 8px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 10px;
-  padding: 6px 10px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 11px;
-}
-.speak-bar-text {
-  color: var(--text-secondary);
-}
-/* Pro 音色降级提示：不是错误，但必须让用户知道"现在听到的是系统音色" */
-.speak-bar-hint { color: var(--warning, #d97706); white-space: nowrap; }
-.speak-bar-spacer {
-  flex: 1;
-}
-.speak-bar-btn {
-  background: none;
-  border: none;
-  padding: 2px 4px;
-  font-size: 11px;
-  color: var(--text-muted);
-  cursor: pointer;
-  border-radius: 6px;
-}
-.speak-bar-btn:hover {
-  color: var(--text-primary);
-  background: var(--bg-primary);
-}
-.speak-bar-stop {
-  color: var(--accent);
-}
-/* 合成期（还没出声）暂停无意义 —— 灰掉它，避免"点了没反应"被误读成坏掉 */
-.speak-bar-btn:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-.speak-bar-btn:disabled:hover {
-  color: var(--text-muted);
-  background: none;
-}
 
 /* ===== 待发送队列 ===== */
 .pending-queue {

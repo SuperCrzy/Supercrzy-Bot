@@ -1,4 +1,5 @@
 import type { Context } from 'koa'
+import { listBgTasks } from './bg-task'
 import { getDB } from '../services/database'
 import { config } from '../config'
 import { runAgentLoop } from './agent'
@@ -298,6 +299,46 @@ export async function handleAgentChat(ctx: Context) {
     ctx.status = 400
     ctx.body = { error: 'messages is required and must be an array' }
     return
+  }
+
+
+  // 后台任务完成 → 自动续跑（客户端只带结果，不造用户气泡）：
+  // 注入一条"系统汇报"形态的用户消息，模型据此决定继续/修错。只回尾部 2000 字，防刷爆上下文。
+  const bgResume = (ctx.request.body as any)?.bgResume
+  if (bgResume && typeof bgResume.taskId === 'string' && bgResume.taskId) {
+    const tail = String(bgResume.tail || '').slice(-2000)
+    const exit = bgResume.exitCode === null || bgResume.exitCode === undefined ? 'null' : String(bgResume.exitCode)
+
+    // 计划连续性：把「还有没有别的任务在跑」一并告诉模型。
+    // 否则它看到"任务完成"就以为整步做完了，容易在别的任务还没结束时就下结论。
+    let siblingsLine = '其它后台任务：无'
+    try {
+      const others = listBgTasks(String((body as any).sessionId || ''))
+        .filter((t) => t.id !== bgResume.taskId)
+      const running = others.filter((t) => t.status === 'running')
+      if (running.length) {
+        const names = running.slice(0, 5).map((t) => `${t.id}(${t.title})`).join('、')
+        siblingsLine = `其它后台任务：${running.length} 个仍在运行 —— ${names}${running.length > 5 ? ' 等' : ''}。若原计划还依赖它们，先说明现状，不必空等。`
+      } else if (others.length) {
+        siblingsLine = `其它后台任务：${others.length} 个均已结束（可用 bg_task list 查看）。`
+      }
+    } catch { /* 注册表不可用不影响续跑 */ }
+
+    body.messages.push({
+      role: 'user',
+      content: [
+        '[后台任务已完成]',
+        `id: ${bgResume.taskId}`,
+        `标题: ${String(bgResume.title || '').slice(0, 120)}`,
+        `退出码: ${exit}`,
+        siblingsLine,
+        '输出尾部：',
+        tail || '(无输出)',
+        '',
+        '请基于以上结果继续：成功就简要汇报并接着完成原计划；失败先定位原因再修正。',
+        '不要重复执行这条命令——它已经跑过了。',
+      ].join('\n'),
+    } as any)
   }
 
   const db = getDB()

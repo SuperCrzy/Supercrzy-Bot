@@ -7,6 +7,7 @@ import { rm } from 'fs/promises'
 import { exec, spawn } from 'child_process'
 import { resolve } from 'path'
 import { scanDangerousPath, sandboxify, markSandboxUnavailable, WORKSPACE_ROOT } from '../services/sandbox'
+import { startBgTask } from '../services/bg-task'
 import { scanDirFiles, diffFileSnapshots } from './shared'
 
 /** 单次执行的结果（硬沙箱失败要能识别并重跑，所以不能直接返回字符串） */
@@ -20,7 +21,7 @@ interface ShellRun {
 
 const tool: ToolDef = {
   name: 'shell_exec',
-  description: '执行 Shell 命令并获取输出。仅限只读/查询类命令（查看、搜索、测试、构建）。**严禁用 echo/cat/heredoc 等命令写文件或改文件**——写文件请用 file_write 工具。输出限制 8000 字符。**必须提供 description 参数**：用一句话说明本命令要做什么（如"运行查看 deeplink.ts 实际位置"），前端用它作为命令卡片标题。',
+  description: '执行 Shell 命令并获取输出。仅限只读/查询类命令（查看、搜索、测试、构建）。**严禁用 echo/cat/heredoc 等命令写文件或改文件**——写文件请用 file_write 工具。输出限制 8000 字符。**必须提供 description 参数**：用一句话说明本命令要做什么（如"运行查看 deeplink.ts 实际位置"），前端用它作为命令卡片标题。**长命令（安装依赖、构建、打包）请加 run_in_background: true**：立即返回任务 id，不阻塞对话；之后用 bg_task 读输出或取消。',
   category: 'system',
   requiresApproval: true,
   parameters: {
@@ -28,7 +29,8 @@ const tool: ToolDef = {
     properties: {
       description: { type: 'string', description: '本命令目的的一句话说明（人类可读标题，如"查看 ChatView.vue 的滚动逻辑"）' },
       command: { type: 'string', description: '要执行的Shell命令' },
-      timeout: { type: 'number', description: '超时毫秒数，默认30000' },
+      timeout: { type: 'number', description: '超时毫秒数，默认30000（run_in_background 时无效，后台任务不设超时）' },
+      run_in_background: { type: 'boolean', description: '长命令置 true：立即返回任务 id，命令在后台继续跑（上限 16 个并发）' },
     },
     required: ['command', 'description'],
   },
@@ -53,6 +55,27 @@ const tool: ToolDef = {
     const danger = scanDangerousPath(cmd, { level: ctx?.permissionLevel, workspaceDir: ctx?.cwd })
     if (danger) {
       return `❌ 已拦截（沙箱规则）: ${danger}\n命令: ${cmd.slice(0, 80)}`
+    }
+
+    // 后台任务：L1/L2 已通过，立即返回 task id，命令交给 bg_task 注册表托管。
+    // ⚠️ 后台路径**不做 L3 内核沙箱包装**（sandbox-exec 包的是前台单次执行），
+    //    因此危险命令库与路径扫描在这里是唯一防线，不可绕过顺序。
+    if (args.run_in_background === true) {
+      try {
+        const id = startBgTask({
+          sessionId: ctx?.sessionId || '',
+          title: String(args.description || cmd).slice(0, 120),
+          command: cmd,
+          cwd: ctx?.cwd || WORKSPACE_ROOT,
+        })
+        return [
+          `已在后台启动：${id}`,
+          `标题：${args.description || cmd.slice(0, 60)}`,
+          `读输出：bg_task(action="output", id="${id}")；取消：bg_task(action="cancel", id="${id}")`,
+        ].join('\n')
+      } catch (e: any) {
+        return `❌ 后台启动失败: ${e?.message || e}`
+      }
     }
 
     // L3 硬沙箱：sandbox-exec 内核级隔离（不可用时自动降级，仍保留 L1/L2）

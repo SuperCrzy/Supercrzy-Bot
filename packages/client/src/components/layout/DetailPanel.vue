@@ -212,6 +212,8 @@
         :maximized="maximized"
         @update:maximized="maximized = $event"
       />
+      <!-- 后台任务预览：命令 + 实时输出（由输入区小浮条点任务行打开） -->
+      <div v-if="activeTab === 'bgtask'" class="tab-content"><BgTaskPreview /></div>
     </div>
   </aside>
 </template>
@@ -227,6 +229,7 @@ import type { ChatFlowNode } from '@/types'
 import TimelinePanel from '@/components/chat/TimelinePanel.vue'
 import PreviewPane from '@/components/layout/PreviewPane.vue'
 import AiBrowserPanel from '@/components/layout/AiBrowserPanel.vue'
+import BgTaskPreview from '@/components/chat/BgTaskPreview.vue'
 import { sanitizeSvg } from '@/utils/sanitize-svg'
 import { openFilePreview } from '@/utils/file-preview'
 import type { FileBlock } from '@/types'
@@ -241,7 +244,7 @@ interface FileEntry {
 
 const props = defineProps<{
   visible: boolean
-  activeTab: 'deliverables' | 'files' | 'changes' | 'preview' | 'timeline' | 'browser'
+  activeTab: 'deliverables' | 'files' | 'changes' | 'preview' | 'timeline' | 'browser' | 'bgtask'
 }>()
 
 const emit = defineEmits<{
@@ -641,7 +644,7 @@ function switchTab(tab: 'deliverables' | 'files' | 'changes' | 'preview' | 'time
 // 主流实现 融合:顶行收敛——主频 产物/文件/预览/浏览器，变更+时间线收进「更多」(2026-09-04)
 const tabMoreOpen = ref(false)
 const MAIN_KEYS = ['deliverables', 'files', 'preview', 'browser'] as const
-const MORE_KEYS = ['changes', 'timeline'] as const
+const MORE_KEYS = ['changes', 'timeline', 'bgtask'] as const
 interface TabDef { key: string; label: string; icon: string }
 // 延迟求值(computed)：模板渲染时 tabs 已初始化，避开 tabs const TDZ 崩溃(黑屏根因,2026-09-04)
 const rowTabs = computed<TabDef[]>(() => (tabs as TabDef[]).filter((x) => (MAIN_KEYS as readonly string[]).includes(x.key)))
@@ -662,6 +665,8 @@ const tabs = [
   { key: 'preview' as const, label: t('detail.tabPreview'), icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>' },
   { key: 'timeline' as const, label: t('detail.tabTimeline'), icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17h18M3 12h18M3 7h18"/><circle cx="12" cy="17" r="1.5" fill="currentColor"/><circle cx="7" cy="12" r="1.5" fill="currentColor"/><circle cx="16" cy="7" r="1.5" fill="currentColor"/></svg>' },
   { key: 'browser' as const, label: t('detail.tabBrowser'), icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/><circle cx="7" cy="7" r="1" fill="currentColor"/><circle cx="11" cy="7" r="1" fill="currentColor"/></svg>' },
+
+  { key: 'bgtask' as const, label: t('detail.tabBgTask'), icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><polyline points="7 9 10 12 7 15"/><line x1="13" y1="15" x2="17" y2="15"/></svg>' },
 ]
 </script>
 
@@ -793,7 +798,7 @@ const tabs = [
 .deliverable-name {
   font-size: 12px;
   font-weight: 500;
-  color: var(--text-color);
+  color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -835,7 +840,7 @@ const tabs = [
   margin-top: 4px;
   padding: 6px;
   border-radius: 6px;
-  background: var(--bg-input, rgba(127,127,127,0.06));
+  background: var(--bg-tertiary);
   overflow: auto;
   max-height: 280px;
 }

@@ -70,7 +70,7 @@ function domain(url: string): string {
 .source-cards {
   margin-top: 10px;
   padding-top: 8px;
-  border-top: 1px solid var(--border-tertiary, rgba(128, 128, 128, 0.15));
+  border-top: 1px solid var(--border-color);
 }
 .source-title {
   font-size: 11px;
@@ -89,17 +89,17 @@ function domain(url: string): string {
   gap: 6px;
   max-width: 260px;
   padding: 3px 10px 3px 4px;
-  border: 1px solid var(--border-tertiary, rgba(128, 128, 128, 0.2));
+  border: 1px solid var(--border-color);
   border-radius: 999px;
   font-size: 12px;
-  color: var(--text-2, #bbb);
+  color: var(--text-secondary, #bbb);
   text-decoration: none;
   transition: border-color 0.15s, background 0.15s;
   overflow: hidden;
 }
 .source-card:hover {
   border-color: var(--accent, #f59e0b);
-  background: var(--accent-soft, rgba(245, 158, 11, 0.08));
+  background: var(--accent-subtle);
 }
 .source-idx {
   flex: none;
@@ -116,7 +116,7 @@ function domain(url: string): string {
 .source-domain {
   flex: none;
   font-weight: 500;
-  color: var(--text-1, #ddd);
+  color: var(--text-primary);
 }
 .source-text {
   overflow: hidden;

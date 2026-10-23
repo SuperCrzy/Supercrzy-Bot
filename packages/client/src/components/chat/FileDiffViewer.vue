@@ -133,7 +133,7 @@ function charDiff(cur: string | undefined, other: string | undefined): Array<{ t
 .fdv-head .fdv-path { flex: 1; border-bottom: none; }
 .fdv-stat { padding: 0 10px; display: flex; gap: 8px; font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .fdv-stat-add { color: var(--success, #3fb950); }
-.fdv-stat-del { color: var(--danger, #e5534b); }
+.fdv-stat-del { color: var(--error); }
 .fdv-body {
   max-height: 260px;
   overflow-y: auto;
@@ -151,7 +151,7 @@ function charDiff(cur: string | undefined, other: string | undefined): Array<{ t
 }
 .fdv-line.del {
   background: rgba(239, 68, 68, 0.08);
-  color: var(--danger, #ef4444);
+  color: var(--error);
   text-decoration: line-through;
   opacity: 0.8;
 }

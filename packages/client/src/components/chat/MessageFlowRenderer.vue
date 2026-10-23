@@ -167,6 +167,7 @@ import type { ChatMessage, ChatFlowNode } from '@/types'
 import { composeFoldSummary, formatDurationMs } from '@/utils/tool-summary'
 import { useSecondTick } from '@/composables/useSecondTick'
 import { stageOfTool, stageBreakdown, formatStageBreakdown, STAGE_I18N } from '@/utils/stage'
+import { shouldFoldProcess } from '@/utils/process-fold'
 // I3：AI 产出的 SVG 走 v-html 前必须清洗（见 utils/sanitize-svg.ts 的威胁模型）
 import { sanitizeSvg } from '@/utils/sanitize-svg'
 import { openFilePreview } from '@/utils/file-preview'
@@ -453,20 +454,34 @@ function makeProcessSeg(nodes: FlowDisplayNode[]): FlowSegment {
 /**
  * 分段结果：
  * - 执行中（流式中）：保持分段结构，全程平铺可视化（工具紧凑卡片 + 中间说明 + 思考实时可见）——不逐段折叠
- * - 完成态：所有过程段合并为一个折叠条（"过程执行完整体折叠，非逐段折叠"——老板 2026-08-21），只出结论
+ * - 完成态（自适应，2026-10-23 老板拍板"短任务简单核实，长任务灵活，不要固定模式"）：
+ *   - 短任务（工具 ≤3 且过程节点 ≤8）：不折叠，平铺展示——"执行了 3 步"不该被收成摘要条（证据消失）
+ *   - 长任务：所有过程段合并为一个折叠条，插在过程**第一次出现的位置**（时间顺序，
+ *     不再 unshift 顶到消息最上面——那会打乱"旁白→过程→结论"的阅读顺序）
  */
 const segments = computed<FlowSegment[]>(() => {
   const segs = segmentFlow(visibleFlow(props.msg.flow))
   if (!shouldCollapse(props.msg)) return segs
-  // 完成态：所有 process 段合并为一个折叠条（不被中间的 text 说明打断——旧实现遇 text 就 flush，
-  // 导致"2 个一模一样"的多个折叠条，老板 2026-08-25 反馈）；text/diagram 保持原顺序排后面
-  const out: FlowSegment[] = []
-  let buf: FlowDisplayNode[] = []
+  // 统计过程规模：steps = 工具调用数，nodes = 过程节点总数（思考 + 工具）
+  let steps = 0
+  let nodes = 0
+  let firstProcIdx = -1
+  segs.forEach((s, i) => {
+    if (s.kind !== 'process') return
+    if (firstProcIdx < 0) firstProcIdx = i
+    steps += s.tools
+    nodes += s.nodes.length
+  })
+  if (!shouldFoldProcess(steps, nodes)) return segs
+  // 长任务：合并为一个折叠条。firstProcIdx 之前全是非 process 段（segmentFlow 保证
+  // 相邻 process 之间必有 text/diagram 隔断），故过滤后 merged 的落点下标不变。
+  if (firstProcIdx < 0 || nodes === 0) return segs
+  const procNodes: FlowDisplayNode[] = []
   for (const s of segs) {
-    if (s.kind === 'process') buf.push(...s.nodes)
-    else out.push(s)
+    if (s.kind === 'process') procNodes.push(...s.nodes)
   }
-  if (buf.length) out.unshift(makeProcessSeg(buf))
+  const out: FlowSegment[] = segs.filter((s) => s.kind !== 'process')
+  out.splice(firstProcIdx, 0, makeProcessSeg(procNodes))
   return out
 })
 
@@ -919,7 +934,7 @@ function shouldCollapse(msg: ChatMessage): boolean {
   align-items: center;
   gap: 5px;
   font-size: 12px;
-  color: var(--text-muted, var(--text-color));
+  color: var(--text-muted, var(--text-primary));
   padding: 4px 0;
 }
 .retry-hint svg { flex-shrink: 0; animation: retry-spin 1.2s linear infinite; }
@@ -938,7 +953,7 @@ function shouldCollapse(msg: ChatMessage): boolean {
   border: 1px dashed var(--border-color);
   border-radius: 999px;
   background: var(--bg-secondary);
-  color: var(--text-muted, var(--text-color));
+  color: var(--text-muted, var(--text-primary));
   font-size: 11.5px;
   cursor: pointer;
   user-select: none;
@@ -955,7 +970,7 @@ function shouldCollapse(msg: ChatMessage): boolean {
   align-items: center;
   gap: 4px;
   padding: 4px 0;
-  color: var(--text-muted, var(--text-color));
+  color: var(--text-muted, var(--text-primary));
   font-size: 12px;
 }
 /* 骨架屏（2026-08-23）：AI 回复前脉动占位线 */
@@ -964,7 +979,7 @@ function shouldCollapse(msg: ChatMessage): boolean {
   height: 12px;
   border-radius: 6px;
   margin-top: 8px;
-  background: linear-gradient(90deg, var(--border-tertiary, rgba(128,128,128,0.12)) 25%, var(--border-secondary, rgba(128,128,128,0.25)) 50%, var(--border-tertiary, rgba(128,128,128,0.12)) 75%);
+  background: linear-gradient(90deg, var(--border-color) 25%, var(--border-hover) 50%, var(--border-color) 75%);
   background-size: 200% 100%;
   animation: skeleton-pulse 1.4s ease-in-out infinite;
 }
@@ -979,7 +994,7 @@ function shouldCollapse(msg: ChatMessage): boolean {
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: var(--text-muted, var(--text-color));
+  background: var(--text-muted, var(--text-primary));
   animation: typing-bounce 1.2s infinite ease-in-out;
 }
 .typing-indicator .dot:nth-child(2) { animation-delay: 0.15s; }
@@ -1051,10 +1066,10 @@ function shouldCollapse(msg: ChatMessage): boolean {
   gap: 6px;
   margin: 4px 0 8px;
   padding: 6px 10px;
-  border: 1px solid var(--warning-border, var(--border-color));
+  border: 1px solid var(--border-color);
   border-radius: 6px;
-  background: var(--bg-warning, var(--bg-tertiary));
-  color: var(--text-warning, var(--text-secondary));
+  background: var(--bg-tertiary);
+  color: var(--warning);
   font-size: 12px;
   line-height: 1.5;
 }

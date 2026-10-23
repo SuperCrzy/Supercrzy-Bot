@@ -1,6 +1,6 @@
 {
   "name": "supercrzy-bot",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "private": true,
   "description": "SUPERCRZY BOT - AI Agent Platform: unified brain + Agent Loop + multi-tool + multi-platform gateway",
   "author": "SuperCrzy",
@@ -29,7 +29,7 @@
     "version:sync": "node scripts/version.mjs",
     "version:check": "node scripts/version.mjs --check",
     "export:clean": "node scripts/check-clean-tree.mjs --export ../supercrzy-clean",
-    "verify": "node scripts/version.mjs --check && node scripts/check-clean-tree.mjs && pnpm lint && pnpm test && pnpm --filter @supercrzy/server validate:tools && pnpm build",
+    "verify": "node scripts/version.mjs --check && node scripts/check-clean-tree.mjs && node scripts/check-css-vars.mjs && node scripts/run-stylelint.mjs && pnpm lint && pnpm test && pnpm --filter @supercrzy/server validate:tools && pnpm --filter @supercrzy/server validate:permission && pnpm build",
     "clean": "pnpm -r clean",
     "test": "pnpm -r test"
   },
@@ -45,7 +45,8 @@
     ],
     "overrides": {
       "http-errors": "^2.0.1",
-      "entities": "^7.0.1"
+      "entities": "^7.0.1",
+      "htmlparser2@8>entities": "^4.5.0"
     }
   },
   "bin": {

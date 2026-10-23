@@ -164,7 +164,7 @@ const isResultLong = computed(() => (props.result || '').length > 400)
   max-height: 260px;
   overflow-y: auto;
   border-radius: 6px;
-  background: var(--code-bg, rgba(15, 20, 30, 0.9));
+  background: var(--bg-code);
   padding: 8px 0;
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
   font-size: 12px;
@@ -204,7 +204,7 @@ const isResultLong = computed(() => (props.result || '').length > 400)
   color: var(--text-secondary);
   white-space: pre-wrap;
   word-break: break-all;
-  background: var(--code-bg, rgba(15, 20, 30, 0.9));
+  background: var(--bg-code);
   padding: 8px;
   border-radius: 6px;
   max-height: 260px;

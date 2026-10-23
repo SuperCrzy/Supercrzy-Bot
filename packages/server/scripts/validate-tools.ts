@@ -103,4 +103,62 @@ if (legacy.length) {
   console.log('✅ 全仓只有 requiresApproval 一个审批声明')
 }
 
+// ---- 能力清单契约（G2，2026-10-23）：白名单必须派生、激活必须数据驱动 ----
+//
+// 修的是什么：baseTools 曾手抄 39 条（漏 4 个工具）；tool_search 激活靠对返回文案做正则
+// （文案改一字 → 按需工具永久调不到且不报错）。两个都是"改一处静默漂移"的形态。
+console.log('')
+console.log('=== 能力清单契约（G2）===')
+
+// ① agent.ts 的 baseTools 必须从注册表派生，不得再出现手抄数组字面量。
+//    匹配 `baseTools = [` 后紧跟字符串字面量的形态（派生写法是 `toolDefinitions.map(...)`，不会命中）。
+const hardcodedBase = AGENT_SRC.match(/\bbaseTools\s*=\s*\[\s*['"]/)
+if (hardcodedBase) {
+  console.log('❌ agent.ts 里 baseTools 又变成了手抄名单（应从 toolDefinitions 派生）')
+  failed = true
+} else if (!/\bbaseTools\s*=\s*toolDefinitions\.map\(/.test(AGENT_SRC)) {
+  console.log('❌ agent.ts 找不到 baseTools 派生逻辑 —— 白名单可能被删或被改回硬编码')
+  failed = true
+} else {
+  console.log('✅ baseTools 从注册表全量派生，无手抄名单')
+}
+
+// ② tool_search 激活不得再依赖返回文案 —— 匹配"读 result.content 判断已加载"的握手形态。
+const textHandshake = /result\.content[^)]*?\)\s*\n?\s*if\s*\(\s*txt\.includes\(|includes\('已加载/
+if (textHandshake.test(AGENT_SRC)) {
+  console.log('❌ agent.ts 里又出现了对 tool_search 返回文案的文本握手（应改用 resolveToolSearchHits 数据化激活）')
+  failed = true
+} else if (!/resolveToolSearchHits\(/.test(AGENT_SRC)) {
+  console.log('❌ agent.ts 找不到 resolveToolSearchHits —— tool_search 激活可能断链')
+  failed = true
+} else {
+  console.log('✅ tool_search 激活走 resolveToolSearchHits（数据驱动），无文案正则握手')
+}
+
+// ③ 激活数据源必须是确定性的：同参两次调用命中名单恒等（文案怎么改都不影响）
+{
+  const { resolveToolSearchHits: hits } = await import('../src/tools/tool-search')
+  const probes = ['图像', 'terminal', '后台任务', 'git']
+  const drift = probes.filter((q) => JSON.stringify(hits(q, 8)) !== JSON.stringify(hits(q, 8)))
+  if (drift.length) {
+    console.log(`❌ resolveToolSearchHits 非确定性，query: ${drift.join(', ')}`)
+    failed = true
+  } else {
+    console.log(`✅ resolveToolSearchHits 确定性验证通过（${probes.length} 个探针两次调用恒等）`)
+  }
+}
+
+// ④ 提示词按需名录（纯文案）里提到的工具必须真实存在于注册表 —— 防止文案推荐不存在的工具
+{
+  const defNameSet = new Set(defNames)
+  const mentioned = [...AGENT_SRC.matchAll(/\*\*\[按需\]\*\*\s+([a-z_][a-z0-9_]*)/g)].map((m) => m[1])
+  const ghost = [...new Set(mentioned)].filter((n) => !defNameSet.has(n))
+  if (ghost.length) {
+    console.log(`❌ 按需名录文案提到的工具不在注册表里: ${ghost.join(', ')}`)
+    failed = true
+  } else {
+    console.log(`✅ 按需名录文案与注册表一致（提及 ${new Set(mentioned).size} 个工具全部真实存在）`)
+  }
+}
+
 process.exit(failed ? 1 : 0)

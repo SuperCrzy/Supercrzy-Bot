@@ -413,7 +413,7 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 .panel-title { font-size: 12px; font-weight: 600; margin: 0 0 10px; }
 .panel-empty { font-size: 12px; color: var(--text-tertiary); padding: 20px 0; text-align: center; }
 .pipeline-card { border: 1px solid var(--border-color); border-radius: 8px; padding: 9px 11px; margin-bottom: 8px; cursor: pointer; background: var(--bg-primary); }
-.pipeline-card:hover { border-color: var(--border-strong); }
+.pipeline-card:hover { border-color: var(--border-hover); }
 .pc--running, .pc--decomposing { border-left: 3px solid #f59e0b; }
 .pc--done { border-left: 3px solid #22c55e; }
 .pc-head { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
@@ -423,7 +423,7 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 .st--done { background: #f0fdf4; color: #15803d; }
 .pc-sub { display: flex; justify-content: space-between; margin-top: 4px; align-items: center; }
 .pc-count { font-size: 11px; color: var(--text-tertiary); }
-.pc-stop { font-size: 11px; border: none; background: transparent; color: var(--text-danger, #dc2626); cursor: pointer; padding: 0; }
+.pc-stop { font-size: 11px; border: none; background: transparent; color: var(--error); cursor: pointer; padding: 0; }
 .chat-flow { flex: 1; overflow-y: auto; padding: 16px; min-height: 0; }
 .chat-empty { text-align: center; color: var(--text-tertiary); padding: 40px 0; }
 .chat-empty-hint { font-size: 12px; margin-top: 6px; }

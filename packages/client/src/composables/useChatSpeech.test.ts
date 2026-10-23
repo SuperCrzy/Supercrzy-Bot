@@ -12,11 +12,12 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { effectScope } from 'vue'
-import { useChatSpeech, liveChunkThresholds, LIVE_FIRST_MIN_CHARS, LIVE_FIRST_MAX_CHARS, type UseChatSpeechOptions } from './useChatSpeech'
+import { useChatSpeech, type UseChatSpeechOptions } from './useChatSpeech'
 
 const h = vi.hoisted(() => ({
   calls: {
     speak: [] as string[],
+    speakText: [] as string[],
     beginStream: [] as string[],
     append: [] as string[],
     endStream: 0,
@@ -25,12 +26,18 @@ const h = vi.hoisted(() => ({
     push: [] as string[],
     endLive: 0,
   },
+  /** Mocked session failure flag (a plain object with `.value` standing in for the ref that the
+   *  real useSpeech keeps internally) */
+  state: { liveFailed: { value: false } },
   opts: { beginStreamOk: true, beginLiveOk: true, latencyMs: 1200 },
+  /** Filled in by the useSpeech mock: clears the shared `speakingId` between tests */
+  setSpeakingId: (_v: string | null) => {},
 }))
 
 vi.mock('./useSpeech', async () => {
   const { ref } = await import('vue')
   const speakingId = ref<string | null>(null)
+  h.setSpeakingId = (v: string | null) => { speakingId.value = v }
   return {
     PRO_COOLDOWN_MS: 60_000,
     useSpeech: () => ({
@@ -39,8 +46,9 @@ vi.mock('./useSpeech', async () => {
       paused: ref(false),
       proDegraded: ref(false),
       isPro: () => true,
-      speak: (id: string) => {
+      speak: (id: string, text: string) => {
         h.calls.speak.push(id)
+        h.calls.speakText.push(String(text || ''))
         speakingId.value = id
       },
       beginStream: (id: string) => {
@@ -65,6 +73,12 @@ vi.mock('./useSpeech', async () => {
       endLive: () => { h.calls.endLive += 1 },
       isLive: () => speakingId.value !== null,
       latencyMs: () => h.opts.latencyMs,
+      /** Live-mode batching control value: a "plenty buffered" number so it never interferes with
+       *  chunking assertions */
+      liveAheadSec: () => 30,
+      liveFailed: h.state.liveFailed,
+      livePushedChars: () => 0,
+      liveTokenNow: () => null,
       stop: () => {
         h.calls.stop += 1
         speakingId.value = null
@@ -91,6 +105,7 @@ function msg(id: string, content = ''): any {
 
 beforeEach(() => {
   h.calls.speak = []
+  h.calls.speakText = []
   h.calls.beginStream = []
   h.calls.append = []
   h.calls.endStream = 0
@@ -98,6 +113,7 @@ beforeEach(() => {
   h.calls.beginLive = []
   h.calls.push = []
   h.calls.endLive = 0
+  h.state.liveFailed.value = false
   h.opts.beginStreamOk = true
   h.opts.beginLiveOk = true
   h.opts.latencyMs = 1200
@@ -238,16 +254,22 @@ describe('useChatSpeech 失败/中断收尾（防止按钮卡死）', () => {
 })
 
 /**
- * 会话式朗读（2026-10-21）：一条消息一条流。
+ * Live reading (one stream per message; batching switched to "unplayed seconds").
  *
- * 与逐段流式的差别全在"几时开读"和"段间是否重新连"上：
- *   · 首段门槛 16 字（一句话就出声），不再是 60/200 字
- *   · 中途只 push，不新建任何音频元素 —— 段间没有新连接，也就没有空档
+ * The difference from per-chunk streaming is entirely "when does reading start" and "does each
+ * chunk open a new connection":
+ *   · First chunk takes the earliest of three (first sentence / comma after 30 chars / 60-char
+ *     fallback), no fixed char threshold any more
+ *   · Following chunks are driven by unplayed seconds (>= 6s → don't cut) — the mock returns 30
+ *     from liveAheadSec, so nothing is cut mid-turn and everything is pushed at turnEnd (same
+ *     assertions as the old version)
+ *   · Mid-turn only pushes text, never creates another audio element — no new connection between
+ *     chunks, hence no gap
  */
 describe('useChatSpeech 会话式朗读（一条消息一条流）', () => {
   const tick = () => new Promise((r) => setTimeout(r, 10))
 
-  it('首句就开流，之后按句推，turnEnd 收尾（且不再整条重读）', async () => {
+  it('首句就开流，之后攒批（秒数充足不切），turnEnd 收尾（且不再整条重读）', async () => {
     const { api } = mount({ live: () => true, mode: () => 'always', foreground: () => false })
     const m = msg('m1')
     api.feedStream(m, '这是第一句话，一共超过十六个字了。')
@@ -256,7 +278,7 @@ describe('useChatSpeech 会话式朗读（一条消息一条流）', () => {
     expect(h.calls.push.length).toBe(1)
     expect(h.calls.beginStream).toEqual([]) // 没有走旧的逐段通道
 
-    // 后续切块最少 40 字 → 这句只有十几个字，先攒着
+    // Plenty unplayed (mock 30s) → no cut, keep buffering
     api.feedStream(m, '第二句继续补充一点内容。')
     await tick()
     expect(h.calls.push.length).toBe(1)
@@ -265,6 +287,7 @@ describe('useChatSpeech 会话式朗读（一条消息一条流）', () => {
     expect(h.calls.push.length).toBe(2) // 残余在收尾时补推
     expect(h.calls.endLive).toBe(1)
     expect(h.calls.speak).toEqual([]) // 已经边生成边读过 → 绝不整条重读
+    expect(api.interrupted.value).toBe(null)
   })
 
   it('开会话失败 → 本轮放弃朗读，且不反复重试（每个 chunk 都撞一次）', async () => {
@@ -285,33 +308,104 @@ describe('useChatSpeech 会话式朗读（一条消息一条流）', () => {
     await tick()
     expect(h.calls.beginLive).toEqual([])
   })
+
+  it('推送失败 → turnEnd 后 interrupted 置位；续读从下一句起、绝不整条重读', async () => {
+    const { api } = mount({ live: () => true, mode: () => 'always', foreground: () => false })
+    const m = msg('m1', '这是第一句话，一共超过十六个字了。后面还有没读到的内容。')
+    api.feedStream(m, '这是第一句话，一共超过十六个字了。')
+    await tick()
+    expect(h.calls.push.length).toBe(1)
+    h.state.liveFailed.value = true
+    api.turnEnd(m, true)
+    await tick()
+    expect(api.interrupted.value?.msgId).toBe('m1')
+    api.resumeInterrupted(m)
+    expect(h.calls.speak).toEqual(['m1'])
+    // Resumed text starts at the first sentence end after the last push's start offset (what came
+    // before the start was already synthesized, so it is not read again)
+    expect(h.calls.speakText[0]).toContain('后面还有没读到的内容')
+    expect(h.calls.speakText[0]).not.toContain('这是第一句话')
+    // The hint disappears after resuming
+    expect(api.interrupted.value).toBe(null)
+  })
+
+  it('正常结束（无失败）→ 不出中断提示，turnEnd 也不整条重读', async () => {
+    const { api } = mount({ live: () => true, mode: () => 'always', foreground: () => false })
+    const m = msg('m1', '全文。')
+    api.feedStream(m, '这是第一句话，一共超过十六个字了。')
+    await tick()
+    api.turnEnd(m, true)
+    await tick()
+    expect(api.interrupted.value).toBe(null)
+    expect(h.calls.speak).toEqual([])
+  })
+
+  it('手动 stop → 中断提示一并收掉', async () => {
+    const { api } = mount({ live: () => true, mode: () => 'always', foreground: () => false })
+    const m = msg('m1')
+    api.feedStream(m, '这是第一句话，一共超过十六个字了。')
+    await tick()
+    h.state.liveFailed.value = true
+    api.turnEnd(m, true)
+    await tick()
+    expect(api.interrupted.value).not.toBe(null)
+    api.stop()
+    expect(api.interrupted.value).toBe(null)
+  })
+})
+
+describe('useChatSpeech 朗读按钮单键语义（2026-10-23）', () => {
+  const tick = () => new Promise((r) => setTimeout(r, 10))
+
+  // 共享 mock（speakingId / calls）不重置会让"读中再点"这类用例被上一条的残留污染
+  beforeEach(() => {
+    h.setSpeakingId(null)
+    h.calls.speak.length = 0
+    h.calls.speakText.length = 0
+    h.calls.stop = 0
+  })
+
+  it('未读 → 点一次开始读（从头）', () => {
+    const { api } = mount({ live: () => false, mode: () => 'off', foreground: () => true })
+    const m = msg('m1', '第一句。第二句。')
+    api.toggleSpeak(m)
+    expect(h.calls.speak).toEqual(['m1'])
+    expect(h.calls.speakText[0]).toContain('第一句')
+    expect(h.calls.stop).toBe(0)
+  })
+
+  it('读中 → 再点一下是**停止**，不是暂停（不进入 paused 分支）', () => {
+    const { api } = mount({ live: () => false, mode: () => 'off', foreground: () => true })
+    const m = msg('m1', '第一句。第二句。')
+    api.toggleSpeak(m)
+    expect(h.calls.speak.length).toBe(1)
+    api.toggleSpeak(m)
+    expect(h.calls.stop).toBe(1)
+    // 停止不得再起一轮朗读
+    expect(h.calls.speak.length).toBe(1)
+  })
+
+  it('中断过的那条 → 点一下从断点续读，不整条重读', async () => {
+    const { api } = mount({ live: () => true, mode: () => 'always', foreground: () => false })
+    const m = msg('m1', '这是第一句话，一共超过十六个字了。后面还有没读到的内容。')
+    api.feedStream(m, '这是第一句话，一共超过十六个字了。')
+    await tick()
+    h.state.liveFailed.value = true
+    api.turnEnd(m, true)
+    await tick()
+    expect(api.interrupted.value?.msgId).toBe('m1')
+
+    api.toggleSpeak(m)
+    // 走的是续读锚点：只读缺口之后的内容
+    expect(h.calls.speak).toEqual(['m1'])
+    expect(h.calls.speakText[0]).toContain('后面还有没读到的内容')
+    expect(h.calls.speakText[0]).not.toContain('这是第一句话')
+    expect(api.interrupted.value).toBe(null)
+  })
 })
 
 /**
- * 自适应切块门槛（2026-10-21）。
- *
- * 依据：中文 4.8 字/秒，一轮合成耗时 T ⇒ 盈亏平衡字数 = T×4.8，再乘 1.5 安全系数。
- * 快链路要"出现几个字就读"，弱网必须攒够，否则每轮都落后一点 → 越读越断。
+ * The seconds-driven splitting rules themselves are covered in `speech-text.test.ts` (the
+ * takeLiveChunk / finishLiveChunk pure layer). This file only pins orchestration behavior: when a
+ * session opens, failure → interrupted, and the resume anchor.
  */
-describe('liveChunkThresholds — 门槛跟着链路走', () => {
-  it('快链路（0.5s）→ 首段 8 字就够（下限兜底，不能低于一句）', () => {
-    expect(liveChunkThresholds(500).first).toBe(LIVE_FIRST_MIN_CHARS)
-  })
-
-  it('弱网（2.3s）→ 首段要 17 字左右，否则一轮追不上播放', () => {
-    const { first } = liveChunkThresholds(2300)
-    expect(first).toBeGreaterThanOrEqual(16)
-    expect(first).toBeLessThanOrEqual(LIVE_FIRST_MAX_CHARS)
-  })
-
-  it('极慢链路也有上限（40 字），不能无限攒着不开口', () => {
-    expect(liveChunkThresholds(9000).first).toBe(LIVE_FIRST_MAX_CHARS)
-  })
-
-  it('后续块门槛 ≥ 首段门槛（后续要攒批，少打上游）', () => {
-    for (const ms of [300, 1200, 2300]) {
-      const { first, next } = liveChunkThresholds(ms)
-      expect(next).toBeGreaterThanOrEqual(first)
-    }
-  })
-})

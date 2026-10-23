@@ -88,7 +88,7 @@ function dismiss() {
   align-items: center;
   gap: 10px;
   background: var(--bg-secondary, #f7f7f8);
-  border: 1px solid var(--border, #e3e3e6);
+  border: 1px solid var(--border-color, #e3e3e6);
   border-radius: 12px;
   padding: 10px 12px;
   position: relative;

@@ -19,8 +19,6 @@
         <span class="tl-turn-no">{{ $t('detail.turn', { n: t.turn }) }}</span>
         <span class="tl-turn-summary">{{ t.summary }}</span>
         <span class="tl-turn-meta">
-          <span v-if="t.tokensIn" class="tl-token" :title="$t('chatui.tlTokensIn')">{{ fmtTokens(t.tokensIn) }} in</span>
-          <span v-if="t.tokensOut" class="tl-token" :title="$t('chatui.tlTokensOut')">{{ fmtTokens(t.tokensOut) }} out</span>
           <span v-if="t.tools.length" class="tl-toolcount">{{ t.tools.length }}</span>
           <button
             class="tl-jump"
@@ -127,8 +125,6 @@ interface TrajTurn {
   thinking: string
   tools: TrajTool[]
   deliverables: TrajDeliverable[]
-  tokensIn?: number
-  tokensOut?: number
   metrics?: { ttft?: number; elapsed?: string }
 }
 interface CheckpointMeta {
@@ -204,8 +200,6 @@ const allTurns = computed<TrajTurn[]>(() => {
       thinking,
       tools,
       deliverables,
-      tokensIn: m.promptTokens,
-      tokensOut: m.completionTokens,
       metrics: Object.keys(metrics).length ? metrics : undefined,
     })
   }
@@ -245,11 +239,6 @@ function formatElapsed(ms: number): string {
   const m = Math.floor(ms / 60000)
   const s = Math.round((ms % 60000) / 1000)
   return `${m}m${s}s`
-}
-
-function fmtTokens(n: number): string {
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`
-  return String(n)
 }
 
 /** 产物点击 → 通知父组件预览文件（edit 走文件预览） */
@@ -309,7 +298,7 @@ onMounted(loadCheckpoints)
   outline: none;
   background: transparent;
   font-size: 12px;
-  color: var(--text-color);
+  color: var(--text-primary);
 }
 .tl-search-input::placeholder { color: var(--text-muted); }
 
@@ -343,7 +332,6 @@ onMounted(loadCheckpoints)
   text-overflow: ellipsis;
 }
 .tl-turn-meta { display: flex; align-items: center; gap: 5px; flex-shrink: 0; }
-.tl-token { font-size: 10px; color: var(--text-muted); font-family: var(--font-mono); }
 .tl-toolcount {
   font-size: 10px;
   color: var(--text-muted);
@@ -396,7 +384,7 @@ onMounted(loadCheckpoints)
 .tl-tool-status { font-size: 11px; }
 .tl-tool.done .tl-tool-status { color: var(--success, #22c55e); }
 .tl-tool.running .tl-tool-status { color: var(--warning, #eab308); }
-.tl-tool.error .tl-tool-status { color: var(--danger, #ef4444); }
+.tl-tool.error .tl-tool-status { color: var(--error); }
 .tl-tool-duration { font-size: 10px; color: var(--text-muted); }
 .tl-tool-file {
   font-size: 10px;

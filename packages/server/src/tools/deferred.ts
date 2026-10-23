@@ -41,6 +41,8 @@ export const DEFERRED_TOOLS = new Set<string>([
   'get_goal', 'task_list',
   // ---- 提问：与常驻的 ask_user 语义重复（同一条前端提问链路），按需即可 ----
   'ask_question',
+  // ---- 后台任务控制：启动走 shell_exec 的 run_in_background，本工具只管 list/output/cancel ----
+  'bg_task',
 ])
 
 /**

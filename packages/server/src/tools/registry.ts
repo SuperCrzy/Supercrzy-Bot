@@ -54,6 +54,7 @@ import askUser from './ask-user'
 // ---- 手机端专用（2026-10-20）：Android 侧「眼睛 + 手」 ----
 import androidScreen from './android-screen'
 import androidAction from './android-action'
+import bgTask from './bg-task'
 
 /**
  * 全部工具定义（供 toolDefinitions 合并）。
@@ -112,6 +113,8 @@ export const directoryTools: ToolDef[] = [
   // ---- 手机端专用：Android 原生截屏/界面操作（桌面端调用会明确报不可用）----
   androidScreen,
   androidAction,
+  // ---- 后台任务控制（启动走 shell_exec 的 run_in_background，本工具只管 list/output/cancel）----
+  bgTask,
 ]
 
 /** 执行器映射：name → execute（供 toolExecutors 合并） */

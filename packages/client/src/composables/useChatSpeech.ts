@@ -16,7 +16,7 @@
  *   ② **流式和整条是互斥的两条路** —— 流式只在"本轮本来就会自动读"的前提下开，
  *      判定复用 `shouldAutoRead`（off = 不读；background = 仅窗口不在前台时读）。
  */
-import { onBeforeUnmount } from 'vue'
+import { onBeforeUnmount, ref } from 'vue'
 import type { ChatMessage } from '@/types'
 import { useSpeech } from '@/composables/useSpeech'
 import {
@@ -25,8 +25,10 @@ import {
   STREAM_MAX_CHARS,
   ensureSentenceEnd,
   extractSpeakText,
+  finishLiveChunk,
   markdownToSpeech,
   packForTts,
+  takeLiveChunk,
   takeStreamChunk,
 } from '@/utils/speech-text'
 import { isWindowForeground, shouldAutoRead } from '@/utils/auto-read'
@@ -49,47 +51,18 @@ export interface UseChatSpeechOptions {
   live?: () => boolean
   /** 窗口是否在前台（默认 isWindowForeground；测试可注入） */
   foreground?: () => boolean
+  /** Look up a message by id (used by resume: the UI only holds the msgId, the text lives in the
+   *  message) */
+  getMessage?: (id: string) => ChatMessage | undefined
 }
 
 /**
- * 会话流首段门槛的**下限**（2026-10-21 改为自适应）。
- *
- * 阈值不是拍出来的，是按「每轮产出必须大于每轮成本」算的：
- *   中文朗读 ≈ 4.8 字/秒；一轮合成耗时 = 首块延迟 T
- *   盈亏平衡字数 = T × 4.8；再乘 1.5 安全系数
- * ⇒ T=0.5s 时只要 3.6 字（取 8 兜底），T=2.3s（弱网）时要 16.6 字。
- * 所以同一条代码在快链路上"出现几个字就读"，在弱网上自动攒够再开口。
- *
- * ⚠️ 下限不能太低：低于 4 字时切点几乎必然落在词中间，听感会"一个字一顿"。
+ * Minimum buffered chars before opening a session. This only decides *when to open the session*,
+ * never how to split — splitting is controlled by `takeLiveChunk`'s three-level first-chunk rule.
+ * 16 chars ≈ one sentence; for very short replies (a few chars) reading the whole thing at turnEnd
+ * sounds better (saves a session round trip).
  */
-export const LIVE_FIRST_MIN_CHARS = 8
-/** 自适应上限：再慢的链路也不该攒超过这么多字才开口 */
-export const LIVE_FIRST_MAX_CHARS = 40
-
-/**
- * 按实测首块延迟算两个门槛（字）。
- *
- * 为什么 next 的门槛用 3 倍系数：一轮合成里**只有第一轮**付握手，后续轮更便宜，
- * 但上游抖动/重连随时可能补一次，所以宁可比"刚好够"多留一倍余量。
- */
-export function liveChunkThresholds(latencyMs: number): { first: number; next: number } {
-  const t = Number.isFinite(latencyMs) && latencyMs > 0 ? latencyMs / 1000 : 1.2
-  const CPS = 4.8 // 中文朗读字/秒（实测 18 字 = 3.768s）
-  const clamp = (lo: number, hi: number, v: number) => Math.min(hi, Math.max(lo, Math.round(v)))
-  return {
-    first: clamp(LIVE_FIRST_MIN_CHARS, LIVE_FIRST_MAX_CHARS, t * CPS * 1.5),
-    next: clamp(24, LIVE_CHUNK_MAX_CHARS, t * CPS * 3),
-  }
-}
-/**
- * 会话流后续切块：最少 40 字、最多 120 字（切点仍优先落在句/行边界）。
- *
- * 为什么不是"每句一推"：一段 3000 字回复按 15 字一句会推 200 次，
- * 每次都是一轮上游合成 —— 请求数就是暴露面。40 字 ≈ 6 秒音频，
- * 而一轮合成只要 0.3~2 秒，所以**合成永远追得上播放**，不会缺料。
- */
-export const LIVE_NEXT_MIN_CHARS = 40
-export const LIVE_CHUNK_MAX_CHARS = 120
+export const LIVE_START_MIN_CHARS = 16
 
 export function useChatSpeech(options: UseChatSpeechOptions = {}) {
   const speech = useSpeech({ voice: options.voice, rate: options.rate })
@@ -112,8 +85,18 @@ export function useChatSpeech(options: UseChatSpeechOptions = {}) {
   let liveStarting = false
   /** 开会话的在途 promise（极短回复时 turnEnd 要等它开好再补推残余） */
   let liveStartPromise: Promise<boolean> | null = null
-  /** 是否已经推过第一段（决定用 16 字门槛还是 40 字门槛） */
+  /** Whether the first chunk has been pushed (decides first-chunk three-level rule vs seconds rule) */
   let livePushed = false
+  /** Chars of cleaned text acknowledged as pushed this turn (tracked separately from
+   *  speech.livePushedChars: this one includes the flush) */
+  let livePushedClean = 0
+  /** **Start** offset of the last push (cleaned-text offset) — resume looks for a sentence end
+   *  after this point, so it never starts mid-word */
+  let liveLastStart = 0
+
+  /** Reading interruption (reactive, for the speak bar UI): set on a push failure / audio stall /
+   *  dropped tail */
+  const interrupted = ref<{ msgId: string; resumeFrom: number } | null>(null)
 
   function resetStream() {
     streamMsgId = null
@@ -125,6 +108,8 @@ export function useChatSpeech(options: UseChatSpeechOptions = {}) {
     liveStarting = false
     liveStartPromise = null
     livePushed = false
+    livePushedClean = 0
+    liveLastStart = 0
   }
 
   /** 本轮现在是否"本来就会读"（与 turnEnd 同一套判定，ok/hasText 先按成立预判） */
@@ -167,23 +152,35 @@ export function useChatSpeech(options: UseChatSpeechOptions = {}) {
   }
 
   /**
-   * 把缓冲里的文本推进会话流。
+   * Push buffered text into the live stream (rewritten: driven by **unplayed seconds**, no more
+   * char-count batching).
    *
-   * 门槛是两级的（与会话流的成本结构对应）：
-   *   · 首段 `LIVE_FIRST_MIN_CHARS`（16 字）—— 一句话就开读，这是"第一段落地就出声"的落点
-   *   · 后续 `LIVE_CHUNK_MAX_CHARS`（120 字）—— 每推一次就是上游一轮合成；
-   *     120 字 ≈ 20 秒音频，远大于一轮合成耗时，因此不会缺料
+   * The old mechanism (fixed 40~120 char thresholds) was rejected by three experiments: 65% of
+   * English cut points landed mid-sentence; a fixed char count starved for 46.6s under slow
+   * generation; and it produced 4x more seams than the seconds strategy.
+   * New mechanism:
+   *   · First chunk: `takeLiveChunk` earliest-of-three (first sentence / comma after 30 chars /
+   *     60-char fallback) — first sound ASAP
+   *   · Following: unplayed >= 6s → don't cut (merge, fewer seams); < 6s → push everything that
+   *     is already a full sentence; only below 3s do a mid-sentence rescue cut
    */
   function drainLive() {
-    const th = liveChunkThresholds(speech.latencyMs())
     for (;;) {
-      // 首段按实测延迟自适应（快链路 8 字就开口），之后攒批少打上游
-      const min = livePushed ? th.next : th.first
-      const cut = takeStreamChunk(streamBuf, min, LIVE_CHUNK_MAX_CHARS)
+      const cut = takeLiveChunk(streamBuf, {
+        first: !livePushed,
+        bufferedAheadSec: liveOn ? speech.liveAheadSec() : 0,
+      })
       if (!cut) return
+      // Line boundary must be checked **before** cleanup (markdownToSpeech eats newlines) —
+      // a line end is a real pause, and finishLiveChunk uses it to decide about a terminator.
+      const rawEndedAtLine = cut.chunk.endsWith('\n')
       streamBuf = cut.rest
-      const text = ensureSentenceEnd(markdownToSpeech(cut.chunk))
-      if (text) { speech.pushLive(text); livePushed = true }
+      const text = finishLiveChunk(markdownToSpeech(cut.chunk), rawEndedAtLine)
+      if (!text) continue
+      liveLastStart = livePushedClean
+      livePushedClean += text.length
+      speech.pushLive(text)
+      livePushed = true
     }
   }
 
@@ -206,13 +203,26 @@ export function useChatSpeech(options: UseChatSpeechOptions = {}) {
     })
   }
 
-  /** 收尾：把残余文本推进去，再告诉服务端"没有更多了" */
-  function flushLive() {
+  /**
+   * Wrap up: push the remaining text, then **wait for the push queue to drain** before telling the
+   * server there is nothing more.
+   *
+   * Returns `{ token, resumeFrom }`: token is for a later status query (did the server drop the
+   * tail), resumeFrom is the start of the last push (the resume anchor, captured before
+   * resetStream zeroes it).
+   */
+  async function flushLive(): Promise<{ token: string | null; resumeFrom: number }> {
     if (streamBuf) {
-      for (const pack of packForTts(markdownToSpeech(streamBuf))) speech.pushLive(pack)
+      for (const pack of packForTts(markdownToSpeech(streamBuf))) {
+        liveLastStart = livePushedClean
+        livePushedClean += pack.length
+        speech.pushLive(pack)
+      }
       streamBuf = ''
     }
-    speech.endLive()
+    const token = speech.liveTokenNow()
+    await speech.endLive()
+    return { token, resumeFrom: liveLastStart }
   }
 
   /**
@@ -239,8 +249,9 @@ export function useChatSpeech(options: UseChatSpeechOptions = {}) {
         return
       }
       const live = liveEnabled()
-      // 会话流：首段门槛按实测延迟自适应（8~40 字）；逐段流仍是 60 字
-      const firstMin = live ? liveChunkThresholds(speech.latencyMs()).first : STREAM_FIRST_MIN_CHARS
+      // Live mode: open the session at 16 chars (splitting is handled by takeLiveChunk's
+      // first-chunk rule); per-chunk streaming keeps its 60-char threshold
+      const firstMin = live ? LIVE_START_MIN_CHARS : STREAM_FIRST_MIN_CHARS
       if (streamBuf.length < firstMin) return
       if (!options.streamRead?.() || !readsThisTurn()) return
       if (live) { startLive(msg); return } // 异步开会话，期间的 chunk 继续攒在 streamBuf
@@ -271,6 +282,68 @@ export function useChatSpeech(options: UseChatSpeechOptions = {}) {
   }
 
   /**
+   * Decide "was this turn interrupted?" after the live stream wrapped up. Two failure signals:
+   *   1. Push failure (useSpeech.liveFailed: non-ok push / audio stall)
+   *   2. Server-side synthesis turn failure (`status.failed` — the audio "ends normally" but only
+   *      holds half the content, which is invisible locally, so the server must be asked; an older
+   *      backend without this endpoint returns null and only signal 1 applies)
+   * A hit sets `interrupted`, which makes the speak bar show the "Resume" button.
+   */
+  function checkLiveInterrupted(
+    msg: ChatMessage,
+    token: string | null,
+    resumeFrom: number,
+  ): void {
+    let failed = speech.liveFailed.value
+    if (token && !failed) {
+      // Query status once: liveFailed may have been overwritten when the audio ended naturally,
+      // and the server's failed flag is the only reliable evidence of a dropped tail
+      void (async () => {
+        let statusFailed: boolean | null = null
+        try {
+          const res = await fetch(`/api/tts/live/status?t=${encodeURIComponent(token)}`)
+          if (res.ok) {
+            const j: any = await res.json().catch(() => null)
+            statusFailed = j?.failed === true
+          }
+        } catch { /* network failure: keep the local verdict */ }
+        if (statusFailed === true) {
+          interrupted.value = { msgId: msg.id, resumeFrom }
+        }
+      })()
+    }
+    if (failed) interrupted.value = { msgId: msg.id, resumeFrom }
+  }
+
+  /**
+   * Resume an interrupted reading (what the speak bar's "Resume" button hits):
+   * start from the first sentence end after the last push's **start offset** — anchoring on the
+   * start guarantees it never opens mid-word; the cost is at most half a sentence repeated
+   * (repeat rather than lose content, the same principle as failPro).
+   *
+   * Accepts a msgId (the UI only holds the id) or a message object; the lookup goes through
+   * options.getMessage so ChatView does not need another "find message by id" helper (it is right
+   * at the file-size limit).
+   */
+  function resumeInterrupted(msgOrId: ChatMessage | string) {
+    const it = interrupted.value
+    interrupted.value = null
+    if (!it) return
+    const msg = typeof msgOrId === 'string' ? options.getMessage?.(msgOrId) : msgOrId
+    if (!msg || it.msgId !== msg.id) return
+    const full = extractSpeakText((msg as any).content)
+    if (!full.trim()) return
+    const from = Math.min(it.resumeFrom, full.length)
+    const rest = full.slice(from)
+    if (!rest.trim()) return
+    // Opening mid-word sounds bad: skip to the first sentence end in rest (at most one sentence,
+    // searched only within 300 chars)
+    const m = rest.slice(0, 300).match(/^[^。！？!?…；;.!?\n]*[。！？!?…；;]\s*/)
+    const text = m ? rest.slice(m[0].length) : rest
+    if (text.trim()) speech.speak(msg.id, text)
+  }
+
+  /**
    * 本轮结束（三条路径的唯一出口）—— 只判朗读，不碰提示音。
    *
    * `ok === false`（失败 / 中断 / 用户手动停止）一律不出声：念半截答案或失败任务是负价值。
@@ -280,15 +353,17 @@ export function useChatSpeech(options: UseChatSpeechOptions = {}) {
   function turnEnd(msg: ChatMessage, ok: boolean): void {
     const streamed = streamOn
     const live = liveOn || liveStarting
+    let liveEndPromise: Promise<void> | null = null
     if (liveOn) {
-      flushLive() // 残余文本推进去 + 告诉服务端收尾
+      liveEndPromise = flushLive().then((r) => { checkLiveInterrupted(msg, r.token, r.resumeFrom) })
     } else if (liveStarting && liveStartPromise) {
       // 会话还没开好就结束了（极短回复）：等它开好再补推残余 + 收尾，
       // 否则这条回复一个字都不会读（比读得晚更糟）。
       const p = liveStartPromise
-      void p.then((startedOk) => {
+      liveEndPromise = p.then(async (startedOk) => {
         if (!startedOk) { speech.stop(); return }
-        flushLive()
+        const r = await flushLive()
+        checkLiveInterrupted(msg, r.token, r.resumeFrom)
       })
     }
     flushStream()
@@ -298,26 +373,42 @@ export function useChatSpeech(options: UseChatSpeechOptions = {}) {
       return
     }
     // 已经边生成边读过了 → 绝不再整条重读一遍
-    if (streamed || live) return
+    if (liveEndPromise) return
+    if (streamed) return
     const text = extractSpeakText((msg as any).content)
     if (!shouldAutoRead({ mode: options.mode?.(), ok, hasText: !!text, foreground: foreground() })) return
     speech.speak(msg.id, text)
   }
 
-  /** 手动点朗读按钮：同一条消息 播放 → 暂停 → 继续；换消息则重读 */
+  /**
+   * 手动点朗读按钮 —— **单键语义**（2026-10-23）：点一下读、再点一下停，没有暂停态。
+   * 中断（丢尾/失败）过的那条，点一下从断点续读，而不是从头再念一遍。
+   *
+   * 为什么去掉暂停：一个键承担「读/暂停/继续」三个语义时，长内容里用户分不清自己点的是
+   * 暂停还是停止，而暂停态的收益（稍后接着听）可以由「停止后再点=续读」覆盖。
+   */
   function toggleSpeak(msg: ChatMessage) {
+    // 顺序有讲究：**先判中断**。中断时 speakingId 可能还没归零（音频错误与状态清理不同步），
+    // 若先判"正在读这条"就会走进 stop 分支，把用户想要的续读吞掉。
+    if (interrupted.value?.msgId === msg.id) {
+      resumeInterrupted(msg)
+      return
+    }
+    // 正在读这条 → 直接停（不进入暂停）
     if (speech.speakingId.value === msg.id) {
-      speech.toggle(msg.id, '') // 已在读该条 → 暂停/继续（文本不用重算）
+      stopSpeech()
       return
     }
     const text = extractSpeakText((msg as any).content)
     if (!text) return
-    speech.toggle(msg.id, text)
+    speech.speak(msg.id, text)
   }
 
   /** 停读（切会话 / 新一轮开始 / 手动停）—— 顺带丢弃流式状态，否则残块会串到下一轮 */
   function stopSpeech() {
     resetStream()
+    // Manually stopping means the user does not want to resume — drop the interruption hint too
+    interrupted.value = null
     speech.stop()
   }
 
@@ -332,6 +423,12 @@ export function useChatSpeech(options: UseChatSpeechOptions = {}) {
     /** 处于「已点朗读、但还一声没出」的合成窗口（UI 据此显示"正在合成语音"并禁用暂停） */
     synthesizing: speech.synthesizing,
     isPro: speech.isPro,
+    /** Reading interruption (reactive): set on a push failure / audio stall / dropped tail; the
+     *  speak bar shows "Resume" from it */
+    interrupted,
+    /** Resume an interrupted reading: continue from the first sentence end after the last push's
+     *  start offset */
+    resumeInterrupted,
     toggleSpeak,
     /** 流式：正文增量到达 */
     feedStream,

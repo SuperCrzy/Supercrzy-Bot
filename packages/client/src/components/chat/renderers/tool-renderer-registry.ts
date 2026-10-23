@@ -13,6 +13,10 @@ export type ToolRendererKey =
   | 'lint'        // lint_file / read_lints 诊断列表
   | 'read-me'     // read_me 可视化指南卡片（VisualizerReadMeCard）
   | 'web-fetch'   // web_fetch 网页卡片（WebFetchCard，一行 header + 结构化展开）
+  | 'web-search'  // web_search 搜索结果卡（来源域名 + 标题 + 摘要 + 日期）
+  | 'tool-search' // tool_search 按需工具发现卡（query + 命中名单）
+  | 'browser'     // browser 动作卡（动作徽标 + 目标 + 结论）
+  | 'computer-use'// computer_use 动作卡（与 browser 共用 ActionToolRenderer）
   | 'multi-edit'  // multi_edit 多文件编辑（MultiEditDiffViewer）
   | 'read-file'   // 读文件（文件名可点击定位行号）
   | 'write-file'  // 写/编辑文件（动词推导 + diff 视图）
@@ -44,6 +48,22 @@ const REGISTRY: RegistryEntry[] = [
   {
     key: 'web-fetch',
     names: ['web_fetch', 'webfetch', 'WebFetch', 'fetch_web_page'],
+  },
+  {
+    key: 'web-search',
+    names: ['web_search', 'WebSearch', 'google_search', 'tavily_search', 'searxng_search'],
+  },
+  {
+    key: 'tool-search',
+    names: ['tool_search', 'ToolSearch'],
+  },
+  {
+    key: 'browser',
+    names: ['browser', 'Browser'],
+  },
+  {
+    key: 'computer-use',
+    names: ['computer_use', 'ComputerUse'],
   },
   {
     key: 'multi-edit',

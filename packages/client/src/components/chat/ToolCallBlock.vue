@@ -118,6 +118,31 @@
       <PlanCard
         v-else-if="isPlan"
       />
+      <!-- 搜索结果卡：来源域名 + 标题 + 两行摘要 + 日期（折叠默认，展开看前 3 条） -->
+      <WebSearchRenderer
+        v-else-if="isWebSearch"
+        :result="props.result"
+        :status="props.status"
+      />
+      <!-- tool_search 发现卡：query + 激活名单（G4，2026-10-23） -->
+      <ToolSearchRenderer
+        v-else-if="isToolSearch"
+        :result="props.result"
+        :args="props.args"
+      />
+      <!-- browser / computer_use 动作卡：动作徽标 + 目标 + 结论（G4，2026-10-23） -->
+      <ActionToolRenderer
+        v-else-if="isBrowserAction"
+        kind="browser"
+        :result="props.result"
+        :args="props.args"
+      />
+      <ActionToolRenderer
+        v-else-if="isComputerUseAction"
+        kind="computer-use"
+        :result="props.result"
+        :args="props.args"
+      />
       <!-- lint 展开态：诊断列表（主流实现 ReadLintsRenderer 同款） -->
       <LintRenderer
         v-else-if="isLint"
@@ -155,6 +180,9 @@ import {
 import CommandRenderer from '@/components/chat/renderers/CommandRenderer.vue'
 import ToolTypeIcon from '@/components/chat/ToolTypeIcon.vue'
 import LintRenderer from '@/components/chat/renderers/LintRenderer.vue'
+import WebSearchRenderer from '@/components/chat/renderers/WebSearchRenderer.vue'
+import ToolSearchRenderer from '@/components/chat/renderers/ToolSearchRenderer.vue'
+import ActionToolRenderer from '@/components/chat/renderers/ActionToolRenderer.vue'
 import FileOpRenderer from '@/components/chat/renderers/FileOpRenderer.vue'
 import PlanCard from '@/components/chat/PlanCard.vue'
 import VisualizerReadMeCard from '@/components/chat/VisualizerReadMeCard.vue'
@@ -548,6 +576,12 @@ const isPlan = computed(() => props.toolName === 'create_plan' || props.toolName
 
 // ===== lint_file 诊断渲染 =====
 const isLint = computed(() => rendererKey.value === 'lint')
+/** 搜索结果卡：来源/标题/摘要/日期（解析失败时卡内回落到原文） */
+const isWebSearch = computed(() => rendererKey.value === 'web-search')
+/** G4（2026-10-23）：tool_search 发现卡 + browser/computer_use 动作卡 */
+const isToolSearch = computed(() => rendererKey.value === 'tool-search')
+const isBrowserAction = computed(() => rendererKey.value === 'browser')
+const isComputerUseAction = computed(() => rendererKey.value === 'computer-use')
 /** 被检查文件名（最后一段） */
 const lintFileName = computed(() => {
   try {
@@ -868,7 +902,7 @@ function toggle() {
 /* 错误摘要（header 内，失败原因一眼可见） */
 .tool-error-hint {
   font-size: 11px;
-  color: var(--danger, #ef4444);
+  color: var(--error);
   background: rgba(239, 68, 68, 0.08);
   border: 0.5px solid rgba(239, 68, 68, 0.25);
   border-radius: 4px;
@@ -922,7 +956,7 @@ function toggle() {
   max-height: 260px;
   overflow-y: auto;
   border-radius: 6px;
-  background: var(--code-bg, rgba(15, 20, 30, 0.9));
+  background: var(--bg-code);
   padding: 8px 0;
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
   font-size: 12px;

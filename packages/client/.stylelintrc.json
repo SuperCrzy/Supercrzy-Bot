@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json.schemastore.org/stylelintrc.json",
+  "customSyntax": "postcss-html",
+  "ignoreFiles": ["dist/**", "node_modules/**"],
+  "rules": {
+    "color-no-invalid-hex": true,
+    "function-calc-no-unspaced-operator": true,
+    "declaration-block-no-duplicate-properties": [true, { "ignore": ["consecutive-duplicates-with-different-values"] }],
+    "declaration-block-no-shorthand-property-overrides": true,
+    "block-no-empty": [true, { "ignore": ["comments"] }],
+    "custom-property-empty-line-before": "never",
+    "property-no-vendor-prefix": [
+      true,
+      {
+        "ignoreProperties": [
+          "appearance",
+          "background-clip",
+          "text-fill-color"
+        ]
+      }
+    ],
+    "value-no-vendor-prefix": [true, { "ignoreValues": ["box", "inline-box"] }],
+    "no-invalid-position-at-import-rule": true,
+    "no-empty-source": true
+  }
+}

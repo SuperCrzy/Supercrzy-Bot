@@ -169,8 +169,8 @@ watch(
   background: var(--bg-hover);
 }
 .psl--pending {
-  border-color: var(--warning-border, #f59e0b);
-  background: var(--bg-warning, var(--bg-tertiary));
+  border-color: var(--warning);
+  background: var(--bg-tertiary);
 }
 .psl:focus-visible {
   outline: 2px solid var(--accent);
@@ -185,7 +185,7 @@ watch(
 }
 .psl--done .psl-icon { color: #059669; }
 .psl--pending .psl-icon { color: var(--warning, #f59e0b); }
-.psl--error { border-color: var(--color-danger-border, #f09595); }
+.psl--error { border-color: var(--error); }
 .psl--error .psl-icon { color: #A32D2D; }
 .psl--cancelled .psl-icon { color: var(--text-muted, #888780); }
 .psl-spin { animation: psl-rotate 1.1s linear infinite; }

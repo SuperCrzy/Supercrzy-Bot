@@ -105,8 +105,8 @@ const displayEdits = computed(() =>
   border-color: var(--success, #059669);
 }
 .med-reject {
-  color: var(--danger, #ef4444);
-  border-color: var(--danger, #ef4444);
+  color: var(--error);
+  border-color: var(--error);
 }
 .med-body {
   max-height: 220px;
@@ -155,7 +155,7 @@ const displayEdits = computed(() =>
   line-height: 1.5;
 }
 .med-col.del .med-col-text {
-  color: var(--danger, #ef4444);
+  color: var(--error);
   text-decoration: line-through;
   opacity: 0.85;
 }

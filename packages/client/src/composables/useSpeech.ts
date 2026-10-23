@@ -258,6 +258,14 @@ export function useSpeech(options: UseSpeechOptions = {}) {
     // 所以这里只需要清指针，不需要额外发请求。
     liveToken = null
     liveAudio = null
+    // Drop the live push queue too: the session is gone, queued text is meaningless
+    // (prevents endLive from draining leftovers of a dead session)
+    livePushQueue = []
+    livePushedChars = 0
+    // ⚠️ liveFailed is deliberately **not** cleared here: turnEnd inspects it **after** the audio
+    // ended (and may also query status), and a natural end runs finish → resetPro, so clearing
+    // here would wipe a failure that was just recorded. Its lifecycle is "clear at the start of
+    // each beginLive" instead (see beginLive).
     // 全停：不只 currentAudio，而是**所有活着的 audio**（漏停的那个会被这里兜住）。
     // 原来的 `if (currentAudio) { pause(); removeAttribute('src') }` 在"两轮交叠、
     // currentAudio 已指向新的"时停不到旧的 —— 那就是重叠朗读的来源。
@@ -501,6 +509,98 @@ export function useSpeech(options: UseSpeechOptions = {}) {
   let liveToken: string | null = null
   let liveAudio: HTMLAudioElement | null = null
 
+  // ---- Serialized live push queue ----
+  //
+  // The old `pushLive`/`endLive` were `void fetch` without await — measured: end arrives at the
+  // server **before** the last push (a 150~366ms jitter on a direct local link is enough to
+  // reorder them) and the server silently drops a "push that arrives after end" (it answers 200
+  // with `{ok:false}`), leaving audio that stops halfway. That was one of the four root causes
+  // behind "it stops in the middle and never finishes the sentence".
+  //
+  // Now: push enqueues → a single pump sends them one by one (order preserved + failures
+  // visible) → `endLive` waits for the queue to **drain** before sending end.
+  // Invariant: once `endLive` resolves, every push has been acknowledged by the server.
+  let livePushQueue: string[] = []
+  /** Chars the server actually acknowledged (failures not counted) — fallback for unplayed seconds */
+  let livePushedChars = 0
+  /** Whether this session saw a push failure / audio interruption (drives the UI hint + resume) */
+  const liveFailed = ref(false)
+
+  /** Real success/failure of one push (non-ok / ok:false both count — HTTP 200 does not mean
+   *  accepted) */
+  async function postLivePush(token: string, text: string): Promise<boolean> {
+    try {
+      const res = await fetch('/api/tts/live/push', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ t: token, text }),
+      })
+      if (!res.ok) return false
+      const j: any = await res.json().catch(() => null)
+      return !j || j.ok !== false
+    } catch {
+      return false
+    }
+  }
+
+  let livePumpInFlight: Promise<void> | null = null
+
+  /**
+   * Push pump. **Repeat calls return the same in-flight promise** — otherwise `await pumpLive()`
+   * inside `endLive` returns immediately while the pump is still running, the token is cleared
+   * too early and the pump discards the whole remaining queue (a race the unit test caught:
+   * push x2 + end back-to-back used to send only 1 push).
+   */
+  function pumpLive(): Promise<void> {
+    if (livePumpInFlight) return livePumpInFlight
+    const p = (async () => {
+      while (livePushQueue.length) {
+        const text = livePushQueue[0]
+        const token = liveToken
+        if (!token) return // session closed by stop: leftover text dies with it (resetPro cleared)
+        const ok = await postLivePush(token, text)
+        if (!liveToken || liveToken !== token) return // closed while draining
+        livePushQueue.shift()
+        if (ok) {
+          livePushedChars += text.length
+        } else {
+          // ⚠️ **No retry**: push is not idempotent. If the server actually accepted the text
+          // and only the response was lost, resending reads the same passage twice (worse than
+          // losing it). Set failed instead — the client shows "interrupted / resume" so the user
+          // can continue from the gap; the gap itself is not hidden.
+          liveFailed.value = true
+        }
+      }
+    })()
+    livePumpInFlight = p
+    void p.finally(() => { if (livePumpInFlight === p) livePumpInFlight = null })
+    return p
+  }
+
+  /**
+   * Currently unplayed audio seconds — the **control value** for live batching (seconds, not
+   * chars).
+   *
+   * Truth first: end of the `audio.buffered` range covering currentTime, minus currentTime.
+   * When the truth is unavailable (some environments / not buffered yet) fall back to a computed
+   * value: acknowledged chars ÷ playback rate (measured 4.8 chars/s) converted to seconds, minus
+   * elapsed playback time.
+   */
+  function liveAheadSec(): number {
+    const a = liveAudio
+    if (!a) return 0
+    const t = a.currentTime || 0
+    try {
+      for (let i = 0; i < a.buffered.length; i++) {
+        if (a.buffered.start(i) - 0.5 <= t && t <= a.buffered.end(i)) {
+          return Math.max(0, a.buffered.end(i) - t)
+        }
+      }
+    } catch { /* buffered unavailable → use computed value */ }
+    const rate = liteRate() || 1
+    return Math.max(0, livePushedChars / (4.8 * rate) - t)
+  }
+
   /**
    * 会话流的码率档（'96' | '48'），**自适应**。
    *
@@ -557,6 +657,8 @@ export function useSpeech(options: UseSpeechOptions = {}) {
     if (!supported.value || !id) return false
     if (Date.now() < proCooldownUntil) return false
     stopInternal()
+    // New session: clear the previous turn's failure flag (resetPro deliberately leaves it)
+    liveFailed.value = false
     wholeRetried = false
     generation += 1
     const gen = generation
@@ -617,6 +719,10 @@ export function useSpeech(options: UseSpeechOptions = {}) {
         proCooldownUntil = Date.now() + PRO_COOLDOWN_MS
         proDegraded.value = true
         resetPro()
+        // ⚠️ Must come **after** resetPro(): resetPro zeroes liveFailed.
+        // Setting failed lets the caller (useChatSpeech) know this turn was interrupted and take
+        // the "interrupted / resume" path instead of silently pretending it finished.
+        liveFailed.value = true
         if (speakingId.value === id) { speakingId.value = null; paused.value = false }
       }
       try { a.load() } catch { /* 不支持预加载 */ }
@@ -627,27 +733,35 @@ export function useSpeech(options: UseSpeechOptions = {}) {
     }
   }
 
-  /** 往当前会话追加一段文本（服务端会把它合成进同一条流） */
+  /** Append text to the current session: enqueued and sent serially by the single pump
+   *  (order preserved, see pumpLive) */
   function pushLive(text: string): void {
     const t = String(text || '').trim()
     if (!liveToken || !t) return
-    void fetch('/api/tts/live/push', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ t: liveToken, text: t }),
-    }).catch(() => { /* 单段丢失不影响整条流 */ })
+    livePushQueue.push(t)
+    void pumpLive()
   }
 
-  /** 文本发完了：让服务端在队列播空后结束整条流（客户端会收到 audio 的 ended） */
-  function endLive(): void {
+  /**
+   * Text is done: **wait for the push queue to drain** before asking the server to end the
+   * stream (which makes the client receive the audio `ended` event).
+   *
+   * Returns a Promise — the caller (useChatSpeech) must await it before treating "all pushes for
+   * this turn have landed", and only then is it safe to query status to detect a dropped tail.
+   */
+  async function endLive(): Promise<void> {
     const token = liveToken
     if (!token) return
-    liveToken = null
-    void fetch('/api/tts/live/end', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ t: token }),
-    }).catch(() => { /* 忽略 */ })
+    // 🔴 Must drain first: end overtaking the last push = the tail is silently dropped (reproducible)
+    await pumpLive()
+    if (liveToken === token) liveToken = null
+    try {
+      await fetch('/api/tts/live/end', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ t: token }),
+      })
+    } catch { /* network failure: the server's idle timeout will reclaim the session */ }
   }
 
   /** 当前是否处于会话流模式 */
@@ -862,11 +976,21 @@ export function useSpeech(options: UseSpeechOptions = {}) {
     beginStream,
     appendStreamText,
     endStream,
-    /** 会话式（一条消息一条流）：beginLive → pushLive* → endLive */
+    /** Live mode (one stream per message): beginLive → pushLive* → endLive (resolves after the
+     *  push queue drains) */
     beginLive,
     pushLive,
     endLive,
     isLive,
+    /** Whether this session saw a push failure / audio interruption (reactive; drives the UI hint) */
+    liveFailed,
+    /** Currently unplayed audio seconds (audio.buffered truth first, computed fallback) — the
+     *  batching control value */
+    liveAheadSec,
+    /** Chars the server acknowledged (failures not counted) */
+    livePushedChars: () => livePushedChars,
+    /** Current session token (flushLive keeps a copy before endLive clears it, to query status) */
+    liveTokenNow: () => liveToken,
     /** 实测「开会话→出声」的 EWMA（ms），供自适应切块算首段门槛 */
     latencyMs,
     pause,

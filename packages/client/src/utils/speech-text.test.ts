@@ -4,6 +4,10 @@ import {
   extractSpeakText,
   packForTts,
   ensureSentenceEnd,
+  ensureSentenceEndLang,
+  finishLiveChunk,
+  isSentenceTail,
+  takeLiveChunk,
   takeStreamChunk,
   TTS_PACK_MAX_CHARS,
   STREAM_FIRST_MIN_CHARS,
@@ -397,5 +401,134 @@ describe('takeStreamChunk 流式攒批', () => {
       }
     }
     expect(full.startsWith(emitted + buf)).toBe(true)
+  })
+})
+
+// ===== Live batching rewrite: driven by unplayed seconds =====
+
+describe('英文句末判定（2026-10-22 补）', () => {
+  it('英文句号后面跟空格 = 句末，能被切出来（旧正则只认全角标点，65% 切点落在句中）', () => {
+    const en = 'The first sentence is here. The second sentence follows it. And a third one.'
+    const cut = takeStreamChunk(en, 10, 600)
+    expect(cut).not.toBeNull()
+    // The cut must land on a sentence end (trailing period), never mid-sentence
+    expect(cut!.chunk.trimEnd().endsWith('.')).toBe(true)
+  })
+
+  it('小数与缩写不误判：3.14 / U.S. 后面不是空格时不切', () => {
+    const s = 'The value is 3.14 and the U.S. market is large. Done.'
+    const cut = takeStreamChunk(s, 10, 600)
+    expect(cut).not.toBeNull()
+    expect(cut!.chunk).not.toBe('The value is 3.')
+  })
+
+  it('isSentenceTail：句末标点（含英文句号与收尾引号）才算', () => {
+    expect(isSentenceTail('这一句结束了。')).toBe(true)
+    expect(isSentenceTail('This is done.')).toBe(true)
+    expect(isSentenceTail('He said "done."')).toBe(true)
+    expect(isSentenceTail('这一句没结束')).toBe(false)
+    expect(isSentenceTail('This is not')).toBe(false)
+  })
+
+  it('ensureSentenceEndLang：中文补「。」，英文补「.」', () => {
+    expect(ensureSentenceEndLang('这是中文结尾')).toBe('这是中文结尾。')
+    expect(ensureSentenceEndLang('This is English')).toBe('This is English.')
+    // Already terminated → left untouched
+    expect(ensureSentenceEndLang('已经结束。')).toBe('已经结束。')
+    expect(ensureSentenceEndLang('Already done.')).toBe('Already done.')
+  })
+
+  it('finishLiveChunk：句末原样 / 行边界补标点 / 句中不补（防假停顿）', () => {
+    expect(finishLiveChunk('完整的一句话。', false)).toBe('完整的一句话。')
+    expect(finishLiveChunk('This is complete.', true)).toBe('This is complete.')
+    // Line boundary (paragraph tail without punctuation) → append a terminator
+    expect(finishLiveChunk('段落末尾没有标点', true)).toBe('段落末尾没有标点。')
+    // Mid-sentence rescue cut → never append punctuation
+    expect(finishLiveChunk('切在句子中间', false)).toBe('切在句子中间')
+  })
+})
+
+describe('takeLiveChunk — 首段三级取最早（尽快出声）', () => {
+  it('第一句已完整 → 第一句就切（不等攒够字数）', () => {
+    const cut = takeLiveChunk('好，我来说。', { first: true, bufferedAheadSec: 0 })
+    expect(cut?.chunk).toBe('好，我来说。')
+  })
+
+  it('第一句超长（无句末）→ 攒满 30 字后的第一个逗号处开口', () => {
+    // The first comma appears after char 32 (no punctuation in the first 30) — exactly the
+    // level-2 threshold trigger
+    const long = '甲'.repeat(32) + '，' + '乙'.repeat(10)
+    const cut = takeLiveChunk(long, { first: true, bufferedAheadSec: 0 })
+    expect(cut).not.toBeNull()
+    expect(cut!.chunk.endsWith('，')).toBe(true)
+    expect(cut!.chunk.length).toBeGreaterThanOrEqual(30)
+  })
+
+  it('连逗号都没有的「懒汉文本」→ 60 字硬兜底', () => {
+    const s = '字'.repeat(80)
+    const cut = takeLiveChunk(s, { first: true, bufferedAheadSec: 0 })
+    expect(cut).not.toBeNull()
+    expect(cut!.chunk.length).toBeLessThanOrEqual(60)
+    expect(cut!.chunk.length).toBeGreaterThan(0)
+  })
+
+  it('文本太短且没有任何切点 → 继续攒（返回 null）', () => {
+    expect(takeLiveChunk('很短', { first: true, bufferedAheadSec: 0 })).toBeNull()
+  })
+})
+
+describe('takeLiveChunk — 后续由未播秒数驱动', () => {
+  const text = '第一句话。第二句话。第三句话。第四句话。第五句话。'
+
+  it('攒料充足（未播 ≥ 6s）→ 不切，继续合并减少接缝', () => {
+    expect(takeLiveChunk(text, { first: false, bufferedAheadSec: 12 })).toBeNull()
+  })
+
+  it('未播 < 6s → 把已完成的句子全部推走（切点落在句末）', () => {
+    const cut = takeLiveChunk(text, { first: false, bufferedAheadSec: 4 })
+    expect(cut).not.toBeNull()
+    expect(cut!.chunk.endsWith('。')).toBe(true)
+    expect(cut!.chunk.length).toBeGreaterThan(5)
+  })
+
+  it('没有句末标点 + 断粮（< 3s）→ 软停顿救急，宁切句中也不静音', () => {
+    // Only resumes at a soft break after char 29 (the >= 24 char threshold)
+    const s = '甲'.repeat(28) + '，' + '乙'.repeat(10)
+    const cut = takeLiveChunk(s, { first: false, bufferedAheadSec: 1 })
+    expect(cut).not.toBeNull()
+    expect(cut!.chunk.endsWith('，')).toBe(true)
+  })
+
+  it('断粮但只有几字碎片 → 不切（推碎片是净亏：一轮合成换 1 秒音频，语调还最生硬）', () => {
+    expect(takeLiveChunk('先说三个必', { first: false, bufferedAheadSec: 0 })).toBeNull()
+    // A soft break exists but under 24 chars → still no cut
+    expect(takeLiveChunk('先说三个，必须承认', { first: false, bufferedAheadSec: 0 })).toBeNull()
+  })
+
+  it('没有句末标点也未断粮 → 继续攒', () => {
+    expect(takeLiveChunk('没有句末标点的一段话', { first: false, bufferedAheadSec: 4 })).toBeNull()
+  })
+
+  it('单块上限 1000：超长无标点文本必须被切到上限内', () => {
+    const s = '字'.repeat(1500)
+    const cut = takeLiveChunk(s, { first: false, bufferedAheadSec: 0 })
+    expect(cut).not.toBeNull()
+    expect(cut!.chunk.length).toBeLessThanOrEqual(1000)
+  })
+
+  it('不丢字不变量：chunk + rest 恒等于原缓冲', () => {
+    for (const ahead of [0, 1, 4, 9]) {
+      const cut = takeLiveChunk(text, { first: false, bufferedAheadSec: ahead })
+      if (!cut) continue
+      expect(cut.chunk + cut.rest).toBe(text)
+    }
+    const firstCut = takeLiveChunk(text, { first: true, bufferedAheadSec: 0 })
+    expect(firstCut!.chunk + firstCut!.rest).toBe(text)
+  })
+
+  it('不切在未闭合代码围栏里（否则代码会被念出来）', () => {
+    const s = '看代码：\n```ts\nconst a = 1\n' + 'x'.repeat(300)
+    // Fence not closed → every cut point is rejected
+    expect(takeLiveChunk(s, { first: false, bufferedAheadSec: 1 })).toBeNull()
   })
 })

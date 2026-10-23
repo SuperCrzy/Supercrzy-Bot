@@ -201,7 +201,7 @@ async function testKey() {
 .is-header { margin-bottom: 18px; }
 .is-title { font-size: 18px; font-weight: 600; margin: 0 0 4px; color: var(--text-primary); }
 .is-sub { margin: 0; font-size: 13px; color: var(--text-secondary); }
-.is-card { background: var(--card-bg, var(--bg-primary)); border: 1px solid var(--border-color); border-radius: 12px; padding: 18px 20px; margin-bottom: 16px; }
+.is-card { background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 12px; padding: 18px 20px; margin-bottom: 16px; }
 .is-group { margin-bottom: 18px; }
 .is-group:last-child { margin-bottom: 0; }
 .is-label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; color: var(--text-primary); }

@@ -75,6 +75,9 @@ export class LiveTtsSession {
   private busy = false
   private ended = false
   private destroyed = false
+  /** Whether this session hit an unrecoverable synthesis failure (drives the status endpoint and
+   *  the client's "interrupted / resume" path) */
+  private failed = false
   private charsTotal = 0
   private bytesTotal = 0
   private idleTimer: NodeJS.Timeout | null = null
@@ -88,6 +91,7 @@ export class LiveTtsSession {
 
   get isEnded(): boolean { return this.ended }
   get isDestroyed(): boolean { return this.destroyed }
+  get isFailed(): boolean { return this.failed }
   get ageMs(): number { return Date.now() - this.createdAt }
   get sentBytes(): number { return this.bytesTotal }
 
@@ -194,6 +198,10 @@ export class LiveTtsSession {
       // 🔴 这里**绝对不能 throw**：pump 是以 `void this.pump().catch(() => { /* pump 内部已兜住 */ })` 起的（没人 await），
       // 抛出去就是 unhandledRejection —— 实机日志里刷屏的就是这个。
       // 头已经发出去了，改不了状态码；能做的是收尾 + 记下来供诊断。
+      // 🔴 failed must be set: after out.end() the client's <audio> receives a **normal `ended`
+      //    event** while holding only half the content — without this flag the client always
+      //    believes the reading finished (a dropped tail is invisible).
+      this.failed = true
       this.lastError = e instanceof Error ? e : new Error(String(e))
       // 失败 ⇒ 把出口判定作废并**立即重测一次**（可能该换中继了）。
       // 不重测的话这条失效只是躺在那儿，下一次朗读还是会走原来的死路。
@@ -218,7 +226,12 @@ export class LiveTtsSession {
         return await this.runTurn(text)
       } catch (e: any) {
         lastErr = e instanceof Error ? e : new Error(String(e))
-        // 连接层坏了 → 丢掉这条连接，下一轮重连后重发同一段（还没有任何字节属于它）
+        // 🔴 This turn already wrote audio bytes ⇒ resending the same text means **doubled audio**
+        //    (reproduced in a unit test: stream break after 8192 bytes → retry → 16384, the same
+        //    content played twice). "writtenBytes > 0" can only mean a mid-stream break, which a
+        //    retry cannot fix — give up and let pump set failed so the client can resume.
+        if (Number((e as any)?.writtenBytes || 0) > 0) throw lastErr
+        // Connection broke before any byte was written → drop it, reconnect and resend (safe)
         this.closeSocket()
         if (attempt < LIVE_TURN_RETRIES) {
           await new Promise((r) => setTimeout(r, 200 * (attempt + 1)))
@@ -241,9 +254,22 @@ export class LiveTtsSession {
         if (settled) return
         settled = true
         if (timer) { clearTimeout(timer); timer = null }
-        if (e) reject(e)
-        else resolve({ bytes })
+        this.out.off('close', onClose)
+        if (e) {
+          // Attach "how many bytes this turn already wrote" to the error — runTurnWithRetry uses
+          // it to tell a safe-to-resend connection failure (nothing played yet) apart from a
+          // mid-stream break (a resend would double the audio)
+          ;(e as any).writtenBytes = bytes
+          reject(e)
+        } else {
+          resolve({ bytes })
+        }
       }
+      // Playback side closed (destroy → out close) ⇒ abort this turn immediately:
+      // 1. stop pulling audio nobody listens to; 2. previously only the stall timeout caught
+      // this (30s of dead wait)
+      const onClose = () => finish(new Error('播放端已断开'))
+      this.out.once('close', onClose)
       const arm = (ms: number, msg: string) => {
         if (timer) clearTimeout(timer)
         timer = setTimeout(() => finish(new Error(msg)), ms)
@@ -255,9 +281,17 @@ export class LiveTtsSession {
         bytes += buf.length
         this.bytesTotal += buf.length
         if (!this.out.write(buf)) {
-          // 下游吃不下（客户端暂停/网络慢）→ 暂停上游，drain 之后再放行
+          // Downstream can't keep up (client paused / slow network) → pause upstream until drain.
+          // 🔴 The stall timer **must be suspended during backpressure**: a client paused for
+          // longer than 30s (the stall threshold) does not mean "upstream died". The timer used to
+          // keep running → a pause long enough was misread as a failure → the same audio was
+          // resent and played twice.
           try { sock?.pause() } catch { /* 已关 */ }
-          this.out.once('drain', () => { try { sock?.resume() } catch { /* 已关 */ } })
+          if (timer) { clearTimeout(timer); timer = null }
+          this.out.once('drain', () => {
+            try { sock?.resume() } catch { /* 已关 */ }
+            if (!settled) arm(TTS_STREAM_STALL_TIMEOUT_MS, '上游数据中断')
+          })
         }
       }
 

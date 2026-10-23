@@ -18,6 +18,8 @@ import { rankMemories, memoryRankedSearch, selectMemoryCandidates, applyCategory
 import { requestChat, chatCompletion, normalizeBaseUrl, buildApiError } from './model-client'
 import { getDB } from '../services/database'
 import { toolDefinitions, executeToolCalls, type ToolCall, type ToolResultWithMeta, type ToolExecCtx, DEFERRED_TOOLS, classifySensitiveTool, setApprovalWorkspaceRoot, SENSITIVE_TOOLS } from './tools'
+import { createCapabilityManifest, addCapability, countBySourceKind, type CapabilityManifest } from './capability-manifest'
+import { resolveToolSearchHits } from '../tools/tool-search'
 import { pushMemorySync, pushReflection } from './memory-worker'
 import { upsertMemory } from './memory-service'
 import { safeWriteSse } from './sse-health'
@@ -847,7 +849,7 @@ export function setupCapabilityLines(input: {
   return lines
 }
 
-function buildSystemPrompt(basePrompt: string, userMessage: string, model?: string, roleId?: string, sessionWorkspace?: string, uiLanguage?: string): { prompt: string; matchedSkills: Array<{ name: string; name_en: string }>; allowedTools: string[] } {
+function buildSystemPrompt(basePrompt: string, userMessage: string, model?: string, roleId?: string, sessionWorkspace?: string, uiLanguage?: string): { prompt: string; matchedSkills: Array<{ name: string; name_en: string }>; allowedTools: string[]; manifest: CapabilityManifest } {
   const db = getDB()
 
   // 权威当前日期（北京时间）——注入系统提示，防止模型靠搜索结果/记忆日期反推"今天"（曾把 8/23 当 8/22）
@@ -955,6 +957,11 @@ ${contentFactoryLine}`
   let matchedSkills: Array<{ name: string; name_en: string }> = []
   let skillTools: string[] = []
 
+  // G2 能力清单（2026-10-23）：manifest 是本会话能力的数据事实（名字 + provenance + 稳定哈希）。
+  // builtin 先登记注册表全量；技能工具在下方逐个以 `skill:<名>` 追加；MCP 在 agent 循环里追加。
+  // 提示词里的按需名录只是**给模型看的文案**，改文案不再影响任何激活路径。
+  let manifest = addCapability(createCapabilityManifest(), toolDefinitions.map((t) => t.name), 'builtin')
+
   // 🔴 I11（2026-10-14）：能力声明必须由**真实表**生成 —— 这三项计数为 0 时对应的声明整条不出现。
   // 旧实现把九个渠道名写死在提示词里，而实测本机 channels 表 **0 行**
   // ⇒ 模型据此承诺"我可以发到你的飞书"，做不到之后用户判定 BOT 在撒谎。
@@ -1035,29 +1042,25 @@ ${contentFactoryLine}`
         if (s.tools) {
           try {
             const tools = typeof s.tools === 'string' ? JSON.parse(s.tools) : s.tools
-            if (Array.isArray(tools)) skillTools.push(...tools)
+            if (Array.isArray(tools)) {
+              skillTools.push(...tools)
+              // G2：技能贡献的工具在 provenance 里单独记账 —— 关掉这个 skill，
+              // manifest 的 hash 变化且对应 entry 少一条 `skill:<名>` 来源
+              manifest = addCapability(manifest, tools, `skill:${s.name}`)
+            }
           } catch {}
         }
       }
     }
   } catch {}
 
-  // 基础白名单 = 全部内置工具（2026-08-29：补 tool_search——两级加载的发现工具必须常驻）。
-  // 注意：DEFERRED_TOOLS（generate_image/video_edit/terminal_*/computer_use 等）仍会在
-  // 注入 tools 数组时被过滤为"按需"，模型先用 tool_search 发现再到 DeferExecuteTool；
-  // 但 allowedTools 白名单必须包含它们，否则按需加载后也无法调用。故这里保留全量名单。
-  const baseTools = [
-    'memory_store', 'memory_recall', 'memory_list',
-    'file_read', 'file_write', 'file_exists', 'multi_edit', 'lint_file', 'read_me',
-    'shell_exec', 'web_search', 'web_fetch', 'deep_research', 'news_search',
-    'tool_search',
-    'draw_diagram', 'generate_image', 'video_edit', 'ask_question', 'ask_user',
-    'task_create', 'task_update', 'task_list', 'create_plan', 'get_goal',
-    'git_status', 'git_diff', 'git_commit',
-    'computer_use',
-    'terminal_open', 'terminal_list', 'terminal_send', 'terminal_read', 'terminal_signal', 'terminal_close',
-    'skill_list', 'skill_search', 'skill_view', 'skill_install',
-  ]
+  // 基础白名单 = **注册表全量派生**（G2，2026-10-23）：不再手抄名单。
+  // 旧写法手写 39 条，曾漏掉 file_delete / memory_consolidate / make_article / browser ——
+  // 今天恰好都按需所以无害，但一旦哪个从按需转常驻，"白名单不含"就会把它静默丢掉。
+  // 派生后注册表加工具自动进白名单，永不漂移（契约断言见 validate-tools.ts 的 G2 段）。
+  // DEFERRED_TOOLS 仍会在注入 tools 数组时被过滤为"按需"，模型先用 tool_search 发现再调用；
+  // 白名单必须包含它们，否则按需加载后也无法调用 —— 全量派生天然满足。
+  const baseTools = toolDefinitions.map((t) => t.name)
   const allowedTools = [...new Set([...baseTools, ...skillTools])]
 
   const prompt = `${basePrompt}${todaySection}${searchTriggerSection}${outputStyleSection}
@@ -1082,6 +1085,13 @@ ${contentFactoryLine}`
 - 文件读写（file_read / file_write / file_exists）请**优先使用相对路径**（相对于上述工作目录），不要猜测或拼接绝对路径。
 - shell_exec 命令默认也在该目录下执行。
 - 如需访问工作目录之外的文件，使用绝对路径（沙箱会校验权限）。
+
+## 后台任务（长命令）
+装依赖、构建、打包、起服务这类**可能超过 30 秒**的命令，用 shell_exec 的 run_in_background: true 启动，不要在前台干等：
+- 启动后返回值只有一行（任务 id），**你可以马上继续做别的事**（改代码、查文件、回应用户），不要空转等它跑完。
+- 跑的过程中要看进展就调 bg_task：action="list" 看状态与「最后输出 Ns 前」，action="output" 读增量。注意**没有进度百分比**，只能靠「有没有新输出」和「耗时」判断是在推进还是卡住。
+- 任务结束（成功/失败）会自动通知你继续，届时用 bg_task 的 output 取尾部输出即可；**不要重复执行同一条命令**。
+- 用户主动取消的任务不会再自动续跑，尊重这个结果。
 
 ## Your Setup
 ${setupCapabilityLines({
@@ -1134,7 +1144,7 @@ Save important facts with memory_store. Retrieve relevant history with memory_re
 
 ${memorySection}${relatedSection}${toolsSection}${skillIndexSection}${skillSection}`
 
-  return { prompt, matchedSkills, allowedTools }
+  return { prompt, matchedSkills, allowedTools, manifest }
 }
 
 /**
@@ -1359,10 +1369,16 @@ export async function runAgentLoop(
 
   // 工具两级加载（2026-08-29 对齐主流实现 deferLoading）：
   // 默认只暴露核心常驻工具，重型/少用工具（生图/视频/终端/绘图等）按需 tool_search 发现，
-  // 压缩每轮 prompt 体积。allowedTools 白名单仍可精确裁剪。
-  let activeToolDefs = systemPrompt.allowedTools.length > 3
-    ? toolDefinitions.filter(t => systemPrompt.allowedTools.includes(t.name) && !isDeferredTool(t.name))
-    : toolDefinitions.filter(t => !isDeferredTool(t.name))
+  // 压缩每轮 prompt 体积。
+  // G2（2026-10-23）：删掉原 `allowedTools.length > 3 ? A : B` 的 B 分支死代码 ——
+  // roleId 只用于选记忆、从不收窄工具白名单，allowedTools 恒含注册表全量，条件恒真；
+  // 注释"白名单仍可精确裁剪"描述的是一个没有调用方的能力。
+  let activeToolDefs = toolDefinitions.filter(t => systemPrompt.allowedTools.includes(t.name) && !isDeferredTool(t.name))
+
+  // G2 能力清单：以 systemPrompt 里的 manifest（builtin + skill provenance）为底稿，
+  // MCP 工具追加 `mcp:<server>` 来源后，把最终清单（hash + 分类计数）推给前端
+  // —— provenance 可回答"这个工具是谁带来的""关掉某 skill 后谁消失了"。
+  let capabilityManifest = systemPrompt.manifest
 
   // ---- MCP 连接器工具注入（用户自定义 MCP server 的工具动态合并） ----
   try {
@@ -1378,9 +1394,16 @@ export async function runAgentLoop(
           : { type: 'object', properties: {} },
       }))
       activeToolDefs = [...activeToolDefs, ...mcpDefs]
+      capabilityManifest = addCapability(capabilityManifest, mcpDefs.map((d) => d.name), 'mcp')
       emitSSE(ctx, 'mcp_tools', { count: mcpDefs.length, servers: [...new Set(mcpTools.map((m) => m.serverName))] })
     }
   } catch { /* MCP 注入失败不影响主流程 */ }
+
+  emitSSE(ctx, 'capability_manifest', {
+    hash: capabilityManifest.hash,
+    total: capabilityManifest.entries.length,
+    bySource: countBySourceKind(capabilityManifest),
+  })
 
   let turn = resumedTurn  // 从检查点恢复轮次
   let finished = false
@@ -2113,22 +2136,23 @@ export async function runAgentLoop(
           }
           messages.push(result)
 
-          // ---- 关键修复(2026-09-04): tool_search 发现 DEFERRED 工具后，真正把它并入后续每轮的 tools 声明 ----
-          // 此前 tool_search 只回一段"已加载可直接调用"文字，却没有把该工具加进下轮 request 的 tools，
-          // 模型下轮调 browser/生图 时 tools 里并不存在 → DeepSeek 拒执行 → "能搜到调不到"鬼打墙。
+          // ---- tool_search 激活（G2，2026-10-23 重写）：数据驱动，不再正则解析返回文案 ----
+          // 旧实现（2026-09-04）：对 result.content 做「是否命中已加载短语」的 includes 判断，
+          // 再用正则抠行首工具名 —— 文案改一个字，按需工具**永久调不到且不报错**。
+          // 现在用模型本次调 tool_search 的**实参**重放同一份 BM25 检索（resolveToolSearchHits，
+          // 与 tool-search.ts 渲染共用唯一数据源），得到结构化的命中名单，按名激活。
+          // 文案从此纯给人看/给模型看，激活与文案不可能再漂移。
           if (toolName === 'tool_search') {
-            const txt = String(result.content || '')
-            if (txt.includes('已加载，可直接调用')) {
-              const re = /-\s+([a-z][a-z0-9_]*)\s*:/gi
-              let m: RegExpExecArray | null
-              while ((m = re.exec(txt)) !== null) {
-                const nm = m[1]
+            try {
+              const args = JSON.parse(tc?.function?.arguments || '{}') as { query?: string; limit?: number }
+              const activated = resolveToolSearchHits(String(args.query || ''), Number(args.limit) || 8)
+              for (const nm of activated) {
                 if (!nm || !isDeferredTool(nm)) continue
                 if (activeToolDefs.some((d) => d.name === nm)) continue
                 const def = toolDefinitions.find((t: any) => t.name === nm)
                 if (def) { activeToolDefs.push(def as any); console.log(`[agent] tool_search 激活 DEFERRED 工具: ${nm}（下轮起可真实调用）`) }
               }
-            }
+            } catch { /* 实参解析失败不影响主流程（下一轮 tool_search 可重试） */ }
           }
 
           // ---- 工具循环防护：签名级追踪 ----

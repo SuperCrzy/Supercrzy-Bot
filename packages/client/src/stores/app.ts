@@ -16,7 +16,7 @@ export const useAppStore = defineStore('app', () => {
   const currentModel = ref('')
   const currentAgent = ref('default')
   const detailPanelVisible = ref(false)
-  const detailPanelTab = ref<'deliverables' | 'files' | 'changes' | 'preview' | 'timeline' | 'browser'>('deliverables')
+  const detailPanelTab = ref<'deliverables' | 'files' | 'changes' | 'preview' | 'timeline' | 'browser' | 'bgtask'>('deliverables')
 
   // 上下文用量（圆环数据源：ChatView 的 SSE usage/config/compressed 事件写入，顶部会话栏圆环读取）
   const ctxUsed = ref(0)                 // 已用上下文 tokens（usage 事件 prompt_tokens）
@@ -372,9 +372,17 @@ export const useAppStore = defineStore('app', () => {
   }
 
   // 历史残留守卫：localStorage/旧代码可能传入已删除的 'terminal'，非法值回退 deliverables
-  function setDetailPanelTab(tab: 'deliverables' | 'files' | 'changes' | 'preview' | 'timeline' | 'browser') {
-    const valid = ['deliverables', 'files', 'changes', 'preview', 'timeline', 'browser']
+  function setDetailPanelTab(tab: 'deliverables' | 'files' | 'changes' | 'preview' | 'timeline' | 'browser' | 'bgtask') {
+    const valid = ['deliverables', 'files', 'changes', 'preview', 'timeline', 'browser', 'bgtask']
     detailPanelTab.value = (valid.includes(tab) ? tab : 'deliverables') as typeof detailPanelTab.value
+  }
+
+  /** 右栏「后台任务」预览的任务 id（点浮层里的任务行时写入） */
+  const bgTaskPreviewId = ref<string | null>(null)
+  function openBgTaskPreview(id: string) {
+    bgTaskPreviewId.value = id
+    detailPanelVisible.value = true
+    setDetailPanelTab('bgtask')
   }
 
   // 产物↔消息联动：DetailPanel 产物卡片/时间线点击 → 定位并高亮消息区对应消息
@@ -402,6 +410,8 @@ export const useAppStore = defineStore('app', () => {
     currentAgent,
     detailPanelVisible,
     detailPanelTab,
+    bgTaskPreviewId,
+    openBgTaskPreview,
     ctxUsed,
     ctxWindow,
     ctxCompressedAt,

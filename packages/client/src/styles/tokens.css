@@ -27,7 +27,6 @@
   /* Borders */
   --border-color: #e4e4e7;
   --border-hover: #d4d4d8;
-  --border-focus: #4F46E5;
   /* 输入框/可交互组件专用边框：比通用边框深一档，保证在纯白页面/纯黑页面都可辨（naive Input 同款 #b8b8c0/#3a3a42） */
   --border-input: #b8b8c0;
 
@@ -48,8 +47,6 @@
   --warning-muted: #fffbeb;
   --error: #dc2626;
   --error-muted: #fef2f2;
-  --info: #0891b2;
-  --info-muted: #ecfeff;
 
   /* Category colors for skills/tools */
   --cat-coding: #2563eb;
@@ -58,26 +55,20 @@
   --cat-automation: #d97706;
   --cat-analysis: #059669;
   --cat-writing: #db2777;
-  --cat-general: #64748b;
   --cat-memory: #8b5cf6;
   --cat-file: #2563eb;
   --cat-network: #059669;
 
   /* Spacing */
-  --space-xs: 4px;
   --space-sm: 8px;
   --space-md: 12px;
   --space-lg: 16px;
-  --space-xl: 24px;
-  --space-2xl: 32px;
-  --space-3xl: 48px;
 
   /* Radius */
   --radius-xs: 4px;
   --radius-sm: 6px;
   --radius-md: 8px;
   --radius-lg: 12px;
-  --radius-xl: 16px;
 
   /* Fonts */
   --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
@@ -87,24 +78,13 @@
   --text-xs: 11px;
   --text-sm: 12px;
   --text-base: 14px;
-  --text-md: 15px;
   --text-lg: 18px;
-  --text-xl: 24px;
-
-  /* Shadows */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
-  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
 
   /* Animation */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
   --duration-fast: 150ms;
   --duration-normal: 200ms;
-  --duration-slow: 300ms;
-
-  /* Legacy aliases (for backward compatibility) */
-  --accent-light: var(--accent-muted);
 }
 
 /* Dark mode — 对齐主流实现 深色：侧边栏 #1f1f1f（比内容区亮一档），内容区 #141414 */
@@ -129,7 +109,6 @@
 
   --border-color: #1f1f23;
   --border-hover: #2e2e33;
-  --border-focus: #818cf8;
   /* 输入框/可交互组件专用边框：比通用边框亮一档，保证在纯黑页面可辨（naive Input 同款） */
   --border-input: #3a3a42;
 
@@ -148,10 +127,4 @@
   --warning-muted: #422006;
   --error: #f87171;
   --error-muted: #450a0a;
-  --info: #22d3ee;
-  --info-muted: #083344;
-
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.3);
-  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.4);
 }

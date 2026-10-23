@@ -193,10 +193,22 @@ export function lintContent(content: string, filePath: string): Array<{ severity
   return diags.slice(0, 50)
 }
 
+/**
+ * 按行切分（G16）：**先去掉一个结尾换行**再切。
+ *
+ * 为什么：`'a\nb\n'.split('\n')` 会多出一个空元素，于是"写一个 60 行、结尾带换行"的文件
+ * 会被算成 +61 行 —— 用户看到的 ± 数字系统性 +1。空串仍返回空数组（不是 ['']）。
+ * 注意只去一个：`'a\n\n'` 是"a 加一个空行"，真实就是 2 行。
+ */
+function splitLines(t: string): string[] {
+  if (!t) return []
+  return t.replace(/\r?\n$/, '').split('\n')
+}
+
 // 行数 diff：对比新旧文本，返回新增/删除行数（主流实现 addedLines/deletedLines 同款算法）
 export function diffLines(oldTxt: string, newTxt: string): { added: number; deleted: number } {
-  const a = oldTxt ? oldTxt.split('\n') : []
-  const b = newTxt ? newTxt.split('\n') : []
+  const a = splitLines(oldTxt)
+  const b = splitLines(newTxt)
   const counter = new Map<string, number>()
   for (const l of a) counter.set(l, (counter.get(l) || 0) + 1)
   let common = 0

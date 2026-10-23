@@ -82,7 +82,7 @@ function submitInput() {
 }
 .qf-card {
   background: var(--bg-elevated, #ffffff);
-  border: 1px solid var(--warning-border, rgba(180, 83, 9, 0.45));
+  border: 1px solid var(--warning);
   border-radius: 10px;
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
   padding: 12px 14px;

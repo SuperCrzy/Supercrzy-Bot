@@ -933,13 +933,13 @@ onMounted(() => {
   overflow-x: hidden;
   padding: 4px 6px;
   scrollbar-width: thin;
-  scrollbar-color: var(--border-color-strong, var(--text-muted)) transparent;
+  scrollbar-color: var(--border-hover) transparent;
 }
 .chats-list::-webkit-scrollbar {
   width: 6px;
 }
 .chats-list::-webkit-scrollbar-thumb {
-  background: var(--border-color-strong, var(--text-muted));
+  background: var(--border-hover);
   border-radius: 3px;
   opacity: 0.6;
 }

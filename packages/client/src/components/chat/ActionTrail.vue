@@ -82,7 +82,7 @@ const rows = computed(() =>
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
-.at-row--failed .at-label { color: var(--danger, #dc2626); }
-.at-row--failed .at-icon { color: var(--danger, #dc2626); }
+.at-row--failed .at-label { color: var(--error); }
+.at-row--failed .at-icon { color: var(--error); }
 .at-row--muted { opacity: 0.72; }
 </style>

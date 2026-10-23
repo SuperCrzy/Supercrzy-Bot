@@ -48,6 +48,61 @@ export function relayCandidates(env: NodeJS.ProcessEnv = process.env): string[] 
     .filter((s) => /^https?:\/\//i.test(s))
 }
 
+// ===== Runtime relay manifest =====
+//
+// Current state: the relay service is alive on the VPS (tts-relay.service :3128), but the env of
+// installed apps **never received TTS_RELAYS** — so the relay was effectively unused. Hardcoding
+// the relay address into the client is not an option either: changing it would blind every app
+// already installed and force a re-packaged release.
+// So: the manifest lives on the updates site (tts-relays.json) and the server fetches it when
+// picking a route.
+//
+//   · env `TTS_RELAYS` (manual config) **wins** — the operator's emergency switch
+//   · manifest is cached for 10 minutes; a fetch failure is non-fatal (fall back to direct)
+
+/**
+ * Manifest URL. Living under `releases/` is deliberate: the updates site's nginx only allows
+ * `/releases/` (`location / { return 404; }`), so the manifest rides an existing channel and
+ * **nginx needs no change**.
+ */
+export const TTS_RELAY_MANIFEST_URL = 'https://updates.supercrzy.com/releases/tts-relays.json'
+export const TTS_RELAY_MANIFEST_TTL_MS = 10 * 60_000
+export const TTS_RELAY_MANIFEST_TIMEOUT_MS = 3_000
+
+let manifestCache: { relays: string[]; at: number } | null = null
+
+/** Diagnostics: the currently cached manifest (never fetched = empty array) */
+export function manifestRelays(): string[] {
+  return manifestCache?.relays ?? []
+}
+
+function parseRelayList(v: unknown): string[] {
+  const arr = Array.isArray(v) ? v : Array.isArray((v as any)?.relays) ? (v as any).relays : []
+  return (arr as unknown[])
+    .map((s) => String(s || '').trim())
+    .filter((s) => /^https?:\/\//i.test(s))
+}
+
+/** Fetch the runtime manifest. **Never throws**: the manifest is just one candidate source, so a
+ *  failed fetch means "no manifest" */
+export async function fetchRelayManifest(
+  env: NodeJS.ProcessEnv = process.env,
+  force = false,
+): Promise<string[]> {
+  if (String(env.TTS_RELAYS || '').trim()) return relayCandidates(env) // manual config wins
+  if (!force && manifestCache && Date.now() - manifestCache.at < TTS_RELAY_MANIFEST_TTL_MS) {
+    return manifestCache.relays
+  }
+  const url = String(env.TTS_RELAY_MANIFEST || '').trim() || TTS_RELAY_MANIFEST_URL
+  let relays: string[] = []
+  try {
+    const res = await withTimeout(fetch(url), TTS_RELAY_MANIFEST_TIMEOUT_MS, '中继清单')
+    if (res.ok) relays = parseRelayList(await res.json())
+  } catch { /* non-fatal: fall back to direct */ }
+  manifestCache = { relays, at: Date.now() }
+  return relays
+}
+
 /** 手工指定了 TTS_PROXY → 不探测，直接用 */
 function manualProxy(env: NodeJS.ProcessEnv = process.env): string | null {
   const raw = String(env.TTS_PROXY || '').trim()
@@ -113,7 +168,10 @@ export async function pickTtsRoute(force = false): Promise<RouteDecision> {
   if (picking) return picking
 
   picking = (async () => {
-    const candidates: (string | null)[] = [null, ...relayCandidates()]
+    // Candidates = direct + env relays + relays from the updates manifest (env wins, a manifest
+    // failure is non-fatal)
+    const relays = await fetchRelayManifest(process.env, force)
+    const candidates: (string | null)[] = [null, ...relays]
     // 每个候选并行采 3 次、取中位数：跨太平洋链路单次抖动可以从 1s 跳到 20s，
     // 只测一次就决定"未来 10 分钟走哪条路"太草率了。
     const probes = await Promise.all(
@@ -163,6 +221,8 @@ export function routeSnapshot() {
   return {
     chosen: getChosenRelay() ?? 'direct',
     relays: relayCandidates(),
+    manifestRelays: manifestRelays(),
+    manifestUrl: TTS_RELAY_MANIFEST_URL,
     manual: manualProxy(),
     probes,
     probedAt: at,

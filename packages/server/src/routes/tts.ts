@@ -302,6 +302,15 @@ ttsRouter.post('/live/push', (ctx: Context) => {
     ctx.body = { error: '朗读会话已失效' }
     return
   }
+  // A finished session accepts no more pushes (409 instead of 200 {ok:false}) — the old code
+  // silently swallowed "pushes that arrived after end", so the client never noticed and the tail
+  // was simply lost. An explicit 409 lets the caller tell "accepted" from "discarded"; together
+  // with the client's serialized push queue this path should not be reachable any more.
+  if (s.isEnded || s.isDestroyed) {
+    ctx.status = 409
+    ctx.body = { ok: false, error: '朗读会话已结束，push 被拒绝' }
+    return
+  }
   const { text: body, error } = validateText(text)
   if (error) {
     ctx.status = 400
@@ -324,6 +333,34 @@ ttsRouter.post('/live/end', (ctx: Context) => {
   s.end()
   ctx.set('Cache-Control', 'no-store')
   ctx.body = { ok: true }
+})
+
+/**
+ * Session status — queried by the client after endLive.
+ *
+ * Why it is required: when synthesis fails mid-way the server calls `out.end()`, so the client's
+ * `<audio>` receives an **ended event identical to a normal finish** — "it read half and stopped"
+ * is completely invisible on the client. `failed` is the only reliable evidence of a dropped tail,
+ * and the client uses it to show "interrupted / resume".
+ *
+ * 410 means the session no longer exists. The sweeper only reclaims sessions that are "ended /
+ * destroyed / idle for long", so **failed sessions stay in the table** (ended not set) until the
+ * idle timeout — therefore, querying right after end means 410 ⇒ "finished normally", not "failed".
+ */
+ttsRouter.get('/live/status', (ctx: Context) => {
+  const s = takeLive((ctx.query as any)?.t)
+  if (!s) {
+    ctx.status = 410
+    ctx.body = { error: '朗读会话已失效' }
+    return
+  }
+  ctx.set('Cache-Control', 'no-store')
+  ctx.body = {
+    failed: s.isFailed,
+    ended: s.isEnded,
+    destroyed: s.isDestroyed,
+    sentBytes: s.sentBytes,
+  }
 })
 
 ttsRouter.get('/live/stream', async (ctx: Context) => {

@@ -54,6 +54,7 @@ import { recoverInterruptedTasks } from './services/collab-engine'
 import { newsRouter } from './routes/news'
 import { ttsRouter } from './routes/tts'
 import { terminalRouter } from './routes/terminal'
+import { bgTasksRouter } from './routes/bg-tasks'
 import { startScheduler } from './services/scheduler'
 import { loadCredentials, sendMessage } from './services/wechat-ilink'
 import { startBot, setMessageHandlerFull } from './services/wechat-bot-runner'
@@ -76,6 +77,7 @@ import { stopComputerUse } from './services/computer-use'
 import { mcpRouter } from './routes/mcp'
 import { routineRouter } from './routes/routines'
 import { taskStateRouter } from './routes/task-state'
+import capabilitiesRouter from './routes/capabilities'
 import { restoreFromDB } from './services/task-state'
 import { stopAllMcp } from './services/mcp-manager'
 import { BROWSER_START_PAGE_PATH, browserStartPageHtml } from './services/ai-browser-start-page'
@@ -444,7 +446,7 @@ async function bootstrap() {
   }
 
   // API Routes
-  const routers = [uploadRouter, chatRouter, fsRouter, settingsRouter, sessionRouter, historyRouter, statsRouter, memoryRouter, gatewayRouter, skillsRouter, tasksRouter, automationsRouter, modelsRouter, workspaceRouter, ocrRouter, checkpointsRouter, playbookRouter, rolesRouter, systemRouter, collabRouter, newsRouter, ttsRouter, mcpRouter, routineRouter, terminalRouter, taskStateRouter]
+  const routers = [uploadRouter, chatRouter, fsRouter, settingsRouter, sessionRouter, historyRouter, statsRouter, memoryRouter, gatewayRouter, skillsRouter, tasksRouter, automationsRouter, modelsRouter, workspaceRouter, ocrRouter, checkpointsRouter, playbookRouter, rolesRouter, systemRouter, collabRouter, newsRouter, ttsRouter, mcpRouter, routineRouter, terminalRouter, taskStateRouter, bgTasksRouter, capabilitiesRouter]
   // 统一任务状态机：回填历史任务（进程重启后仍可查询上次状态，幽灵任务自动收敛为 cancelled）
   try { const n = restoreFromDB(); if (n > 0) console.log(`[task-state] 已回填 ${n} 条历史任务`) } catch { /* 不影响启动 */ }
   for (const r of routers) {
@@ -549,7 +551,11 @@ async function bootstrap() {
     })
   }
 
-  server.listen(PORT, () => {
+  // 绑定地址：默认不指定（Node 在 IPv6 可用时绑 `::`，双栈）——这是**原本就正确**的行为。
+  // 2026-10-23 曾误判「手机端 adb forward 连不上 = 绑定错了」，实际是 forward 重建时序问题；
+  // 这里保留一个可选的 HOST 逃生口（不设则完全维持默认），供确实需要显式绑 IPv4 的场景使用。
+  const BIND_HOST = process.env.HOST || ''
+  const onListening = () => {
     const localIP = getLocalIP()
     console.log(`\n🚀 SUPERCRZY BOT running on:`)
     console.log(`   Local:   http://localhost:${PORT}`)
@@ -590,7 +596,11 @@ async function bootstrap() {
     startAllWecomChannels().catch((err: any) => {
       console.error('[Bootstrap] Wecom channels restore failed:', err.message)
     })
-  })
+  }
+
+  // HOST 显式给出时按 IPv4/IPv6 指定绑定（手机端 adb forward 只走 IPv4），否则沿用 Node 默认
+  if (BIND_HOST) server.listen(PORT, BIND_HOST, onListening)
+  else server.listen(PORT, onListening)
 
   // Graceful shutdown
   process.on('SIGINT', async () => {

@@ -20,7 +20,7 @@ vi.mock('./tts', () => ({
   },
 }))
 
-import { pickTtsRoute, relayCandidates, ROUTE_IMPROVE_RATIO, routeSnapshot } from './tts-route'
+import { pickTtsRoute, relayCandidates, fetchRelayManifest, ROUTE_IMPROVE_RATIO, routeSnapshot } from './tts-route'
 import { resetRouteState } from './tts-route-state'
 
 beforeEach(() => {
@@ -28,6 +28,10 @@ beforeEach(() => {
   resetRouteState()
   delete process.env.TTS_RELAYS
   delete process.env.TTS_PROXY
+  delete process.env.TTS_RELAY_MANIFEST
+  // Unit tests never touch the network: a failed manifest fetch yields an empty list (individual
+  // cases override fetch themselves)
+  globalThis.fetch = (async () => { throw new Error('offline in unit test') }) as any
 })
 afterEach(() => {
   delete process.env.TTS_RELAYS
@@ -93,5 +97,46 @@ describe('选路规则', () => {
     const d = await pickTtsRoute(true)
     expect(d.proxy).toBe('http://manual:3128')
     expect(h.calls).toEqual([]) // 一次探测都不该发生
+  })
+})
+
+/**
+ * Runtime relay manifest delivery.
+ *
+ * Why "a failure is non-fatal" must be pinned: the env of installed apps has no TTS_RELAYS, so the
+ * relay address can only come from the manifest; if this threw whenever the manifest site is down,
+ * the **whole reading chain would go down with it** — turning an optimization into a failure point.
+ */
+describe('运行时中继清单', () => {
+  it('env TTS_RELAYS 手工配置优先 → 根本不发清单请求', async () => {
+    let calls = 0
+    globalThis.fetch = (async () => { calls++; return { ok: true, json: async () => ({ relays: ['http://from-manifest:1'] }) } as any }) as any
+    const r = await fetchRelayManifest({ TTS_RELAYS: 'http://env-relay:3128' } as any)
+    expect(r).toEqual(['http://env-relay:3128'])
+    expect(calls).toBe(0)
+  })
+
+  it('无 env → 拉清单并解析 relays[]；非法项过滤', async () => {
+    globalThis.fetch = (async () => ({
+      ok: true,
+      json: async () => ({ relays: ['http://relay:3128', 'socks5://bad:1', ''] }),
+    }) as any) as any
+    const r = await fetchRelayManifest({} as any, true)
+    expect(r).toEqual(['http://relay:3128'])
+  })
+
+  it('拉取失败非致命 → 返回空数组（回直连），绝不抛错', async () => {
+    globalThis.fetch = (async () => { throw new Error('network down') }) as any
+    await expect(fetchRelayManifest({} as any, true)).resolves.toEqual([])
+  })
+
+  it('缓存 10 分钟：不带 force 的重复调用不再打网络', async () => {
+    let n = 0
+    globalThis.fetch = (async () => { n++; return { ok: true, json: async () => ({ relays: ['http://c:1'] }) } as any }) as any
+    await fetchRelayManifest({} as any, true) // 写缓存
+    n = 0
+    expect(await fetchRelayManifest({} as any)).toEqual(['http://c:1'])
+    expect(await fetchRelayManifest({} as any)).toEqual(['http://c:1'])
+    expect(n).toBe(0)
   })
 })

@@ -125,10 +125,24 @@ export function extractSpeakText(content: unknown): string {
   return markdownToSpeech(String(content))
 }
 
-/** 句末标点（切分点，保留标点在句尾）；`；;` 也算 —— 列举项各自成句反而更清楚 */
-const SENTENCE_END_RE = /(?<=[。！？!?；;…])/
-/** 一段文本自身是否以句末标点收尾（**唯一来源**：ensureSentenceEnd 与流式切点共用） */
-const SENTENCE_TAIL_RE = /[。！？!?…；;]$/
+/**
+ * Sentence terminators (split points; the punctuation stays at the end of each part).
+ * `；;` counts too — enumerated items sound clearer as separate sentences.
+ *
+ * 2026-10-22: English full stops / question / exclamation marks added. The old pattern only
+ * matched full-width CJK marks, so `.` was **not** a boundary: on a real 2,724-char English
+ * sample, 65% of cut points landed mid-sentence (only line boundaries and the hard cap saved
+ * the rest) — audibly "reads half a sentence, then pauses". Ambiguity (decimals `3.14`,
+ * abbreviations `U.S.`) is resolved with a lookahead: `.!?` only ends a sentence when
+ * followed by whitespace or end-of-string, so `3.14` (digit) and `U.S.` (letter) never split.
+ */
+const SENTENCE_END_RE = /(?<=[。！？!?；;…])|(?<=[.!?])(?=\s|$)/
+/**
+ * Whether a piece of text already ends with a sentence terminator
+ * (**single source of truth**: shared by ensureSentenceEnd and the streaming cut points).
+ * Trailing quotes/brackets after an English period are allowed (`...word."` / `...word.)`).
+ */
+const SENTENCE_TAIL_RE = /(?:[。！？!?…；;]|\.)["”’)\]]*$/
 /** 软停顿（逗号/顿号/冒号分号/空白）：硬切时优先在这里断，别把句子从中间劈开 */
 const SOFT_BREAK_RE = /[，、,；;：:\s]/
 
@@ -243,6 +257,199 @@ export function ensureSentenceEnd(s: string): string {
   if (SENTENCE_TAIL_RE.test(t)) return t
   if (/[，、：,:]$/.test(t)) return t.slice(0, -1) + '。'
   return t + '。'
+}
+
+/**
+ * Whether a chunk already ends with a sentence terminator (used by the live batching
+ * logic to decide "is this cut point a sentence boundary?").
+ */
+export function isSentenceTail(s: string): boolean {
+  return SENTENCE_TAIL_RE.test(String(s || '').trim())
+}
+
+/**
+ * Append a sentence terminator in the right language (live batching only):
+ * more Latin letters than Han characters → `.`, otherwise `。`.
+ *
+ * Why not reuse `ensureSentenceEnd`: it carries the historical semantics of appending a
+ * Chinese full stop even for English text (packForTts mostly receives Chinese, and the unit
+ * tests pin `。`). Conversational reading feeds **real mixed-language** content; appending
+ * `。` to an English paragraph produces "period + abrupt full-width pause". So pick by language.
+ */
+export function ensureSentenceEndLang(s: string): string {
+  const t = String(s || '').trim()
+  if (!t) return ''
+  if (SENTENCE_TAIL_RE.test(t)) return t
+  const latin = (t.match(/[A-Za-z]/g) || []).length
+  const han = (t.match(/[\u4e00-\u9fff]/g) || []).length
+  const period = latin > han ? '.' : '。'
+  if (/[，、：,:]$/.test(t)) return t.slice(0, -1) + period
+  return t + period
+}
+
+/**
+ * Finalize a chunk for conversational reading.
+ * `rawEndedAtLine` = whether the cut fell on a line boundary **in the raw buffer**
+ * (the caller must check before `markdownToSpeech` cleanup, because cleanup eats newlines).
+ *
+ * Three rules:
+ *   · Already ends a sentence → leave it alone, the punctuation is there.
+ *   · Ends at a line boundary (paragraph tail without punctuation) → append a terminator in
+ *     the right language. A line end is a real pause; without a terminator the synthesizer
+ *     closes with "the sentence isn't finished" intonation and the next chunk starts abruptly.
+ *   · Mid-sentence rescue cut → **no punctuation added**. Appending a full stop fabricates a
+ *     false pause (measured: the resulting intonation is much worse than a slightly quicker
+ *     join); Edge keeps a continuous contour across an unterminated continuation.
+ */
+export function finishLiveChunk(clean: string, rawEndedAtLine: boolean): string {
+  const t = String(clean || '').trim()
+  if (!t) return ''
+  if (SENTENCE_TAIL_RE.test(t)) return t
+  return rawEndedAtLine ? ensureSentenceEndLang(t) : t
+}
+
+// ===== Conversational reading batching (control value = unplayed audio seconds) =====
+//
+// The previous mechanism (liveChunkThresholds, char-count based) was rejected by three
+// experiments:
+//   1. Cut quality: a char cap often lands mid-sentence (65% of English samples); a
+//      mid-sentence cut means Edge gets chopped while still speaking.
+//   2. Batching simulation (4 real replies x fast/slow generation): a fixed 240 chars
+//      starved for 46.6s under slow generation; "only feed while unplayed < 6s" gave
+//      7 seams / 0.6s starvation on the fast link and won outright.
+//   3. First chunk: a fixed char count left the first chunk waiting forever -> no sound.
+//      Earliest-of-three fixes it (see takeLiveChunk).
+// New mechanism: **the control value is unplayed audio seconds**; char count is only a
+// safety cap (matching the server's LIVE_MAX_CHARS_PER_PUSH = 1000), never the driver.
+
+/** Feed more audio only while unplayed seconds are below this (strategy C main threshold). */
+export const LIVE_FLUSH_AHEAD_SEC = 6
+/** Starvation edge: mid-sentence rescue cuts are allowed only below this many unplayed seconds
+ *  (a mid-sentence cut beats silence). */
+export const LIVE_STARVE_AHEAD_SEC = 3
+/**
+ * Minimum chars for a starvation rescue cut. Below this we **do not cut**: one synthesis round
+ * has a fixed cost (200ms~2s), so pushing 5 chars for ~1s of audio is a net loss and fragment
+ * chunks are the least natural (measured: a 5-char fragment right after the first chunk sounded
+ * like "a hiccup, then restart").
+ */
+export const LIVE_STARVE_MIN_CHARS = 24
+/** Hard per-chunk char cap — mirrors the server's `LIVE_MAX_CHARS_PER_PUSH` (a length guard,
+ *  not a splitting driver). */
+export const LIVE_MAX_CHARS_PER_PUSH = 1000
+/** Hard char count for the first-chunk fallback (≈ 12s of audio @4.8 chars/s; waiting longer
+ *  makes first sound too late). */
+export const LIVE_FIRST_FALLBACK_CHARS = 60
+
+export interface LiveChunkOpts {
+  /** Whether this is the first chunk (no audio pushed yet this turn) — its goal is first sound
+   *  ASAP, so the rules differ. */
+  first?: boolean
+  /** Currently unplayed audio seconds (`audio.buffered` truth first, computed value as fallback) */
+  bufferedAheadSec: number
+  /** Per-chunk cap, defaults to LIVE_MAX_CHARS_PER_PUSH */
+  max?: number
+}
+
+/**
+ * Cut one pushable chunk out of the conversational reading buffer.
+ * Returns `null` = keep buffering.
+ *
+ * Invariants (same as takeStreamChunk):
+ *   1. No text lost: `cut.chunk + cut.rest === buf`
+ *   2. Never cut inside an unclosed code fence (otherwise code gets read aloud)
+ *
+ * Rules:
+ *   · **First chunk**: earliest of three — first sentence end / first comma after 30 chars /
+ *     60-char hard fallback. Its only goal is first sound ASAP, and it has no unplayed audio
+ *     to lean on (nothing pushed yet).
+ *   · **Following chunks**: unplayed >= 6s → don't cut (keep merging, fewer seams); < 6s →
+ *     push everything that is **already a full sentence**, up to the 1000 cap (one whole run
+ *     of sentences per push, minimal seams); no sentence end and starving (< 3s) → soft-break
+ *     rescue cut (mid-sentence beats silence).
+ */
+export function takeLiveChunk(buf: string, opts: LiveChunkOpts): StreamChunkCut | null {
+  const s = String(buf ?? '')
+  if (!s) return null
+  const max = Math.max(1, opts.max ?? LIVE_MAX_CHARS_PER_PUSH)
+  const at = opts.first
+    ? pickLiveFirstCut(s, max)
+    : pickLiveNextCut(s, Number.isFinite(opts.bufferedAheadSec) ? opts.bufferedAheadSec : 0, max)
+  if (at <= 0 || at > s.length) return null
+  if (!fenceBalanced(s.slice(0, at))) return null
+  return { chunk: s.slice(0, at), rest: s.slice(at) }
+}
+
+/**
+ * First-chunk cut point: earliest of three (the minimum of the candidates — the first sentence
+ * may run 200 chars, by which time "comma after 30 chars" and the "60-char fallback" should have
+ * produced sound long ago).
+ *   1. First sentence end (sentence terminator)
+ *   2. First comma/enumeration mark after 30 chars
+ *   3. 60-char hard fallback (cut at a soft break, don't split a word)
+ */
+function pickLiveFirstCut(s: string, max: number): number {
+  const hi = Math.min(s.length, max)
+  // 1. First sentence end: index of the first terminator + 1
+  const c1 = firstSentenceEnd(s, max)
+  // 2. First comma/enumeration mark after 30 chars
+  let c2 = 0
+  for (let i = 29; i < hi; i++) {
+    if (/[，、,]/.test(s[i])) { c2 = i + 1; break }
+  }
+  // 3. 60-char hard fallback
+  const c3 = s.length >= LIVE_FIRST_FALLBACK_CHARS
+    ? softCutIndex(s, Math.min(LIVE_FIRST_FALLBACK_CHARS, max))
+    : 0
+  return Math.min(...[c1, c2, c3].filter((c) => c > 0))
+}
+
+/** Index of the first sentence terminator + 1 (capped at max); 0 if none */
+function firstSentenceEnd(s: string, max: number): number {
+  const parts = s.split(SENTENCE_END_RE)
+  let at = 0
+  for (const part of parts) {
+    at += part.length
+    if (at > max) break
+    if (SENTENCE_TAIL_RE.test(part)) return at
+  }
+  return 0
+}
+
+/** Following-chunk cut point: driven by unplayed seconds (see takeLiveChunk) */
+function pickLiveNextCut(s: string, aheadSec: number, max: number): number {
+  // Plenty buffered → don't cut, keep merging (fewer seams is the whole point here)
+  if (aheadSec >= LIVE_FLUSH_AHEAD_SEC) {
+    return s.length >= max ? softCutIndex(s, max) : 0
+  }
+  // Need to feed: push everything that is **already a sentence** (a whole run per push, so
+  // cut points always land on sentence ends)
+  const se = lastSentenceEnd(s, 1, max)
+  if (se > 0) return se
+  // No sentence terminator available:
+  //   · cap reached → soft-break cut (guard triggered, independent of seconds)
+  //   · starvation edge (< 3s) → rescue cut, but it **must land on a soft break and be at
+  //     least 24 chars**: fragments are a net loss (one synthesis round has a fixed cost,
+  //     5 chars buy ~1s of audio and the intonation is the worst part);
+  //     if there is not even a soft break, buffer up to 60 chars before cutting hard
+  if (s.length >= max) return softCutIndex(s, max)
+  if (aheadSec < LIVE_STARVE_AHEAD_SEC) {
+    const soft = lastSoftBreak(s, Math.min(s.length, max))
+    if (soft >= LIVE_STARVE_MIN_CHARS) return soft
+    if (s.length >= LIVE_FIRST_FALLBACK_CHARS) {
+      return softCutIndex(s, Math.min(LIVE_FIRST_FALLBACK_CHARS, max))
+    }
+    return 0
+  }
+  return 0
+}
+
+/** Index right after the **last** soft break in `[0, hi)`; 0 if none (never cut hard) */
+function lastSoftBreak(s: string, hi: number): number {
+  for (let i = Math.min(hi, s.length) - 1; i >= 0; i--) {
+    if (SOFT_BREAK_RE.test(s[i])) return i + 1
+  }
+  return 0
 }
 
 // ===== 流式朗读攒批（2026-09-28「边生成边朗读」）=====

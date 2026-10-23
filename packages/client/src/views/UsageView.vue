@@ -138,6 +138,37 @@
       </div>
     </div>
 
+    <!-- 闲置能力建议（G3）：≥14 天没用过的工具，系统主动提醒而不是装了没人用 -->
+    <div class="section">
+      <h3 class="section-title">{{ $t('usage.idleSection') }}</h3>
+      <p class="idle-desc">{{ $t('usage.idleDesc') }}</p>
+      <n-table v-if="idleSuggestions.length > 0" :single-line="false" size="small" class="model-table">
+        <thead>
+          <tr>
+            <th>{{ $t('usage.idleToolCol') }}</th>
+            <th>{{ $t('usage.idleReasonCol') }}</th>
+            <th>{{ $t('usage.idleDaysCol') }}</th>
+            <th>{{ $t('usage.idleLastUsedCol') }}</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="s in idleSuggestions" :key="s.tool">
+            <td><code class="model-name">{{ s.tool }}</code></td>
+            <td>{{ $t(s.reason === 'never-used' ? 'usage.idleNever' : 'usage.idleReason') }}</td>
+            <td>{{ $t('usage.idleDays', { n: s.idleDays }) }}</td>
+            <td>{{ s.lastUsed ? formatShortDate(s.lastUsed) : '-' }}</td>
+            <td class="idle-action">
+              <button class="idle-dismiss" :disabled="dismissing === s.tool" @click="dismissIdle(s.tool)">
+                {{ $t('usage.idleDismiss') }}
+              </button>
+            </td>
+          </tr>
+        </tbody>
+      </n-table>
+      <n-empty v-else :description="$t('usage.idleEmpty')" class="empty-mini" />
+    </div>
+
     <!-- 模型用量详情 -->
     <div class="section">
       <h3 class="section-title">{{ $t('usage.modelDetail') }}</h3>
@@ -174,7 +205,7 @@
 
 <script setup lang="ts">
 import { reactive, ref, computed, onMounted } from 'vue'
-import { NTable } from 'naive-ui'
+import { NTable, NEmpty } from 'naive-ui'
 import VChart from 'vue-echarts'
 import { use } from 'echarts/core'
 import { LineChart } from 'echarts/charts'
@@ -251,6 +282,35 @@ function setTaskWindow(days: number) {
   if (taskDays.value === days) return
   taskDays.value = days
   void loadTaskStats()
+}
+
+// ---- 闲置能力建议（G3）：口径 = playbook.tools_used，服务端按天记账 ----
+interface IdleSuggestion { tool: string; reason: 'never-used' | 'idle'; idleDays: number; lastUsed: string | null }
+const idleSuggestions = ref<IdleSuggestion[]>([])
+const dismissing = ref('')
+
+async function loadIdleCapabilities() {
+  try {
+    const res = await fetch('/api/capabilities/idle')
+    if (!res.ok) return
+    const data = await res.json()
+    if (Array.isArray(data.suggestions)) idleSuggestions.value = data.suggestions
+  } catch { /* 拿不到不影响用量页其他部分 */ }
+}
+
+async function dismissIdle(tool: string) {
+  if (dismissing.value) return
+  dismissing.value = tool
+  try {
+    const res = await fetch('/api/capabilities/idle/dismiss', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tool }),
+    })
+    if (res.ok) idleSuggestions.value = idleSuggestions.value.filter((s) => s.tool !== tool)
+  } catch {} finally {
+    dismissing.value = ''
+  }
 }
 
 const stats = reactive({
@@ -376,6 +436,8 @@ onMounted(async () => {
   await loadTaskStats()
   // 余额与用量并行拉，查不到不影响上面
   void loadBalance()
+  // 闲置能力建议（G3）：独立端点，失败不阻塞页面
+  void loadIdleCapabilities()
 })
 </script>
 
@@ -400,7 +462,7 @@ onMounted(async () => {
 .overview-flag {
   display: inline-block; margin-top: 6px; padding: 1px 6px; border-radius: 4px;
   font-size: 10px; line-height: 16px; cursor: help;
-  color: var(--warning-color, #f59e0b);
+  color: var(--warning);
   background: rgba(245, 158, 11, .1);
   border: 1px solid rgba(245, 158, 11, .25);
 }
@@ -431,7 +493,7 @@ onMounted(async () => {
   background: rgba(79, 70, 229, .08);
 }
 .task-row-label { font-size: 12px; color: var(--text-primary); }
-.task-row-fail { font-size: 11px; color: var(--danger-color, #e5484d); }
+.task-row-fail { font-size: 11px; color: var(--error); }
 .table-note { margin-top: 8px; font-size: 11px; color: var(--text-muted); }
 
 /* Bar Chart */
@@ -454,7 +516,7 @@ onMounted(async () => {
   flex-wrap: wrap;
   margin: 0 0 16px;
   padding: 10px 14px;
-  border: 1px solid var(--border-subtle, rgba(0, 0, 0, 0.08));
+  border: 1px solid var(--border-color);
   border-radius: 10px;
   background: var(--bg-secondary, #fafafa);
   font-size: 12px;
@@ -471,7 +533,7 @@ onMounted(async () => {
   margin-left: auto;
   padding: 3px 10px;
   font-size: 11px;
-  border: 1px solid var(--border-subtle, rgba(0, 0, 0, 0.12));
+  border: 1px solid var(--border-color);
   border-radius: 6px;
   background: transparent;
   color: inherit;
@@ -495,4 +557,15 @@ onMounted(async () => {
   color: var(--text-tertiary, #9CA3AF);
 }
 .empty-mini { margin: 20px 0; }
+
+/* 闲置能力建议（G3） */
+.idle-desc { font-size: 12px; color: var(--text-muted); margin: 0 0 10px; }
+.idle-action { text-align: right; }
+.idle-dismiss {
+  padding: 2px 10px; font-size: 11px; cursor: pointer;
+  color: var(--text-secondary); background: transparent;
+  border: 1px solid var(--border-color); border-radius: 5px;
+}
+.idle-dismiss:hover { color: var(--text-primary); border-color: var(--text-muted); }
+.idle-dismiss:disabled { opacity: 0.5; cursor: default; }
 </style>

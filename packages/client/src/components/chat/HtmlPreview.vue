@@ -136,7 +136,7 @@ function openInTab() {
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
-  border-bottom: 1px solid var(--border, #e3e3e6);
+  border-bottom: 1px solid var(--border-color, #e3e3e6);
   font-size: 11px;
   color: var(--text-secondary);
   flex-shrink: 0;
@@ -178,7 +178,7 @@ function openInTab() {
   display: flex;
   border-radius: 4px;
 }
-.hp-btn:hover { background: var(--border, #e3e3e6); color: var(--text-primary); }
+.hp-btn:hover { background: var(--border-color, #e3e3e6); color: var(--text-primary); }
 .hp-iframe {
   flex: 1;
   border: none;
