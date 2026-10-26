@@ -8,6 +8,8 @@
  * 只测纯逻辑 + 可注入 db 的 storeMemory，不触真实数据库。
  */
 import { describe, it, expect } from 'vitest'
+import Database from 'better-sqlite3'
+import { ensureMemoryTable } from '../services/memory-service'
 import {
   diffLines,
   escapeFfPath,
@@ -246,5 +248,25 @@ describe('storeMemory 记忆入库三分支', () => {
     storeMemory(db, 'k2', 'v2')
     expect(db.rows[0].category).toBe('general')
     expect(db.rows[0].importance).toBe(5)
+  })
+})
+
+/**
+ * merged 分支的对外文案（2026-10-26）。
+ *
+ * 写入侧近似去重会返回 `action: 'merged'`。这个 action 是**后加的**，
+ * 若 switch 没显式处理，它会落进 default 的「⛔ 记忆未存储」——
+ * 模型收到失败提示就会重新再存一次，去重等于白做。所以这条必须钉住。
+ */
+describe('storeMemory：merged 反馈不能是失败文案', () => {
+  it('merged 返回成功语义，不含「未存储」', () => {
+    // 用真实内存库（本文件的假 db 只实现精确 key 语义，走不到近似去重分支）
+    const db = new Database(':memory:')
+    ensureMemoryTable(db)
+    storeMemory(db, '用户偏好中文回答', '回答用中文', 'preference')
+    const msg = storeMemory(db, '用户偏好中文回答方式', '别夹英文', 'preference')
+    expect(msg).not.toContain('未存储')
+    expect(msg).toContain('✅')
+    expect(msg).toContain('并入')
   })
 })

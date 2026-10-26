@@ -132,6 +132,10 @@ export function storeMemory(db: any, key: string, content: string, category?: st
       return `✅ 记忆已更新（同 key 覆盖旧值）：${r.key}`
     case 'unchanged':
       return `✅ 记忆已存在（同 key 同内容），自动去重跳过：${r.key}`
+    case 'merged':
+      // 2026-10-26：写入侧近似去重新增的 action。**绝不能落到 default** ——
+      // 那会让模型收到「⛔ 记忆未存储」，误以为失败又重存一遍，等于去重白做。
+      return `✅ 记忆已并入既有条目（近似重复，内容已合并）：${r.key}`
     default:
       return `⛔ 记忆未存储：${r.reason || '入参非法'}`
   }
