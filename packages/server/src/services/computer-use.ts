@@ -13,13 +13,11 @@
  * 注意：该 MCP【没有】 app_launch / clipboard_* action（旧注释写错了）。
  *       “打开应用”由下方的 Spotlight 组合键序列实现，见 openApplication()。
  */
-import { spawn, type ChildProcess } from 'child_process'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 
 let client: Client | null = null
 let transport: StdioClientTransport | null = null
-let proc: ChildProcess | null = null
 let connecting: Promise<Client> | null = null
 
 /** 是否已连接 */
@@ -36,27 +34,40 @@ export async function getComputerUseClient(): Promise<Client> {
   if (connecting) return connecting
 
   connecting = (async () => {
-    // 优先本地 npx 缓存，避免每次下载；找不到时回退到已安装的包
-    const cmd = process.platform === 'win32' ? 'npx.cmd' : 'npx'
-    proc = spawn(cmd, ['-y', 'computer-use-mcp'], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, NODE_OPTIONS: '' },
-    })
-    proc.stderr?.on('data', (d) => {
+    // 🔴 2026-10-26 修 Windows `spawn EINVAL`。
+    //
+    // 旧写法是 `spawn('npx.cmd', [...])`。Node 自 18.20.2 / 20.12.2 / 22 起（CVE-2024-27980
+    // 的修复）**拒绝在不带 shell 的情况下 spawn .bat/.cmd**，直接抛 EINVAL —— Windows 10 +
+    // Node 24 上表现为 computer_use 的任何动作都在后端初始化阶段就崩，与工具本身无关。
+    //
+    // 而 MCP 的 StdioServerParameters 不暴露 shell 选项，所以把 `cmd.exe` 当可执行文件、
+    // 把 npx 放进参数里。/d /s /c 是 npm 自己的写法：跳过 AutoRun，并按需去掉最外层引号。
+    // 参数是固定的两个字面量，不经过用户输入，没有注入面。
+    const isWin = process.platform === 'win32'
+    const command = isWin ? process.env.ComSpec || 'cmd.exe' : 'npx'
+    const args = isWin
+      ? ['/d', '/s', '/c', 'npx', '-y', 'computer-use-mcp']
+      : ['-y', 'computer-use-mcp']
+
+    // 只启动**一个**进程。StdioClientTransport 自己会 spawn。
+    // 旧代码额外 spawn 了一个 proc，仅用于收 stderr —— 那个进程从不参与通信，纯粹多一份
+    // npx 解析开销；更糟的是它 exit 时会把正常的 client/transport 一起清空，
+    // 于是"服务器 exited"之后下一次调用又要重连。
+    const env: Record<string, string> = {}
+    for (const [k, v] of Object.entries(process.env)) if (v !== undefined) env[k] = v
+    env.NODE_OPTIONS = ''
+
+    transport = new StdioClientTransport({ command, args, env, stderr: 'pipe' })
+    transport.stderr?.on('data', (d) => {
       const msg = String(d).trim()
       if (msg && !msg.includes('ExperimentalWarning')) console.log(`[ComputerUse] ${msg}`)
     })
-    proc.on('exit', (code) => {
-      console.log(`[ComputerUse] server exited (${code})`)
+    transport.onclose = () => {
+      console.log('[ComputerUse] server closed')
       client = null
       transport = null
-      proc = null
-    })
+    }
 
-    transport = new StdioClientTransport({
-      command: cmd,
-      args: ['-y', 'computer-use-mcp'],
-    })
     const c = new Client({ name: 'supercrzy-server', version: '1.0.0' })
     await c.connect(transport)
     client = c
@@ -209,8 +220,9 @@ async function saveScreenshotWithOcr(base64Data: string): Promise<string> {
 
 /** 停止 MCP server（应用退出时调用） */
 export function stopComputerUse(): void {
+  // 只有一个进程，归 transport 管：close() 会终止它并触发 onclose。
+  // 旧实现还额外 kill 了一个自己 spawn 的 proc，那是对同一个服务元的第二次启动。
   try { transport?.close() } catch { /* ignore */ }
-  if (proc) { proc.kill('SIGTERM'); proc = null }
   client = null
   transport = null
   connecting = null

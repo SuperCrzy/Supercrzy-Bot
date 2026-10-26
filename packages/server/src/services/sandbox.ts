@@ -17,7 +17,7 @@
  */
 import { exec } from 'child_process'
 import { writeFileSync, existsSync } from 'fs'
-import { tmpdir } from 'os'
+import { homedir, tmpdir } from 'os'
 import { join, resolve, dirname } from 'path'
 import { config } from '../config'
 
@@ -37,11 +37,28 @@ function findProjectRoot(start: string): string {
 }
 export const PROJECT_ROOT = findProjectRoot(WORKSPACE_ROOT)
 
-const HOME = process.env.HOME || ''
+/**
+ * 用户主目录。
+ *
+ * 🔴 2026-10-26：原来只读 `process.env.HOME`，而 **Windows 上通常没有 HOME**
+ * （只有 USERPROFILE/USERPROFILE 派生）⇒ HOME 为空 ⇒ `full` 档的额外放行整段跳过，
+ * 于是"完全访问"在 Windows 上等于最窄档。`os.homedir()` 在三个平台都正确。
+ */
+const HOME = (() => {
+  try {
+    const h = homedir()
+    if (h) return h
+  } catch { /* 极端环境拿不到 */ }
+  return process.env.HOME || process.env.USERPROFILE || ''
+})()
 
 /** 放行的前缀集合（软沙箱用）：项目仓库 + workspaceDir + 运行时只读 + 临时目录 */
 function allowedPrefixes(level: PermissionLevel = 'sandbox', workspaceDir?: string): string[] {
   const list: string[] = ['/tmp', '/private/tmp']
+  // Windows 没有 /tmp：临时目录在 %TEMP%（如 C:\Users\x\AppData\Local\Temp）。
+  // 缺这一条时"写临时文件"在 Windows 上必失败，而它在 Unix 上是放行的。
+  if (process.env.TEMP) list.push(process.env.TEMP)
+  if (process.env.TMPDIR) list.push(process.env.TMPDIR)
 
   if (level === 'workspace-only') {
     // 最窄档：只放行会话工作目录 + 临时目录；未设工作目录时退化为 sandbox
@@ -202,16 +219,23 @@ const TILDE_SENSITIVE = /~\/(\.ssh|\.aws|\.gnupg|\.netrc|\.kube|\.docker|\.confi
 /** 系统敏感文件 */
 const SYSTEM_SENSITIVE = /\/(?:private\/)?etc\/(?:shadow|sudoers|master\.passwd|security|krb5\.keytab)(\s|'|"|;|&|\||$)/
 
-/** 凭据文件名（任意路径位置出现即拦：.env/.npmrc/id_rsa 等） */
+/**
+ * 凭据文件名（任意路径位置出现即拦：.env/.npmrc/id_rsa 等）
+ * 路径前缀同样要认 `\`，否则 `C:\proj\.env` 在 Windows 上不命中（2026-10-26 修）。
+ */
 const CREDENTIAL_FILE =
-  /(?:^|[\s'";&|(])(?:[^\s'";&|()]*\/)?(\.env(?:\.[A-Za-z0-9_-]+)?|\.npmrc|\.netrc|\.pgpass|\.git-credentials|id_rsa|id_ed25519|id_dsa)(?=[\s'";&|)]|$)/
+  /(?:^|[\s'";&|(])(?:[^\s'";&|()]*[\/\\])?(\.env(?:\.[A-Za-z0-9_-]+)?|\.npmrc|\.netrc|\.pgpass|\.git-credentials|id_rsa|id_ed25519|id_dsa)(?=[\s'";&|)]|$)/
 
 /**
  * 敏感配置目录（任何权限档位下都不可访问）：
  * .ssh/.aws/.config/.gnupg/.kube/.docker/.npm/.pki/.gradle/.m2/.cache/.git 等
+ *
+ * 🔴 2026-10-26：分隔符原来只写 `/`。Windows 路径是 `C:\Users\x\.ssh\id_rsa`，
+ * 这条正则**一个都匹配不到** —— 也就是说在 Windows 上敏感目录从来没有被拦住过。
+ * 这是安全缺口，不只是兼容性问题。现在 `\` 与 `/` 都认。
  */
 const SENSITIVE_DIR =
-  /\/(?:\.ssh|\.aws|\.config|\.gnupg|\.kube|\.docker|\.npm|\.pki|\.gradle|\.m2|\.cache|\.git|\.svn|\.hg)(?:\/|$)/
+  /[\/\\](?:\.ssh|\.aws|\.config|\.gnupg|\.kube|\.docker|\.npm|\.pki|\.gradle|\.m2|\.cache|\.git|\.svn|\.hg)(?:[\/\\]|$)/
 
 /** 默认权限三档：workspace-only（仅工作文件夹）/ sandbox（项目沙箱，默认）/ full（允许完全访问） */
 export type PermissionLevel = 'workspace-only' | 'sandbox' | 'full'
@@ -262,15 +286,43 @@ export function scanDangerousPath(command: string, opts: { level?: PermissionLev
 // ============================
 
 /** 路径是否位于白名单内（按权限档位：workspace-only / sandbox / full） */
+/**
+ * 纯字符串的祖先判断：`child` 是否等于 `parent` 或位于其下。
+ *
+ * 单独抽出来是为了**可测**：`resolve()` 会把 `C:\Users\x` 在 macOS 上解析成本地路径，
+ * 所以真实 Windows 路径没法在这个平台上走完整链路。这里只做分隔符归一化 + 比较，
+ * 两个平台的输入都能直接断言。
+ *
+ * Windows 文件系统大小写不敏感，一并归一化（`C:\Users` 与 `c:\users` 是同一处）。
+ */
+export function pathUnder(child: string, parent: string): boolean {
+  const norm = (s: string) => {
+    const t = s.replace(/\\/g, '/').replace(/\/+$/, '')
+    return process.platform === 'win32' ? t.toLowerCase() : t
+  }
+  const c = norm(child)
+  const p = norm(parent)
+  if (!p) return false
+  return c === p || c.startsWith(p + '/')
+}
+
+/** 统一分隔符（含尾部斜杠清理）；不改变大小写，仅供展示/诊断 */
+function toSlashes(p: string): string {
+  const s = resolve(p).replace(/\\/g, '/')
+  return s.length > 1 ? s.replace(/\/+$/, '') : s
+}
+
 export function isPathAllowed(
   p: string,
   opts: { level?: PermissionLevel; workspaceDir?: string; extraAllowed?: string[] } | string[] = {},
 ): boolean {
   if (!p) return false
   const o = Array.isArray(opts) ? { extraAllowed: opts } : opts
-  const resolved = resolve(p)
   const level = o.level || 'sandbox'
-  return allowedPrefixes(level, o.workspaceDir).concat(o.extraAllowed || []).some((a) => resolved === a || resolved.startsWith(a + '/'))
+  const resolved = toSlashes(p)
+  return allowedPrefixes(level, o.workspaceDir)
+    .concat(o.extraAllowed || [])
+    .some((a) => pathUnder(resolved, toSlashes(a)))
 }
 
 /**
