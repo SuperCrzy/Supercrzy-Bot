@@ -41,6 +41,14 @@ const BLOCKLIST = [
     exactPrefix: ['docs/internal/'],
   },
   {
+    id: 'internal-manual',
+    // 与 .gitignore 的规则**故意重复**：.gitignore 只挡「随手 add」，挡不住 `git add -f`，
+    // 也挡不住有人为了图方便把规则删掉。这道闸门跑在 pnpm verify 第一步，是最后一层。
+    // 2026-10-26 曾误提交一次运维手册（第 33 行是明文 root 密码），在 push 前拦下。
+    why: '运维手册含 VPS 地址与明文 root 密码；界面设计稿属内部资产 —— 均不得入库、不得开源',
+    exactPrefix: ['docs/PROJECT_BOT_MANUAL.md', 'packages/server/bot-mockup.html'],
+  },
+  {
     id: 'local-tool-state',
     why: '本机工具状态目录，与项目源码无关',
     anySegment: ['.playwright-cli', '.git-rewrite'],
