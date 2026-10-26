@@ -4,7 +4,7 @@
  *
  * 设计要点（参考 Hermes agent 的 telegram 插件工程经验）：
  *  1. 长轮询：HTTP outbound 连接，本地/内网环境即可运行，无需公网回调
- *  2. 网络兜底：api.telegram.org 在国内可能被 DNS 污染/直连超时，
+ *  2. 网络兜底：api.telegram.org 在中国大陆可能被 DNS 污染/直连超时，
  *     支持 TELEGRAM_API_BASE 覆盖为反代地址（如 https://tg.xxx.com/bot 或本地 telegram-bot-api server）
  *  3. 长消息聚合：Telegram 客户端会把超长消息拆成多条 update，按 chat 缓冲合并
  *  4. 分段发送：单条 4096 字符上限，超长回复自动分段
