@@ -81,8 +81,20 @@ function allowedPrefixes(level: PermissionLevel = 'sandbox', workspaceDir?: stri
   if (workspaceDir) list.push(resolve(workspaceDir))
 
   if (level === 'full' && HOME) {
-    // 完全访问：额外放行用户主目录下的常见内容目录（敏感点目录由 SENSITIVE_DIR 另拦）
-    for (const d of ['Documents', 'Downloads', 'Desktop', 'Pictures', 'Music', 'Movies', 'Projects', 'Work', 'dev', 'code']) {
+    // 完全访问：用户主目录下的常见内容目录 + 应用自己的运行期数据目录。
+    //
+    // 🔴 2026-10-26 补 `.supercrzy`：任务日志写在 `~/.supercrzy/logs`（见 memory 约定），
+    // 报告/会话数据也在这一层。旧列表只有 Documents/Downloads/... 这类"用户文档"目录，
+    // 于是 full 档下 agent **读不回自己刚写的东西** —— Windows 实机报的正是这个现象
+    // （`.supercrzy 下自己刚写的报告` 被拒）。
+    //
+    // 敏感点目录（.ssh/.aws/.config/.git…）不在这里排除，由 SENSITIVE_DIR 单独拦，
+    // 顺序是"先拦敏感、再看白名单"（见 assertSafeFilePath）。
+    for (const d of [
+      'Documents', 'Downloads', 'Desktop', 'Pictures', 'Music', 'Movies',
+      'Projects', 'Work', 'dev', 'code',
+      'logs', '.supercrzy',
+    ]) {
       list.push(join(HOME, d))
     }
   }
@@ -221,21 +233,26 @@ const SYSTEM_SENSITIVE = /\/(?:private\/)?etc\/(?:shadow|sudoers|master\.passwd|
 
 /**
  * 凭据文件名（任意路径位置出现即拦：.env/.npmrc/id_rsa 等）
- * 路径前缀同样要认 `\`，否则 `C:\proj\.env` 在 Windows 上不命中（2026-10-26 修）。
+ * 2026-10-26：路径前缀认 `\`（Windows 上 `C:\proj\.env` 原本不命中），并加 `i` 标记 ——
+ * 与 SENSITIVE_DIR 同理，大小写不敏感的平台不能留 `.ENV` 这种绕过。
  */
 const CREDENTIAL_FILE =
-  /(?:^|[\s'";&|(])(?:[^\s'";&|()]*[\/\\])?(\.env(?:\.[A-Za-z0-9_-]+)?|\.npmrc|\.netrc|\.pgpass|\.git-credentials|id_rsa|id_ed25519|id_dsa)(?=[\s'";&|)]|$)/
+  /(?:^|[\s'";&|(])(?:[^\s'";&|()]*[\/\\])?(\.env(?:\.[A-Za-z0-9_-]+)?|\.npmrc|\.netrc|\.pgpass|\.git-credentials|id_rsa|id_ed25519|id_dsa)(?=[\s'";&|)]|$)/i
 
 /**
  * 敏感配置目录（任何权限档位下都不可访问）：
  * .ssh/.aws/.config/.gnupg/.kube/.docker/.npm/.pki/.gradle/.m2/.cache/.git 等
  *
- * 🔴 2026-10-26：分隔符原来只写 `/`。Windows 路径是 `C:\Users\x\.ssh\id_rsa`，
- * 这条正则**一个都匹配不到** —— 也就是说在 Windows 上敏感目录从来没有被拦住过。
- * 这是安全缺口，不只是兼容性问题。现在 `\` 与 `/` 都认。
+ * 🔴 2026-10-26 两处修正：
+ *   ① 分隔符原来只写 `/`。Windows 路径是 `C:\Users\x\.ssh\id_rsa`，这条正则**一个都匹配不到**
+ *      —— 也就是说在 Windows 上敏感目录从来没有被拦住过。这是安全缺口，不只是兼容性问题。
+ *   ② 补 `i` 标记。Windows 与 macOS(APFS) 文件系统大小写不敏感，`.SSH`/`.Aws` 指向的是
+ *      同一个目录；而 pathUnder 在同样的平台上已经按大小写不敏感比较 —— 两边必须一致，
+ *      否则比较放宽了、敏感匹配没放宽，`.SSH` 就是一条现成的绕过路径。
+ *      代价：Linux 上若真存在 `.SSH` 这种同名目录会被一并拦下（实际不会有人这么建）。
  */
 const SENSITIVE_DIR =
-  /[\/\\](?:\.ssh|\.aws|\.config|\.gnupg|\.kube|\.docker|\.npm|\.pki|\.gradle|\.m2|\.cache|\.git|\.svn|\.hg)(?:[\/\\]|$)/
+  /[\/\\](?:\.ssh|\.aws|\.config|\.gnupg|\.kube|\.docker|\.npm|\.pki|\.gradle|\.m2|\.cache|\.git|\.svn|\.hg)(?:[\/\\]|$)/i
 
 /** 默认权限三档：workspace-only（仅工作文件夹）/ sandbox（项目沙箱，默认）/ full（允许完全访问） */
 export type PermissionLevel = 'workspace-only' | 'sandbox' | 'full'
@@ -293,12 +310,16 @@ export function scanDangerousPath(command: string, opts: { level?: PermissionLev
  * 所以真实 Windows 路径没法在这个平台上走完整链路。这里只做分隔符归一化 + 比较，
  * 两个平台的输入都能直接断言。
  *
- * Windows 文件系统大小写不敏感，一并归一化（`C:\Users` 与 `c:\users` 是同一处）。
+ * 大小写：Windows 与 macOS（APFS 默认）文件系统都**不敏感**，`~\Documents` 与 `~\documents`
+ * 是同一个目录 —— 不做归一化会把合法路径判成越权。Linux 保持敏感。
+ * 注意这与 SENSITIVE_DIR 的 `i` 标记必须一致：比较放宽了，敏感目录匹配也得跟着放宽，
+ * 否则 `.SSH` 就成了绕过口子。
  */
 export function pathUnder(child: string, parent: string): boolean {
+  const caseInsensitive = process.platform === 'win32' || process.platform === 'darwin'
   const norm = (s: string) => {
     const t = s.replace(/\\/g, '/').replace(/\/+$/, '')
-    return process.platform === 'win32' ? t.toLowerCase() : t
+    return caseInsensitive ? t.toLowerCase() : t
   }
   const c = norm(child)
   const p = norm(parent)
