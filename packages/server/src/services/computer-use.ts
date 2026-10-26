@@ -15,6 +15,7 @@
  */
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
+import { resolveStdioCommand } from './stdio-command'
 
 let client: Client | null = null
 let transport: StdioClientTransport | null = null
@@ -34,20 +35,9 @@ export async function getComputerUseClient(): Promise<Client> {
   if (connecting) return connecting
 
   connecting = (async () => {
-    // 🔴 2026-10-26 修 Windows `spawn EINVAL`。
-    //
-    // 旧写法是 `spawn('npx.cmd', [...])`。Node 自 18.20.2 / 20.12.2 / 22 起（CVE-2024-27980
-    // 的修复）**拒绝在不带 shell 的情况下 spawn .bat/.cmd**，直接抛 EINVAL —— Windows 10 +
-    // Node 24 上表现为 computer_use 的任何动作都在后端初始化阶段就崩，与工具本身无关。
-    //
-    // 而 MCP 的 StdioServerParameters 不暴露 shell 选项，所以把 `cmd.exe` 当可执行文件、
-    // 把 npx 放进参数里。/d /s /c 是 npm 自己的写法：跳过 AutoRun，并按需去掉最外层引号。
-    // 参数是固定的两个字面量，不经过用户输入，没有注入面。
-    const isWin = process.platform === 'win32'
-    const command = isWin ? process.env.ComSpec || 'cmd.exe' : 'npx'
-    const args = isWin
-      ? ['/d', '/s', '/c', 'npx', '-y', 'computer-use-mcp']
-      : ['-y', 'computer-use-mcp']
+    // Windows 上 npx 是 .cmd 包装器，Node 22+ 无 shell 启动会 EINVAL（2026-10-26 实机 bug）
+    // —— 平台适配统一在 services/stdio-command.ts，mcp-manager 用的是同一份。
+    const { command, args } = resolveStdioCommand('npx', ['-y', 'computer-use-mcp'])
 
     // 只启动**一个**进程。StdioClientTransport 自己会 spawn。
     // 旧代码额外 spawn 了一个 proc，仅用于收 stderr —— 那个进程从不参与通信，纯粹多一份

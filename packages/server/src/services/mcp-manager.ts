@@ -10,7 +10,8 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
-import { spawn, type ChildProcess } from 'child_process'
+import { resolveStdioCommand } from './stdio-command'
+import type { ChildProcess } from 'child_process'
 import { getDB } from './database'
 
 export interface McpServerConfig {
@@ -81,34 +82,34 @@ async function connectServer(cfg: McpServerConfig): Promise<void> {
   const existing = connections.get(cfg.id)
   if (existing) return
   let transport: any
-  let proc: ChildProcess | undefined
   if (cfg.type === 'stdio') {
     if (!cfg.command) throw new Error('stdio 类型需要 command')
-    const cmd = cfg.command
-    const args = cfg.args || []
-    proc = spawn(cmd, args, {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, ...cfg.env, NODE_OPTIONS: '' },
+    // Windows 上 npx/npm 是 .cmd 包装器，Node 22+ 无 shell 启动会 EINVAL —— 统一走
+    // services/stdio-command.ts（同一逻辑此前在 computer-use 里也踩过一次）。
+    const { command: spawnCmd, args: spawnArgs } = resolveStdioCommand(cfg.command, cfg.args || [])
+    // 只启动一个进程：StdioClientTransport 自己会 spawn。
+    // 旧实现额外 spawn 了一个 proc，仅用于收 stderr —— 那个进程从不参与协议，
+    // 在 Windows 上还会因为 .cmd 问题先崩溃，而它的 exit 回调把正常连接一起删掉。
+    transport = new StdioClientTransport({
+      command: spawnCmd,
+      args: spawnArgs,
+      env: { ...process.env, ...cfg.env } as Record<string, string>,
+      stderr: 'pipe',
     })
-    proc.stderr?.on('data', (d) => {
+    transport.stderr?.on('data', (d: Buffer) => {
       const msg = String(d).trim()
       if (msg && !msg.includes('ExperimentalWarning')) console.log(`[McpManager:${cfg.name}] ${msg}`)
     })
-    proc.on('exit', () => {
+    transport.onclose = () => {
       connections.delete(cfg.id)
-    })
-    transport = new StdioClientTransport({
-      command: cmd,
-      args,
-      env: { ...process.env, ...cfg.env } as Record<string, string>,
-    })
+    }
   } else {
     if (!cfg.url) throw new Error('sse/http 类型需要 url')
     transport = new StreamableHTTPClientTransport(new URL(cfg.url))
   }
   const client = new Client({ name: 'supercrzy-mcp', version: '1.0.0' })
   await client.connect(transport)
-  connections.set(cfg.id, { client, proc, transport })
+  connections.set(cfg.id, { client, transport })
   const tools = await listTools(cfg.id)
   console.log(`[McpManager] "${cfg.name}" connected, ${tools.length} tools`)
 }
@@ -118,7 +119,7 @@ export function disconnectMcpServer(id: string): void {
   const conn = connections.get(id)
   if (!conn) return
   try { conn.transport?.close() } catch { /* ignore */ }
-  if (conn.proc) { try { conn.proc.kill('SIGTERM') } catch { /* ignore */ } }
+  // proc 已不再单独创建（见 connect 里的注释）：transport.close() 会终止子进程。
   try { conn.client?.close() } catch { /* ignore */ }
   connections.delete(id)
 }

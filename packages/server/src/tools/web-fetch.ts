@@ -5,7 +5,7 @@
 import type { ToolDef } from './types'
 import { execFile } from 'child_process'
 import { statSync } from 'fs'
-import { resolve } from 'path'
+import { join, resolve } from 'path'
 import { readSetting } from './shared'
 
 const tool: ToolDef = {
@@ -100,11 +100,24 @@ const tool: ToolDef = {
 // ---- 本工具私有辅助（随工具一并从 services/tools.ts 迁出，供本文件内使用）----
 /** 无头浏览器兜底：系统 Chrome headless dump-dom 渲染 JS 页面（SPA/登录页/反爬）→ 提取正文 */
 async function webFetchChromeFallback(rawUrl: string, maxLen: number): Promise<string> {
+  // 🔴 2026-10-26 补 Windows：原列表只有 macOS（/Applications）与 Linux（/usr/bin）路径，
+  // Windows 上 `find` 永远返回空 ⇒ 需要 JS 渲染的页面一律报「无可用浏览器渲染」。
+  // Windows 的安装位置由环境变量给出（Program Files / Program Files (x86) / LocalAppData
+  // 三处都可能，按用户安装方式不同）。
+  const winBases = [
+    process.env.PROGRAMFILES,
+    process.env['PROGRAMFILES(X86)'],
+    process.env.LOCALAPPDATA,
+  ].filter((b): b is string => Boolean(b))
   const candidates = [
     '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
     '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
     '/usr/bin/google-chrome',
     '/usr/bin/chromium',
+    ...winBases.flatMap((base) => [
+      join(base, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+      join(base, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+    ]),
   ]
   const chrome = candidates.find((p) => { try { return statSync(p).isFile() } catch { return false } })
   if (!chrome) return `❌ 获取网页失败：所有抓取策略均失败（无可用浏览器渲染）`
