@@ -29,9 +29,10 @@
     "version:sync": "node scripts/version.mjs",
     "version:check": "node scripts/version.mjs --check",
     "export:clean": "node scripts/check-clean-tree.mjs --export ../supercrzy-clean",
-    "verify": "node scripts/version.mjs --check && node scripts/check-clean-tree.mjs && node scripts/check-css-vars.mjs && node scripts/run-stylelint.mjs && pnpm lint && pnpm test && pnpm --filter @supercrzy/server validate:tools && pnpm --filter @supercrzy/server validate:permission && pnpm build",
+    "verify": "node scripts/version.mjs --check && node scripts/check-clean-tree.mjs && node scripts/check-css-vars.mjs && node scripts/check-language.mjs && node scripts/run-stylelint.mjs && pnpm lint && pnpm test && pnpm --filter @supercrzy/server validate:tools && pnpm --filter @supercrzy/server validate:permission && pnpm build",
     "clean": "pnpm -r clean",
-    "test": "pnpm -r test"
+    "test": "pnpm -r test",
+    "check:language": "node scripts/check-language.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",
