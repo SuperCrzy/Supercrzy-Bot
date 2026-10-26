@@ -37,21 +37,46 @@ function appendOutput(s: TerminalSession, chunk: string) {
   }
 }
 
-/** 打开一个持久终端会话（bash -i；cwd 可指定） */
-export function terminalOpen(cwd?: string, shell: string = '/bin/bash'): { ok: true; id: string } | { ok: false; error: string } {
+/**
+ * 各平台的默认交互 shell 与启动参数。
+ *
+ * 🔴 2026-10-26：原来默认写死 `/bin/bash` 且固定传 `-i`。Windows 上没有 /bin/bash，
+ * spawn 直接报 `ENOENT` —— 实测表现是 terminal_open 看似成功（会话对象已建、错误只写进
+ * 输出缓冲区），而 terminal_read 拿不到任何输出并报 spawn /bin/bash ENOENT。
+ * cmd.exe 也不接受 `-i`（那是 POSIX shell 的参数）。
+ *
+ * Unix 侧**维持 /bin/bash 不变**：换成 $SHELL 会把用户的 zsh 启动脚本一并带进来，
+ * 输出里混入提示符/别名提示，属于与本 bug 无关的行为变化。要改应单独做并验证。
+ */
+export function defaultShellSpec(): { shell: string; args: string[] } {
+  if (process.platform === 'win32') {
+    // %ComSpec% 是所有 Windows 都保证存在的；/Q 关回显，减少缓冲区噪音
+    return { shell: process.env.ComSpec || 'cmd.exe', args: ['/Q'] }
+  }
+  return { shell: '/bin/bash', args: ['-i'] }
+}
+
+/** 打开一个持久终端会话（交互式 shell；cwd 可指定） */
+export function terminalOpen(
+  cwd?: string,
+  shell?: string,
+): { ok: true; id: string } | { ok: false; error: string } {
   // 会话上限防泄漏：最多 8 个，超出拒绝并提示先关
   if (sessions.size >= 8) {
     return { ok: false, error: '终端会话已达上限（8 个），请先关闭不用的会话（terminal_close）' }
   }
+  const spec = defaultShellSpec()
+  const useShell = shell || spec.shell
+  const useArgs = shell ? [] : spec.args
   const id = randomUUID().slice(0, 8)
   try {
-    const proc = spawn(shell, ['-i'], {
+    const proc = spawn(useShell, useArgs, {
       cwd: cwd || process.cwd(),
       env: { ...process.env, TERM: 'xterm-256color' },
       stdio: ['pipe', 'pipe', 'pipe'],
     })
     const s: TerminalSession = {
-      id, proc, shell, cwd: cwd || process.cwd(), createdAt: Date.now(),
+      id, proc, shell: useShell, cwd: cwd || process.cwd(), createdAt: Date.now(),
       buffer: '', consumed: 0, exited: false, exitCode: null,
     }
     proc.stdout?.on('data', (d: Buffer) => appendOutput(s, d.toString()))

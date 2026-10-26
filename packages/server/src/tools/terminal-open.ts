@@ -14,7 +14,8 @@ const tool: ToolDef = {
     type: 'object',
     properties: {
       cwd: { type: 'string', description: '可选：工作目录（默认当前会话工作区）' },
-      shell: { type: 'string', description: '可选：shell 路径（默认 /bin/bash）' },
+      // 默认值由 terminal-manager 按平台给（Windows: %ComSpec% / cmd.exe，Unix: /bin/bash）。
+      shell: { type: 'string', description: 'Optional: shell path. Defaults to cmd.exe on Windows, /bin/bash elsewhere.' },
     },
   },
   async execute(args, ctx) {
@@ -23,7 +24,9 @@ const tool: ToolDef = {
       return '⛔ 终端会话仅"完全访问"权限可用（设置 → 会话权限 → 允许完全访问）。当前为 ' + (ctx?.permissionLevel || 'unknown')
     }
     const cwd = args.cwd ? resolvePath(args.cwd, ctx?.cwd) : ctx?.cwd
-    const res = terminalOpen(cwd, args.shell || '/bin/bash')
+    // 不在这里补默认值：写死 '/bin/bash' 会让 Windows 直接 ENOENT（2026-10-26 实机 bug），
+    // 平台默认由 terminal-manager 的 defaultShellSpec() 决定。
+    const res = terminalOpen(cwd, args.shell)
     return res.ok ? `✅ 终端会话已打开：${res.id}（cwd: ${cwd || process.cwd()}）。用 terminal_send 发命令、terminal_read 读输出。` : `❌ ${res.error}`
   },
 }
