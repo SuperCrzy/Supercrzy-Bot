@@ -71,12 +71,21 @@ export const PRO_COOLDOWN_MS = 15_000
 const LITE_VOICE_PREFER = [
   // ① Google 系（装了才有，质量最好）
   'Google 普通话', 'Google 國語',
-  // ② 实测能完整朗读的中文音色：优先普通话，其次美嘉
+  // ② 实测能完整朗读的中文音色（2026-10-26 用系统 TTS 导出音频量过时长）：
+  //    婷婷 8.76s / 有声 85%，美嘉 8.65s / 86%。优先普通话，其次美嘉。
   'Tingting', '婷婷',
   'Meijia', '美嘉',
-  // ③ 其它常见中文音色（未见占位问题，但未逐个验证；排在已验可用之后）
-  'Sinji', 'Li-mu', 'Yu-shu', 'Yaoyao', 'Xiaoxiao', '晓晓', 'Yunxi', 'Yunyang',
-  // ④ 未下载语音包时会输出 1.756s 占位音频 —— 只在上面全都没有时才用
+  // ③ Windows 侧。⚠️ **未在 Windows 实机验证**（手头没有环境），排序依据是系统版本新旧：
+  //    Windows 11 的 OneCore 神经音色（Xiaoxiao / Xiaoyi / Yunxi / Yunyang）质量最好，
+  //    其次是 Windows 10 的 Tracy / Yaoyao。**必须排在 Huihui 之前** —— 慧慧是 Windows 7
+  //    时代的拼接式音色，Windows 10/11 上仍作为兜底存在，先命中它等于主动挑最差的。
+  'Xiaoxiao', '晓晓', 'Xiaoyi', 'Yunxi', 'Yunyang',
+  'Tracy', 'Yaoyao',
+  // ④ 其它常见中文音色（未见占位问题，未逐个验证）
+  'Sinji', 'Li-mu', 'Yu-shu',
+  // ⑤ 拼接式老音色 / 未下载语音包时的占位输出，只在上面全都没有时才用。
+  //    Windows: 慧慧 / 康康（Windows 7 时代）；macOS: 那八个 Siri 占位音色。
+  'Huihui', '慧慧', 'Kangkang', '康康',
   'Shelley', 'Sandy', 'Flo', 'Eddy', 'Reed', 'Rocko', 'Grandma', 'Grandpa',
 ] as const
 

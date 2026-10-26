@@ -925,3 +925,55 @@ describe('系统语音列表预热', () => {
     expect(mod.systemVoiceCount()).toBeGreaterThan(0)
   })
 })
+
+/**
+ * Windows 侧兜底音色（2026-10-26 加）。
+ *
+ * 背景：优选表此前只覆盖 macOS 的音色名，Windows 上一个都命中不到 ⇒ 落到 `pool[0]`
+ * （getVoices 的第一个），很可能正是 Windows 7 时代的慧慧（拼接式）。
+ *
+ * ⚠️ 这些音色**没有 Windows 实机验证过**（手头无环境），所以断言只钉"优先级方向"：
+ * Windows 11 的神经音色必须先于慧慧被选中，且只剩慧慧时仍要出声（不能因为可能不好听就哑掉）。
+ */
+describe('Lite 兜底音色：Windows 音色优先级', () => {
+  let mock: ReturnType<typeof installMocks>
+
+  it('Windows 11：同时有 Xiaoxiao 和 Huihui → 选神经音色 Xiaoxiao', async () => {
+    mock = installMocks({
+      fetchOk: false,
+      voices: [
+        { name: 'Microsoft Huihui Desktop - Chinese (Simplified)', lang: 'zh-CN' },
+        { name: 'Microsoft Xiaoxiao - Chinese (Mainland)', lang: 'zh-CN' },
+      ],
+    })
+    const { api } = withSpeech()
+    api.speak('m1', '文本。')
+    await new Promise((r) => setTimeout(r, 30))
+    expect(mock.picked[0].name).toContain('Xiaoxiao')
+  })
+
+  it('Windows 10：有 Tracy 和 Huihui → 选 Tracy（不是拼接式慧慧）', async () => {
+    mock = installMocks({
+      fetchOk: false,
+      voices: [
+        { name: 'Microsoft Huihui Desktop - Chinese (Simplified)', lang: 'zh-CN' },
+        { name: 'Microsoft Tracy - Chinese (Simplified)', lang: 'zh-CN' },
+      ],
+    })
+    const { api } = withSpeech()
+    api.speak('m1', '文本。')
+    await new Promise((r) => setTimeout(r, 30))
+    expect(mock.picked[0].name).toContain('Tracy')
+  })
+
+  it('只有慧慧时仍然要出声（不能因为音色旧就哑掉）', async () => {
+    mock = installMocks({
+      fetchOk: false,
+      voices: [{ name: 'Microsoft Huihui Desktop - Chinese (Simplified)', lang: 'zh-CN' }],
+    })
+    const { api } = withSpeech()
+    api.speak('m1', '文本。')
+    await new Promise((r) => setTimeout(r, 30))
+    expect(mock.picked[0].name).toContain('Huihui')
+  })
+})

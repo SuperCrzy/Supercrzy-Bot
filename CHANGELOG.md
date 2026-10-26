@@ -54,6 +54,10 @@
 - 顺带修掉：`getVoices()` 在 Chromium/Electron 里是**异步填充**的，首次同步调用返回空数组 ⇒
   `pickVoice()` 直接放弃、退到浏览器默认音色。现在模块加载即预热，`voiceschanged` 监听 +
   轮询兜底（Electron 实测不总派发该事件）。
+- **Windows 侧补齐**：优选表此前全是 macOS 音色名，Windows 上一个都命中不到 ⇒ 落到列表
+  第一个，很可能正是 Windows 7 时代的拼接式"慧慧"。现按系统版本新旧排序：Windows 11 的
+  OneCore 神经音色（晓晓/晓伊/云希/云扬）→ Windows 10 的 Tracy / 瑶瑶 → 慧慧 / 康康 放最后。
+  ⚠️ Windows 音色名**未实机验证**（手头无 Windows 环境），只钉"优先级方向"。
 
 ### 新增
 
