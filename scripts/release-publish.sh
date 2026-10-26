@@ -138,8 +138,13 @@ if [ "$BOT_ONLY" -eq 0 ]; then
 # ---------------------------------------------------------------------------
 log "4/8 vps-fetch: download + unzip on VPS"
 vssh "rm -rf $WORK && mkdir -p $WORK/mac $WORK/win"
-vssh "GH_TOKEN='$TOKEN' MAC_ID='$MAC_ID' bash -s" <<'EOS'
+# 🔴 2026-10-26 修：这两个 heredoc 原来**没有 cd**，于是 `curl -o mac.zip` 落在 SSH 登录目录
+# （/root），`unzip` 也解到 /root，而第 5 步去 $WORK/mac 找 dmg ⇒ find 返回空 ⇒
+# `cp` 全部失败 ⇒ 第 8 步验证 6 个二进制全是 404。生产更新源本身没坏（set -e 在 cp 处就退了，
+# yml 没被覆盖），但发版静默失败。现在每个平台各自 cd 进自己的目录。
+vssh "GH_TOKEN='$TOKEN' MAC_ID='$MAC_ID' WORK='$WORK' bash -s" <<'EOS'
 set -euo pipefail
+cd "$WORK/mac"
 curl -sL --retry 2 --max-time 900 \
     -H "Authorization: Bearer $GH_TOKEN" \
     -H "Accept: application/vnd.github+json" \
@@ -148,8 +153,9 @@ curl -sL --retry 2 --max-time 900 \
     "https://api.github.com/repos/SuperCrzy/Supercrzy-Bot/actions/artifacts/$MAC_ID/zip"
 unzip -o -q mac.zip && rm mac.zip
 EOS
-vssh "GH_TOKEN='$TOKEN' WIN_ID='$WIN_ID' bash -s" <<'EOS'
+vssh "GH_TOKEN='$TOKEN' WIN_ID='$WIN_ID' WORK='$WORK' bash -s" <<'EOS'
 set -euo pipefail
+cd "$WORK/win"
 curl -sL --retry 2 --max-time 900 \
     -H "Authorization: Bearer $GH_TOKEN" \
     -H "Accept: application/vnd.github+json" \
@@ -233,8 +239,29 @@ log "6/8 bot.html (local rewrite + diff; upload gated by --publish-bot-html)"
 [ -f "$SITE_BOT_HTML" ] || die "site page not found: $SITE_BOT_HTML (set SITE_BOT_HTML to override)"
 old_ver=$(grep -oE 'BOT-[0-9]+\.[0-9]+\.[0-9]+' "$SITE_BOT_HTML" | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
 [ -n "$old_ver" ] || die "could not detect the current version in bot.html"
+# 幂等：已经是目标版本就直接跳过（`--publish-bot-html-only` 重跑时就是这个情形）。
+# 没有这一步，下面的"残留自检"会把 old==new 误判成"替换漏了"，让脚本第二次跑必然失败。
+if [ "$old_ver" = "$VER" ]; then
+    echo "bot.html already at v$VER — nothing to change"
+    tmp_html=""
+else
 tmp_html=$(mktemp)
-sed "s/$old_ver/$VER/g" "$SITE_BOT_HTML" > "$tmp_html"
+# 🔴 2026-10-26 修：原来是一句 `sed "s/$old_ver/$VER/g"`。sed 里 `.` 是**任意字符**，
+# 于是 `1.2.2` 变成正则 `1?2?2`，在 SVG 路径里命中 `2H21`：
+#     M18.901 2H21l  →  M18.901.2.31l      （图标直接变形，且 diff 里混在版本行中间看不出来）
+# 现在按**带明确前缀**的形态替换，点号转义，SVG 之类无关内容一律不碰。
+old_esc=$(printf '%s' "$old_ver" | sed 's/\./\\./g')
+sed -e "s/BOT-$old_esc/BOT-$VER/g" \
+    -e "s/BOT%20Setup%20$old_esc/BOT%20Setup%20$VER/g" \
+    -e "s/v$old_esc/v$VER/g" \
+    -e "s/\"softwareVersion\": \"$old_esc\"/\"softwareVersion\": \"$VER\"/g" \
+    "$SITE_BOT_HTML" > "$tmp_html"
+# 自检：替换后不该再残留旧版本号。页面里出现新形态（比如新增了别的下载入口）时，
+# 这一步会直接失败，而不是安静地发布一个"版本号只改了一半"的页面。
+if grep -qF "$old_ver" "$tmp_html"; then
+    rm -f "$tmp_html"
+    die "bot.html still contains \"$old_ver\" after rewrite — add the new form to the sed rules"
+fi
 replaced=$(diff -U0 "$SITE_BOT_HTML" "$tmp_html" | grep -c '^+[^+]' || true)
 echo "bot.html: $old_ver -> $VER, $replaced changed lines"
 if [ "$replaced" -eq 0 ]; then
@@ -251,21 +278,40 @@ else
         echo "  scripts/release-publish.sh $VER --publish-bot-html-only)"
     fi
 fi
+fi  # endif old_ver != VER
 
 # ---------------------------------------------------------------------------
 log "7/8 cleanup"
 vssh "rm -rf $WORK && echo 'VPS temp dir removed'"
 
 # ---------------------------------------------------------------------------
-log "8/8 verify (binaries 206, yml 200)"
+log "8/8 verify (binaries 206, yml 200 + version match)"
 fail=0
+# 🔴 2026-10-26 修两处：
+#   ① 原实现对**所有** URL 都带 `-r 0-1023`，nginx 对文本文件同样回 206，而 yml 那一行
+#      断言的是 200 ⇒ 全部资源其实都正常也会报 FAILED（连续误报三次，把真 bug 淹了）。
+#      现在只对二进制发 Range；yml 取完整响应。
+#   ② 原实现只看 HTTP 码不看内容 —— 一个**旧的** latest*.yml 也能 200 通过，等于没验证
+#      "清单确实指向这次发布的版本"。现在额外断言版本号。
 check() {
-    code=$(curl -s -o /dev/null -w '%{http_code}' -L -r 0-1023 --max-time 20 "$1")
-    printf '%-58s %s\n' "$2" "$code"
-    case "$3" in
-        206) [ "$code" = "206" ] || fail=1 ;;
-        200) [ "$code" = "200" ] || fail=1 ;;
-    esac
+    local url="$1" label="$2" want="$3" range=""
+    [ "$want" = "206" ] && range="-r 0-1023"
+    local code
+    code=$(curl -s -o /dev/null -w '%{http_code}' -L $range --max-time 20 "$url")
+    printf '%-58s %s\n' "$label" "$code"
+    [ "$code" = "$want" ] || fail=1
+}
+# yml 的内容断言：版本号必须是这次要发的那个。
+check_yml() {
+    local url="$1" label="$2" body
+    body=$(curl -s -L --max-time 20 "$url")
+    if printf '%s' "$body" | head -1 | grep -qx "version: $VER"; then
+        printf '%-58s %s (%s)\n' "$label" "OK" "version: $VER"
+    else
+        printf '%-58s %s\n' "$label" "WRONG VERSION"
+        printf '%s\n' "$body" | head -1 | sed 's/^/    got: /'
+        fail=1
+    fi
 }
 check "$PUBLIC/SUPERCRZY%20BOT-$VER-arm64.dmg"                 "dmg"           206
 check "$PUBLIC/SUPERCRZY%20BOT-$VER-arm64.dmg.blockmap"        "dmg.blockmap"  206
@@ -273,7 +319,7 @@ check "$PUBLIC/SUPERCRZY%20BOT-$VER-arm64-mac.zip"             "zip"           2
 check "$PUBLIC/SUPERCRZY%20BOT-$VER-arm64-mac.zip.blockmap"    "zip.blockmap"  206
 check "$PUBLIC/SUPERCRZY%20BOT%20Setup%20$VER.exe"             "exe"           206
 check "$PUBLIC/SUPERCRZY%20BOT%20Setup%20$VER.exe.blockmap"    "exe.blockmap"  206
-check "$PUBLIC/latest-mac.yml"                                 "latest-mac.yml" 200
-check "$PUBLIC/latest.yml"                                     "latest.yml"     200
+check_yml "$PUBLIC/latest-mac.yml" "latest-mac.yml"
+check_yml "$PUBLIC/latest.yml"     "latest.yml"
 [ "$fail" -eq 0 ] || die "verification FAILED — see codes above (latest*.yml backups are on the VPS)"
 echo "ALL CHECKS PASSED — v$VER published"
