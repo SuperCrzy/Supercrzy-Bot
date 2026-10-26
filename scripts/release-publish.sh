@@ -195,7 +195,10 @@ NOTES_B64=$(base64 < "$notes_file" | tr -d '\n')
 rel_json=$(vssh "PUB_VER='$VER' NOTES_B64='$NOTES_B64' GH_TOKEN='$TOKEN' bash -s" <<'EOS'
 set -euo pipefail
 body=$(printf '%s' "$NOTES_B64" | base64 -d)
-payload=$(python3 -c 'import json,sys;print(json.dumps({"tag_name":"v"+sys.argv[1],"name":"v"+sys.argv[1],"body":sys.argv[2]}))' "$PUB_VER" "$body")
+# 2026-10-26 修：name 原来是 "v$VER"，而历史 Release（v1.2.2 及更早）用的是
+# "SUPERCRZY BOT $VER"。同一页面上两种命名并存，看起来像两个不同的东西。
+# REST API 只接受 tag_name 做定位，显示名必须显式给成历史格式。
+payload=$(python3 -c 'import json,sys;print(json.dumps({"tag_name":"v"+sys.argv[1],"name":"SUPERCRZY BOT "+sys.argv[1],"body":sys.argv[2]}))' "$PUB_VER" "$body")
 code=$(curl -s -o /tmp/rel.json -w '%{http_code}' -X POST \
     -H "Authorization: Bearer $GH_TOKEN" \
     -H "Accept: application/vnd.github+json" \
