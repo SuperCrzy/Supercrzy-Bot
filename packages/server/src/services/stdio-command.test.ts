@@ -1,11 +1,12 @@
 /**
- * stdio 命令的跨平台解析（2026-10-26）。
+ * Cross-platform stdio command resolution (2026-10-26).
  *
- * 钉住的实机 bug：Windows 10 + Node 24 上 `spawn('npx.cmd', ...)` 抛 EINVAL
- * （Node 18.20.2+/20.12.2+/22 起拒绝无 shell 启动 .cmd，CVE-2024-27980 的修复），
- * computer_use 与所有 MCP stdio server 都因此起不来。
+ * Pins the behaviour behind a real failure: on Windows 10 / Node 24, `spawn('npx.cmd')`
+ * threw EINVAL (Node refuses to spawn .cmd without a shell since the CVE-2024-27980
+ * fix), so computer_use and every MCP stdio server failed to start.
  *
- * 本机是 macOS，所以翻转 process.platform 断言分支；真正的进程启动仍需 Windows 实机回归。
+ * This machine is macOS, so the platform is flipped in the tests instead. The actual
+ * process launch still needs a real Windows run.
  */
 import { describe, it, expect, afterEach } from 'vitest'
 import { resolveStdioCommand } from './stdio-command'
@@ -17,19 +18,19 @@ function withPlatform(p: NodeJS.Platform) {
 afterEach(() => withPlatform(realPlatform))
 
 describe('resolveStdioCommand', () => {
-  it('POSIX：原样返回，绝不经 shell', () => {
+  it('POSIX: returned unchanged, never shelled out', () => {
     withPlatform('darwin')
     expect(resolveStdioCommand('npx', ['-y', 'pkg'])).toEqual({ command: 'npx', args: ['-y', 'pkg'] })
   })
 
-  it('Windows：npx（无扩展名）→ 经 cmd.exe，参数保持顺序', () => {
+  it('Windows: npx (no extension) goes through cmd.exe with args in order', () => {
     withPlatform('win32')
     const r = resolveStdioCommand('npx', ['-y', 'computer-use-mcp'])
     expect(r.command.toLowerCase()).toMatch(/cmd\.exe$/)
     expect(r.args).toEqual(['/d', '/s', '/c', 'npx', '-y', 'computer-use-mcp'])
   })
 
-  it('Windows：.cmd / .bat 同样经 cmd.exe', () => {
+  it('Windows: .cmd and .bat also go through cmd.exe', () => {
     withPlatform('win32')
     for (const cmd of ['npm.cmd', 'pnpm.CMD', 'run.bat']) {
       const r = resolveStdioCommand(cmd, [])
@@ -38,14 +39,14 @@ describe('resolveStdioCommand', () => {
     }
   })
 
-  it('Windows：已经是 .exe 的命令原样跑（不需要 shell）', () => {
+  it('Windows: an .exe command runs directly, no shell needed', () => {
     withPlatform('win32')
     const r = resolveStdioCommand('C:\\tools\\server.exe', ['--port', '1'])
     expect(r.command).toBe('C:\\tools\\server.exe')
     expect(r.args).toEqual(['--port', '1'])
   })
 
-  it('Windows：空命令不崩（交给上层报错）', () => {
+  it('Windows: an empty command does not throw (the caller validates it)', () => {
     withPlatform('win32')
     expect(() => resolveStdioCommand('', [])).not.toThrow()
   })
