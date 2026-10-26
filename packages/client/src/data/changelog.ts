@@ -15,19 +15,59 @@ export interface ChangelogEntry {
 }
 
 /**
- * 引擎（代码仓库）版本 —— 必须与根 / packages/client / packages/server 三个
- * package.json 的 `version` 保持一致（当前 0.4.0）。
+/**
+ * 当前版本 —— 构建时由 `vite.config.mjs` 的 `define` 注入，来源是
+ * `packages/client/package.json`（`scripts/version.mjs` 负责把它与其余 workspace 同步）。
  *
- * ⚠️ 这**不是** App 二进制版本。App 版本请走 `window.supercrzyDesktop.app.getInfo()`
- * （主进程 `app.getVersion()`：打包读 Info.plist、dev 读 packages/desktop/package.json）。
+ * 🔴 2026-10-26 删除了原 `ENGINE_VERSION = '0.4.0'`。
+ * 它和 package.json 各存一份版本号，注释里写着「必须与三个 package.json 保持一致」，
+ * 但**没有任何机制检查它** —— 于是它停在 0.4.0，而应用已经走到 1.2.3。
+ * 结果是「设置 → 关于」同时显示「应用 v1.2.3 / 引擎 v0.4.0」，看起来像装了半成品。
  *
- * 2026-10-12 改名由来：此前叫 `APP_VERSION` 且被渲染成「SUPERCRZY BOT v0.3.0」，
- * 与 App 的真实版本（1.0.5/1.0.6）并排出现时口径打架 —— 数字本身没错，标签错了。
- * CHANGELOG 记录的就是**引擎**的版本变更，与上面的 ENGINE_VERSION 同体系。
+ * 为什么直接删而不是让它跟随：用户视角只有一个版本。两套版本号只要不能自动校验，
+ * 迟早再次漂移；而这个标签本身在 2026-10-12 就因「和真实版本并排出现时口径打架」改过一次名
+ * —— 当时选择改标签，而不是删掉多余那套。这次删掉。
+ *
+ * 打包后的二进制版本仍走 `window.supercrzyDesktop.app.getInfo()`（主进程 app.getVersion()，
+ * 读 Info.plist）；它与这里同源，因为 desktop/package.json 也在 version.mjs 的同步范围内。
+ *
+ * 兜底 `'0.0.0'`：单测（vitest）不经过 vite 的 define，运行时要能拿到一个字符串而不是 ReferenceError。
  */
-export const ENGINE_VERSION = '0.4.0'
+export const APP_VERSION: string = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : '0.0.0'
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    version: '1.2.3',
+    date: '2026-10-26',
+    title: '手机端终于能收到回复 · 朗读音色按语种选择',
+    titleEn: 'Messaging channels reply again · voices follow the text language',
+    features: [
+      '版本号统一：「关于」页不再并列显示「应用」和「引擎」两个版本，只保留一个',
+      'Windows 兜底音色补齐优先级：Windows 11 神经音色 → Tracy / 瑶瑶 → 慧慧 / 康康',
+    ],
+    featuresEn: [
+      'One version everywhere: the About panel no longer shows an "app" and an "engine" number side by side',
+      'Windows fallback voices now have a priority order: Windows 11 neural → Tracy / Yaoyao → Huihui / Kangkang',
+    ],
+    fixes: [
+      '六个 IM 渠道（Telegram / Discord / Slack / 钉钉 / 飞书 / 企业微信）全部返回 "No response" —— 事件名对不上，且跨 TCP 分片的半行被丢弃',
+      '中文被英文音色朗读：前端把默认音色写死成英文，服务端「按语言选音色」永远走不到',
+      '日文被当成中文：汉字占比把日文误判，改用中文音色去读假名',
+      '中国用户的中继形同虚设：清单和中继在同一台境外机器上，拉清单必然超时',
+      '兜底朗读听不清：macOS 八个占位音色只输出 1.76 秒，现将它们降到末位',
+      '第二次启动崩在端口上：现在自动寻找空闲端口',
+      '每次更新都要下完整 170MB：补上 blockMapSize 后改走差分',
+    ],
+    fixesEn: [
+      'All six IM channels answered "No response" — wrong SSE event name, and half-frames lost across TCP splits',
+      'Chinese read by an English voice: the client pinned an English voice, so the server rule never ran',
+      'Japanese classified as Chinese: the kanji ratio outweighed kana, so a Chinese voice read the kana',
+      'The relay was unusable for the users it exists for: the manifest lived on the same slow cross-border host',
+      'Fallback speech was unintelligible: eight macOS placeholder voices emit 1.76s and never read the line',
+      'A second launch crashed on a taken port: it now walks to a free one',
+      'Every update downloaded the full 170 MB: blockMapSize is now written, so delta updates work',
+    ],
+  },
   {
     version: '0.4.0',
     date: '2026-10-16',

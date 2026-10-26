@@ -6,20 +6,19 @@
       </div>
 
       <!--
-        版本口径（2026-10-12 统一）：
-        「应用版本」来自主进程 app.getVersion()（打包读 Info.plist / dev 读 desktop/package.json），
-        是**唯一**能代表「你手上这个 App 是第几版」的数字；
-        「引擎版本」是代码仓库版本（根/client/server 的 package.json），与 App 发布节奏无关。
-        两者都不是对方的别名，所以分标签并排，不做合并。
+        版本口径（2026-10-26 合并为一个）：
+        只显示一个版本：桌面端取主进程 app.getVersion()（打包读 Info.plist / dev 读
+        desktop/package.json），网页端没有主进程时退回 changelog.ts 的 APP_VERSION
+        （构建时由 vite define 从 client/package.json 注入）。两者同源 —— scripts/version.mjs
+        会把所有 workspace 的 version 一起同步。
+        曾经还有一个「引擎版本」常量与它并排显示，但没有任何检查盯着那份副本，
+        四个月后它停在 0.4.0 而应用已到 1.2.3，用户看到的是「应用 v1.2.3 / 引擎 v0.4.0」。
+        2026-10-26 删除该常量与它的标签。
       -->
       <div class="update-meta">
         <span v-if="isDesktop" class="update-meta-item">
           <span class="update-meta-label">{{ $t('nav.appVersionLabel') }}</span>
           <span class="update-meta-value">{{ appVersionLabel }}</span>
-        </span>
-        <span class="update-meta-item">
-          <span class="update-meta-label">{{ $t('nav.engineVersionLabel') }}</span>
-          <span class="update-meta-value">v{{ ENGINE_VERSION }}</span>
         </span>
         <span v-if="showSource && gitHead" class="update-meta-item">
           <span class="update-meta-label">{{ $t('nav.sourceLabel') }}</span>
@@ -82,7 +81,7 @@
       </div>
     </div>
 
-    <!-- 更新日志弹窗：引擎版本变更（历史见 CHANGELOG.md） -->
+    <!-- 更新日志弹窗：当前版本的新增与修复（完整历史见仓库 CHANGELOG.md 与 GitHub Release） -->
     <n-modal v-model:show="showChangelog" preset="card" :title="$t('nav.changelogTitle')" style="max-width:560px" @update:show="onChangelogShow">
       <div class="changelog-list">
         <div class="changelog-entry">
@@ -106,7 +105,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ENGINE_VERSION, CHANGELOG } from '@/data/changelog'
+import { APP_VERSION, CHANGELOG } from '@/data/changelog'
 import SvgIcon from '@/components/ui/SvgIcon.vue'
 
 const { locale, t } = useI18n({ useScope: 'global' })
@@ -159,7 +158,7 @@ const showSource = computed(() => (isDesktop ? !packaged.value : true))
 const gitHead = ref('')
 const sourceStatus = ref<'idle' | 'checking' | 'available' | 'latest'>('idle')
 
-const currentEntry = computed(() => CHANGELOG.find((e) => e.version === ENGINE_VERSION) || CHANGELOG[0])
+const currentEntry = computed(() => CHANGELOG.find((e) => e.version === APP_VERSION) || CHANGELOG[0])
 
 const appVersionLabel = computed(() => (appVersion.value ? `v${appVersion.value}` : '—'))
 
@@ -339,7 +338,7 @@ async function loadVersion() {
 function dismissChangelog(remember = true) {
   showChangelog.value = false
   if (remember) {
-    try { localStorage.setItem(CHANGELOG_SEEN_KEY, ENGINE_VERSION) } catch {}
+    try { localStorage.setItem(CHANGELOG_SEEN_KEY, APP_VERSION) } catch {}
   }
 }
 
@@ -371,10 +370,10 @@ onMounted(async () => {
     checkSourceUpdate()
   }
 
-  // 3) 引擎版本更新提示：已读版本 ≠ 当前引擎版本 → 自动弹出更新日志
+  // 3) 版本更新提示：已读版本 ≠ 当前版本 → 自动弹出更新日志
   try {
     const seen = localStorage.getItem(CHANGELOG_SEEN_KEY)
-    if (seen !== ENGINE_VERSION) {
+    if (seen !== APP_VERSION) {
       setTimeout(() => { showChangelog.value = true }, 600)
     }
   } catch { /* localStorage 不可用时静默 */ }
