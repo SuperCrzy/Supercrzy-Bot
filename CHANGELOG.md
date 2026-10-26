@@ -9,6 +9,45 @@
 
 ---
 
+## v1.2.4 (2026-10-26) — Windows 全平台修复
+
+### 修复
+
+- **Windows：8 个工具一次性恢复可用。** 根因只有 3 个：
+  ① `spawn('npx.cmd')` 返回 EINVAL —— Node 自 CVE-2024-27980 修复起拒绝在不带 shell 的情况下启动
+  `.cmd`，`computer_use` 与**所有** MCP stdio 服务器都在启动阶段就死；
+  ② 沙箱用 `startsWith(a + '/')` 比路径，在 Windows 上拼出 `C:\...\Documents/`（反斜杠 + 正斜杠），
+  **每一个路径都判越权**，与权限档位无关 —— 这就是"PowerShell 能写、file_write 报越权"的真因；
+  ③ 终端默认 shell 写死 `/bin/bash` + 硬编码 `-i`，Windows 上两样都不存在。
+- **完全访问在 Windows 上确实生效了**：`HOME` 取自 `process.env.HOME`（Windows 通常为空）⇒ full 档
+  放行代码整段被跳过；放行列表也没有 `%TEMP%` 和 `~/.supercrzy`（读不回自己刚写的报告）。
+- **安全缺口（Windows）**：`SENSITIVE_DIR` 与 `CREDENTIAL_FILE` 只认 `/`，`C:\...\.ssh`、`.env`
+  在 Windows 上**从来没被拦过**。现同时认 `\` 并按平台大小写不敏感。
+- **MCP 服务器在 Windows 上能起**：`mcp-manager` 与 `computer_use` 有同样的两个缺陷，且各自独立实现；
+  平台规则收敛到一处，顺带删掉那个只收 stderr、退出时还会清空正常连接的孤儿进程。
+- **记忆去重改在写入侧**：`upsertMemory` 原本只做精确 key 匹配，同一件事换个说法就是两条。
+  试过降合并阈值，但实测"真正改写"与"同前缀不同产物"都落在 0.5000，阈值分不开 ⇒ 改为写入时拦截：
+  同分类、阈值 0.75、内容追加而非覆盖。`任务反思:A/B/C` 曾被误合成一条，故词元少于 4 个不判定。
+- **`create_plan` 现在返回 id**：此前建了行、生成了 id 却只返回标题，`task_update` 永远拿不到合法 id，
+  计划卡片卡在第一步。
+- **`memory_store` 不再把"已合并"报成"未存储"**：`merged` 曾落进 default 分支返回「⛔ 记忆未存储」，
+  模型会因此重存一遍，等于去重白做。
+
+### 界面
+
+- **Windows 沉浸式标题栏**：原生标题栏此前只在 macOS 隐藏，而 56px 横栏在 Electron 里一律渲染、
+  左侧固定留 87px 给 macOS 红绿灯 ⇒ Windows 上那条横栏是空的，还把侧边栏下推一个标题栏高度
+  （即"LOGO 上方空一档"）。现在窗口控制按钮画进同一条横栏右端。
+- **「关于」只显示一个版本**：此前并列「应用 v1.2.3 / 引擎 v0.4.0」，后者是无人校验的常量。
+
+### 已知限制
+
+- Windows 的几何布局与进程启动只做了代码路径断言，**未在 Windows 实机测量**。
+- `terminal_signal` 的 SIGINT 在 Windows 上会**关闭整个会话**（pipe 而非 pty，Ctrl-C 无法传递）。
+- 完全访问仍不含系统目录（`C:\Windows`、`/etc`）。
+
+---
+
 ## v1.2.3 (2026-10-26) — 手机端终于能收到回复
 
 ### 修复
