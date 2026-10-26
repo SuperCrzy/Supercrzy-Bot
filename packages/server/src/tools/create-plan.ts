@@ -45,7 +45,17 @@ const tool: ToolDef = {
       ).run(stepId, planSessionId, planId, steps[i].subject, steps[i].description || '', i === 0 ? 'in_progress' : 'pending', i + 1)
       stepIds.push(stepId)
     }
-    return `📋 计划已创建: "${title}"，共 ${steps.length} 步。\n` + steps.map((s, i) => `  ${i + 1}. [ ] ${s.subject}`).join('\n')
+    // 🔴 2026-10-26 修：原来只返回标题和步骤文字，plan_id 与每个 step 的 task id **全部丢弃**。
+    // 模型拿不到 id ⇒ 后续想调 task_update 只能自己编 ⇒ 恒报 "Task not found"，
+    // 计划卡片永远停在第一步（实机报告「计划进度断裂」）。
+    // 现在按 task_create 的既有格式（`Task created: [id]`）把 id 一起交出去。
+    return (
+      `📋 计划已创建: "${title}"，共 ${steps.length} 步。plan_id: ${planId}\n` +
+      steps
+        .map((s, i) => `  ${i + 1}. ${i === 0 ? '[→]' : '[ ]'} ${s.subject}  task_id: ${stepIds[i]}`)
+        .join('\n') +
+      `\n（推进步骤用 task_update，参数 id 取上面的 task_id）`
+    )
   },
 }
 
