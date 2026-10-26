@@ -100,6 +100,48 @@ function isChineseOnly(text) {
   return !text.split('\n').some((l) => ENGLISH_WORDS.test(l))
 }
 
+// ---------------------------------------------------------------------------
+// 2. Terminology in user-facing copy
+// ---------------------------------------------------------------------------
+/**
+ * 「国内」 means "domestic" — it reads correctly only from inside one country. This
+ * product ships worldwide, so a release note addressed to everyone that says
+ * 「国内用户」 silently frames the reader as an outsider, and in English it has no
+ * direct equivalent at all. Everywhere: 中国用户 / mainland China.
+ *
+ * Scope is deliberate: user-facing docs only. Code comments say 中国大陆 (the precise
+ * term for the network environment being described) and internal docs stay Chinese.
+ */
+const BANNED_TERMS = [
+  { word: '国内', why: 'say 中国用户 (or "mainland China") — this copy is read worldwide' },
+]
+
+function userFacingDocs() {
+  const out = []
+  for (const n of ['CHANGELOG.md', 'README.md', 'README.zh-CN.md']) {
+    const p = join(ROOT, n)
+    if (existsSync(p)) out.push({ rel: n, path: p })
+  }
+  if (existsSync(RELEASE_DIR)) {
+    for (const n of readdirSync(RELEASE_DIR).filter((f) => f.endsWith('.md')).sort()) {
+      out.push({ rel: `docs/release-notes/${n}`, path: join(RELEASE_DIR, n) })
+    }
+  }
+  return out
+}
+
+function checkTerminology() {
+  for (const { rel, path } of userFacingDocs()) {
+    let src
+    try { src = readFileSync(path, 'utf8') } catch { continue }
+    src.split('\n').forEach((line, i) => {
+      for (const t of BANNED_TERMS) {
+        if (line.includes(t.word)) problems.push({ file: `${rel}:${i + 1}`, why: t.why })
+      }
+    })
+  }
+}
+
 function scan() {
   const hits = []
   for (const d of SCAN_DIRS) {
@@ -120,6 +162,7 @@ try {
 const baselineSet = new Set(baseline)
 
 checkReleaseNotes()
+checkTerminology()
 const chineseOnly = scan()
 const newOffenders = chineseOnly.filter((f) => !baselineSet.has(f))
 const fixed = baseline.filter((f) => !chineseOnly.includes(f))
