@@ -9,6 +9,7 @@
  * 3. 每 8s 心跳 ping，收到 CALLBACK 帧需回 ACK
  * 4. 回复走入站消息附带的 sessionWebhook URL（POST JSON）
  */
+import { callAgent as callAgentBridge } from './agent-bridge'
 import WebSocket from 'ws'
 import { getDB } from '../services/database'
 import { formatForChannel } from '../services/channel-format'
@@ -328,45 +329,17 @@ class DingtalkBotInstance {
 
 // ── 调用 SUPERCRZY agent（SSE 流，聚合完整回复） ──
 
+/**
+ * Delegate to the shared channel→agent bridge.
+ *
+ * Previously each bot carried its own 40-line copy that looked for `type: 'block'` — a shape
+ * the server never emits — so every channel answered "No response" while the agent actually
+ * ran. Parsing, event names and chunk buffering now live in exactly one place.
+ */
 async function callAgent(userText: string): Promise<string> {
-  try {
-    const res = await fetch(`http://localhost:${process.env.PORT || '3000'}/api/chat/agent`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        messages: [{ role: 'user', content: userText }],
-      }),
-    })
-    if (!res.ok) return 'Sorry, Agent is busy.'
-
-    const reader = res.body?.getReader()
-    if (!reader) return ''
-    const decoder = new TextDecoder()
-    let buf = ''
-    let result = ''
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buf += decoder.decode(value, { stream: true })
-      for (const line of buf.split('\n')) {
-        if (line.startsWith('data: ')) {
-          try {
-            const d = JSON.parse(line.slice(6))
-            if (d.type === 'block' && d.block?.type === 'text' && d.block?.text) {
-              result = d.block.text
-            } else if (d.content) {
-              result = d.content
-            }
-          } catch { /* 忽略非 JSON 行 */ }
-        }
-      }
-      buf = buf.includes('\n') ? buf.split('\n').pop() || '' : ''
-    }
-    return result || 'No response'
-  } catch {
-    return 'Sorry, something went wrong.'
-  }
+  const reply = await callAgentBridge({ userText })
+  if (reply.error) return `⚠️ ${reply.error}`
+  return reply.text || 'No response'
 }
 
 // ── 公开 API（与 gateway.ts 接入） ─────────────────────

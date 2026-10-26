@@ -270,6 +270,11 @@ else
   UPDATE_URL="$UPDATE_URL" pnpm dist
 fi
 
+# Inject blockMapSize into latest*.yml (2026-10-25): electron-builder writes the .blockmap
+# files but omits this field, and electron-updater refuses to do a differential download
+# without it — every update was a full 170 MB transfer even though the maps were right there.
+node "$ROOT/scripts/inject-blockmap-size.mjs" "$ROOT/packages/desktop/dist"
+
 echo "═══ ④ 完成 ═══"
 ls -lh "$ROOT/packages/desktop/dist/"SUPERCRZY*.dmg 2>/dev/null | awk '{print "  DMG:", $5, $9}' || true
 ls -lh "$ROOT/packages/desktop/dist/"*-mac.zip 2>/dev/null | awk '{print "  ZIP:", $5, $9}' || true

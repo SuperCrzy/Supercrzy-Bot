@@ -188,6 +188,11 @@ jobs:
           }
           if (-not $ok) { Write-Error "electron-builder failed after $attempt attempts"; exit 1 }
 
+      # Inject blockMapSize into latest.yml: electron-builder writes the .blockmap file but
+      # omits the field, and electron-updater skips differential downloads without it.
+      - name: Annotate updater manifest with blockMapSize
+        run: node scripts/inject-blockmap-size.mjs packages/desktop/dist
+
       - name: List artifacts
         working-directory: packages/desktop/dist
         shell: pwsh

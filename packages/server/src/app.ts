@@ -109,7 +109,9 @@ async function bootstrap() {
   startScheduler()
 
   const app = new Koa()
-  const PORT = config.port
+  // Mutable: `listenWithFallback` may advance to the next free port when the configured one is
+  // taken. Everything downstream reads this binding, so it must reflect the port actually bound.
+  let PORT = config.port
 
   // Auto-start WeChat bot if credentials exist
   const creds = loadCredentials()
@@ -599,8 +601,55 @@ async function bootstrap() {
   }
 
   // HOST 显式给出时按 IPv4/IPv6 指定绑定（手机端 adb forward 只走 IPv4），否则沿用 Node 默认
-  if (BIND_HOST) server.listen(PORT, BIND_HOST, onListening)
-  else server.listen(PORT, onListening)
+  //
+  // Port fallback: a user opening the desktop app on a machine where 3000 is already taken
+  // (another dev server, a second instance, some SDK's default) previously got a raw
+  // EADDRINUSE stack and a blank window. Try a short ladder of nearby ports instead, and keep
+  // going until one binds. `PORT` is reassigned so the banner, the channel bridge
+  // (`agent-bridge` reads process.env.PORT) and the desktop shell all agree on the real port.
+  const listenOnce = (port: number) =>
+    new Promise<NodeJS.ErrnoException | null>((resolve) => {
+      const onError = (err: NodeJS.ErrnoException) => {
+        server.removeListener('listening', onOk)
+        resolve(err)
+      }
+      const onOk = () => {
+        server.removeListener('error', onError)
+        resolve(null)
+      }
+      server.once('error', onError)
+      server.once('listening', onOk)
+      if (BIND_HOST) server.listen(port, BIND_HOST)
+      else server.listen(port)
+    })
+
+  const MAX_PORT_TRIES = 20
+  for (let attempt = 0; attempt < MAX_PORT_TRIES; attempt++) {
+    // eslint-disable-next-line no-await-in-loop -- sequential by design: stop at first success
+    const err = await listenOnce(PORT + attempt)
+    if (!err) {
+      if (attempt > 0) {
+        console.warn(`[Server] Port ${config.port} was busy; bound to ${PORT + attempt} instead.`)
+      }
+      PORT = PORT + attempt
+      // Channels and the desktop shell resolve the agent URL from PORT. Keep the env in sync
+      // with what we actually bound, otherwise they would keep calling the occupied port.
+      process.env.PORT = String(PORT)
+      onListening()
+      break
+    }
+    if (err.code !== 'EADDRINUSE') {
+      console.error(`[Server] Failed to listen on ${PORT + attempt}: ${err.code || err.message}`)
+      throw err
+    }
+    if (attempt === MAX_PORT_TRIES - 1) {
+      console.error(
+        `[Server] No free port in ${config.port}-${config.port + MAX_PORT_TRIES - 1}. ` +
+          'Close whatever is using them, or set PORT to a free one.',
+      )
+      throw err
+    }
+  }
 
   // Graceful shutdown
   process.on('SIGINT', async () => {
