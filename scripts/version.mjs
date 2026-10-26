@@ -37,6 +37,23 @@ export function targetPackages() {
   return out
 }
 
+/**
+ * 应用内更新日志所在文件。
+ *
+ * 目前只有客户端一处（设置 → 关于 → 更新日志，走 UpdatePanel.vue 的 CHANGELOG 数组）。
+ * 做成数组是为了将来若桌面端/手机端各自维护一份时，检查能一并覆盖，不用再改脚本。
+ */
+function changelogFiles() {
+  return [join(ROOT, 'packages/client/src/data/changelog.ts')].filter((f) => existsSync(f))
+}
+
+/** 该更新日志文件是否已含指定版本的条目 */
+function changelogHasVersion(file, version) {
+  const src = readFileSync(file, 'utf8')
+  // 条目形如 `version: '1.2.4'`；用词边界避免 1.2.4 命中 11.2.4 / 1.2.40
+  return new RegExp(`version:\\s*['"]${version.replace(/\./g, '\\.')}['"]`).test(src)
+}
+
 export function readVersion(file) {
   const text = readFileSync(file, 'utf8')
   const m = text.match(/^\s*"version"\s*:\s*"([^"]*)"/m)
@@ -100,7 +117,22 @@ function main() {
       console.error('  修复：pnpm version:sync')
       process.exit(1)
     }
+    // 应用内更新日志必须为当前版本写条目（2026-10-26 加）。
+    // 起因：老板发现「所有端的设置 → 更新日志」长期停在旧版本内容 ——
+    // changelog.ts 是手写数组，发版时没人记得加，界面上就一直是几个月前的说明。
+    // 这是发布流程的缺失环节，不是文案疏漏，所以放进门禁而不是靠提醒。
+    const missing = []
+    for (const f of changelogFiles()) {
+      if (!changelogHasVersion(f, rootVersion)) missing.push(f)
+    }
+    if (missing.length) {
+      console.error(`✗ 更新日志缺少 v${rootVersion} 条目：`)
+      for (const f of missing) console.error(`   ${f}`)
+      console.error('  修复：按现有条目格式补一条（features / fixes 中英各一份）')
+      process.exit(1)
+    }
     console.log(`✓ 版本一致：${rootVersion}（${targets.length} 个包）`)
+    console.log(`✓ 更新日志已含 v${rootVersion}`)
     return
   }
 
