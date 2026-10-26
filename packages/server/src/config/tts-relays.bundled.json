@@ -1,0 +1,7 @@
+{
+  "updatedAt": "2026-10-26",
+  "note": "Bundled fallback for the TTS relay list. The app reads this file when fetching the online manifest fails — which is the normal case for users in mainland China, because the manifest host (updates.supercrzy.com) sits behind the same cross-border link that makes direct Edge-TTS handshakes take 1.5-30s. Shipping it inside the package means the relay is usable on first launch with no network round-trip. Keep in sync with updates.supercrzy.com/releases/tts-relays.json.",
+  "relays": [
+    "http://scbot:960e7c07f2d3712523fcdd6c0ab321c2@107.174.107.199:3128"
+  ]
+}

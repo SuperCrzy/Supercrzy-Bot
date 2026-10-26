@@ -1022,11 +1022,18 @@ onMounted(async () => {
   loadMcp()
   loadPresets()
   // 朗读音色清单（失败保持内置兜底）
+  // 2026-10-24：带上界面语言 —— 服务端据此只下发「本语种 + 中英通用」的音色（D2）。
   try {
-    const vres = await fetch('/api/tts/voices')
+    const vres = await fetch(`/api/tts/voices?locale=${encodeURIComponent(String(locale.value || ''))}`)
     if (vres.ok) {
       const vdata = await vres.json()
       if (Array.isArray(vdata?.voices) && vdata.voices.length) ttsVoices.value = vdata.voices
+      // 迁移：空选择或退役音色（Ava/Andrew/Jenny —— 旧 host 对中文静默挂死）
+      // → 服务端给的本语言默认档。**只在明确失效时改**，不覆盖用户的有效选择。
+      const retired = new Set<string>(Array.isArray(vdata?.retired) ? vdata.retired : [])
+      if (!form.ttsVoice || retired.has(form.ttsVoice)) {
+        form.ttsVoice = String(vdata?.default || ttsVoices.value[0]?.id || '')
+      }
     }
   } catch { /* ignore */ }
 })

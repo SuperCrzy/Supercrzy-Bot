@@ -49,22 +49,133 @@ export const PRO_COOLDOWN_MS = 15_000
 /**
  * Lite 档音色优选顺序（名字子串匹配）。
  *
- * 2026-09-28 重排：原来首项是 `Tingting/婷婷`，而 macOS 上「婷婷」是**拼接式**老音色，
- * 听感最机械 —— 等于我们主动挑了最差的那个。实测本机 Chrome 暴露 18 个中文音色，
- * 其中 `Shelley / Sandy / Flo / Eddy / Reed / Rocko` 是 macOS 新代 Siri 神经音色，
- * 原来的优选表**一个都没列**。现在按「神经音色 → Google → 其它 → 拼接式老音色」排。
+ * 🔴 2026-10-26 重排（第二次）：上一版把 macOS 新代 Siri 音色（Shelley/Sandy/Flo/Eddy/
+ * Reed/Rocko/Grandma/Grandpa）排在最前，理由是"它们出现在 getVoices() 列表里且是新代音色"。
+ * **实测证明它们在本机不可用**：同一句中文，用系统 TTS 逐个导出音频测时长 —
+ *
+ *   | 音色 | 时长 | RMS | 有声占比 |
+ *   |---|---|---|---|
+ *   | Shelley / Sandy / Flo / Eddy / Reed / Rocko / Grandma / Grandpa | **全部 1.756s** | 2836 | **41%** |
+ *   | Meijia | 8.65s | 5860 | 86% |
+ *   | Tingting | 8.76s | 4143 | 85% |
+ *
+ * 八个音色时长**完全相同**（1.756s）且有声占比只有 41%，说明它们根本没读这句话 —— 那是
+ * 未下载语音包时的占位输出。旧优选表把用户推给它们，结果就是兜底时"只听到断续的几个字、
+ * 听不清在读什么"。这比排最后的拼接式 Tingting 差得多。
+ *
+ * 现在的顺序：**实测能完整朗读的在前，占位音色降到最后**（不是删除 —— 用户真下载了语音包
+ * 的机器上它们可用，此时仍会被选中，因为前面的都命中不到）。
+ *
+ * ⚠️ 教训：`getVoices()` 里有 ≠ 能用。优选表必须用"实际朗读音频长度"验证过，不能凭名单猜。
  */
 const LITE_VOICE_PREFER = [
-  // ① macOS 新代 Siri 神经音色（女性在前，跟默认的晓晓保持一致）
-  'Shelley', 'Sandy', 'Flo',
-  'Eddy', 'Reed', 'Rocko',
-  // ② Google 系（装了才有）
+  // ① Google 系（装了才有，质量最好）
   'Google 普通话', 'Google 國語',
-  // ③ 其它常见中文音色
-  'Meijia', '美嘉', 'Sinji', 'Li-mu', 'Yu-shu', 'Yaoyao', 'Xiaoxiao', '晓晓', 'Yunxi', 'Yunyang',
-  // ④ 最后才是拼接式老音色：只在上面全都没有时才用
+  // ② 实测能完整朗读的中文音色：优先普通话，其次美嘉
   'Tingting', '婷婷',
+  'Meijia', '美嘉',
+  // ③ 其它常见中文音色（未见占位问题，但未逐个验证；排在已验可用之后）
+  'Sinji', 'Li-mu', 'Yu-shu', 'Yaoyao', 'Xiaoxiao', '晓晓', 'Yunxi', 'Yunyang',
+  // ④ 未下载语音包时会输出 1.756s 占位音频 —— 只在上面全都没有时才用
+  'Shelley', 'Sandy', 'Flo', 'Eddy', 'Reed', 'Rocko', 'Grandma', 'Grandpa',
 ] as const
+
+/**
+ * 其它语言的兜底音色优选（2026-10-24，修 D3）。
+ *
+ * 原来 `pickVoice()` 只筛中文音色、`u.lang` 写死 `zh-CN` ⇒ **全球用户触发兜底时
+ * 会被中文音色读英文/法语**，这正是"机械音听不清内容"在海外用户身上的形态。
+ * 现在按"待读文本 → 语言"选池，并给每个语言一份神经音色优先表。
+ */
+const LITE_VOICE_PREFER_BY_LANG: Record<string, readonly string[]> = {
+  en: [
+    'Samantha', 'Ava', 'Allison', 'Susan', 'Google US English', 'Alex', 'Daniel', 'Karen', 'Moira',
+    // 老式拼接音色放最后
+    'Fred', 'Zarvox',
+  ],
+  fr: ['Amélie', 'Thomas', 'Audrey', 'Google français'],
+  de: ['Anna', 'Petra', 'Markus', 'Google Deutsch'],
+  es: ['Mónica', 'Paulina', 'Jorge', 'Diego', 'Google español'],
+  it: ['Alice', 'Luca', 'Google italiano'],
+  pt: ['Luciana', 'Joana', 'Felipe', 'Google português do Brasil'],
+  ru: ['Milena', 'Yuri', 'Google русский'],
+  ja: ['Kyoko', 'Otoya', 'Google 日本語'],
+  // ⚠️ 2026-10-26 实测（macOS）：`Sora` 输出 0.35s / RMS=1 / 有声占比 0% —— **完全静音**。
+  // `Yuna` 4.69s / 83% 正常。故 Yuna 必须在前；Sora 只在没有其它韩语音色时才会被选中（此时
+  // 等于无声，但没有更差的选择），保留它是为了永远不返回空池。
+  ko: ['Yuna', 'Sora', 'Google 한국의'],
+}
+
+/**
+ * 从待读文本推测语言（只用来挑系统音色，不需要精确）：
+ * 有汉字 → zh；有假名 → ja；有韩文 → ko；否则用 `navigator.language`。
+ */
+/** 导出给单测：语言判定是 D3 的核心逻辑，不能只靠肉眼 */
+export function detectSpeechLang(text: string): string {
+  const s = String(text || '')
+  if (/[\u3040-\u30ff]/.test(s)) return 'ja'
+  if (/[\uac00-\ud7af]/.test(s)) return 'ko'
+  if (/[\u4e00-\u9fff]/.test(s)) return 'zh'
+  const nav = (typeof navigator !== 'undefined' ? navigator.language : 'en') || 'en'
+  return nav.toLowerCase().split(/[-_]/)[0] || 'en'
+}
+
+/**
+ * 系统语音列表缓存（2026-10-26）。
+ *
+ * 为什么必须缓存：**`speechSynthesis.getVoices()` 是异步填充的**。Chromium（含 Electron）
+ * 首次同步调用通常返回**空数组**，列表加载完才派发 `voiceschanged`。旧实现在"朗读那一刻"
+ * 只调用一次，拿到空就 `return null`，调用方只能把 `u.lang` 设成检测到的语言、让浏览器用
+ * **它自己的默认音色** —— macOS 上这个默认常常是拼接式的 Tingting，于是用户听到的就是
+ * 那种一个字一个字拼出来的机械音，而优选表里明明排着 Shelley 等神经音色却从没被用上。
+ *
+ * 现在：模块加载即预热一次，并持续监听 `voiceschanged`；`pickVoice()` 读缓存。
+ * 这样"打开页面 → 点朗读"这段正常间隔内，音色池已经就绪。
+ */
+const systemVoiceCache: { list: SpeechSynthesisVoice[] } = { list: [] }
+
+/** 读一次当前语音列表并写入缓存；返回是否已非空 */
+function refreshSystemVoices(): boolean {
+  if (typeof window === 'undefined' || typeof window.speechSynthesis === 'undefined') return false
+  try {
+    const now = window.speechSynthesis.getVoices()
+    if (now && now.length) {
+      systemVoiceCache.list = Array.from(now)
+      return true
+    }
+  } catch { /* 某些环境 getVoices 会抛 */ }
+  return systemVoiceCache.list.length > 0
+}
+
+/**
+ * 预热系统语音列表。模块加载时执行一次。
+ *
+ * 三重保险，因为各家实现的时机不一样：
+ *   ① 立即读一次（Chromium 第二次起就能拿到）
+ *   ② 监听 `voiceschanged`（标准事件）
+ *   ③ 前两次都没拿到时短轮询 —— **Electron 实测不总派发 voiceschanged**，
+ *      只靠事件会让音色池永久为空，这正是"一直是机械音"的成因。
+ */
+function warmSystemVoices(): void {
+  if (typeof window === 'undefined' || typeof window.speechSynthesis === 'undefined') return
+  if (refreshSystemVoices()) return
+  try {
+    window.speechSynthesis.addEventListener('voiceschanged', () => { refreshSystemVoices() })
+  } catch { /* 老实现只有 onvoiceschanged */ }
+  let tries = 0
+  const timer = setInterval(() => {
+    tries += 1
+    if (refreshSystemVoices() || tries >= 20) clearInterval(timer)
+  }, 250) // 最多等 5s；拿到即停
+}
+
+warmSystemVoices()
+
+/** 供单测/诊断：当前缓存到的系统语音数 */
+export function systemVoiceCount(): number {
+  return systemVoiceCache.list.length
+}
+
 
 export function useSpeech(options: UseSpeechOptions = {}) {
   const nativeSupported =
@@ -804,22 +915,47 @@ export function useSpeech(options: UseSpeechOptions = {}) {
 
   // ===== Lite（系统 TTS 兜底）=====
 
-  function pickVoice(): SpeechSynthesisVoice | null {
+  /**
+   * 选系统音色（2026-10-24 改为**按语言**，修 D3）。
+   *
+   * 旧实现只筛选中文音色、`u.lang` 写死 `zh-CN`；全球用户（英文/法语/日语…）
+   * 触发兜底时会听到中文音色念拉丁文 —— 听感比拼接音色更糟。现在：
+   *   ① 由待读文本推出语言（`detectSpeechLang`）
+   *   ② 在该语言的音色池里按神经音色优先表挑
+   *   ③ 该语言一个音色都没有 → 返回 null，由调用方把 `u.lang` 设成检测到的语言，
+   *      让浏览器用它自己的默认音色（而不是强行 zh-CN）
+   */
+  function pickVoice(text = ''): SpeechSynthesisVoice | null {
     if (!nativeSupported) return null
-    const voices = window.speechSynthesis.getVoices()
+    // Cached list first (filled by warmSystemVoices). Falling back to a live read keeps the old
+    // behaviour for the rare case where the cache is still empty but the implementation is
+    // already populated — never worse than before.
+    const voices = systemVoiceCache.list.length
+      ? systemVoiceCache.list
+      : window.speechSynthesis.getVoices()
     if (!voices.length) return null
-    const zh = voices.filter((v) => /^zh/i.test(v.lang) || /Chinese|中文|普通话/i.test(v.name))
-    if (!zh.length) return null
-    // 大陆优先：同一音色名常常同时有 zh-CN 与 zh-TW 两份（如 "Shelley (中文（中国大陆）)"），
-    // 不先筛一次就会随机拿到台湾腔那版。
-    const pools = [zh.filter((v) => /^zh[-_]CN/i.test(v.lang)), zh]
-    for (const pool of pools) {
-      for (const name of LITE_VOICE_PREFER) {
-        const hit = pool.find((v) => v.name.includes(name))
+    const lang = detectSpeechLang(text)
+    const pool = voices.filter((v) => v.lang.toLowerCase().startsWith(lang))
+    if (!pool.length) return null
+    const prefer = lang === 'zh' ? LITE_VOICE_PREFER : (LITE_VOICE_PREFER_BY_LANG[lang] ?? [])
+    // 同语言常有 zh-CN / zh-TW 两版（如 "Shelley (中文（中国大陆）)"）：先按完整地区收敛
+    const region = countryOf(lang)
+    const narrowed = region ? pool.filter((v) => v.lang.toLowerCase().startsWith(region)) : []
+    for (const list of narrowed.length ? [narrowed, pool] : [pool]) {
+      for (const name of prefer) {
+        const hit = list.find((v) => v.name.includes(name))
         if (hit) return hit
       }
     }
-    return zh[0]
+    // 没有命中优选表 → 取该语言的第一个（至少语言是对的）
+    return pool[0]
+  }
+
+  /** 语言 → 首选地区（zh → zh-CN；其余用 `navigator.language` 的地区码，没有就空） */
+  function countryOf(lang: string): string {
+    if (lang === 'zh') return 'zh-cn'
+    const nav = String((typeof navigator !== 'undefined' ? navigator.language : '') || '').toLowerCase()
+    return nav.startsWith(`${lang}-`) ? nav : ''
   }
 
   /**
@@ -850,12 +986,14 @@ export function useSpeech(options: UseSpeechOptions = {}) {
     clearKeepAlive()
 
     const u = new SpeechSynthesisUtterance(text)
-    const voice = pickVoice()
+    const voice = pickVoice(text)
     if (voice) {
       u.voice = voice
       u.lang = voice.lang
     } else {
-      u.lang = 'zh-CN'
+      // 该语言没有可用系统音色 → 交给浏览器按"检测到的语言"自己挑，
+      // 绝不写死 zh-CN（2026-10-24 之前正是这样把英文用户推给中文音色）
+      u.lang = detectSpeechLang(text)
     }
     u.rate = liteRate()
     u.pitch = 1

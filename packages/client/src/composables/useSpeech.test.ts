@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { effectScope } from 'vue'
-import { useSpeech, PRO_COOLDOWN_MS } from './useSpeech'
+import { useSpeech, PRO_COOLDOWN_MS, detectSpeechLang } from './useSpeech'
 
 /** ---- 环境 mock：系统 TTS + fetch + Audio + ObjectURL ---- */
 function installMocks(opts: { fetchOk?: boolean; voices?: { name: string; lang: string }[]; failFirstN?: number; failAfter?: number } = {}) {
@@ -472,23 +472,39 @@ describe('useSpeech 流式（边生成边朗读）', () => {
 })
 
 /**
- * Lite 兜底音色的优选顺序（2026-09-28 重排）。
+ * Lite 兜底音色的优选顺序。
  *
- * 原来首项是 `Tingting/婷婷` —— macOS 上那是**拼接式**老音色，听感最机械，
- * 等于我们主动挑了最差的一个；而 macOS 新代 Siri 神经音色（Shelley 等）原来的表里
- * 一个都没列。这三条防止顺序被改回去。
+ * 🔴 2026-10-26 再次反转（上一版 2026-09-28 的判断被实测推翻）。
+ *
+ * 上一版认为「Shelley 等 macOS 新代 Siri 音色比拼接式的婷婷好」，于是把它们排在最前。
+ * 实测（用系统 TTS 逐音色导出音频量时长）：同一句中文，Shelley/Sandy/Flo/Eddy/Reed/Rocko/
+ * Grandma/Grandpa **八个全部只输出 1.756 秒、有声占比 41%** —— 未下载语音包时的占位输出，
+ * 根本没读这句话。婷婷 8.76s / 85%，美嘉 8.65s / 86%，才是真能读完的。
+ *
+ * 所以现在的规则是：**能完整朗读 > 音色新旧**。这几条防止有人凭名单又把顺序改回去。
  */
 describe('Lite 兜底音色优选顺序', () => {
   let mock: ReturnType<typeof installMocks>
 
-  it('有 Siri 神经音色时不再选「婷婷」', async () => {
+  it('池里同时有婷婷和 Siri 占位音色 → 选婷婷（占位音色只输出 1.75s 断续音频）', async () => {
     mock = installMocks({
       fetchOk: false,
       voices: [
-        { name: '婷婷', lang: 'zh-CN' },
         { name: 'Shelley (中文（中国大陆）)', lang: 'zh-CN' },
         { name: 'Eddy (中文（中国大陆）)', lang: 'zh-CN' },
+        { name: '婷婷', lang: 'zh-CN' },
       ],
+    })
+    const { api } = withSpeech()
+    api.speak('m1', '文本。')
+    await new Promise((r) => setTimeout(r, 30))
+    expect(mock.picked[0].name).toContain('婷婷')
+  })
+
+  it('只有 Siri 音色、没有可用替代时仍然用它（不能因为可能占位就哑掉）', async () => {
+    mock = installMocks({
+      fetchOk: false,
+      voices: [{ name: 'Shelley (中文（中国大陆）)', lang: 'zh-CN' }],
     })
     const { api } = withSpeech()
     api.speak('m1', '文本。')
@@ -843,5 +859,69 @@ describe('useSpeech 首声延迟测量', () => {
     expect(v).toBeGreaterThanOrEqual(200)   // 夹在合理区间
     expect(v).toBeLessThanOrEqual(5000)
     expect(Number(localStorage.getItem('supercrzy:ttsLatencyMs'))).toBe(v)
+  })
+})
+
+/**
+ * 兜底选音的语言判定（2026-10-24，D3）。
+ *
+ * 旧实现把 `u.lang` 写死 `zh-CN`、音色池只筛中文 ⇒ 英文/法语用户兜底时
+ * 会被中文音色读拉丁文。这里钉住「语言判定」这条唯一入口：
+ * 判错的后果不是报错，而是**听起来口音极重**（最难定位的那类问题）。
+ */
+describe('detectSpeechLang（兜底语言判定，D3）', () => {
+  it('汉字 → zh；假名 → ja；谚文 → ko（优先级：假名/谚文先于汉字）', () => {
+    expect(detectSpeechLang('这是一段中文回复。')).toBe('zh')
+    expect(detectSpeechLang('こんにちは、テストです。')).toBe('ja')
+    expect(detectSpeechLang('안녕하세요 테스트입니다')).toBe('ko')
+    // 日文里常混汉字：必须判成 ja 而不是 zh
+    expect(detectSpeechLang('本日は晴天なり、テストです')).toBe('ja')
+  })
+
+  it('纯拉丁文本 → 跟随 navigator.language（不再回落 zh）', () => {
+    const original = Object.getOwnPropertyDescriptor(window.navigator, 'language')
+    try {
+      Object.defineProperty(window.navigator, 'language', { value: 'fr-FR', configurable: true })
+      expect(detectSpeechLang('Bonjour, ceci est un test.')).toBe('fr')
+      Object.defineProperty(window.navigator, 'language', { value: 'en-US', configurable: true })
+      expect(detectSpeechLang('Hello, this is a test.')).toBe('en')
+    } finally {
+      if (original) Object.defineProperty(window.navigator, 'language', original)
+    }
+  })
+})
+
+/**
+ * 系统语音列表预热（2026-10-26）。
+ *
+ * 这条测的是「一直机械音」的成因：`speechSynthesis.getVoices()` 在 Chromium/Electron 里
+ * **异步填充**，首次同步调用返回空数组。旧实现只在朗读那一刻读一次，空就 `return null`，
+ * 于是浏览器用自己的默认音色（macOS 上常是拼接式的 Tingting）—— 优选表里排第一的神经音色
+ * 从来没机会被选上。
+ *
+ * 断言两条：①首次为空时不抛、缓存保持空；②列表异步就绪后**无需再点朗读**缓存就能补上
+ * （靠 `voiceschanged` 或轮询兜底 —— Electron 实测不总派发该事件）。
+ */
+describe('系统语音列表预热', () => {
+  it('getVoices 首次返回空、之后异步就绪 → 缓存自动填充', async () => {
+    vi.resetModules()
+    let ready = false
+    const synth = {
+      getVoices: () => (ready ? [{ name: 'Shelley', lang: 'zh-CN' }] : []),
+      addEventListener: () => { /* Electron 可能永不派发 */ },
+      speak: () => {},
+      cancel: () => {},
+      pause: () => {},
+      resume: () => {},
+    }
+    Object.defineProperty(window, 'speechSynthesis', { value: synth, configurable: true })
+
+    const mod = await import('./useSpeech')
+    expect(mod.systemVoiceCount()).toBe(0) // 首读为空，符合 Chromium 实际行为
+
+    ready = true
+    // 轮询间隔 250ms，留足一次机会
+    await new Promise((r) => setTimeout(r, 400))
+    expect(mod.systemVoiceCount()).toBeGreaterThan(0)
   })
 })

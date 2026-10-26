@@ -1,9 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { vi } from 'vitest'
-import { createHash } from 'node:crypto'
-import { createRequire } from 'node:module'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import {
   TTS_VOICES,
+  voicesForLocale,
+  defaultVoiceFor,
+  voiceLang,
   TTS_MAX_CHARS,
   TTS_MAX_ATTEMPTS,
   TTS_RETRY_BACKOFF_MS,
@@ -15,6 +15,11 @@ import {
   TTS_STREAM_FIRST_FLUSH_BYTES,
   TTS_STREAM_FLUSH_BYTES,
   defaultVoice,
+  DEFAULT_VOICE_ZH,
+  pickVoiceForText,
+  cjkRatio,
+  detectTtsLang,
+  retiredVoices,
   isTransientTtsError,
   secMsGec,
   synthesizeSpeech,
@@ -174,6 +179,51 @@ function resetTtsStub(opts: { failFirstN?: number; failMessage?: string } = {}) 
  * 晓伊的台词里写着"我是晓晓" —— 这种错在真机上听起来只像"音色不对"，很难定位。
  * 所以这里用「台词必须包含自己 label 里的名字」把它钉死。
  */
+/**
+ * 全球化：按语言分发字幕清单（2026-10-24，D2）。
+ *
+ * 不变量：**任何 locale 都不会拿到空清单**（设置页空白比音色不对更糟），
+ * 且专属语言音色必须排在自己的语言里 —— 否则 `?locale=fr` 却给中文音色，
+ * 等于把"选不到母语音色"这个 bug 换个地方复现。
+ */
+describe('voicesForLocale（按语言分发，D2）', () => {
+  it('zh-CN → 含中文专用音色 + 中英通用，且默认音色在清单内', () => {
+    const list = voicesForLocale('zh-CN')
+    const ids = list.map((v) => v.id)
+    expect(ids).toContain('zh-CN-XiaoxiaoNeural')
+    expect(ids).toContain('en-US-EmmaMultilingualNeural')
+    expect(ids).not.toContain('fr-FR-DeniseNeural')
+  })
+
+  it('fr-FR → 含法语音色 + 通用，且不含中文专用音色', () => {
+    const ids = voicesForLocale('fr-FR').map((v) => v.id)
+    expect(ids).toContain('fr-FR-DeniseNeural')
+    expect(ids).toContain('en-US-EmmaMultilingualNeural')
+    expect(ids).not.toContain('zh-CN-XiaoxiaoNeural')
+  })
+
+  it('未知/空 locale → 至少给通用音色，绝不返回空', () => {
+    for (const loc of ['', 'xx-YY', 'tlh']) {
+      const list = voicesForLocale(loc)
+      expect(list.length, `locale=${loc} 返回空清单`).toBeGreaterThan(0)
+      expect(list.every((v) => v.id.includes('Multilingual'))).toBe(true)
+    }
+  })
+
+  it('默认音色按语言走：fr/es/de 不再被塞英文音色', () => {
+    expect(defaultVoiceFor('fr-FR')).toBe('fr-FR-DeniseNeural')
+    expect(defaultVoiceFor('es-ES')).toBe('es-ES-ElviraNeural')
+    expect(defaultVoiceFor('zh-CN')).toBe('zh-CN-XiaoxiaoNeural')
+    expect(defaultVoiceFor('xx-YY')).toBe(defaultVoice())
+  })
+
+  it('voiceLang 从 id 前缀取语言（不接受任意字符串）', () => {
+    expect(voiceLang('fr-FR-DeniseNeural')).toBe('fr-FR')
+    expect(voiceLang('en-US-EmmaMultilingualNeural')).toBe('en-US')
+    expect(voiceLang('')).toBe('en-US')
+  })
+})
+
 describe('TTS_VOICES 音色清单不变量', () => {
   it('每个音色都有试听台词，且台词里提到的是自己的名字', () => {
     for (const v of TTS_VOICES) {
@@ -619,37 +669,39 @@ describe('流式阈值不变量（改一不改二会退化成"逐块抖 2897 次
 })
 
 /**
- * v2 端点契约（2026-10-12 迁 v2 后新增）。
+ * v2 GEC 端点契约（2026-10-24 第二次迁移后：旧 host + TrustedClientToken + v2 token）。
  *
- * 这批断言的价值在于：迁移后的**每个参数都是"错了就 403 / 404 / 1007"的硬约束**，
- * 而它们全藏在 URL 和帧里 —— 一旦有人"顺手"改了 host、把 `Ocp-Apim-Subscription-Key`
- * 换回 `TrustedClientToken`、或把版本号"升级"到 `2-155.x`，功能会整体哑掉，
- * 但代码看上去毫无问题，且报错只有一个 403。所以逐条钉死。
+ * 这批断言的价值在于：迁移后的**每个参数都是"错了就握手失败"的硬约束**，
+ * 而它们全藏在 URL 和帧里 —— 一旦有人"顺手"改了 host、把 `TrustedClientToken`
+ * 换回 `Ocp-Apim-Subscription-Key`、或把 v2 token 换成 v1 裸哈希，功能会整体哑掉，
+ * 但代码看上去毫无问题。所以逐条钉死。
  */
 describe('v2 端点契约（迁移后不可"顺手"改动）', () => {
   beforeEach(() => resetTtsStub())
 
-  it('URL 指向新 host 与 /websocket/v1 路径（沿用 /edge/v1 会 404）', async () => {
+  it('URL 指向旧 host（2026-10-23 复活）与 /edge/v1 路径', async () => {
     await synthesizeSpeech('一句测试文本。')
-    expect(state.lastUrl).toMatch(/^wss:\/\/api\.msedgeservices\.com\/tts\/cognitiveservices\/websocket\/v1\?/)
+    expect(state.lastUrl).toMatch(
+      /^wss:\/\/speech\.platform\.bing\.com\/consumer\/speech\/synthesize\/readaloud\/edge\/v1\?/,
+    )
   })
 
-  it('token 用 v2 的参数名（换回 TrustedClientToken 会 403）', async () => {
+  it('token 用旧参数名 TrustedClientToken（新 host 的 Ocp-Apim 已随该 host 一起失效）', async () => {
     await synthesizeSpeech('一句测试文本。')
-    expect(state.lastUrl).toContain('Ocp-Apim-Subscription-Key=6A5AA1D4EAFF4E9FB37E23D68491D6F4')
-    expect(state.lastUrl).not.toContain('TrustedClientToken')
+    expect(state.lastUrl).toContain('TrustedClientToken=6A5AA1D4EAFF4E9FB37E23D68491D6F4')
+    expect(state.lastUrl).not.toContain('Ocp-Apim-Subscription-Key')
   })
 
-  it('版本号固定 legacy 1-143.0.3650.75（谎报 2-155.x 反而 403）', async () => {
+  it('版本号固定 v2 配套的 2-143.0.3650.75', async () => {
     await synthesizeSpeech('一句测试文本。')
-    expect(state.lastUrl).toContain('Sec-MS-GEC-Version=1-143.0.3650.75')
+    expect(state.lastUrl).toContain('Sec-MS-GEC-Version=2-143.0.3650.75')
   })
 
-  it('每次连接带新的 ConnectionId，且带 64 位签名', async () => {
+  it('每次连接带新的 ConnectionId，且 Sec-MS-GEC 是 v2 格式（16hex-64hex）', async () => {
     await synthesizeSpeech('一句测试文本。')
     const first = state.lastUrl
     expect(first).toMatch(/ConnectionId=[0-9a-f]{32}/)
-    expect(first).toMatch(/Sec-MS-GEC=[0-9A-F]{64}/)
+    expect(first).toMatch(/Sec-MS-GEC=[0-9A-F]{16}-[0-9A-F]{64}/)
     await synthesizeSpeech('另一句。')
     expect(state.lastUrl).not.toBe(first)
   })
@@ -696,11 +748,12 @@ describe('v2 端点契约（迁移后不可"顺手"改动）', () => {
   })
 })
 
-describe('Sec-MS-GEC 签名', () => {
+describe('Sec-MS-GEC 签名（v2）', () => {
   it('同一时间点 → 同一签名（纯函数，不是随机数）', () => {
     const t = 1_791_797_744_000
     expect(secMsGec(t)).toBe(secMsGec(t))
-    expect(secMsGec(t)).toMatch(/^[0-9A-F]{64}$/)
+    // v2 格式：`<16 hex CS64>-<64 hex SHA256*>`
+    expect(secMsGec(t)).toMatch(/^[0-9A-F]{16}-[0-9A-F]{64}$/)
   })
 
   it('按 5 分钟窗口对齐 —— 窗口内任意时刻相同，跨窗口才变', () => {
@@ -713,27 +766,26 @@ describe('Sec-MS-GEC 签名', () => {
    * 🔴 本组最关键的一条：**与外来实现比对**，不是拿自己的参考实现比自己。
    *
    * 2026-10-12 的教训：这里的"参考实现"曾经把 `tts.ts` 里的纪元常量原样抄了一遍，
-   * 而那个常量少了一位数（`1_164_447_360`，真值 `11_644_473_600`）⇒ 断言恒真。
-   * 结果：签名格式合法、窗口对齐正确、整份单测全绿，而线上**恒定 403**，
-   * 白排查三轮（先怀疑出口、再怀疑握手头）。**"测试跟着实现一起错"是这类 bug 唯一的藏身处。**
+   * 而那个常量少了一位数 ⇒ 断言恒真、单测全绿、线上恒 403。
+   * **"测试跟着实现一起错"是这类 bug 唯一的藏身处。**
    *
-   * 所以这里直接调上游 `node-edge-tts` 的 `generateSecMsGecToken()` 做对照物
-   * （它在 `package.json` 里就是为这个对照留的）。两边都读 `Date.now()`，
-   * 用假时钟钉住时刻，消除跨 5 分钟窗口边界的偶发抖动。
+   * v2 算法（自定义 SHA-256 变体 + CS64）无法再从 npm 包取对照物
+   * （`node-edge-tts` 只实现了 v1），所以对照物改为**上游 Python
+   * `edge-tts==7.3.1` 的 `generate_sec_ms_gec_v2()` 离线算出的固定字面量**
+   * （2026-10-24 本机 stub `drm.py` 实算，6 组时间戳双向 diff 全等）。
+   * 改算法必须先用脚本重算这些字面量并人工核对来源。
    */
-  it('与上游 node-edge-tts 的实现逐位一致（外来对照物）', () => {
-    const drm = createRequire(import.meta.url)('node-edge-tts/dist/drm.js') as {
-      generateSecMsGecToken: () => string
-    }
-    vi.useFakeTimers()
-    try {
-      // 三个时刻分属不同窗口，避免"恰好只在一个窗口里对得上"
-      for (const t of [1_791_797_700_000, 1_791_797_744_123, 1_791_797_999_999]) {
-        vi.setSystemTime(t)
-        expect(secMsGec()).toBe(drm.generateSecMsGecToken())
-      }
-    } finally {
-      vi.useRealTimers()
+  it('与上游 Python edge-tts==7.3.1 的离线基准值逐位一致（外来对照物）', () => {
+    // key = Unix 秒；value = 上游 generate_sec_ms_gec_v2(ts) 的输出
+    const fixtures: Array<[number, string]> = [
+      [0, '52BC7A17B50DFEC9-28C4394775C8751CD2F6859C030C06DB1489ACAB3B3A7651831FC26895177ED6'],
+      [1_500_000_000, 'BEA53E27C8730D2A-262BC008E383061BE8FEA9F27A99067C42E81CCE3BB35D18A96624F0AC3D764B'],
+      [1_791_797_744, '9860952DD08E4D03-B337B736562CA4900D094EDBFCDCE2A254D5E02E3AE41020A6FBECD250E5352B'],
+      [1_792_822_702, 'A2A9ADB82CB415E1-51A5511C3E12A56F5C76BE52DD9450E21E1B0B8D665B21D7A593C4029D72F78C'],
+      [4_102_444_800, 'DD230DB44FEE2FD7-DA0D4FA797866E36C992FABB81DD2F9DB37EB74D675D63228277003DCD3F9F8C'],
+    ]
+    for (const [ts, expected] of fixtures) {
+      expect(secMsGec(ts * 1000)).toBe(expected)
     }
   })
 
@@ -752,22 +804,14 @@ describe('Sec-MS-GEC 签名', () => {
 
   /**
    * 给"用 number 而不是 BigInt"这个坑留的回归位。
-   * ticks 量级约 1.34e17 > `Number.MAX_SAFE_INTEGER`(9.0e15)，用普通 number 会**静默丢精度**
-   * ⇒ 签名与服务端算不出同一个值 ⇒ 恒 403 且完全无从溯源。
+   * ticks 量级约 1.34e17 > `Number.MAX_SAFE_INTEGER`(9.0e15)，用普通 number 会**静默丢精度**。
+   * 基准值来自上游 Python（2026-10-24 实算，ts=1791797744 恰好与窗口用例同刻）。
    */
-  it('与"精确到 ticks 低位"的手算参考值一致（BigInt 不丢精度）', () => {
+  it('与"精确到 ticks 低位"的上游基准值一致（BigInt 不丢精度）', () => {
     const t = 1_791_797_744_123
-    const ticksPerSecond = 10_000_000n
-    const epochOffsetS = Math.round((Date.UTC(1970, 0, 1) - Date.UTC(1601, 0, 1)) / 1000)
-    let ticks = BigInt(Math.floor(t / 1000) + epochOffsetS) * ticksPerSecond
-    ticks -= ticks % (300n * ticksPerSecond)
-    const expected = createHash('sha256')
-      .update(`${ticks}6A5AA1D4EAFF4E9FB37E23D68491D6F4`, 'ascii')
-      .digest('hex')
-      .toUpperCase()
-    expect(secMsGec(t)).toBe(expected)
-    // 顺带钉住回归基准值（上游一致，2026-10-12 实测）
-    expect(expected).toBe('558259C3BE2277D2A7D25EC9C3411408933FFC3C14610478374178F724166276')
+    expect(secMsGec(t)).toBe(
+      '9860952DD08E4D03-B337B736562CA4900D094EDBFCDCE2A254D5E02E3AE41020A6FBECD250E5352B',
+    )
   })
 })
 
@@ -836,5 +880,115 @@ describe('码率档（弱网降到 48k）', () => {
 
   it('默认档就是 96k（不传 quality 时行为不变）', () => {
     expect(formatForQuality('96')).toBe(TTS_OUTPUT_FORMAT)
+  })
+})
+
+/**
+ * 语言感知音色（2026-10-26）。
+ *
+ * 修的病：未指定音色时一律落到英文默认音色，于是中文用户听到的是"英文音色读中文" ——
+ * 实测同一句中文，英文音色比中文音色**慢 12.8%、过零率（高频噪感）高 39%**，音量却相同，
+ * 听感就是"闷、糊、听不清在读什么"。
+ *
+ * 这些断言钉的是**选择规则**，不是某个具体音色 id —— 换音色不该让测试变成维护负担，
+ * 但"中文文本必须拿中文音色"这条不能退化。
+ */
+describe('pickVoiceForText：按文本语言选音色', () => {
+  it('纯中文文本 → 中文音色（不是英文默认）', () => {
+    const v = pickVoiceForText('这是一段中文内容，请朗读出来。')
+    expect(v).toBe(DEFAULT_VOICE_ZH)
+    expect(v.startsWith('zh-')).toBe(true)
+  })
+
+  it('纯英文文本 → 英文音色', () => {
+    const v = pickVoiceForText('This is an English sentence to be read aloud.')
+    expect(v.startsWith('en-')).toBe(true)
+  })
+
+  it('中英混排且以中文为主 → 中文音色', () => {
+    const v = pickVoiceForText('把这个 API 的返回值打印出来，注意 error 字段。')
+    expect(v).toBe(DEFAULT_VOICE_ZH)
+  })
+
+  it('纯英文里夹一个中文词 → 仍用英文音色（占比未过阈值）', () => {
+    const v = pickVoiceForText('The quick brown fox jumps over the lazy dog while 你 watch the entire experiment carefully.')
+    expect(v.startsWith('en-')).toBe(true)
+  })
+
+  it('用户显式指定的音色优先，即使语言不匹配', () => {
+    expect(pickVoiceForText('这是中文', 'en-US-EmmaMultilingualNeural')).toBe('en-US-EmmaMultilingualNeural')
+    expect(pickVoiceForText('This is English', 'zh-CN-YunxiNeural')).toBe('zh-CN-YunxiNeural')
+  })
+
+  it('退役音色即便被显式指定也会替换（旧 host 对它们静默挂死）', () => {
+    for (const retired of retiredVoices()) {
+      expect(pickVoiceForText('任意文本', retired)).not.toBe(retired)
+    }
+  })
+
+  it('纯标点/空白不触发中文音色（cjkRatio 忽略标点）', () => {
+    expect(cjkRatio('，。！？—— …')).toBe(0)
+    expect(pickVoiceForText('...')).toBe(pickVoiceForText('Hello'))
+  })
+
+  it('cjkRatio 计算正确', () => {
+    expect(cjkRatio('中文')).toBe(1)
+    expect(cjkRatio('ab')).toBe(0)
+    expect(cjkRatio('中a')).toBeCloseTo(0.5, 5)
+    expect(cjkRatio('')).toBe(0)
+  })
+})
+
+/**
+ * 语种判定与音色映射（2026-10-26）。
+ *
+ * 🔴 这里钉住的是一个**已经踩过的坑**：日文正文汉字占比可到 0.45，如果先判汉字再判假名，
+ * 日文会被当成中文，然后拿中文音色去读假名。实测证据（同一句日文）：
+ *   自动(误判中文)=XiaoxiaoNeural 44352B  vs  正确=NanamiNeural 84960B
+ * 所以 detectTtsLang 的判定顺序（假名 → 谚文 → 汉字 → 西里尔 → 拉丁）不能改。
+ */
+describe('detectTtsLang 语种判定顺序', () => {
+  it('日文（汉字占比很高）→ ja，不是 zh', () => {
+    const ja = 'これは日本語のテストです。音声が正しく読み上げられているか確認します。'
+    expect(cjkRatio(ja)).toBeGreaterThan(0.15) // 汉字确实过阈值 —— 这正是误判来源
+    expect(detectTtsLang(ja)).toBe('ja')
+  })
+
+  it('韩文 → ko', () => {
+    expect(detectTtsLang('이것은 한국어 테스트입니다.')).toBe('ko')
+  })
+
+  it('中文 → zh', () => {
+    expect(detectTtsLang('这是一段中文内容，请朗读出来。')).toBe('zh')
+  })
+
+  it('俄文（西里尔）→ ru', () => {
+    expect(detectTtsLang('Это тест на русском языке.')).toBe('ru')
+  })
+
+  it('英文 → en', () => {
+    expect(detectTtsLang('This is an English sentence.')).toBe('en')
+  })
+})
+
+describe('pickVoiceForText 语种 → 音色映射', () => {
+  const cases: Array<[string, string, string]> = [
+    ['日文', 'これは日本語のテストです。', 'ja'],
+    ['韩文', '이것은 한국어 테스트입니다.', 'ko'],
+    ['中文', '这是中文测试。', 'zh'],
+    ['俄文', 'Это тест на русском языке.', 'ru'],
+  ]
+  for (const [label, text, lang] of cases) {
+    it(`${label} → 该语种的专用音色（前缀 ${lang}-）`, () => {
+      const v = pickVoiceForText(text)
+      expect(v.startsWith(`${lang}-`)).toBe(true)
+      // 专用音色必须是母语音色，不能是英文多语言音色
+      expect(v.includes('Multilingual')).toBe(false)
+    })
+  }
+
+  it('日文绝不能用中文音色（历史 bug 的回归保护）', () => {
+    const v = pickVoiceForText('これは日本語のテストです。音声を確認します。')
+    expect(v.startsWith('zh-')).toBe(false)
   })
 })

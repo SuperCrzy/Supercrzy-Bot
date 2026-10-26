@@ -136,8 +136,17 @@ export const useAppStore = defineStore('app', () => {
   const showCost = ref(false)
   const busyInputMode = ref(true)
   const streamingEnabled = ref(true)
-  /** 朗读音色（Edge TTS voice id，2026-09-27） */
-  const ttsVoice = ref('en-US-AvaMultilingualNeural')
+  /**
+   * 朗读音色（Edge TTS voice id）。
+   *
+   * 2026-10-26 默认改为**空串 = 自动**。之前这里写死 `en-US-EmmaMultilingualNeural`（英文音色），
+   * 而前端每次请求都把这个值显式传给后端 ⇒ 后端"未指定就按文本语言选音色"的逻辑永远走不到，
+   * 中文用户始终在听英文音色读中文（实测比中文音色慢 12.8%、高频噪感高 39%，听感"闷、听不清"）。
+   *
+   * 空串的语义：交给后端 `pickVoiceForText()` 按文本语言决定（中文→中文音色，英文→英文音色）。
+   * 用户一旦在设置页选了具体音色，就按他的选择来，不再自动。
+   */
+  const ttsVoice = ref('')
   /** 朗读语速百分比（-50~50，0=正常，映射到 Edge TTS 的 '+N%'） */
   const ttsRate = ref(0)
   /** 自动朗读档位（2026-09-27）：off / background（仅窗口不在前台时，默认）/ always */

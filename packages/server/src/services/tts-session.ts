@@ -32,7 +32,7 @@ import {
   formatForQuality,
   TTS_FIRST_CHUNK_TIMEOUT_MS,
   TTS_STREAM_STALL_TIMEOUT_MS,
-  defaultVoice,
+  pickVoiceForText,
   type UpstreamSocket,
 } from './tts'
 
@@ -332,7 +332,8 @@ export class LiveTtsSession {
           s.on('error', (e: any) => finish(e instanceof Error ? e : new Error(String(e))))
 
           // 每轮一个全新的 X-RequestId（必须是 32 位无横线 UUID，否则上游 1002 直接关连接）
-          s.send(ssmlFrame(randomBytes(16).toString('hex'), text, liveVoice(this.voice), liveLang(this.voice), this.rate || 'default'))
+          const resolved = liveVoice(this.voice, text)
+          s.send(ssmlFrame(randomBytes(16).toString('hex'), text, resolved, liveLang(resolved), this.rate || 'default'))
         } catch (e: any) {
           finish(e instanceof Error ? e : new Error(String(e)))
         }
@@ -341,11 +342,16 @@ export class LiveTtsSession {
   }
 }
 
-/** 音色/语种都取 tts.ts 的唯一来源，别在这里再抄一份默认值 */
-function liveVoice(voice?: string): string {
-  return voice || defaultVoice()
+/**
+ * 音色/语种都取 tts.ts 的唯一来源，别在这里再抄一份默认值。
+ *
+ * 2026-10-26：改为把 `text` 传进去 —— 未指定音色时按文本语言选（中文文本用中文音色）。
+ * 之前这里只做退役替换，于是未指定的中文请求落到英文默认音色，听感"闷、听不清"。
+ */
+function liveVoice(voice?: string, text = ''): string {
+  return pickVoiceForText(text, voice)
 }
 
-function liveLang(voice?: string): string {
-  return liveVoice(voice).startsWith('zh') ? 'zh-CN' : 'en-US'
+function liveLang(voice: string): string {
+  return voice.startsWith('zh') ? 'zh-CN' : 'en-US'
 }

@@ -20,7 +20,7 @@ vi.mock('./tts', () => ({
   },
 }))
 
-import { pickTtsRoute, relayCandidates, fetchRelayManifest, ROUTE_IMPROVE_RATIO, routeSnapshot } from './tts-route'
+import { pickTtsRoute, relayCandidates, fetchRelayManifest, ROUTE_IMPROVE_RATIO, routeSnapshot, BUNDLED_RELAYS } from './tts-route'
 import { resetRouteState } from './tts-route-state'
 
 beforeEach(() => {
@@ -125,9 +125,38 @@ describe('运行时中继清单', () => {
     expect(r).toEqual(['http://relay:3128'])
   })
 
-  it('拉取失败非致命 → 返回空数组（回直连），绝不抛错', async () => {
+  // 🔴 2026-10-26 行为变更：拉取失败不再"回直连"。
+  //
+  // 旧断言 `.resolves.toEqual([])` 固化的是 bug 本身 —— 清单主机与中继转发目标是同一台机器，
+  // 都压在同一条跨境链路上，所以"拉不到清单"正是大陆用户的常态（不是边缘情况）。返回空数组
+  // 意味着中继永久不被探测，用户只能吃 1.5~30s 的直连握手，超时后回落系统 TTS（机械音）。
+  //
+  // 现在的契约：**任何拉取失败都必须回落到包内清单**，只有包内清单也不存在时才为空。
+  it('拉取失败非致命 → 回落到包内清单（不是空数组），绝不抛错', async () => {
     globalThis.fetch = (async () => { throw new Error('network down') }) as any
-    await expect(fetchRelayManifest({} as any, true)).resolves.toEqual([])
+    const r = await fetchRelayManifest({} as any, true)
+    expect(r).toEqual(BUNDLED_RELAYS)
+    expect(r.length).toBeGreaterThan(0)
+  })
+
+  it('HTTP 非 200 也回落到包内清单', async () => {
+    globalThis.fetch = (async () => ({ ok: false, status: 503, json: async () => ({}) }) as any) as any
+    expect(await fetchRelayManifest({} as any, true)).toEqual(BUNDLED_RELAYS)
+  })
+
+  it('清单返回空 relays[] 也回落到包内清单（不能把兜底清空）', async () => {
+    globalThis.fetch = (async () => ({ ok: true, json: async () => ({ relays: [] }) }) as any) as any
+    expect(await fetchRelayManifest({} as any, true)).toEqual(BUNDLED_RELAYS)
+  })
+
+  it('清单成功时**覆盖**包内清单（中继换机无需重新发版）', async () => {
+    globalThis.fetch = (async () => ({
+      ok: true,
+      json: async () => ({ relays: ['http://rotated:3128'] }),
+    }) as any) as any
+    const r = await fetchRelayManifest({} as any, true)
+    expect(r).toEqual(['http://rotated:3128'])
+    expect(r).not.toEqual(BUNDLED_RELAYS)
   })
 
   it('缓存 10 分钟：不带 force 的重复调用不再打网络', async () => {

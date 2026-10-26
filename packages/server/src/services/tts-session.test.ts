@@ -40,7 +40,12 @@ vi.mock('./tts', () => ({
   formatForQuality: () => null,
   TTS_FIRST_CHUNK_TIMEOUT_MS: 200,
   TTS_STREAM_STALL_TIMEOUT_MS: 200,
-  defaultVoice: () => 'zh-CN-XiaoxiaoNeural',
+  normalizeVoice: (v?: string) => v || 'zh-CN-XiaoxiaoNeural',
+  // tts-session resolves the voice through pickVoiceForText (language-aware); the mock must
+  // export it or the session throws before sending any frame. Mirrors the real rule: an explicit
+  // voice wins, otherwise Chinese text gets the Chinese voice.
+  pickVoiceForText: (text: string, v?: string) =>
+    v || (/[\u4e00-\u9fff]/.test(String(text)) ? 'zh-CN-XiaoxiaoNeural' : 'en-US-EmmaMultilingualNeural'),
 }))
 
 import { LiveTtsSession } from './tts-session'

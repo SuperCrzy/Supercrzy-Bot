@@ -5,8 +5,10 @@ import { randomBytes } from 'node:crypto'
 import {
   synthesizeSpeech,
   synthesizeSpeechStream,
-  TTS_VOICES,
   defaultVoice,
+  defaultVoiceFor,
+  voicesForLocale,
+  retiredVoices,
   TTS_MAX_CHARS,
 } from '../services/tts'
 import { LiveTtsSession, LIVE_MAX_CHARS_PER_PUSH } from '../services/tts-session'
@@ -96,8 +98,33 @@ function takeTicket(token: unknown): Ticket | null {
   return rec
 }
 
+/**
+ * 音色清单（2026-10-24 全球化）。
+ *
+ * 语言来源优先级：`?locale=` > `Accept-Language` > 默认。
+ * 返回的是**该语言的子集**（通用音色恒在），label 也按语言切换 ——
+ * 否则法语用户会在设置里看到一堆中文标签（D2）。
+ */
 ttsRouter.get('/voices', (ctx: Context) => {
-  ctx.body = { voices: TTS_VOICES, default: defaultVoice(), maxChars: TTS_MAX_CHARS }
+  const query = typeof ctx.query.locale === 'string' ? ctx.query.locale : ''
+  const header = String(ctx.get('accept-language') || '')
+  // Accept-Language: "zh-CN,zh;q=0.9,en;q=0.8" → 取第一段的主语言码
+  const fromHeader = header.split(',')[0]?.trim() || ''
+  const locale = query || fromHeader || ''
+  const isZh = /^zh/i.test(locale)
+  const voices = voicesForLocale(locale).map((v) => ({
+    id: v.id,
+    label: isZh ? v.label : v.labelEn,
+    sample: v.sample,
+  }))
+  ctx.body = {
+    voices,
+    default: locale ? defaultVoiceFor(locale) : defaultVoice(),
+    maxChars: TTS_MAX_CHARS,
+    locale: locale || null,
+    // 退役音色（旧 host 上对中文静默挂死）：前端据此把用户存过的旧选择迁移掉
+    retired: retiredVoices(),
+  }
 })
 
 /** 校验朗读入参，返回错误文案（null = 通过）。整包与流式两条路共用，口径不能分叉 */

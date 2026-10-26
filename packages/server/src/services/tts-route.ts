@@ -13,6 +13,9 @@
  *   · 结果缓存 10 分钟；失败时可以用 `POST /api/tts/route/refresh` 强制重测
  */
 import { randomBytes } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { openUpstream } from './tts'
 import {
   getChosenRelay,
@@ -59,6 +62,22 @@ export function relayCandidates(env: NodeJS.ProcessEnv = process.env): string[] 
 //
 //   · env `TTS_RELAYS` (manual config) **wins** — the operator's emergency switch
 //   · manifest is cached for 10 minutes; a fetch failure is non-fatal (fall back to direct)
+//
+// 🔴 2026-10-26 — chicken-and-egg fix. The manifest host (updates.supercrzy.com) is the very
+// machine the relay forwards to, i.e. it sits behind the same congested cross-border link that
+// makes a direct Edge-TTS handshake take 1.5-30s from mainland China. So the one request that
+// tells the client "there is a faster route" is itself the request most likely to time out
+// (3s budget), leaving `relays = []` and the relay permanently unused for exactly the users who
+// need it. Measured on the operator's box: direct-to-relay = 0.875s vs direct-to-upstream
+// 1.5-30s, i.e. the relay was fine — only the lookup was broken.
+//
+// Fix: ship the list **inside the package** (`src/config/tts-relays.bundled.json`, 259 B) and use
+// it whenever the network fetch yields nothing. Two ordering rules matter:
+//   · the bundled list is a *fallback*, never an override — a successful fetch replaces it, so
+//     relay rotation still works without shipping a new build;
+//   · an empty fetch result must NOT clear the fallback (that is precisely the mainland case).
+// The relay list is configuration, not live data: it changes at the pace of an infrastructure
+// move, not per request, so pinning a copy to the build costs nothing (259 B in a 170 MB app).
 
 /**
  * Manifest URL. Living under `releases/` is deliberate: the updates site's nginx only allows
@@ -68,6 +87,27 @@ export function relayCandidates(env: NodeJS.ProcessEnv = process.env): string[] 
 export const TTS_RELAY_MANIFEST_URL = 'https://updates.supercrzy.com/releases/tts-relays.json'
 export const TTS_RELAY_MANIFEST_TTL_MS = 10 * 60_000
 export const TTS_RELAY_MANIFEST_TIMEOUT_MS = 3_000
+
+/**
+ * Relays shipped with the build. Read synchronously once at import: it is 259 bytes and the
+ * first route pick may happen before any I/O completes.
+ *
+ * Resolution is relative to this module (`src/config/…` in dev, `dist/config/…` in the package),
+ * which keeps it working in both layouts without depending on cwd — the packaged app's cwd is
+ * not the server directory.
+ */
+export const TTS_RELAY_FALLBACK_FILE = join(dirname(fileURLToPath(import.meta.url)), '..', 'config', 'tts-relays.bundled.json')
+
+function loadBundledRelays(): string[] {
+  try {
+    return parseRelayList(JSON.parse(readFileSync(TTS_RELAY_FALLBACK_FILE, 'utf8')))
+  } catch {
+    return [] // missing/unreadable build asset: behave exactly like before the fix
+  }
+}
+
+/** Bundled fallback list (empty when the asset is absent). Exported for diagnostics and tests. */
+export const BUNDLED_RELAYS: string[] = loadBundledRelays()
 
 let manifestCache: { relays: string[]; at: number } | null = null
 
@@ -98,7 +138,10 @@ export async function fetchRelayManifest(
   try {
     const res = await withTimeout(fetch(url), TTS_RELAY_MANIFEST_TIMEOUT_MS, '中继清单')
     if (res.ok) relays = parseRelayList(await res.json())
-  } catch { /* non-fatal: fall back to direct */ }
+  } catch { /* non-fatal: fall back below */ }
+  // Fallback to the bundled list when the fetch produced nothing. This is the *normal* path for
+  // mainland users, not an edge case — an empty result here previously meant "no relay at all".
+  if (relays.length === 0) relays = BUNDLED_RELAYS
   manifestCache = { relays, at: Date.now() }
   return relays
 }

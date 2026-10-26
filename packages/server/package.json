@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/app.ts",
-    "build": "tsc -p tsconfig.build.json && node scripts/fix-esm-specifiers.mjs dist",
+    "build": "tsc -p tsconfig.build.json && node scripts/fix-esm-specifiers.mjs dist && node scripts/copy-assets.mjs dist",
     "start": "tsx src/app.ts",
     "cli": "tsx src/cli.ts",
     "lint": "tsc --noEmit",

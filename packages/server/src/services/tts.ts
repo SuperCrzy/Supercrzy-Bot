@@ -8,17 +8,21 @@
  * 实测该主机的 wss 握手在本机网络约 **3/4 次数**被中间盒 RST（详见 isTransientTtsError 注释）。
  * "能连上"是概率事件，所以**必须有重试**，不能靠一次成功就认定链路可用。
  *
- * 🔴 **迁移到 v2 端点（2026-10-12）**：见下方 `TTS_UPSTREAM_*` 一段的完整说明。
- * 一句话版：旧 host 自 2026-10-10 起全球分批退役（握手恒 403），必须换
- * `api.msedgeservices.com` + `Ocp-Apim-Subscription-Key` + 显式 `speech.config` 帧。
- * 同时**不再依赖 `node-edge-tts` 建连接**（它把旧 host 写死在包内），改由本文件自建 wss。
+ * 🔴 **迁移到 v2 端点（2026-10-12）→ 第二次协议破坏（2026-10-23）**：
+ * 见下方 `TTS_UPSTREAM_*` 一段的完整说明。一句话版：微软 12 天内两次改协议 ——
+ * 10-12 迁去的 `api.msedgeservices.com` + v1 GEC 组合自 ~10-23 起握手恒返回
+ * HTTP 200（不升级成 ws，空 body）；**旧 host `speech.platform.bing.com/.../edge/v1`
+ * 复活，但只认 v2 GEC token**（算法见 `tts-gec.ts`，与上游 `edge-tts==7.3.1`
+ * 双向比对 6/6 时间戳 bit-exact）。
+ * 同时仍不依赖 `node-edge-tts` 建连接（协议帧全部自发自收）。
  */
-import { createHash, randomBytes } from 'node:crypto'
+import { randomBytes } from 'node:crypto'
 import type { ClientRequest, IncomingMessage } from 'node:http'
 import WebSocket from 'ws'
 import { HttpsProxyAgent } from 'https-proxy-agent'
 // 自动选路的共享状态（手工 TTS_PROXY 优先，其次用这里的结果）
 import { getChosenRelay } from './tts-route-state'
+import { secMsGecV2 } from './tts-gec'
 
 export interface TtsOptions {
   /** 音色（默认晓晓；英文内容建议 en-US-AriaNeural） */
@@ -149,76 +153,58 @@ export interface UpstreamSocket {
   resume(): void
 }
 
-// ===== 上游端点（2026-10-12 迁移到 v2）=====
+// ===== 上游端点（2026-10-24 第二次迁移：回到旧 host + v2 GEC）=====
 //
-// 🔴 背景：微软自 **2026-10-10** 起把 Edge Read Aloud 从 v1 迁到 v2，旧端点
-// `speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1` 正在**全球分批退役**
-// （欧洲 → 英国 → 美国，逐日推进），症状是 **wss 握手恒返回 403**。
-// ⚠️ 排查时最容易被误导的一点：**同一 IP 上 HTTPS 的 `voices/list` 仍然 200** ——
-// 于是"域名可达、token 有效、不是 IP 被封"全都成立，偏偏合成不通。
-// 上游 `edge-tts` 的 issue #490 记录了全过程（本机复现 + 多国确认）。
+// 🔴 时间线（两次协议破坏相隔 12 天）：
+//   · 2026-10-10  v1 退役：旧 host 握手恒 403 → 迁 `api.msedgeservices.com` +
+//     `Ocp-Apim-Subscription-Key` + v1 GEC（当时唯一可行组合，issue #490）。
+//   · ~2026-10-23 新 host 也失效：握手恒 HTTP 200（不升级成 ws、空 body）——
+//     这是"软失败"，比 403 更隐蔽：`unexpected-response` 拿到的 statusCode 是 200。
+//     本机 + VPS 双端复现（/tmp/tts-probe.cjs）；edge-tts issue（pyvideotrans #8421 同步爆发）。
+//   · 2026-10-24 修复：**旧 host 复活了，但只认 v2 GEC token**（`edge-tts==7.3.1`
+//     在 VPS 实测合成成功，17.5KB mp3）。
 //
-// 迁移后**唯一可行**的参数组合（社区多国实测 + 本机逐条复验）：
-//   · host/path 换新：`api.msedgeservices.com/tts/cognitiveservices/websocket/v1`
-//     （⚠️ 路径必须是 `/websocket/v1`；沿用 `/edge/v1` 会 404）
-//   · token 参数名换新：`Ocp-Apim-Subscription-Key`（**取值不变**）
-//   · `Sec-MS-GEC-Version` **必须保留 legacy `1-143.0.3650.75`** ——
-//     谎报 v2 的版本号（`2-155.x`）却没带 v2 token 反而会被 403（issue #490 评论 #18 实测）
-//   · **必须显式发 `speech.config` 帧声明 `outputFormat`** —— 不发会用隐式默认值
-//     `audio-16khz-32kbitrate-mono-mp3`，被服务端以 `code=1007` 直接关连接
-const TTS_UPSTREAM_HOST = 'api.msedgeservices.com'
-const TTS_UPSTREAM_PATH = '/tts/cognitiveservices/websocket/v1'
-/** 与上游一致的"公开"客户端令牌；在 v2 里它作为 `Ocp-Apim-Subscription-Key` 传递 */
+// 迁移后**唯一可行**的参数组合（逐条对 `edge-tts==7.3.1` 源码 + VPS 实测复验）：
+//   · host/path 回旧版：`speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1`
+//   · token 参数名回旧版：`TrustedClientToken`（**取值不变**）
+//   · `Sec-MS-GEC` 必须是 **v2 token**（格式 `16hex-64hex`，算法见 `tts-gec.ts`）
+//   · `Sec-MS-GEC-Version` = `2-143.0.3650.75`（与 v2 token 配套）
+//   · **必须带 `Cookie: muid=<32位随机大写hex>;`**（上游 `DRM.headers_with_muid`）
+//   · 仍**必须显式发 `speech.config` 帧**（v2 时代的老契约未变，缺省输出格式会被 1007 关连接）
+const TTS_UPSTREAM_HOST = 'speech.platform.bing.com'
+const TTS_UPSTREAM_PATH = '/consumer/speech/synthesize/readaloud/edge/v1'
+/** 与上游一致的"公开"客户端令牌；旧 host 下参数名是 `TrustedClientToken` */
 const TTS_UPSTREAM_TOKEN = '6A5AA1D4EAFF4E9FB37E23D68491D6F4'
-/** 固定 legacy 版本号：见上面的说明，**不要"顺手升级它"** */
-const TTS_GEC_VERSION = '1-143.0.3650.75'
+/** v2 配套版本号 —— **不要"顺手升级它"**，必须与 token 算法版本匹配 */
+const TTS_GEC_VERSION = '2-143.0.3650.75'
+/** 与 Sec-MS-GEC-Version 同源的 Edge 客户端 UA（上游要求带浏览器指纹） */
+const TTS_UPSTREAM_UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) ' +
+  'Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0'
 /** Edge 客户端 origin（上游握手要求，去掉也能连但保持与上游一致最省事） */
 const TTS_UPSTREAM_ORIGIN = 'chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold'
 
 /**
- * 1601-01-01 → 1970-01-01 的秒差 = **11,644,473,600**（≈369 年）。
+ * `Sec-MS-GEC` 签名 —— 2026-10-24 起指向 **v2 算法**（`tts-gec.ts`）。
  *
- * 🔴 2026-10-12 曾把它写成 `1_164_447_360`（少一位数，恰好是十分之一）⇒ ticks 变成 2.96e16
- * 而非 1.34e17 ⇒ 服务端算不出同一个签名 ⇒ **稳定 403**，且因为 403 只在握手上体现、
- * 与"出口/区域策略"的症状完全同形，白白排查了三轮。**这类常量必须推导、不能手打**：
- *   `Math.round((Date.UTC(1970,0,1) - Date.UTC(1601,0,1)) / 1000)`
- * 单测里也留了一条从日期推导的断言，防止实现与测试"抄同一个错字面量"。
- */
-const WIN_EPOCH_OFFSET_S = 11_644_473_600
-const TICKS_PER_SECOND = 10_000_000 // FILETIME 是 100ns 粒度
-const GEC_WINDOW_TICKS = 300 * TICKS_PER_SECOND // 签名按 5 分钟窗口对齐
-
-/**
- * `Sec-MS-GEC` 签名（等价于上游 `drm.py` 的 `generate_sec_ms_gec()`）。
+ * 🔴 历史（教训保留，防止重蹈）：
+ *   · v1 时代（`createHash('sha256')` 一步出 64hex）：2026-10-12 曾把纪元常量
+ *     `11_644_473_600` 手打少一位 ⇒ 签名格式完全合法、纯函数测试全绿，但服务端恒 403 ——
+ *     **唯一有效的度量是双向比对**，不是"看起来像哈希"。
+ *   · 2026-10-23 微软换 v2：自定义 SHA-256 变体 + CS64，任何"内联重写"都不可靠，
+ *     故独立成 `tts-gec.ts` 并以下游 Python 实现为唯一对照（6/6 时间戳 bit-exact）。
  *
- * 算法：Unix 秒 + FILETIME 纪元差 → 转 100ns ticks → **对齐到 5 分钟窗口** →
- * 拼客户端令牌做 SHA-256、输出大写十六进制。
- *
- * ⚠️ 必须用 `BigInt`：ticks 量级约 **1.34e17**，而 `Number.MAX_SAFE_INTEGER` 只有 9.0e15 ——
- * 用普通 number 乘出来会静默丢精度，得到一个"看起来合法但服务端算不出同一个值"的签名，
- * 症状就是莫名其妙的 403 且完全无从溯源。
- *
- * 🔴 **这个函数的唯一验收标准是"和上游算出同一串"**，不是"看起来像哈希"。
- * 2026-10-12 我漏了一位纪元常量（见 `WIN_EPOCH_OFFSET_S`），签名格式完全合法、
- * 纯函数与窗口对齐测试全绿，但服务端恒定 403 —— 因为**唯一有效的度量是双向比对**。
- * 复验命令（须在真实网络下）：
- *   `secMsGec(Date.now()) === require('node-edge-tts/dist/drm.js').generateSecMsGecToken()`
- *
- * 为什么自己实现而不是从 `node-edge-tts` 取：我们要连的是新 host，已不再用那个包的 socket，
- * 只为这一个哈希把它留在链路上不划算（且它只导出内部路径 `dist/drm.js`）。
- * 但**它仍是这个函数唯一的对照物**，改动前后都要拿它比一次。
+ * 保留旧签名 `secMsGec(nowMs)` 以免牵动调用面；它现在就是 `secMsGecV2` 的别名。
  */
 export function secMsGec(nowMs: number = Date.now()): string {
-  let ticks = BigInt(Math.floor(nowMs / 1000) + WIN_EPOCH_OFFSET_S) * BigInt(TICKS_PER_SECOND)
-  ticks -= ticks % BigInt(GEC_WINDOW_TICKS)
-  return createHash('sha256').update(`${ticks}${TTS_UPSTREAM_TOKEN}`, 'ascii').digest('hex').toUpperCase()
+  return secMsGecV2(Math.floor(nowMs / 1000))
 }
 
-/** 拼 v2 的 wss URL（每次连接都要新的 `ConnectionId` + 当前窗口的 GEC） */
+/** 拼 wss URL（每次连接都要新的 `ConnectionId` + 当前窗口的 v2 GEC） */
 function buildUpstreamUrl(connectionId: string): string {
   return (
     `wss://${TTS_UPSTREAM_HOST}${TTS_UPSTREAM_PATH}` +
-    `?Ocp-Apim-Subscription-Key=${TTS_UPSTREAM_TOKEN}` +
+    `?TrustedClientToken=${TTS_UPSTREAM_TOKEN}` +
     `&ConnectionId=${connectionId}` +
     `&Sec-MS-GEC=${secMsGec()}` +
     `&Sec-MS-GEC-Version=${TTS_GEC_VERSION}`
@@ -313,9 +299,17 @@ export async function openUpstream(
   proxyOverride?: string | null,
 ): Promise<UpstreamSocket> {
   const proxy = proxyOverride === undefined ? ttsProxyFromEnv() : proxyOverride === null ? undefined : proxyOverride
+  // muid：上游 `DRM.generate_muid()` = 16 随机字节的 hex 大写，Cookie 形如 `muid=<MUID>;`
+  // （v2 握手必带；缺了会被当作非 Edge 客户端拒绝）。
+  const muid = randomBytes(16).toString('hex').toUpperCase()
   const ws = new WebSocket(buildUpstreamUrl(connectionId), {
     origin: TTS_UPSTREAM_ORIGIN,
-    headers: { Pragma: 'no-cache', 'Cache-Control': 'no-cache' },
+    headers: {
+      Pragma: 'no-cache',
+      'Cache-Control': 'no-cache',
+      'User-Agent': TTS_UPSTREAM_UA,
+      Cookie: `muid=${muid};`,
+    },
     // 未设 TTS_PROXY 时为 undefined ⇒ 真直连（不自动采用宿主 HTTP_PROXY，见 ttsProxyFromEnv 注释）
     agent: proxy ? new HttpsProxyAgent(proxy) : undefined,
   })
@@ -457,13 +451,37 @@ export function takeWarmConnection(format: string = TTS_OUTPUT_FORMAT): WarmSlot
  */
 export type TtsChunkSink = (buf: Buffer) => void | Promise<void>
 
+/**
+ * 已退役音色（2026-10-24）：旧 host 上对中文文本**静默挂死**（零音频、不回 turn.end，
+ * 见 DEFAULT_VOICE 注释的实测矩阵）。设置表里可能还持久化着它们 ——
+ * 在 streamOnce 入口统一迁移到默认音色，别让老用户的选择悄悄变成"整轮朗读失败"。
+ */
+const RETIRED_VOICES = new Set([
+  'en-US-AvaMultilingualNeural',
+  'en-US-AndrewMultilingualNeural',
+  'en-US-JennyMultilingualNeural',
+])
+
+/** 退役音色清单（下发给前端做选择迁移：设置里存过的旧值要能识别出来） */
+export function retiredVoices(): string[] {
+  return [...RETIRED_VOICES]
+}
+
+/** 退役音色 → 默认音色（tts-session 的 liveVoice 与 streamOnce 共用这一份清单） */
+export function normalizeVoice(voice?: string): string {
+  return voice && RETIRED_VOICES.has(voice) ? DEFAULT_VOICE : voice || DEFAULT_VOICE
+}
+
 /** 一次流式尝试：连上 → 发帧 → 逐块回调。失败即抛，**不做任何重试** */
 async function streamOnce(
   text: string,
   opts: TtsOptions,
   onChunk: TtsChunkSink,
 ): Promise<void> {
-  const voice = opts.voice || DEFAULT_VOICE
+  // Language-aware voice: an unset voice previously fell through to the English default, so every
+  // Chinese user was hearing Chinese pronounced by an English voice model (slow, flat tones).
+  // A voice the user picked explicitly still wins — see pickVoiceForText.
+  const voice = pickVoiceForText(text, opts.voice)
   const lang = voice.startsWith('zh') ? 'zh-CN' : 'en-US'
   const rate = opts.rate || 'default'
   const fmt = formatForQuality(opts.quality) ?? TTS_OUTPUT_FORMAT
@@ -622,17 +640,126 @@ export async function synthesizeSpeechStream(
 
 
 /**
- * 默认音色（2026-10-16 改）。
+ * 默认音色（2026-10-16 改 → **2026-10-24 再改**）。
  *
- * 由 `zh-CN-XiaoxiaoNeural` 改为 **`en-US-AvaMultilingualNeural`**：
- * 晓晓是**中文专用**音色，读英文带中文口音；Ava 是 Edge TTS 的**多语言**音色，
- * 中英混排都自然（上游实测：中文 62KB / 英文 44KB 均 200）。
+ * 历史：`zh-CN-XiaoxiaoNeural`（晓晓读英文带口音）→ `en-US-AvaMultilingualNeural`
+ * （多语言，中英混排自然）→ **`en-US-EmmaMultilingualNeural`**。
+ *
+ * 🔴 2026-10-24 换掉 Ava 的原因：迁回旧 host（见文件头）后实测，Multilingual 音色
+ * 对中文文本**按音色随机静默挂死** —— 连接正常、turn.start/response 正常，
+ * 然后**零音频、不回 turn.end**，只能靠 3s 首块超时兜底（重试 3 次全挂 = 整轮朗读失败
+ * 回落机械音）。实测矩阵（同句中文）：
+ *   AvaMultilingual = 0 ✗   JennyMultilingual = 0 ✗
+ *   EmmaMultilingual = 41631 ✓   SeraphinaMultilingual = 40925 ✓
+ *   Xiaoxiao(中英) ✓   Yunxi(中英混排) ✓
+ * Emma 中英双通（英文 36633 / 中文 41631），故选它。
  *
  * ⚠️ **中文区没有 Multilingual 音色**（上游总表 322 个音色里 `zh-CN-*Multilingual*` = 0），
- * 所以中英通用只能从 `en-US-*-MultilingualNeural` 里选（全表共 12 个，中文场景可用 4 个）。
- * 想纯中文最自然的话，设置里可选回晓晓。
+ * 所以中英通用只能从 `en-US-*-MultilingualNeural` 里选。想纯中文最自然的话，设置里可选回晓晓。
  */
-const DEFAULT_VOICE = 'en-US-AvaMultilingualNeural'
+const DEFAULT_VOICE = 'en-US-EmmaMultilingualNeural'
+
+/**
+ * 中文专用默认音色（2026-10-26）。
+ *
+ * 为什么需要它：`DEFAULT_VOICE` 是**英文**音色，用它读中文虽然能出声，但发音器官是按英文
+ * 建模的 —— 中文四声被压平、声母韵母过渡不自然，听感是"闷、糊、听不清在读什么"。
+ * 客观测量（同一句中文，24kHz/96kbps 两者相同）：
+ *
+ *   | 音色 | 时长 | 过零率 | RMS |
+ *   |---|---|---|---|
+ *   | Emma（英文）   | 9.77s | 0.1893 | 2694 |
+ *   | 晓晓（中文）   | 8.66s | 0.1359 | 2706 |
+ *
+ * 即英文音色读中文**慢 12.8%、高频噪感高 39%**，而音量完全相同（RMS 差 0.4%）——
+ * 所以这不是"声音小"，是"发音不准"。中文文本必须用中文音色。
+ *
+ * ⚠️ 采样率无法再提升：上游对 `audio-48khz-*` 一律回 `1007 Unsupported Edge output format`
+ * （2026-10-26 实测），24kHz 已是顶格。
+ */
+export const DEFAULT_VOICE_ZH = 'zh-CN-XiaoxiaoNeural'
+
+/** CJK 统一表意文字（含扩展 A、兼容区）。日文假名/韩文谚文不在此范围，按各自语言处理。 */
+const CJK_CHAR_RE = /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/g
+
+/**
+ * 汉字占"有效字符"的比例（忽略空白与标点，避免短句被标点稀释）。无有效字符时返回 0。
+ *
+ * ⚠️ 它**只回答"汉字占多少"**，不能单独用来判语种 —— 日文正文汉字占比可达 0.45。
+ * 判语种请用 `detectTtsLang()`，那里先排假名/谚文。
+ */
+export function cjkRatio(text: string): number {
+  const meaningful = String(text || '').replace(/[\s\p{P}\p{S}]/gu, '')
+  if (!meaningful) return 0
+  const cjk = meaningful.match(CJK_CHAR_RE)
+  return (cjk ? cjk.length : 0) / meaningful.length
+}
+
+/**
+ * 汉字占比达到这个阈值即视为"中文文本"。取 0.15 而不是 0.5：
+ * 中英混排的技术文本（"把这个 API 的返回值打印出来"）汉字占比常在 0.4~0.6，
+ * 而纯英文里偶尔夹一个中文词（<0.1）不该触发中文音色。
+ */
+const CJK_VOICE_THRESHOLD = 0.15
+/** 日文假名（平假名 + 片假名）。日文正文里汉字常占多数，靠汉字判语种会把它误判成中文。 */
+const KANA_RE = /[\u3040-\u30ff]/
+/** 韩文谚文 */
+const HANGUL_RE = /[\uac00-\ud7af\u1100-\u11ff]/
+/** 西里尔字母（俄/乌/保等） */
+const CYRILLIC_RE = /[\u0400-\u04ff]/
+
+/**
+ * 文本语种判定（只用于挑音色，不需要精确）。
+ *
+ * 🔴 2026-10-26：**顺序很关键**。必须先看假名/谚文，再看汉字 —— 日文正文里汉字可达 40%
+ * 以上（「日本語のテストです。音声が正しく…」汉字占比 0.45），先判汉字就会把日文当中文，
+ * 用中文音色去读假名，比"英文口音"错得更彻底。前端 `detectSpeechLang()` 一直是这个顺序，
+ * 服务端此前只有 cjkRatio 一条线，两边不一致 —— 现在对齐。
+ */
+export function detectTtsLang(text: string): string {
+  const s = String(text || '')
+  if (KANA_RE.test(s)) return 'ja'
+  if (HANGUL_RE.test(s)) return 'ko'
+  if (cjkRatio(s) >= CJK_VOICE_THRESHOLD) return 'zh'
+  if (CYRILLIC_RE.test(s)) return 'ru'
+  return 'en'
+}
+
+/**
+ * 未指定音色时，语种 → 默认音色。
+ *
+ * 全部来自 `TTS_VOICES` 里已登记的专用音色（母语级），不再一律落到英文多语言音色。
+ * 落不到的语种走 `DEFAULT_VOICE`（Emma 是多语言音色，能读拉丁语系，只是带英文口音 ——
+ * 这比"用中文音色读日文"里的那种错法轻得多）。
+ */
+const VOICE_BY_LANG: Record<string, string> = {
+  zh: 'zh-CN-XiaoxiaoNeural',
+  ja: 'ja-JP-NanamiNeural',
+  ko: 'ko-KR-SunHiNeural',
+  ru: 'ru-RU-SvetlanaNeural',
+  fr: 'fr-FR-DeniseNeural',
+  es: 'es-ES-ElviraNeural',
+  de: 'de-DE-KatjaNeural',
+  it: 'it-IT-ElsaNeural',
+  pt: 'pt-BR-FranciscaNeural',
+  en: 'en-US-EmmaMultilingualNeural',
+}
+
+/**
+ * 决定这次合成用哪个音色。
+ *
+ * 优先级：
+ *   1. **用户显式指定**（设置页选过音色）→ 一律尊重，即使语言不匹配 —— 那是他的选择
+ *   2. 未指定 → **按文本语种自动选**（日/韩/俄有专属字符特征，拉丁语系按常见项判定）
+ *
+ * 第 2 条 2026-10-26 加。之前未指定时一律落到英文默认音色，中文用户听到"英文音色读中文"；
+ * 而同一次修改若只判"是不是中文"，日文会被汉字占比误判成中文，错得更彻底 —— 见 detectTtsLang。
+ */
+export function pickVoiceForText(text: string, requested?: string): string {
+  const asked = String(requested || '').trim()
+  if (asked) return normalizeVoice(asked)
+  return VOICE_BY_LANG[detectTtsLang(text)] ?? DEFAULT_VOICE
+}
 
 /**
  * 输出音频格式。
@@ -730,19 +857,67 @@ const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
  * 是为了"音色清单 + 自我介绍"只有一份来源 —— 加音色时不可能漏写台词。
  * 中文音色故意混入英文品牌名（"中英文读"），顺带验证中英混排的合成质量。
  */
-export const TTS_VOICES = [
+export interface TtsVoice {
+  id: string
+  /** 中文标签（默认中文界面用） */
+  label: string
+  /** 英文标签（全球用户） */
+  labelEn: string
+  /** 试听台词（用该音色自己的语言念，便于一听就知道对不对） */
+  sample: string
+}
+
+export const TTS_VOICES: readonly TtsVoice[] = [
   // ── 中英通用（Edge TTS 多语言音色）—— 默认档，读英文不带中文口音 ──
-  { id: 'en-US-AvaMultilingualNeural', label: 'Ava（中英通用·女声）', sample: "Hi, I'm Ava. 您好，我是 Ava，是你的 SUPERCRZY BOT." },
-  { id: 'en-US-EmmaMultilingualNeural', label: 'Emma（中英通用·女声）', sample: "Hi, I'm Emma. 您好，我是 Emma，是你的 SUPERCRZY BOT." },
-  { id: 'en-US-AndrewMultilingualNeural', label: 'Andrew（中英通用·男声）', sample: "Hi, I'm Andrew. 您好，我是 Andrew，是你的 SUPERCRZY BOT." },
-  { id: 'en-US-BrianMultilingualNeural', label: 'Brian（中英通用·男声）', sample: "Hi, I'm Brian. 您好，我是 Brian，是你的 SUPERCRZY BOT." },
+  // 🔴 2026-10-24：Ava / Andrew / Jenny 在旧 host 上对中文**静默挂死**（零音频、
+  // 不回 turn.end，见 DEFAULT_VOICE 注释的实测矩阵），从白名单剔除。
+  { id: 'en-US-EmmaMultilingualNeural', label: 'Emma（中英通用·女声）', labelEn: 'Emma (multilingual, female)', sample: "Hi, I'm Emma. 您好，我是 Emma，是你的 SUPERCRZY BOT." },
+  { id: 'en-US-BrianMultilingualNeural', label: 'Brian（中英通用·男声）', labelEn: 'Brian (multilingual, male)', sample: "Hi, I'm Brian. 您好，我是 Brian，是你的 SUPERCRZY BOT." },
   // ── 中文专用（纯中文最自然；读英文会带口音）──
-  { id: 'zh-CN-XiaoxiaoNeural', label: '晓晓（中文·女声·自然）', sample: '您好，我是晓晓，是你的 SUPERCRZY BOT.' },
-  { id: 'zh-CN-XiaoyiNeural', label: '晓伊（中文·女声·活泼）', sample: '您好，我是晓伊，是你的 SUPERCRZY BOT.' },
-  { id: 'zh-CN-YunxiNeural', label: '云希（中文·男声·年轻）', sample: '您好，我是云希，是你的 SUPERCRZY BOT.' },
-  { id: 'zh-CN-YunyangNeural', label: '云扬（中文·男声·播报）', sample: '您好，我是云扬，是你的 SUPERCRZY BOT.' },
-  { id: 'zh-CN-liaoning-XiaobeiNeural', label: '晓北（中文·东北话）', sample: '您好，我是晓北，是你的 SUPERCRZY BOT.' },
+  { id: 'zh-CN-XiaoxiaoNeural', label: '晓晓（中文·女声·自然）', labelEn: 'Xiaoxiao (Chinese, female)', sample: '您好，我是晓晓，是你的 SUPERCRZY BOT.' },
+  { id: 'zh-CN-XiaoyiNeural', label: '晓伊（中文·女声·活泼）', labelEn: 'Xiaoyi (Chinese, female)', sample: '您好，我是晓伊，是你的 SUPERCRZY BOT.' },
+  { id: 'zh-CN-YunxiNeural', label: '云希（中文·男声·年轻）', labelEn: 'Yunxi (Chinese, male)', sample: '您好，我是云希，是你的 SUPERCRZY BOT.' },
+  { id: 'zh-CN-YunyangNeural', label: '云扬（中文·男声·播报）', labelEn: 'Yunyang (Chinese, male)', sample: '您好，我是云扬，是你的 SUPERCRZY BOT.' },
+  { id: 'zh-CN-liaoning-XiaobeiNeural', label: '晓北（中文·东北话）', labelEn: 'Xiaobei (Chinese, Northeastern)', sample: '您好，我是晓北，是你的 SUPERCRZY BOT.' },
+  // ── 其它语言（2026-10-24 全球视野新增，全部**实测出声**后才入册）──
+  // 每条都在旧 host + v2 GEC 参数下验证过音频字节数 > 0，见 daily log。
+  { id: 'fr-FR-DeniseNeural', label: 'Denise（法语·女声）', labelEn: 'Denise (French, female)', sample: 'Bonjour, je suis Denise, votre SUPERCRZY BOT.' },
+  { id: 'es-ES-ElviraNeural', label: 'Elvira（西语·女声）', labelEn: 'Elvira (Spanish, female)', sample: 'Hola, soy Elvira, tu SUPERCRZY BOT.' },
+  { id: 'de-DE-KatjaNeural', label: 'Katja（德语·女声）', labelEn: 'Katja (German, female)', sample: 'Hallo, ich bin Katja, dein SUPERCRZY BOT.' },
+  { id: 'it-IT-ElsaNeural', label: 'Elsa（意语·女声）', labelEn: 'Elsa (Italian, female)', sample: 'Ciao, sono Elsa, il tuo SUPERCRZY BOT.' },
+  { id: 'pt-BR-FranciscaNeural', label: 'Francisca（葡语·女声）', labelEn: 'Francisca (Portuguese, female)', sample: 'Olá, eu sou a Francisca, sua SUPERCRZY BOT.' },
+  { id: 'ru-RU-SvetlanaNeural', label: 'Svetlana（俄语·女声）', labelEn: 'Svetlana (Russian, female)', sample: 'Здравствуйте, я Svetlana, ваш SUPERCRZY BOT.' },
+  { id: 'ja-JP-NanamiNeural', label: 'Nanami（日语·女声）', labelEn: 'Nanami (Japanese, female)', sample: 'こんにちは、Nanami です。あなたの SUPERCRZY BOT です。' },
+  { id: 'ko-KR-SunHiNeural', label: 'SunHi（韩语·女声）', labelEn: 'SunHi (Korean, female)', sample: '안녕하세요, SunHi 입니다. 당신의 SUPERCRZY BOT 입니다.' },
 ] as const
+
+/** 音色 id → 语言标签（`fr-FR-DeniseNeural` → `fr-FR`；多语言音色 → `en-US`） */
+export function voiceLang(id: string): string {
+  const parts = String(id || '').split('-')
+  return parts.length >= 2 ? `${parts[0]}-${parts[1]}` : 'en-US'
+}
+
+/** 语种 → 默认音色（全球用户不再被塞一个英文音色） */
+export function defaultVoiceFor(locale?: string): string {
+  const base = String(locale || '').toLowerCase().split(/[-_]/)[0]
+  const hit = TTS_VOICES.find((v) => voiceLang(v.id).toLowerCase().startsWith(`${base}-`))
+  return hit ? hit.id : DEFAULT_VOICE
+}
+
+/**
+ * 按请求语言给出可用音色（2026-10-24 全球化）。
+ *
+ * 规则：**通用音色（Multilingual）恒在 + 该语言的专用音色**；
+ * 请求语言没有专用音色时，退回默认档（中英通用），绝不返回空清单。
+ * `locale` 的格式任意（`zh-CN` / `en` / `fr-FR` / `pt_BR`），只取主语言码。
+ */
+export function voicesForLocale(locale?: string): TtsVoice[] {
+  const base = String(locale || '').trim().toLowerCase().split(/[-_]/)[0]
+  const universal = TTS_VOICES.filter((v) => v.id.includes('Multilingual'))
+  const localized = base ? TTS_VOICES.filter((v) => !v.id.includes('Multilingual') && voiceLang(v.id).toLowerCase().startsWith(`${base}-`)) : []
+  // zh / en 之外没有专用音色的语种 → 至少给通用档，避免"设置页空白"
+  return localized.length ? [...localized, ...universal] : [...universal]
+}
 
 export function defaultVoice(): string {
   return DEFAULT_VOICE
