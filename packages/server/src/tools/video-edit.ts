@@ -49,13 +49,16 @@ const tool: ToolDef = {
     }
     const ffmpegPath = ff.path
     // 输出路径必须在工作区（防越权写盘）
-    try { assertSafeFilePath(output, { workspaceDir: cwd }) } catch (e: any) { return `❌ 输出路径不在允许的工作区: ${output}` }
+    // 带上 level：不传会退回 'sandbox'，full 授权对输出目录失效（2026-10-26 自检）
+    try {
+      assertSafeFilePath(output, { level: ctx?.permissionLevel, workspaceDir: cwd, extraAllowed: [cwd] })
+    } catch (e: any) { return `❌ 输出路径不在允许的工作区: ${output}` }
     if (!op) return '❌ video_edit 需要 op 参数（trim/concat/convert/compress/extract/subtitle）'
 
     // 校验输入路径在工作区内
     const checkInput = (p: string) => {
       if (!p) return ''
-      try { assertSafeFilePath(p, { workspaceDir: cwd }); return '' } catch (e: any) { return `输入路径不合法: ${p}` }
+      try { assertSafeFilePath(p, { level: ctx?.permissionLevel, workspaceDir: cwd, extraAllowed: [cwd] }); return '' } catch (e: any) { return `输入路径不合法: ${p}` }
     }
     const err = (args.input ? checkInput(String(args.input)) : '') || (args.subtitle_file ? checkInput(String(args.subtitle_file)) : '')
     if (err) return `❌ ${err}`

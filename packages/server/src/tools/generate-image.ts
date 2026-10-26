@@ -39,7 +39,11 @@ const tool: ToolDef = {
     const cwd = ctx?.cwd || WORKSPACE_ROOT
     const fileName = `generated_${Date.now()}.png`
     const outPath = join(cwd, fileName)
-    try { assertSafeFilePath(outPath, { workspaceDir: cwd }) } catch (e: any) { return `❌ 输出路径不允许: ${fileName}` }
+    // 必须带上 permissionLevel：不传时沙箱按 'sandbox' 兜底，full 授权对产物目录不生效
+    // （2026-10-26 自检发现：此处与 video-edit 是仅有的两处漏传）。
+    try {
+      assertSafeFilePath(outPath, { level: ctx?.permissionLevel, workspaceDir: cwd, extraAllowed: [cwd] })
+    } catch (e: any) { return `❌ 输出路径不允许: ${fileName}` }
     const stream = (c: string) => { if (ctx?.onOutput) ctx.onOutput('', c) }
     const pushImage = (data: string, isUrl: boolean) => { stream(isUrl ? `已生成图: ${data.slice(0, 120)}` : '图片已生成'); try { if (ctx?.onImage) ctx.onImage(data, isUrl, title) } catch {} }
 
