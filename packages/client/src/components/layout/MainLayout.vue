@@ -39,7 +39,7 @@
          三段：①红绿灯(0~87px) ②侧边栏上方(87~220px，收缩按钮驻留) ③工作区段(220px+，会话标题+模型+操作)。
          sidebar 收缩不影响它；整行可拖拽；交互元素 no-drag。
          展开/收起：横栏收缩按钮、单击分隔条、Cmd+B（按钮式，无拖拽） -->
-    <div v-if="isDesktop" class="traffic-spacer">
+    <div v-if="isDesktop" class="traffic-spacer" :class="{ 'traffic-spacer--win': isWin }">
       <div class="traffic-sidebar-zone"></div>
       <!-- 工作区段：当前会话标题 + 模型 + 工作区 + 上下文用量 -->
       <div class="traffic-workspace-zone" :class="{ collapsed: sidebarCollapsed }">
@@ -360,12 +360,27 @@ const chatsCollapsed = ref(false)
 // ---- 桌面 App 沉浸式顶栏：isDesktop（Electron 环境，setup 同步判断避免首帧延迟）+ 后端状态 ----
 const isDesktop = ref(false)
 const backendReady = ref('')
+/**
+ * 窗口控制按钮在**哪一侧**（2026-10-26）。
+ *
+ * macOS 红绿灯在左 ⇒ 横栏左 padding 87px 让位；
+ * Windows 用 titleBarOverlay 把最小化/最大化/关闭画在**右**侧 ⇒ 左侧留白应去掉（那 87px
+ * 原本是 Windows 上「LOGO 上方空一档」的元凶），右侧改为给系统按钮让位。
+ *
+ * 默认 'darwin'：保留原有视觉，即使 app:info 拿不到也不会错位。
+ */
+const platform = ref<'darwin' | 'win32' | 'linux'>('darwin')
+const isWin = computed(() => platform.value === 'win32')
 ;(() => {
   try {
     const d = (window as any).supercrzyDesktop
     if (d?.isDesktop) {
       isDesktop.value = true
       d.onBackendStatus?.((s: any) => { backendReady.value = s.status === 'ready' ? '已连接' : s.status })
+      // 异步补齐：首帧用默认值渲染，拿到真实平台后重算 padding（一次 reflow，可接受）
+      d.app?.getInfo?.().then((info: any) => {
+        if (info?.platform) platform.value = info.platform
+      }).catch(() => {})
     }
   } catch { /* 浏览器环境 */ }
 })()
@@ -587,6 +602,15 @@ onMounted(() => {
   border-bottom: 1px solid var(--border-color);
   overflow: hidden;
 }
+/* Windows：窗口控制按钮画在**右**侧（main.cjs 的 titleBarOverlay），
+   所以左侧不该再给红绿灯留白 —— 那 87px 正是「LOGO 上方空一档」的成因；
+   右侧要给系统按钮让位，否则三个按钮会压在横栏的操作图标上。
+   ⚠️ 高度 56px 与 main.cjs 的 titleBarOverlay.height 必须一致。
+   2026-10-26 修 */
+.traffic-spacer--win {
+  padding: 0 140px 0 12px; /* 右侧 140px = 系统按钮宽度 + 安全间距 */
+}
+
 /* 横栏收缩侧边栏按钮：驻留在红绿灯右侧（始终可见，不随 sidebar 宽度变化） */
 
 

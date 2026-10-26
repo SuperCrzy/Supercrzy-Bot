@@ -247,12 +247,35 @@ function createWindow() {
     minHeight: 640,
     title: 'SUPERCRZY BOT',
     backgroundColor: '#ffffff',
-    // 沉浸式顶栏（对齐主流实现）：隐藏原生标题栏，红绿灯嵌入 52px 顶栏
-    ...(process.platform === 'darwin' ? {
-      titleBarStyle: 'hiddenInset',
-      trafficLightPosition: { x: 21, y: 20 },
-      // 去掉 vibrancy（macOS 最大化/全屏时 NSVisualEffectView 会盖住红绿灯导致消失；横栏背景不透明，毛玻璃本无视觉作用）
-    } : {}),
+    // 沉浸式顶栏：三个平台都隐藏原生标题栏，窗口控制按钮画进前端那条 56px 横栏。
+    //
+    // 🔴 2026-10-26 修 Windows「LOGO 上方空一档」。
+    // 原实现只在 darwin 下隐藏标题栏，Windows 走默认 ⇒ 顶部多一条原生标题栏；
+    // 而前端 `traffic-spacer` 只判断 isDesktop（不看平台），照样渲染 56px 横栏并在左侧
+    // 留 87px 给 macOS 红绿灯。Windows 上这 87px 是纯空白，系统按钮又在原生标题栏里，
+    // 于是视觉上"LOGO 上方空一档"，而且多占一条标题栏高度。
+    //
+    // 现在 Windows 用 titleBarStyle:'hidden' + titleBarOverlay：系统的最小化/最大化/关闭
+    // 直接画进前端横栏右上角，与 macOS 红绿灯在左、Windows 控制在右的各自习惯一致。
+    // overlay 的 height 必须与前端横栏 56px 对齐，否则按钮会压到内容。
+    ...(process.platform === 'darwin'
+      ? {
+          titleBarStyle: 'hiddenInset',
+          trafficLightPosition: { x: 21, y: 20 },
+          // 去掉 vibrancy（macOS 最大化/全屏时 NSVisualEffectView 会盖住红绿灯导致消失；横栏背景不透明，毛玻璃本无视觉作用）
+        }
+      : process.platform === 'win32'
+        ? {
+            titleBarStyle: 'hidden',
+            // ⚠️ 与 MainLayout.vue 的 .traffic-spacer { height: 56px } 是同一个数，
+            // 改一处必须同时改另一处，否则控制按钮会与横栏错位。
+            titleBarOverlay: {
+              color: '#00000000', // 透明：让横栏自己的背景透出来
+              symbolColor: '#1f2328',
+              height: 56,
+            },
+          }
+        : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -493,6 +516,10 @@ ipcMain.handle('update:dismiss', () => {
 ipcMain.handle('app:info', () => ({
   version: app.getVersion(),
   packaged: app.isPackaged,
+  // 前端需要区分「窗口控制按钮在哪一侧」：macOS 红绿灯在左（横栏左侧留白），
+  // Windows 的 titleBarOverlay 在右（左侧留白应去掉、右侧要让位）。
+  // 不能靠 navigator.platform 猜：它已被废弃，且与 Electron 的 userAgent 漂移无关。
+  platform: process.platform,
 }))
 
 /** 启动后延迟检查一次（不阻塞窗口/后端启动）；非 dev 才检查，dev 下也允许（本地测试） */
