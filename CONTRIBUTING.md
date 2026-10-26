@@ -52,7 +52,8 @@ pnpm --filter @supercrzy/client build
 - **Use mature open source**: prefer well-maintained libraries over reinventing the wheel, unless the feature is a core differentiator.
 - **No emoji icons in UI**: the project keeps a clean, original visual style.
 - **Tests**: add or update tests in `packages/*/tests/` for any behavior change.
-- **Comments and PRs in any language**: most existing code comments are in Chinese — the project was built in a Chinese-speaking context. Contributions are welcome in **English or Chinese**, and PRs are reviewed in whichever language you write. New code should prefer **English comments** so the codebase gets easier to read over time; translating existing comments is appreciated but never required, and we will not ask for it in review.
+- **English first**: this is an international open-source project. All new code comments (`//`, `/* */`, JSDoc, shell script comments), commit message bodies, pull request descriptions, issue reports, release notes, and documentation must be written in **English**. Existing Chinese comments may stay as they are — do not spend review time asking for them to be translated. When a file is substantially rewritten, migrate its comments to English along the way. The only places where Chinese is expected are `docs/internal/` (never published) and the `zh-CN` half of i18n strings.
+- **Release notes** follow a fixed shape: an English summary on top, then the Chinese detail nested inside a `<details><summary>中文</summary>…</details>` block, so readers can stop at the English summary.
 
 ## Reporting bugs
 

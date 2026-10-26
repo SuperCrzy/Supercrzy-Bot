@@ -23,8 +23,17 @@ logs/
 # 目录内文件保留在工作区，仅挡入库。
 docs/internal/
 
+# ── 设计稿与 Bot 功能文档：禁止入库 / 禁止开源（2026-10-26 老板要求）──
+# 按**精确路径**挡，不用通配符 —— 通配符容易连带挡掉要发布的页面或资源。
+# `packages/server/bot-mockup.html` 是界面设计稿（未最终确定，属于内部资产）。
+# `docs/PROJECT_BOT_MANUAL.md` 是运维手册（含 VPS 地址与凭据流程，见下方敏感文件区块）。
+packages/server/bot-mockup.html
+
 # ── 敏感文件：含服务器凭据，禁止入库 ──
 SUPERCRZY_AGENT_参考手册.md
+# 运维手册第 33 行有明文 root 密码 ⇒ 绝不入库、绝不开源。
+# 2026-10-26 曾误提交一次（commit 已在本机改写掉），此后由本规则兜底。
+docs/PROJECT_BOT_MANUAL.md
 
 # ── 编译产物与备份残留 ──
 *.tsbuildinfo
