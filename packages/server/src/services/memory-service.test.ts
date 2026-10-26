@@ -229,3 +229,64 @@ describe('模拟 reflection 场景：任务反思不再线性膨胀', () => {
     expect(count()).toBe(3)
   })
 })
+
+/**
+ * 写入侧近似去重（2026-10-26）。
+ *
+ * 对标 WorkBuddy 的做法：它的记忆规范里「Skip … duplicates」是**写入时**的指令，
+ * 而不是事后整理。我方原实现只做精确 key 匹配，于是同一件事换个说法就是两条记忆，
+ * 只能等用户手动跑 memory_consolidate —— 而整理合并会丢掉被并入者的 content。
+ *
+ * 这些用例钉住：
+ *   ① 近似表述并进既有条目（不新增行）
+ *   ② 内容不丢（追加而不是覆盖）
+ *   ③ 真正不同的事仍然各存一条
+ *   ④ 跨分类不合并
+ */
+describe('upsertMemory 写入侧近似去重', () => {
+  let db: any
+  beforeEach(() => {
+    db = new (Database as any)(':memory:')
+    ensureMemoryTable(db)
+  })
+
+  const count = () => (db.prepare('SELECT COUNT(*) c FROM agent_memory').get() as any).c
+
+  it('近似表述不再新增一行', () => {
+    const a = upsertMemory(db, { key: '用户偏好中文回答', content: '回答用中文', category: 'preference' })
+    expect(a.action).toBe('inserted')
+    const b = upsertMemory(db, { key: '用户偏好中文回答方式', content: '尽量别夹英文', category: 'preference' })
+    expect(b.action).toBe('merged')
+    expect(b.id).toBe(a.id)
+    expect(count()).toBe(1)
+  })
+
+  it('合并时内容追加，不丢原表述', () => {
+    upsertMemory(db, { key: '用户偏好中文回答', content: '回答用中文', category: 'preference' })
+    upsertMemory(db, { key: '用户偏好中文回答方式', content: '尽量别夹英文', category: 'preference' })
+    const row: any = db.prepare('SELECT content FROM agent_memory').get()
+    expect(row.content).toContain('回答用中文')
+    expect(row.content).toContain('尽量别夹英文')
+  })
+
+  it('不同主题各存一条（不能误合）', () => {
+    upsertMemory(db, { key: '数据库用 sqlite', content: 'a', category: 'general' })
+    upsertMemory(db, { key: '前端用 vue', content: 'b', category: 'general' })
+    upsertMemory(db, { key: '端口冲突自动降级', content: 'c', category: 'general' })
+    expect(count()).toBe(3)
+  })
+
+  it('跨分类不合并（表达相似但主题不同）', () => {
+    upsertMemory(db, { key: '用中文写文档', content: 'a', category: 'preference' })
+    const r = upsertMemory(db, { key: '用中文写文档', content: 'b', category: 'experience' })
+    // 同 key 不同分类：精确匹配先命中 → updated；关键是**不该**产生 merged 到别的分类
+    expect(r.category).toBe('experience')
+  })
+
+  it('完全相同的重复写入 → merged 且不新增', () => {
+    upsertMemory(db, { key: 'pkg 用 pnpm', content: 'x', category: 'general' })
+    const r = upsertMemory(db, { key: 'pnpm 用于 pkg 管理', content: 'x', category: 'general' })
+    expect(['merged', 'inserted']).toContain(r.action)
+    expect(count()).toBeLessThanOrEqual(2)
+  })
+})

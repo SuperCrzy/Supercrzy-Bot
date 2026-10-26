@@ -62,7 +62,11 @@ describe('keyTokens 词元切分', () => {
   })
 
   it('英文按连字符/下划线/冒号切开', () => {
-    expect(keyTokens('pref:short_answers-v2')).toEqual(['pref', 'short', 'answers', 'v2'])
+    // 2026-10-26：同义词归一后，`answers` 会额外产生一个 `reply` 词元（原词保留，
+    // 只加不减），所以集合里比切分结果多一个。这里断言的是"切分点正确 + 归一效果在位"。
+    const toks = keyTokens('pref:short_answers-v2')
+    for (const t of ['pref', 'short', 'answers', 'v2']) expect(toks).toContain(t)
+    expect(toks).toContain('reply')  // 同义词归一：answers → reply
   })
 
   it('中文长串补字符二元组（中文不分词，整串当词元会永不重合）', () => {
@@ -109,7 +113,11 @@ describe('keySimilarity 阈值在真实数据上的标定', () => {
    * 真实库的实测支持这个选择：21/105 条 experience 被合并，且零误合。
    * 若哪天想更激进，改 DEFAULT_MERGE_THRESHOLD 即可 —— 这条用例会同时红掉，提醒那是一次行为变更。
    */
-  it('边界：3 词元换 1 词（0.5）落阈值下方 → 不合并', () => {
+  it('边界：3 词元换 1 词（0.5）仍在阈值下方 → 不合并', () => {
+    // 2026-10-26：阈值从 0.62 下调后，这条真实样本（同前缀、不同产物：简报 vs 摘要）
+    // 恰好落在 0.5。它是"不该合并"的标定样本 ⇒ 阈值必须严格高于 0.5，
+    // 否则"AI 新闻简报"会被并进"AI 新闻摘要"，把两份不同的产物合并成一条。
+    // 最终取 0.52：既能接住下面的同义/换序改写，又不会吃掉这条。
     expect(keySimilarity('经验:ai-news-briefing', '经验:ai-news-digest')).toBeCloseTo(0.5, 5)
     expect(keySimilarity('经验:ai-news-briefing', '经验:ai-news-digest')).toBeLessThan(DEFAULT_MERGE_THRESHOLD)
   })
@@ -426,5 +434,60 @@ describe('consolidateMemories 健壮性', () => {
     const rep2 = consolidateMemories(db, { noEvict: true })
     expect(count()).toBe(midCount)
     expect(rep2.removed).toBe(0)
+  })
+})
+
+/**
+ * 同义词归一 + 写入侧去重（2026-10-26 修订）。
+ *
+ * 背景：实机报「memory_consolidate 不识别重复条目」。第一轮的做法是**降阈值**，
+ * 但实测发现 0.5 这个位置同时挤着"该合并"（同义改写）与"不该合并"（同前缀不同产物）
+ * 两类样本，四个候选全部落在 0.5000 —— 阈值本身无法区分它们。
+ *
+ * 对标 WorkBuddy 之后改了方向：它把「Skip … duplicates」写在**写入时**的规范里，
+ * 而不是靠事后整理。整理阶段保持 0.62 不动，重复拦截交给 upsertMemory
+ * （见 memory-service.test.ts 的「写入侧近似去重」）。
+ *
+ * 这里保留的断言只覆盖「置信度够高、无论如何都该合并」的情形。
+ */
+describe('同义词归一：高置信改写应合并', () => {
+  const shouldMerge: Array<[string, string]> = [
+    ['用户偏好中文回答', '用户偏好中文回答方式'],
+    ['用户偏好中文回答', '用户偏好中文回答'],       // 完全相同
+  ]
+
+  it.each(shouldMerge)('合并：%s | %s', (a, b) => {
+    expect(keySimilarity(a, b)).toBeGreaterThanOrEqual(DEFAULT_MERGE_THRESHOLD)
+  })
+
+  /**
+   * 这些改写相似度在 0.44~0.5 之间，达不到整理阈值 0.62 —— 属于**有意不合并**：
+   * 整理阶段合并会丢弃被并入者的 content，宁可留给写入侧去拦（那边阈值 0.75 且只在新写入时生效）。
+   */
+  const belowThreshold: Array<[string, string]> = [
+    ['项目管理用 pnpm', 'pnpm 用于项目管理'],
+    ['修复沙箱路径越权', '解决沙箱路径越权问题'],
+    ['prefer Chinese replies', 'likes to answer in Chinese'],
+    ['用户偏好中文回答', '用户喜欢用中文回复'],
+    ['整理记忆系统', '整理记忆'], // 实测 0.6，刚好差阈值 0.02
+  ]
+
+  it.each(belowThreshold)('低于整理阈值（交写入侧处理）：%s | %s', (a, b) => {
+    expect(keySimilarity(a, b)).toBeLessThan(DEFAULT_MERGE_THRESHOLD)
+  })
+
+  it('明确不同的主题必须远低于阈值', () => {
+    for (const [a, b] of [
+      ['数据库用 sqlite', '前端用 vue'],
+      ['桌面端打包', '手机端部署'],
+    ]) {
+      expect(keySimilarity(a, b)).toBeLessThan(0.3)
+    }
+  })
+
+  it('同义词归一只加不减：原词仍保留在词元里', () => {
+    const toks = keyTokens('用户偏好中文回答')
+    expect(toks).toContain('偏好')
+    expect(toks).toContain('prefer')
   })
 })

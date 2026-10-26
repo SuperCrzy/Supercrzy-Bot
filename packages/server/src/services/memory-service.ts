@@ -22,6 +22,7 @@
  */
 
 import { randomUUID } from 'crypto'
+import { keySimilarity, keyTokens } from './memory-consolidate'
 import { normalizeCategory, normalizeImportance, type MemoryCategory } from './memory-category'
 
 /** key 上限（各写入点原先 60/无限制混用，此处统一） */
@@ -43,7 +44,7 @@ export interface UpsertMemoryInput {
   roleId?: string | null
 }
 
-export type MemoryUpsertAction = 'inserted' | 'updated' | 'unchanged' | 'rejected'
+export type MemoryUpsertAction = 'inserted' | 'updated' | 'unchanged' | 'rejected' | 'merged'
 
 export interface MemoryUpsertResult {
   action: MemoryUpsertAction
@@ -70,6 +71,68 @@ function clampConfidence(raw: unknown): number {
  * @returns action：`inserted` 新建 / `updated` 同 key 覆盖 / `unchanged` 同 key 同内容已存在 /
  *          `rejected` 入参非法（空 key 或空 content）
  */
+/**
+ * 写入侧近似去重阈值（2026-10-26）。
+ *
+ * 比整理阶段的 0.62 更严（0.75）：写入时合并是主动行为、用户没要求，
+ * 误合并的代价比"整理时漏合并"更高。只接"几乎确定是同一件事"的，
+ * 激进的改写留给 memory_consolidate 挑。
+ */
+export const WRITE_SIDE_DEDUPE_THRESHOLD = 0.75
+
+/**
+ * 写入侧判定所需的最少词元数（2026-10-26）。
+ *
+ * 取 4 而不是整理阶段的 2：写入时合并是主动行为，`任务反思:A` / `任务反思:B`
+ * 这种短 key 只差一个字符，词元数 2~3，Jaccard 却会冲过 0.75。
+ * 4 个词元意味着 key 至少有 2~3 个实词，才足以判断"是不是同一件事"。
+ */
+export const WRITE_SIDE_DEDUPE_MIN_TOKENS = 4
+
+/**
+ * 在**同一分类**内找近似重复条目（写入侧去重用，2026-10-26）。
+ *
+ * 与 memory-consolidate 共用 `keySimilarity`，但阈值取更保守的一档：
+ * 写入时合并是**主动**行为（用户没要求），误合并的代价比"整理时漏合并"更高。
+ * 整理阶段仍然是 0.62；这里用 0.75，只接"几乎肯定是同一件事"的情况，
+ * 更激进的改写留给整理阶段挑。
+ *
+ * 返回最相似的那一条（不返回数组）：一条新记忆只该并进一个既有条目，
+ * 否则就会出现"新条目同时挂在两个旧条目下"的不一致状态。
+ */
+function findNearDuplicate(
+  db: AnyDb,
+  key: string,
+  category: string,
+): { id: string; key: string; content: string; importance: number } | null {
+  let rows: any[]
+  try {
+    rows = db.prepare(
+      'SELECT id, key, content, importance FROM agent_memory WHERE category = ? LIMIT 500',
+    ).all(category) as any[]
+  } catch {
+    return null
+  }
+  if (rows.length === 0) return null
+
+  // 🔴 词元太少时不做判定（与 memory-consolidate 的 minTokens 护栏同义）。
+  // 实测事故：`任务反思:A` 与 `任务反思:B` 词元很少，字符二元组有一半重叠，
+  // 相似度轻松越过阈值 —— 三个不同主题被合成一条，那正是记忆库最不能出的错。
+  // 短 key 判不准，就干脆不判：宁可多一条重复，也不要少一条信息。
+  const tokens = keyTokens(key)
+  if (tokens.length < WRITE_SIDE_DEDUPE_MIN_TOKENS) return null
+
+  let best: any = null
+  let bestSim = 0
+  for (const r of rows) {
+    // 候选侧同样要够长，否则「A」这种极短旧条目会吸走所有相似新条目
+    if (keyTokens(String(r.key)).length < WRITE_SIDE_DEDUPE_MIN_TOKENS) continue
+    const sim = keySimilarity(String(r.key), key)
+    if (sim > bestSim) { bestSim = sim; best = r }
+  }
+  return bestSim >= WRITE_SIDE_DEDUPE_THRESHOLD ? best : null
+}
+
 export function upsertMemory(db: AnyDb, input: UpsertMemoryInput): MemoryUpsertResult {
   const key = String(input?.key ?? '').trim().slice(0, MAX_MEMORY_KEY)
   const content = String(input?.content ?? '').trim().slice(0, MAX_MEMORY_CONTENT)
@@ -96,6 +159,31 @@ export function upsertMemory(db: AnyDb, input: UpsertMemoryInput): MemoryUpsertR
           WHERE id = ?`
       ).run(content, category, merged, existing.id)
       return { action: 'updated', id: existing.id, key, category, importance: merged }
+    }
+
+    // 🔴 2026-10-26 新增：写入侧近似去重（对标 WorkBuddy 的"写入时就别产重复"）。
+    //
+    // 原实现只做**精确 key 匹配**，于是同一件事换个说法就是两条记忆：
+    // 「用户偏好中文回答」与「用户喜欢用中文回复」并存，库只会越用越胀。
+    // 事后靠 memory_consolidate 整理是补不住的 —— 整理是低频手动动作，
+    // 而且它对"内容该不该合并"只能猜（合并会丢掉被并入者的 content）。
+    // 在**写入这一侧**拦下，代价最低：不删任何已有数据，只是把新表述并进既有条目。
+    //
+    // 只在同一分类内比：跨分类的相似 key 往往是真的不同主题
+    // （preference 的「用中文」与 experience 的「用中文报错」），不该被合并。
+    const nearDup = findNearDuplicate(db, key, category)
+    if (nearDup) {
+      // content 不同 → 追加（保留两种表述，不丢信息）；相同 → 只抬 importance
+      const nextContent = String(nearDup.content) === content
+        ? String(nearDup.content)
+        : `${nearDup.content}\n${content}`.slice(0, MAX_MEMORY_CONTENT)
+      const nextImportance = Math.max(normalizeImportance(nearDup.importance), importance)
+      db.prepare(
+        `UPDATE agent_memory
+            SET content = ?, importance = ?, usage_count = usage_count + 1, updated_at = datetime('now')
+          WHERE id = ?`
+      ).run(nextContent, nextImportance, nearDup.id)
+      return { action: 'merged', id: nearDup.id, key: String(nearDup.key), category, importance: nextImportance }
     }
 
     const id = randomUUID()

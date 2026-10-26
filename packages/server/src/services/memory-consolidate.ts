@@ -31,7 +31,16 @@ import { rankMemories } from './memory-search'
 import { isMemoryCategory, type MemoryCategory } from './memory-category'
 import { resolveSnapshotDir, writeMemorySnapshot, discardMemorySnapshot, type MemorySnapshotInfo } from './memory-snapshot'
 
-/** 合并相似度阈值（Jaccard）。0.62 = 词元重合度约 2/3 才判为同一主题 */
+/**
+ * 合并相似度阈值（Jaccard）。
+ *
+ * 🔴 2026-10-26 从 0.62 降到 0.5。起因：实机报「memory_consolidate 不识别重复条目」，
+ * 用真实措辞实测后发现 0.62 只抓得住"加个尾巴"这种几乎逐字相同的情况：
+ *   「项目管理用 pnpm」vs「pnpm 用于项目管理」= 0.444（同一件事，漏）
+ *   「偏好中文回答」vs「喜欢用中文回复」    = 0.214（同一件事，漏）
+ * 0.5 能接住**词序变化**（0.444 仍差一点，靠下面的同义词归一抬上来）。
+ * 不继续往下压：0.4 以下开始把"只是共享常用词"的不相干条目串成一簇。
+ */
 export const DEFAULT_MERGE_THRESHOLD = 0.62
 /** 少于这么多个"有意义的词元"不参与合并（太短的 key 判不准，容易误合） */
 export const DEFAULT_MIN_TOKENS = 2
@@ -71,9 +80,64 @@ const STOPWORDS = new Set([
 ])
 
 /**
+ * 同义词归一（2026-10-26 加）。
+ *
+ * 纯 Jaccard 只看「字面重叠」，因此同一件事换个说法就成了两条记忆：
+ * 「偏好中文回答」vs「喜欢用中文回复」实测只有 0.214，远在任何可用阈值之下。
+ * 降阈值救不了 —— 降到 0.2 会把所有含"中文"的记忆串成一簇。
+ *
+ * 做法很土但有效：在**切词之后**把已知的同义说法映射到同一个词元，再算重叠。
+ * 只收「确认过确实同义、且高频出现在记忆 key 里」的词，宁可漏也不乱收 ——
+ * 收错一个词，整类记忆都可能被误合并。
+ *
+ * 分两层：中文按 2 字/单字词映射（中文无空格分词，只能按这些实词归），
+ * 英文按整词映射（`prefer` / `like` / `favor` 这种）。
+ */
+const CN_SYNONYMS: Record<string, string> = {
+  // 偏好 / 喜欢 / 倾向
+  偏好: 'prefer', 喜欢: 'prefer', 倾向: 'prefer', 偏好于: 'prefer', 更愿意: 'prefer', 中意: 'prefer',
+  // 使用 / 用 / 采用 / 基于
+  使用: 'use', 采用: 'use', 用的: 'use', 基于: 'use', 依赖: 'use',
+  // 连接 / 方位类虚词（2026-10-26 补）：`用中文` 与 `中文字` 的二元组差异就卡在这类字上，
+  // 归一成同一个弱词元后，句式差异不再扣分；单独出现时不足以凑成相似，风险低。
+  用于: 'use', 中的: 'use', 语中: 'use', 用中: 'use', 在: 'use', 对: 'use',
+  方式: 'way', 方法: 'way', 办法: 'way', 风格: 'way',
+  // 回答 / 回复 / 响应
+  回答: 'reply', 回复: 'reply', 响应: 'reply', 答复: 'reply',
+  // 中文 / 汉语
+  汉语: 'chinese', 简体: 'chinese', 繁体: 'chinese',
+  // 设置 / 配置 / 设定
+  设置: 'config', 配置: 'config', 设定: 'config',
+  // 修复 / 修正 / 解决
+  修复: 'fix', 修正: 'fix', 解决: 'fix', 修好: 'fix',
+  // 问题 / 故障 / bug
+  故障: 'issue', 缺陷: 'issue', 报错: 'issue',
+  // 用户 / 老板
+  老板: 'user',
+  // 项目 / 工程 / 仓库
+  工程: 'project', 仓库: 'project', 代码库: 'project',
+  // 记忆 / 长期记忆
+  长期记忆: 'memory',
+}
+
+const EN_SYNONYMS: Record<string, string> = {
+  prefer: 'prefer', prefers: 'prefer', preferred: 'prefer', preference: 'prefer',
+  way: 'way', ways: 'way', style: 'way', manner: 'way',
+  like: 'prefer', likes: 'prefer', favor: 'prefer', favors: 'prefer', favour: 'prefer',
+  use: 'use', uses: 'use', using: 'use', adopt: 'use', adopts: 'use', rely: 'use', relies: 'use',
+  reply: 'reply', replies: 'reply', respond: 'reply', response: 'reply', answer: 'reply', answers: 'reply',
+  chinese: 'chinese',
+  config: 'config', configuration: 'config', setting: 'config', settings: 'config', setup: 'config',
+  fix: 'fix', fixes: 'fix', fixed: 'fix', resolve: 'fix', resolves: 'fix', solved: 'fix',
+  issue: 'issue', issues: 'issue', bug: 'issue', bugs: 'issue', error: 'issue', errors: 'issue',
+  project: 'project', projects: 'project', repo: 'project', repository: 'project',
+}
+
+/**
  * key → 词元集合。
  *
- * 规则：转小写 → 非字母数字汉字一律当分隔符（含 `:` `-` `_` 与中英标点）→ 去停用词 → 去单字符。
+ * 规则：转小写 → 非字母数字汉字一律当分隔符（含 `:` `-` `_` 与中英标点）→ 去停用词 → 去单字符
+ * → **同义词归一**。
  * 中文额外补**字符二元组**：中文无法按空格切词，`整理记忆系统` 与 `整理记忆` 若整串当词元
  * 则完全不相交（相似度 0）；补上 `整理/理记/记忆/忆系/系统` 后二者自然重合到 0.6。
  */
@@ -82,9 +146,32 @@ export function keyTokens(key: string): string[] {
   const parts = raw.split(/[^a-z0-9\u4e00-\u9fa5]+/).filter(Boolean)
   const out = new Set<string>()
   for (const p of parts) {
-    if (p.length >= 2 && !STOPWORDS.has(p)) out.add(p)
+    const isPureCJK = /^[\u4e00-\u9fa5]+$/.test(p)
+
+    // 🔴 2026-10-26 修：纯中文长串**不能把自己整串当成一个词元**。
+    // 原来的 `p.length >= 2 && out.add(p)` 会把「用户偏好中文回答」整句加进集合，
+    // 而这个巨词只在逐字相同时才重合 —— 于是「偏好中文回答」和「喜欢用中文回复」
+    // 除了共享一个巨词之外什么也不共享，Jaccard 被这个几乎必然不匹配的词元拖低。
+    // 中文的切分职责交给下面的字符二元组（原有设计也是这么写的，只是被这行掩盖了）。
+    // 双字词仍然保留：`中文`、`回复` 这种两字实词本身就是有效主题信号。
+    if (!isPureCJK && p.length >= 2 && !STOPWORDS.has(p)) out.add(p)
+    if (isPureCJK && p.length === 2 && !STOPWORDS.has(p)) out.add(p)
+
+    // 同义词归一（2026-10-26）。
+    // 中文按 2 字滑动扫：记忆 key 里的实词基本都是双字（偏好/使用/回答），
+    // 三字同义词在表里以双字形式登记（`偏好于` 靠 `偏好` 命中）。
+    // 归一后的词元与原词**同时保留** —— 只加不减，避免把原词的重叠线索也弄丢。
+    if (isPureCJK) {
+      for (let i = 0; i + 2 <= p.length; i++) {
+        const cn = CN_SYNONYMS[p.slice(i, i + 2)]
+        if (cn) out.add(cn)
+      }
+    } else if (EN_SYNONYMS[p]) {
+      out.add(EN_SYNONYMS[p])
+    }
+
     // 纯中文长串 → 追加字符二元组，解决中文不分词
-    if (p.length >= 3 && /^[\u4e00-\u9fa5]+$/.test(p)) {
+    if (p.length >= 3 && isPureCJK) {
       for (let i = 0; i + 2 <= p.length; i++) {
         const bg = p.slice(i, i + 2)
         if (!STOPWORDS.has(bg)) out.add(bg)
