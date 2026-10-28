@@ -16,13 +16,9 @@
         2026-10-26 删除该常量与它的标签。
       -->
       <div class="update-meta">
-        <span v-if="isDesktop" class="update-meta-item">
+        <span v-if="appVersionLabel" class="update-meta-item">
           <span class="update-meta-label">{{ $t('nav.appVersionLabel') }}</span>
           <span class="update-meta-value">{{ appVersionLabel }}</span>
-        </span>
-        <span v-if="showSource && gitHead" class="update-meta-item">
-          <span class="update-meta-label">{{ $t('nav.sourceLabel') }}</span>
-          <span class="update-meta-value">{{ gitHead }}</span>
         </span>
       </div>
 
@@ -152,15 +148,22 @@ const packaged = ref(true)
 const appUpdate = ref<AppUpdateState>({ status: 'idle' })
 let offUpdate: (() => void) | null = null
 
-/** 源码（git）语境：Web 形态始终适用；桌面形态仅未打包时适用 */
-const showSource = computed(() => (isDesktop ? !packaged.value : true))
+/**
+ * Whether the backend has a git work tree. `null` = not asked yet.
+ * 2026-10-26: version row now always shows the app version; the commit hash row is gone
+ * (it was noise), and the whole source-update block disappears when there is no .git —
+ * packaged desktop and the Android chroot ship dist/ without a repo, so "cannot check"
+ * there is not information, it is a dead control.
+ */
+const gitAvailable = ref<boolean | null>(null)
+const showSource = computed(() => (isDesktop ? !packaged.value : true) && gitAvailable.value !== false)
 
-const gitHead = ref('')
-const sourceStatus = ref<'idle' | 'checking' | 'available' | 'latest'>('idle')
+const sourceStatus = ref<'idle' | 'checking' | 'available' | 'latest' | 'unavailable'>('idle')
 
 const currentEntry = computed(() => CHANGELOG.find((e) => e.version === APP_VERSION) || CHANGELOG[0])
 
-const appVersionLabel = computed(() => (appVersion.value ? `v${appVersion.value}` : '—'))
+/** Always resolvable: desktop reads Info.plist via the bridge, web falls back to the baked APP_VERSION */
+const appVersionLabel = computed(() => `v${appVersion.value || APP_VERSION}`)
 
 /**
  * 状态胶囊：**只反映一个更新口径**，不再让两个体系并排给结论。
@@ -192,6 +195,9 @@ const statusPill = computed<{ tone: string; text: string } | null>(() => {
   if (sourceStatus.value === 'checking') return { tone: 'checking', text: t('nav.checkingUpdate') }
   if (sourceStatus.value === 'available') return { tone: 'available', text: t('nav.sourceUpdateAvailable') }
   if (sourceStatus.value === 'latest') return { tone: 'latest', text: t('nav.latestVersion') }
+  // 2026-10-26: "cannot determine" (no .git / remote unreachable / network error)
+  // must NOT render as "already latest" — saying "I don't know" beats a false green
+  if (sourceStatus.value === 'unavailable') return { tone: 'unavailable', text: t('nav.sourceUnavailable') }
   return null
 })
 
@@ -266,9 +272,13 @@ function onChangelogShow(v: boolean) {
   }
 }
 
-/** 源码仓库更新检查（仅在有 .git 的形态下调用）；8s 超时兜底视为最新（不误导） */
+/**
+ * Source repo update check. Doubles as the probe for whether a source channel exists
+ * at all (server reports `gitAvailable`), so packaged desktop / Android chroot hide the
+ * whole block instead of showing a dead control.
+ */
 async function checkSourceUpdate() {
-  if (!showSource.value) {
+  if (isDesktop && packaged.value) {
     sourceStatus.value = 'idle'
     return
   }
@@ -278,9 +288,24 @@ async function checkSourceUpdate() {
     const timer = setTimeout(() => ctrl.abort(), 8000)
     const check = await (await fetch('/api/system/check-update', { signal: ctrl.signal })).json()
     clearTimeout(timer)
-    sourceStatus.value = check.hasUpdate === true ? 'available' : 'latest'
+    if (check.gitAvailable === false) {
+      gitAvailable.value = false
+      sourceStatus.value = 'idle'
+      return
+    }
+    gitAvailable.value = true
+    // 2026-10-26: three-way outcome. hasUpdate=false used to collapse
+    // "remote unavailable / not a git tree" into "already latest" — a false claim
+    // (e.g. packaged desktop backend served to a browser reports localHead=unknown).
+    // Now those cases render as "source unavailable" instead.
+    const undeterminable =
+      check.reason === 'remote-unavailable' ||
+      check.reason === 'no-remote-branch' ||
+      check.localHead === 'unknown'
+    sourceStatus.value = check.hasUpdate === true ? 'available' : undeterminable ? 'unavailable' : 'latest'
   } catch {
-    sourceStatus.value = 'latest'
+    // network/timeout: cannot determine either — never fake "latest"
+    sourceStatus.value = 'unavailable'
   }
 }
 
@@ -317,22 +342,8 @@ async function runUpdate() {
     updateLog.value.push({ message: `${t('settings.updateFailed')}: ${err.message}`, ok: false })
   } finally {
     updating.value = false
-    loadVersion()
     checkSourceUpdate()
   }
-}
-
-/** 拉取源码版本信息（git head）—— 仅源码语境下调用 */
-async function loadVersion() {
-  if (!showSource.value) {
-    gitHead.value = ''
-    return
-  }
-  try {
-    const r = await fetch('/api/system/version')
-    const d = await r.json()
-    gitHead.value = d.gitHead || ''
-  } catch {}
 }
 
 function dismissChangelog(remember = true) {
@@ -364,11 +375,8 @@ onMounted(async () => {
     } catch { /* 订阅失败 */ }
   }
 
-  // 2) 源码语境（Web 形态，或桌面未打包形态）
-  if (showSource.value) {
-    loadVersion()
-    checkSourceUpdate()
-  }
+  // 2) 源码语境：由服务端 gitAvailable 决定是否存在（无 .git 时整块隐藏）
+  checkSourceUpdate()
 
   // 3) 版本更新提示：已读版本 ≠ 当前版本 → 自动弹出更新日志
   try {
@@ -424,6 +432,7 @@ onBeforeUnmount(() => {
 .update-status.checking { color: var(--text-muted); background: var(--bg-hover); }
 .update-status.latest { color: var(--success, #10B981); background: rgba(16, 185, 129, 0.12); }
 .update-status.available { color: var(--warning, #F59E0B); background: rgba(245, 158, 11, 0.12); }
+.update-status.unavailable { color: var(--text-muted); background: var(--bg-hover); }
 .update-status.error { color: var(--error); background: rgba(226, 75, 74, 0.12); }
 .update-actions { display: flex; gap: 8px; width: 100%; flex-wrap: wrap; margin-top: 10px; }
 .update-actions .n-button { flex: 1; }

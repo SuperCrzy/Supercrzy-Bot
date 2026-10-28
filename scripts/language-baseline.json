@@ -1,6 +1,6 @@
 {
-  "generatedAt": "2026-10-23",
-  "note": "SEEDED baseline (first run). From now on this list MAY ONLY SHRINK.",
+  "generatedAt": "2026-10-26",
+  "note": "Chinese-only files grandfathered by the English-first policy. MAY ONLY SHRINK.",
   "files": [
     "packages/client/src/App.vue",
     "packages/client/src/__tests__/file-size-guard.test.ts",
@@ -48,7 +48,6 @@
     "packages/client/src/composables/useInputTrigger.ts",
     "packages/client/src/composables/useSecondTick.ts",
     "packages/client/src/composables/useShareExport.ts",
-    "packages/client/src/composables/useSpeech.test.ts",
     "packages/client/src/composables/useSpeechPreview.test.ts",
     "packages/client/src/composables/useSpeechPreview.ts",
     "packages/client/src/composables/useWelcomePanel.ts",
@@ -179,7 +178,6 @@
     "packages/server/src/pdf-parse.d.ts",
     "packages/server/src/routes/mcp.ts",
     "packages/server/src/routes/news.ts",
-    "packages/server/src/routes/ocr.ts",
     "packages/server/src/routes/settings.test.ts",
     "packages/server/src/routes/task-state-stats.test.ts",
     "packages/server/src/routes/task-state.ts",
