@@ -9,6 +9,60 @@
 
 ---
 
+## v1.3.0 (2026-10-28) — 先登录才能用
+
+### 新功能
+
+- **必须先登录，登录在浏览器里完成（0999348）**
+  - 首次打开会停在登录页，一个按钮拉起默认浏览器 → 邮箱收六位验证码 → 授权后自动回到应用。
+  - 凭据不进应用：浏览器向 `auth.supercrzy.com` 证明身份，一次性码（60 秒、单次）交回本机回环端口，
+    且与发起登录的进程绑定（PKCE S256），本机其它程序截到码也换不出 token。
+  - 会话以 AES-256-GCM 加密落在 `~/.supercrzy/data/auth.json`，密钥独立文件（0600）；
+    "已登录"的判定是 refresh 落在 30 天离线窗口内，而不是 access 未过期——否则每 15 分钟误判掉线。
+  - 服务端 `requireAccount` gate；健康检查、账号状态、登录/登出、一次性 TTS 流豁免。
+  - 静默续期用共享 promise 串行化：并发多个 401 只能触发一次 refresh，否则 auth 服务会判定
+    token 重用并吊销整个 family（表现为"一直退不出去也进不来"）。
+  - 前端 401 拦截器先重新读状态再跳转；直接假定掉线会和路由守卫互斥（守卫会把已登录用户从 /login 弹回）。
+  - 登录页：图案 + 文字 lockup、中英切换、明确写"没有账号也能直接登录，首次自动创建"、浏览器被拦时的手动链接。
+
+- **本地 OCR，带视觉模型兜底（87eaf7d）**
+  - 原来取字依赖机器上装没装 Python RapidOCR；没装或坏掉时，结果是"截了图没有文字、也没有报错"。
+  - macOS：`scripts/vision_ocr.swift` → `build:ocr` 编译出 `scripts/bin/vision_ocr`（Vision 框架，约 88KB，无运行时依赖）。
+  - Windows：`scripts/win_ocr.ps1` 走 `Windows.Media.Ocr`，零依赖。
+  - 兜底：本地引擎无结果时由 `services/model-vision.ts` 交给视觉模型，降级而不是静默失败。
+  - 打包链路同步更新：`sync-backend.mjs` 会把 `ocr_service.py`、`win_ocr.ps1`、`bin/` 一并带进 App。
+  - 编译产物不进仓库（已 gitignore），由 `pnpm build` 重新生成。
+
+- **一条命令完成发版（32c1c89）**
+  - `pnpm release prepare <ver>`：从提交日志起草发布说明、CHANGELOG、应用内更新面板。
+  - `pnpm release ship <ver>`：门禁 → 提交 → 打标签 → 等 CI → 发布更新源与下载页。
+  - 目的是消掉手工步骤：更新源版本号与下载页不一致，历史上发生过。
+
+### 修复
+
+_本次无修复。_
+
+### 工程
+
+- 三个新文件注释改为英文，符合 English-first 约定；`language-baseline.json` 继续缩短（7538af7）。
+- 更新面板去掉提交哈希行：它每次提交都变，给不出可执行结论；面板现在始终显示应用版本，
+  没有 git 工作树时隐藏源码区块（e4bab57）。
+- 忽略临时产出物（`/output/`）与编译出的 OCR helper（`packages/server/scripts/bin/`）（2b3caf0）。
+
+### 已知限制
+
+- **登录链路尚未由真人在打包版上走完一次。** 生产 auth 服务已按协议层验证：JWKS 200、portal 含
+  `code_challenge` 透传与 loopback 回跳分支、DB `user_version=6`、临时库实测
+  `pkce_required` / `pkce_mismatch` / 重放 `used` / 浏览器流仍可无 verifier 兑换；打包版已验证
+  生成的登录 URL 指向生产 auth 且带 S256 挑战，界面停在登录页。"真人输码登录"留给本版验收。
+- 从应用内首次注册的账号**没有端到端加密信封**：信封在首次登录 `supercrzy.com/account` 时创建。
+  跨设备同步需要它，使用应用不需要。
+- GitHub / Google 登录未实现，当前只有邮箱验证码。
+- 构建未签名：macOS 首次右键 → 打开，Windows 一次 SmartScreen 提示。
+- Windows 版由 CI 产出，本轮未真机验证；只安装并验证了 macOS arm64。
+
+---
+
 ## v1.2.4 (2026-10-26) — Windows 全平台修复
 
 ### 修复

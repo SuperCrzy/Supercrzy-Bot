@@ -37,6 +37,28 @@ export const APP_VERSION: string = typeof __APP_VERSION__ === 'string' ? __APP_V
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.3.0',
+    date: '2026-10-28',
+    title: '先登录，再使用',
+    titleEn: 'Sign in first',
+    features: [
+      '打开即登录：浏览器收六位验证码，登录后三十天内免登录，退出在设置里。',
+      '截图取字不再需要额外安装：macOS 用系统 Vision，Windows 用系统 OCR，取不到时自动改用视觉模型。',
+      '本地会话加密保存，窗口一直开着也会自己接上登录状态，不用重启。',
+    ],
+    featuresEn: [
+      'Sign in on first launch: a six-digit code from your browser session keeps the app open for thirty days. Sign out any time from Settings.',
+      'Screen text extraction works out of the box: system Vision on macOS, system OCR on Windows, and a vision model when neither finds text.',
+      'The saved session is encrypted on disk and refreshes itself, so a window left open picks up the new state without a restart.',
+    ],
+    fixes: [
+      // no fixes
+    ],
+    fixesEn: [
+      // no fixes
+    ],
+  },
+  {
     version: '1.2.4',
     date: '2026-10-26',
     title: 'Windows 平台支持与稳定性提升',

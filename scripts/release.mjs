@@ -356,7 +356,10 @@ async function ship(version) {
   console.log(c.ok('  ✓ pnpm verify'))
 
   step(3, 6, 'commit + tag + push')
-  sh(`git add -A ':!output'`)
+  // Plain `git add -A`: ignored paths (output/, build artifacts) are skipped by
+  // git itself. Naming an ignored path as a pathspec — even as an exclusion —
+  // makes git abort with "The following paths are ignored".
+  sh('git add -A')
   const status = shQuiet('git status --porcelain')
   if (status) {
     sh(`git commit -q -F -`, { input: releaseCommitMessage(version) })
