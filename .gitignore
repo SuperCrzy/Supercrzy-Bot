@@ -130,3 +130,6 @@ packages/desktop/.build-tools/
 
 # 归档临时目录（删文件时先移到这里，确认后再清）—— 2026-10-17
 .trash-*/
+
+# Compiled OCR helpers (rebuilt by `pnpm --filter @supercrzy/server build:ocr`) — 2026-10-28
+packages/server/scripts/bin/

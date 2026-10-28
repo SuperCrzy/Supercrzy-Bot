@@ -26,6 +26,13 @@ function findProjectRoot(start: string): string {
   }
 }
 const PROJECT_ROOT = findProjectRoot(process.cwd())
+/**
+ * 2026-10-26: the source-update channel only exists in a git work tree.
+ * Packaged desktop app and the Android chroot deployment ship dist/ + node_modules
+ * with no .git, so every git call there fails — reporting "no update" for that state
+ * was a false claim. Expose the fact so the client can drop the whole source block.
+ */
+const GIT_AVAILABLE = existsSync(join(PROJECT_ROOT, '.git'))
 
 export const systemRouter = new Router({ prefix: '/api/system' })
 
@@ -102,6 +109,7 @@ systemRouter.get('/version', async (ctx: Context) => {
     version: resolveProductVersion(),
     gitHead: await getGitHead(),
     branch,
+    gitAvailable: GIT_AVAILABLE,
   }
 })
 
@@ -112,6 +120,12 @@ systemRouter.get('/check-update', async (ctx: Context) => {
     ctx.body = { error: 'Forbidden' }
     return
   }
+  // No .git → nothing to fetch, and every git call below would just time out.
+  // Say so explicitly instead of letting it fall through to "remote-unavailable".
+  if (!GIT_AVAILABLE) {
+    ctx.body = { hasUpdate: false, localHead: 'unknown', remoteHead: null, reason: 'not-a-repo', gitAvailable: false }
+    return
+  }
   const localHead = await getGitHead()
   try {
     // 先尝试获取远程（不拉取代码，只更新远程跟踪分支）；GIT_TERMINAL_PROMPT=0 防凭据交互卡死；8s 超时避免弹窗久等
@@ -120,14 +134,14 @@ systemRouter.get('/check-update', async (ctx: Context) => {
     const { stdout: remoteOut } = await execAsync('git rev-parse --short origin/main 2>/dev/null || git rev-parse --short origin/HEAD 2>/dev/null || echo unknown', { cwd: PROJECT_ROOT, timeout: 5000 })
     const remoteHead = remoteOut.toString().trim()
     if (remoteHead === 'unknown') {
-      ctx.body = { hasUpdate: false, localHead, remoteHead: null, reason: 'no-remote-branch', message: '远程分支不可用' }
+      ctx.body = { hasUpdate: false, localHead, remoteHead: null, reason: 'no-remote-branch', message: '远程分支不可用', gitAvailable: true }
       return
     }
     const hasUpdate = remoteHead !== localHead
-    ctx.body = { hasUpdate, localHead, remoteHead, reason: hasUpdate ? 'behind' : 'latest' }
+    ctx.body = { hasUpdate, localHead, remoteHead, reason: hasUpdate ? 'behind' : 'latest', gitAvailable: true }
   } catch (err: any) {
-    // 远程不可达（仓库不存在/无网络）→ 无法检查，视为本地最新
-    ctx.body = { hasUpdate: false, localHead, remoteHead: null, reason: 'remote-unavailable', message: (err.message || '').split('\n')[0]?.slice(0, 100) || '远程不可达' }
+    // 远程不可达（仓库不存在/无网络）→ 无法检查，不再谎称「已是最新」
+    ctx.body = { hasUpdate: false, localHead, remoteHead: null, reason: 'remote-unavailable', message: (err.message || '').split('\n')[0]?.slice(0, 100) || '远程不可达', gitAvailable: true }
   }
 })
 

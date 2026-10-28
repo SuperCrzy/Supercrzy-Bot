@@ -173,10 +173,13 @@ export async function callComputerUse(
  * 保存截屏 PNG 并本地 OCR 认字（免费链路：截图→RapidOCR→文本注入 AI 上下文）
  * 返回给 Agent：截图路径 + 识别出的屏幕文字
  */
+/**
+ * Save the screenshot PNG and recognise its text (screenshot → OS OCR → text in context).
+ * Returns: screenshot path + recognised lines + which engine actually ran.
+ */
 async function saveScreenshotWithOcr(base64Data: string): Promise<string> {
   const { mkdirSync, writeFileSync, existsSync } = await import('fs')
-  const { join, dirname } = await import('path')
-  const { fileURLToPath } = await import('url')
+  const { join } = await import('path')
   try {
     const buf = Buffer.from(base64Data, 'base64')
     const shotDir = join(process.cwd(), 'uploads', 'screenshots')
@@ -184,25 +187,15 @@ async function saveScreenshotWithOcr(base64Data: string): Promise<string> {
     const fname = `screen-${Date.now()}.png`
     const fpath = join(shotDir, fname)
     writeFileSync(fpath, buf)
-    // 本地 OCR（与 /api/ocr 同一脚本，免费认字）
-    try {
-      const { execFile } = await import('child_process')
-      const { promisify } = await import('util')
-      const execFileP = promisify(execFile)
-      const __dirname = dirname(fileURLToPath(import.meta.url))
-      // 🔴 不许写死解释器路径：曾经这里硬编码了某个开发机上的 python 绝对路径，
-      // 对外发布后别人的机器必然命中不存在 ⇒ OCR 每次失败，且顺带泄露本机路径。
-      // 解析顺序：显式配置 → PATH 里的 python3（下面的 catch 会把「找不到」变成可读提示）。
-      const PYTHON_BIN = process.env.OCR_PYTHON_BIN || 'python3'
-      const OCR_SCRIPT = join(__dirname, '../../scripts/ocr_service.py')
-      const { stdout } = await execFileP(PYTHON_BIN, [OCR_SCRIPT, fpath], { timeout: 30000 })
-      const ocr = JSON.parse(stdout) as { texts?: string[]; error?: string }
-      if (ocr.error) return `📸 截图已保存: ${fpath}\n（OCR 失败: ${ocr.error}）`
-      const lines = (ocr.texts || []).map((t) => `- ${t}`).join('\n')
-      return `📸 截图已保存: ${fpath}\n🔍 屏幕文字识别（OCR）:\n${lines || '（未识别到文字）'}`
-    } catch (err: any) {
-      return `📸 截图已保存: ${fpath}\n（OCR 调用失败: ${err.message}）`
+    // Engine chain lives in services/ocr-engine.ts: macOS Vision → Windows WinRT → RapidOCR.
+    // It never throws; `engine === 'none'` means we must say WHY instead of implying "no text".
+    const { runOcr } = await import('./ocr-engine')
+    const ocr = await runOcr(fpath)
+    if (ocr.engine === 'none') {
+      return `📸 截图已保存: ${fpath}\n（OCR 不可用: ${ocr.error}）\n提示：macOS 无需额外安装；Windows 需在系统里安装对应语言包的 OCR 组件。`
     }
+    const lines = ocr.texts.map((t) => `- ${t}`).join('\n')
+    return `📸 截图已保存: ${fpath}\n🔍 屏幕文字识别（OCR · ${ocr.engine}）:\n${lines || '（未识别到文字）'}`
   } catch (err: any) {
     return `❌ 截屏保存失败: ${err.message}`
   }

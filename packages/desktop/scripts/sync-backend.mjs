@@ -37,8 +37,16 @@ if (!existsSync(join(srcRoot, 'src'))) {
   process.exit(2)
 }
 
-/** 需要同步的相对路径（文件或目录） */
-const ITEMS = ['src', 'package.json', 'tsconfig.json']
+/**
+ * 需要同步的相对路径（文件或目录）
+ */
+// 2026-10-26: the OCR runtime lives in `scripts/`, and services/ocr-engine.ts resolves all
+// of it through join(__dirname, '../../scripts/...') — so a packaged app must carry:
+//   ocr_service.py   legacy python fallback (RapidOCR, user-installed deps)
+//   win_ocr.ps1      Windows.Media.Ocr shim (zero deps)
+//   bin/vision_ocr   compiled macOS Vision helper (~68KB, built by `pnpm build`)
+// Missing any of them used to mean "screenshot without text", silently.
+const ITEMS = ['src', 'package.json', 'tsconfig.json', 'scripts/ocr_service.py', 'scripts/win_ocr.ps1', 'scripts/bin']
 const checkOnly = process.argv.includes('--check')
 
 /** 递归列出目录下所有文件的相对路径 */
