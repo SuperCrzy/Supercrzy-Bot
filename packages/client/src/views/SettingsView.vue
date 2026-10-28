@@ -12,6 +12,15 @@
           <!-- Tab 1: 账户 -->
           <n-tab-pane name="account" :tab="$t('settings.tabAccount')">
             <div class="tab-content">
+              <div class="account-panel">
+                <div class="account-panel-info">
+                  <p class="account-panel-label">{{ $t('account.signedInAs') }}</p>
+                  <p class="account-panel-email">{{ accountStore.email || '—' }}</p>
+                </div>
+                <n-button size="small" :loading="signOutBusy" @click="handleSignOut">
+                  {{ $t('account.signOut') }}
+                </n-button>
+              </div>
               <!-- 个人资料：昵称 + 头像 -->
               <div class="profile-section">
                 <div class="profile-head">
@@ -445,6 +454,7 @@ import { detectLocale } from '@/utils/locale'
 import { PERMISSION_TIERS, TIER_I18N, isPermissionTier, DEFAULT_PERMISSION_TIER } from '@/utils/permission'
 import { useReasoningDisplay } from '@/utils/reasoning-display'
 import { useAppStore } from '@/stores/app'
+import { useAccountStore } from '@/stores/account'
 import { getModelSelectOptions } from '@/data/models'
 import ProfileAvatar from '@/components/ui/ProfileAvatar.vue'
 import SvgIcon from '@/components/ui/SvgIcon.vue'
@@ -463,6 +473,20 @@ import { AUTO_READ_MODES, DEFAULT_AUTO_READ_MODE, normalizeAutoReadMode } from '
 
 const router = useRouter()
 const appStore = useAppStore()
+const accountStore = useAccountStore()
+const signOutBusy = ref(false)
+
+// Signing out drops the local session; the router guard then sends us to /login.
+async function handleSignOut() {
+  if (signOutBusy.value) return
+  signOutBusy.value = true
+  try {
+    await accountStore.signOut()
+    router.replace({ name: 'Login' })
+  } finally {
+    signOutBusy.value = false
+  }
+}
 const nMessage = useMessage()
 const { locale, t } = useI18n({ useScope: 'global' })
 
@@ -1270,4 +1294,32 @@ async function saveSettings() {
 .upload-plus { font-size: 18px; color: var(--text-muted); font-weight: 300; }
 .hidden-file { display: none; }
 
+
+.account-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  margin-bottom: 18px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-tertiary);
+}
+.account-panel-info { min-width: 0; }
+.account-panel-label {
+  margin: 0 0 3px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.account-panel-email {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 </style>

@@ -1,8 +1,18 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
 import i18n from '@/i18n'
+import { useAccountStore } from '@/stores/account'
 
 const routes: RouteRecordRaw[] = [
+  // Sign-in lives outside MainLayout: there is no navigation to offer until the
+  // account exists, and the layout would otherwise mount the whole app behind
+  // the login screen.
+  {
+    path: '/login',
+    name: 'Login',
+    component: () => import('@/views/LoginView.vue'),
+    meta: { title: 'nav.login', public: true },
+  },
   {
     path: '/',
     component: () => import('@/components/layout/MainLayout.vue'),
@@ -32,7 +42,15 @@ const router = createRouter({
   routes,
 })
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
+  // The app requires an account, so resolve who is signed in before the first
+  // route renders. ensureReady() is memoised — this costs one request per boot.
+  const account = useAccountStore()
+  await account.ensureReady()
+
+  if (!account.signedIn && !to.meta.public) return { name: 'Login' }
+  if (account.signedIn && to.name === 'Login') return { name: 'Chat' }
+
   const title = to.meta.title as string
   if (title) document.title = `${i18n().global.t(title)} - SUPERCRZY BOT`
 })

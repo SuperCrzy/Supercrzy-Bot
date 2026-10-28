@@ -23,6 +23,8 @@ import { mediaMimeOf, isNonPreviewableBinary, docxMimeOf } from './services/file
 // TTS 启动预热：手机实测"进程刚起来的第一条朗读"要付冷 TLS 成本（见 warmUpTts 注释）
 import { warmUpTts } from './services/tts'
 import { pickTtsRoute } from './services/tts-route'
+import { accountRouter } from './routes/account'
+import { requireAccount } from './services/account-auth'
 import { chatRouter } from './routes/chat'
 import { fsRouter } from './routes/filesystem'
 import { settingsRouter } from './routes/settings'
@@ -426,6 +428,11 @@ async function bootstrap() {
     return next()
   })
 
+  // Signed-in gate for every API route. Runs after the network-exposure check
+  // above: that one keeps strangers out of a LAN-bound instance, this one keeps
+  // the app unusable until an account exists.
+  app.use(requireAccount)
+
   // AI 浏览器起始页：desktop 的原生视图（WebContentsView）必须先 loadURL 一个**真实 http 页面**
   // 才可能被 attach 模式接管（about:blank / data: 都会被 judgeUrl 挡掉）。
   // 必须挂在 koa-static **之前**：否则会被 SPA 兜底吞掉，URL 是起始页、内容却是 App 界面。
@@ -448,7 +455,7 @@ async function bootstrap() {
   }
 
   // API Routes
-  const routers = [uploadRouter, chatRouter, fsRouter, settingsRouter, sessionRouter, historyRouter, statsRouter, memoryRouter, gatewayRouter, skillsRouter, tasksRouter, automationsRouter, modelsRouter, workspaceRouter, ocrRouter, checkpointsRouter, playbookRouter, rolesRouter, systemRouter, collabRouter, newsRouter, ttsRouter, mcpRouter, routineRouter, terminalRouter, taskStateRouter, bgTasksRouter, capabilitiesRouter]
+  const routers = [accountRouter, uploadRouter, chatRouter, fsRouter, settingsRouter, sessionRouter, historyRouter, statsRouter, memoryRouter, gatewayRouter, skillsRouter, tasksRouter, automationsRouter, modelsRouter, workspaceRouter, ocrRouter, checkpointsRouter, playbookRouter, rolesRouter, systemRouter, collabRouter, newsRouter, ttsRouter, mcpRouter, routineRouter, terminalRouter, taskStateRouter, bgTasksRouter, capabilitiesRouter]
   // 统一任务状态机：回填历史任务（进程重启后仍可查询上次状态，幽灵任务自动收敛为 cancelled）
   try { const n = restoreFromDB(); if (n > 0) console.log(`[task-state] 已回填 ${n} 条历史任务`) } catch { /* 不影响启动 */ }
   for (const r of routers) {
@@ -578,6 +585,18 @@ async function bootstrap() {
     // 先选出口（直连 vs 中继），再预热连接 —— 顺序不能反：
     // 预热到错误出口等于白建一条连接，而且它会被当成"可用"干扰后续判断。
     void pickTtsRoute().finally(() => warmUpTts())
+
+    // OCR warmup (2026-10-26): the first macOS Vision call after boot takes ~60s
+    // (model load); afterwards 0.35-0.65s. Without this, the first computer_use
+    // screenshot after every restart would stall for a minute. Local cache only —
+    // a failure is silent because the real call retries.
+    void import('./services/ocr-engine')
+      .then((m) => m.warmupOcr())
+      .then((r) => {
+        if (r.ok) console.log(`[OCR] warmup: ${r.engine} ready in ${(r.elapsed / 1000).toFixed(1)}s`)
+        else console.log('[OCR] warmup: no engine available (screenshots will degrade to text-only)')
+      })
+      .catch(() => {})
 
     // 恢复已启用的各平台通道（常驻后台）
     startAllTelegramChannels().catch((err: any) => {

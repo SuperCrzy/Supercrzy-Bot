@@ -4,6 +4,7 @@ import naive from 'naive-ui'
 import App from './App.vue'
 import createRouter from './router'
 import createI18n from './i18n'
+import { installAuthInterceptor } from './utils/auth-interceptor'
 import './styles/tokens.css'
 import './assets/styles/global.css'
 
@@ -17,5 +18,8 @@ app.use(pinia)
 app.use(router)
 app.use(i18n)
 app.use(naive)
+
+// Any 401 from the local backend sends the user back to the login screen.
+installAuthInterceptor(router)
 
 app.mount('#app')
