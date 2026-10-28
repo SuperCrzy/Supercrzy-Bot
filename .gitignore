@@ -133,3 +133,6 @@ packages/desktop/.build-tools/
 
 # Compiled OCR helpers (rebuilt by `pnpm --filter @supercrzy/server build:ocr`) — 2026-10-28
 packages/server/scripts/bin/
+
+# Generated media/doc artifacts from ad-hoc runs — 2026-10-28
+/output/
