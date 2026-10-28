@@ -43,8 +43,19 @@ const REPO = 'SuperCrzy/Supercrzy-Bot'
 /** Marker for text a human must replace. Kept greppable and unique on purpose. */
 const TODO = 'RELEASE-TODO:'
 
-const sh = (cmd, opts = {}) =>
-  execSync(cmd, { cwd: ROOT, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], ...opts }).trim()
+/**
+ * Run a command and return its trimmed stdout.
+ *
+ * `execSync` returns null — not an empty string — when `stdio` is 'inherit',
+ * which is exactly what the gate step passes so `pnpm verify` can stream its
+ * output. Trimming the return value unconditionally threw
+ * "Cannot read properties of null (reading 'trim')" at the end of a green gate
+ * run, so the release died after every check had already passed.
+ */
+const sh = (cmd, opts = {}) => {
+  const out = execSync(cmd, { cwd: ROOT, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], ...opts })
+  return out == null ? '' : out.trim()
+}
 const shQuiet = (cmd) => {
   try { return sh(cmd, { stdio: 'pipe' }) } catch { return '' }
 }
