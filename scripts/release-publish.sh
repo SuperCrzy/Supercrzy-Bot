@@ -179,8 +179,12 @@ ts=$(date +%Y%m%d-%H%M%S)
 for f in latest-mac.yml latest.yml; do
     [ -f "$REL_DIR/$f" ] && cp -a "$REL_DIR/$f" "$REL_DIR/$f.bak-$ts"
 done
-MAC_DIR=$(find /root/artifacts/mac -name '*.dmg' | head -1 | xargs dirname)
-WIN_DIR=$(find /root/artifacts/win -name '*.exe' | head -1 | xargs dirname)
+# `xargs dirname` splits on spaces, and every artifact name contains one
+# ("SUPERCRZY BOT-1.3.0-arm64.dmg"), so it returned two lines and every `cp`
+# below failed with a path that had a newline in the middle. Quote the input
+# instead and let dirname see the whole name.
+MAC_DIR=$(dirname "$(find /root/artifacts/mac -name '*.dmg' -print -quit)")
+WIN_DIR=$(dirname "$(find /root/artifacts/win -name '*.exe' -print -quit)")
 cp -v "$MAC_DIR/SUPERCRZY BOT-$PUB_VER-arm64.dmg"         "$REL_DIR/"
 cp -v "$MAC_DIR/SUPERCRZY BOT-$PUB_VER-arm64.dmg.blockmap"     "$REL_DIR/"
 cp -v "$MAC_DIR/SUPERCRZY BOT-$PUB_VER-arm64-mac.zip"         "$REL_DIR/"
@@ -226,11 +230,27 @@ EXE=$(find win -name "SUPERCRZY BOT Setup $PUB_VER.exe" | head -1)
 for f in "$DMG" "$ZIP" "$EXE"; do
     base=$(basename "$f")
     enc=$(python3 -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1]))' "$base")
-    code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
-        -H "Authorization: Bearer $GH_TOKEN" \
-        -H "Content-Type: application/octet-stream" \
-        --data-binary @"$f" \
-        "https://uploads.github.com/repos/SuperCrzy/Supercrzy-Bot/releases/$REL_ID/assets?name=$enc")
+    upload() {
+        curl -s -o /dev/null -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Content-Type: application/octet-stream" \
+            --data-binary @"$f" \
+            "https://uploads.github.com/repos/SuperCrzy/Supercrzy-Bot/releases/$REL_ID/assets?name=$enc"
+    }
+    code=$(upload)
+    if [ "$code" = "422" ]; then
+        # Re-running a publish that died after this asset landed: GitHub refuses
+        # a duplicate name, so drop the old one and upload again instead of
+        # failing the whole release on an artifact that is already correct.
+        asset_id=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/SuperCrzy/Supercrzy-Bot/releases/$REL_ID/assets?per_page=100" \
+            | python3 -c 'import json,sys;name=sys.argv[1];print(next((a["id"] for a in json.load(sys.stdin) if a["name"]==name),""))' "$base")
+        if [ -n "$asset_id" ]; then
+            curl -s -o /dev/null -X DELETE -H "Authorization: Bearer $GH_TOKEN" \
+                "https://api.github.com/repos/SuperCrzy/Supercrzy-Bot/releases/assets/$asset_id"
+            code=$(upload)
+        fi
+    fi
     echo "$base: HTTP $code"
     [ "$code" = "201" ] || exit 1
 done
