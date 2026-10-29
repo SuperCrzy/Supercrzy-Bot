@@ -564,6 +564,16 @@ onMounted(() => {
   display: flex;
   flex: 1;
   min-height: 0;
+  /* 🔴 2026-10-28 Fix — "maximising the AI browser eats the title bar".
+     `.detail-panel.visible.maximized` is `position:absolute; top:0; bottom:0`, but nothing
+     above it on the chain (.app-layout / .app-body / App.vue) was positioned, so the
+     containing block fell back to the initial containing block — the viewport. The panel
+     then spread from window y=0, covering the whole 56px title strip: no title bar (so the
+     window cannot be dragged), and the panel's own close button ended up stacked under the
+     Windows `titleBarOverlay` controls (minimise/maximise/close), i.e. unclickable.
+     This one line makes app-body the containing block, which is exactly "everything below
+     the title bar". Keep it on .app-body, NOT on .app-layout — that would cover the bar again. */
+  position: relative;
 }
 
 /* ===== Sidebar（宽度用 CSS 变量，支持拖拽调整 + 横栏标题联动） ===== */

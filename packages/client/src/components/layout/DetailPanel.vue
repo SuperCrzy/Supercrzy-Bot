@@ -26,6 +26,12 @@
         </div>
       </div>
 
+      <!-- Maximised: exit without closing the panel. The maximise toggle lives inside the
+           preview / browser tab body, so every other tab needs this button to get out. -->
+      <button v-if="maximized" class="panel-close-btn" @click="restoreMaximize" :title="$t('detail.previewRestore')">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/></svg>
+      </button>
+
       <button class="panel-close-btn" @click="emit('toggle')" :title="$t('detail.collapse')">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <polyline points="15 18 9 12 15 6" />
@@ -230,6 +236,7 @@ import TimelinePanel from '@/components/chat/TimelinePanel.vue'
 import PreviewPane from '@/components/layout/PreviewPane.vue'
 import AiBrowserPanel from '@/components/layout/AiBrowserPanel.vue'
 import BgTaskPreview from '@/components/chat/BgTaskPreview.vue'
+import { usePanelMaximize } from '@/composables/usePanelMaximize'
 import { sanitizeSvg } from '@/utils/sanitize-svg'
 import { openFilePreview } from '@/utils/file-preview'
 import type { FileBlock } from '@/types'
@@ -257,7 +264,8 @@ const { t } = useI18n({ useScope: 'global' })
 const chatStore = useChatStore()
 
 // ===== L1/L2 实时预览：store 数据 + 800ms 防抖 + 配套 css/js 内联 =====
-const maximized = ref(false)
+// Maximise state + its three exits (restore button / Esc / tab change) live in the composable.
+const { maximized, restore: restoreMaximize } = usePanelMaximize(() => props.visible, () => props.activeTab)
 /** 宽内容 Tab：仅预览/变更 diff(内容型默认宽)。浏览器默认窄像产物列，点放大才 92%(老板定) */
 const livePreviewPath = ref('')
 
@@ -695,10 +703,14 @@ const tabs = [
    其它 320px ⇒ 切 tab 面板 320↔800px 跳变，观感即"宽度不统一"。现在所有 tab 统一 420px，
    预览/长代码需要更大走已有的"最大化"按钮（92%）。 */
 
-/* 预览最大化：展开覆盖聊天区，大屏查看（L1） */
+/* 预览最大化：展开覆盖聊天区，大屏查看（L1）
+   🔴 2026-10-28：`top:0` 的基准是 `.app-body`（MainLayout 已补 position:relative）。
+   基准缺失时会退回视口 ⇒ 连 56px 顶栏一起盖掉，Windows 上「面板关闭键」正好叠在
+   titleBarOverlay 的系统按钮下面，点不到 = 关不掉。min-width 夹到容器宽度以内，
+   否则最小窗宽（960px）下 720px 会越过侧边栏。 */
 .detail-panel.visible.maximized {
   width: 92%;
-  min-width: 720px;
+  min-width: min(720px, 100%);
   position: absolute;
   right: 0;
   top: 0;
