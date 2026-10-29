@@ -1,6 +1,6 @@
 <template>
   <div class="login-screen">
-    <div class="login-lang" role="group" :aria-label="t('account.language')">
+    <div class="login-lang" :class="{ 'win-controls': isWinDesktop }" role="group" :aria-label="t('account.language')">
       <button
         type="button"
         :class="['login-lang-btn', { active: locale === 'zh-CN' }]"
@@ -72,6 +72,24 @@ const account = useAccountStore()
 
 type Phase = 'idle' | 'starting' | 'waiting' | 'timeout' | 'error'
 const phase = ref<Phase>('idle')
+
+// Windows paints the window controls (minimise/maximise/close, titleBarOverlay)
+// into the top-right ~140×56 band — exactly where the language switch sits.
+// macOS traffic lights live top-left, so the switch only needs to move on Windows.
+// Same detection shape as MainLayout: default darwin keeps the current layout when
+// the bridge is missing (plain browser).
+const isWinDesktop = ref(false)
+;(() => {
+  try {
+    const d = (window as any).supercrzyDesktop
+    if (d?.isDesktop) {
+      d.app?.getInfo?.().then((info: any) => {
+        if (info?.platform === 'win32') isWinDesktop.value = true
+      }).catch(() => {})
+    }
+  } catch { /* browser environment */ }
+})()
+
 
 // The app requires sign-in, so this screen is the only place a reader can flip
 // the language before reaching Settings. The choice persists under the same key
@@ -306,6 +324,11 @@ onUnmounted(stopPolling)
   gap: 6px;
   font-size: 12px;
   color: var(--text-muted);
+}
+/* Windows: sit left of the titleBarOverlay controls (140px band + 20px gap,
+   same 140px figure MainLayout's .traffic-spacer--win reserves). */
+.login-lang.win-controls {
+  right: 160px;
 }
 .login-lang-btn {
   background: none;
