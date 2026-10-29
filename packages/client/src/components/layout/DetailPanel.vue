@@ -264,8 +264,9 @@ const { t } = useI18n({ useScope: 'global' })
 const chatStore = useChatStore()
 
 // ===== L1/L2 实时预览：store 数据 + 800ms 防抖 + 配套 css/js 内联 =====
-// Maximise state + its three exits (restore button / Esc / tab change) live in the composable.
-const { maximized, restore: restoreMaximize } = usePanelMaximize(() => props.visible, () => props.activeTab)
+// Maximise state + its exits (restore button / Esc / tab change / conversation change)
+// live in the composable.
+const { maximized, restore: restoreMaximize } = usePanelMaximize(() => props.visible, () => props.activeTab, () => chatStore.currentSessionId)
 /** 宽内容 Tab：仅预览/变更 diff(内容型默认宽)。浏览器默认窄像产物列，点放大才 92%(老板定) */
 const livePreviewPath = ref('')
 
@@ -658,7 +659,7 @@ interface TabDef { key: string; label: string; icon: string }
 const rowTabs = computed<TabDef[]>(() => (tabs as TabDef[]).filter((x) => (MAIN_KEYS as readonly string[]).includes(x.key)))
 const moreTabs = computed<TabDef[]>(() => (tabs as TabDef[]).filter((x) => (MORE_KEYS as readonly string[]).includes(x.key)))
 const inMoreTab = computed(() => (MORE_KEYS as readonly string[]).includes(props.activeTab))
-function switchMainOrMore(k: string) { emit('update:tab', k as any); if ((MORE_KEYS as readonly string[]).includes(k)) tabMoreOpen.value = false }
+function switchMainOrMore(k: string) { emit('update:tab', k as any); tabMoreOpen.value = false }
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`

@@ -16,8 +16,16 @@ import { onMounted, onUnmounted, ref, watch } from 'vue'
  *
  * @param isVisible current panel visibility (`detailPanelVisible`)
  * @param activeTab current tab key; any change drops back to the normal width
+ * @param sessionId current conversation id; a sidebar click on another
+ *   conversation must also hand the chat area back — the maximised overlay
+ *   belongs to one session, and browsing conversations must never leave the
+ *   chat trapped under it
  */
-export function usePanelMaximize(isVisible: () => boolean, activeTab: () => string) {
+export function usePanelMaximize(
+  isVisible: () => boolean,
+  activeTab: () => string,
+  sessionId: () => string | null | undefined = () => undefined,
+) {
   const maximized = ref(false)
   const restore = () => {
     maximized.value = false
@@ -39,6 +47,7 @@ export function usePanelMaximize(isVisible: () => boolean, activeTab: () => stri
     if (!v) restore()
   })
   watch(activeTab, () => restore())
+  watch(sessionId, () => restore())
 
   return { maximized, restore }
 }

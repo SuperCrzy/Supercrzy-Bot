@@ -54,6 +54,15 @@ await page.waitForSelector('.app-layout', { timeout: 30000 })
 await page.click('.traffic-actions .traffic-action-btn:last-child')
 await page.waitForSelector('.detail-panel.visible', { timeout: 10000 })
 
+// The "more" dropdown must close on ANY tab selection (boss report 2026-10-29:
+// it stayed open after clicking a row tab like the AI browser).
+await page.click('.panel-tabs .more-tab')
+await page.waitForTimeout(200)
+check('「更多」下拉框可以展开', await page.locator('.tab-more-drop').isVisible())
+await page.locator('.panel-tabs > .panel-tab').first().click()
+await page.waitForTimeout(200)
+check('点行内 tab 后「更多」下拉框自动收起', !(await page.locator('.tab-more-drop').isVisible()))
+
 // Switch to the AI browser tab (4th direct child: artifacts / files / preview / browser),
 // then maximise. Direct-child selector on purpose: the "more" dropdown lives in a wrapper.
 const browserTab = page.locator('.panel-tabs > .panel-tab').nth(3)
