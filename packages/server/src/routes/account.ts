@@ -38,13 +38,30 @@ function prunePending(now = Date.now()): void {
   }
 }
 
+/**
+ * Pick the command that opens `url` in the system browser.
+ *
+ * 🔴 Windows must NOT go through `cmd /c start`. libuv only quotes arguments that
+ * contain whitespace or quotes — a bare `&` stays unquoted, and cmd treats `&` as a
+ * command separator. The login URL (`...?returnPath=...&code_challenge=...&state=...`)
+ * was therefore split at the first `&`: the browser received only `?returnPath=...`,
+ * the portal POSTed /auth/verify without a PKCE challenge, and the auth server
+ * answered `pkce_required` ("回环重定向必须发送PKCE挑战"). Confirmed in the auth
+ * nginx log on 2026-10-29: the Windows attempt's referer carried `returnPath` only,
+ * while the (working) macOS attempt carried the full query string.
+ *
+ * `rundll32 url.dll,FileProtocolHandler` is a real executable invoked via
+ * CreateProcess — no cmd parsing involved, so `&` survives intact, and it still
+ * opens the user's default browser.
+ */
+export function browserOpenCommand(platform: NodeJS.Platform, url: string): [string, string[]] {
+  if (platform === 'darwin') return ['open', [url]]
+  if (platform === 'win32') return ['rundll32', ['url.dll,FileProtocolHandler', url]]
+  return ['xdg-open', [url]]
+}
+
 function openBrowser(url: string): void {
-  const [cmd, args] =
-    process.platform === 'darwin'
-      ? ['open', [url]]
-      : process.platform === 'win32'
-        ? ['cmd', ['/c', 'start', '', url]]
-        : ['xdg-open', [url]]
+  const [cmd, args] = browserOpenCommand(process.platform, url)
   try {
     const child = spawn(cmd, args, { detached: true, stdio: 'ignore' })
     child.on('error', () => {})
