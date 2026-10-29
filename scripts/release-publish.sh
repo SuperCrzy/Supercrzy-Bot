@@ -285,6 +285,18 @@ if grep -qF "$old_ver" "$tmp_html"; then
     rm -f "$tmp_html"
     die "bot.html still contains \"$old_ver\" after rewrite — add the new form to the sed rules"
 fi
+# 🔴 2026-10-29: the generic `vX.Y.Z` rule also rewrote the demo-video caption
+# ("Filmed on SUPERCRZY BOT v1.3.0") — but that footage was recorded on an older
+# build, so bumping the caption publishes a claim that is not true. Pin the
+# caption back to the version the film was actually shot on. Runs *after* the
+# self-check on purpose: the check must see a fully bumped document first.
+cap_ver=$(grep -oE 'Filmed on SUPERCRZY BOT v[0-9]+\.[0-9]+\.[0-9]+' "$SITE_BOT_HTML" | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+if [ -n "$cap_ver" ] && [ "$cap_ver" != "$VER" ]; then
+    tmp_cap=$(mktemp)
+    sed "s/Filmed on SUPERCRZY BOT v$VER\./Filmed on SUPERCRZY BOT v$cap_ver./" "$tmp_html" > "$tmp_cap"
+    mv "$tmp_cap" "$tmp_html"
+    echo "bot.html: demo-video caption kept at v$cap_ver (footage predates v$VER)"
+fi
 replaced=$(diff -U0 "$SITE_BOT_HTML" "$tmp_html" | grep -c '^+[^+]' || true)
 echo "bot.html: $old_ver -> $VER, $replaced changed lines"
 if [ "$replaced" -eq 0 ]; then
