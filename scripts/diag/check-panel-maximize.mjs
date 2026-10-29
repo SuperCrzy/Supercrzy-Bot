@@ -113,9 +113,17 @@ check(
 )
 
 check(
-  '放大后面板变宽（92% 级别）',
+  '放大后面板变宽（占满侧边栏以右）',
   !!panelBox && panelBox.width > (normalBox?.width ?? 0) * 1.5,
   `normal=${Math.round(normalBox?.width ?? 0)} → max=${Math.round(panelBox?.width ?? 0)}`,
+)
+
+// The conversation list must stay usable: the overlay starts at the sidebar's edge.
+const sidebarBox = await page.locator('.sidebar').boundingBox()
+check(
+  '放大后面板不覆盖左侧边栏',
+  !!panelBox && !!sidebarBox && panelBox.x >= sidebarBox.width - 1,
+  `panel.x=${Math.round(panelBox?.x ?? 0)} sidebar.w=${Math.round(sidebarBox?.width ?? 0)}`,
 )
 
 // Right edge alignment: the Windows window controls sit at the top-right corner.
@@ -143,16 +151,25 @@ await page.waitForTimeout(400)
 let restored = await page.locator('.detail-panel').boundingBox()
 check('点「还原」回到常规宽度', !!restored && Math.abs(restored.width - 420) < 4, `w=${Math.round(restored?.width ?? 0)}`)
 
-// Exit #2: Escape.
+// Exit #2: clicking anywhere in the sidebar restores (boss report 2026-10-29:
+// no sidebar position could shrink the panel back).
 await maxBtn.click()
 await page.waitForTimeout(400)
 check('再次放大成功', (await page.locator('.detail-panel').boundingBox())?.width > 700)
+await page.locator('.sidebar').click({ position: { x: 60, y: 120 } })
+await page.waitForTimeout(400)
+restored = await page.locator('.detail-panel').boundingBox()
+check('点侧边栏即缩回', !!restored && Math.abs(restored.width - 420) < 4, `w=${Math.round(restored?.width ?? 0)}`)
+
+// Exit #3: Escape.
+await maxBtn.click()
+await page.waitForTimeout(400)
 await page.keyboard.press('Escape')
 await page.waitForTimeout(400)
 restored = await page.locator('.detail-panel').boundingBox()
 check('Esc 退出放大', !!restored && Math.abs(restored.width - 420) < 4, `w=${Math.round(restored?.width ?? 0)}`)
 
-// Exit #3: switching tabs collapses the maximised width.
+// Exit #4: switching tabs collapses the maximised width.
 await maxBtn.click()
 await page.waitForTimeout(400)
 await page.locator('.panel-tabs .panel-tab').first().click()

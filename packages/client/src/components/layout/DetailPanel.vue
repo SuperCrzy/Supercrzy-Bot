@@ -705,17 +705,18 @@ const tabs = [
    预览/长代码需要更大走已有的"最大化"按钮（92%）。 */
 
 /* 预览最大化：展开覆盖聊天区，大屏查看（L1）
-   🔴 2026-10-28：`top:0` 的基准是 `.app-body`（MainLayout 已补 position:relative）。
-   基准缺失时会退回视口 ⇒ 连 56px 顶栏一起盖掉，Windows 上「面板关闭键」正好叠在
-   titleBarOverlay 的系统按钮下面，点不到 = 关不掉。min-width 夹到容器宽度以内，
-   否则最小窗宽（960px）下 720px 会越过侧边栏。 */
+   🔴 2026-10-28：`top:0` 的基准是 `.app-body`（MainLayout 已补 position:relative）；
+   基准缺失会退回视口 ⇒ 连 56px 顶栏一起盖掉。
+   🔴 2026-10-29：左边界止于侧边栏右缘 —— 原先 width:92% 从右侧铺开把会话列表也盖住，
+   点对话时命中面板 ⇒「点侧边栏缩回」不可能发生。现在侧边栏始终可点，点它即还原。 */
 .detail-panel.visible.maximized {
-  width: 92%;
-  min-width: min(720px, 100%);
   position: absolute;
-  right: 0;
   top: 0;
+  right: 0;
   bottom: 0;
+  left: var(--sidebar-w, 220px);
+  width: auto;
+  min-width: 0;
   z-index: 80;
   box-shadow: -4px 0 20px rgba(0, 0, 0, .18);
 }

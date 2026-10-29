@@ -40,8 +40,28 @@ export function usePanelMaximize(
     restore()
   }
 
-  onMounted(() => window.addEventListener('keydown', onKeydown))
-  onUnmounted(() => window.removeEventListener('keydown', onKeydown))
+  /**
+   * Touching the sidebar always hands the chat area back.
+   *
+   * The maximised panel starts at the sidebar's right edge, so its conversations
+   * stay visible — but without this, clicking one only closes the overlay when it
+   * happens to be a *different* conversation. Clicking the same one, the logo or
+   * empty space left the chat covered with no feedback.
+   */
+  function onPointerDown(e: PointerEvent) {
+    if (!maximized.value) return
+    const el = e.target as HTMLElement | null
+    if (el && el.closest('.sidebar, .sidebar-sash, .mobile-topbar')) restore()
+  }
+
+  onMounted(() => {
+    window.addEventListener('keydown', onKeydown)
+    window.addEventListener('pointerdown', onPointerDown, true)
+  })
+  onUnmounted(() => {
+    window.removeEventListener('keydown', onKeydown)
+    window.removeEventListener('pointerdown', onPointerDown, true)
+  })
 
   watch(isVisible, (v) => {
     if (!v) restore()
