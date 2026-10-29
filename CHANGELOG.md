@@ -9,6 +9,39 @@
 
 ---
 
+## v1.3.1 (2026-10-29) — Windows 登录修复 + 窗口细节三处
+
+### 新功能
+
+_本次无新功能。_
+
+### 修复
+
+- **Windows 端登录失败已修（4736f40）**
+  - 根因：`cmd /c start` 把登录 URL 在第一个 `&` 处当命令分隔符切开，浏览器只收到
+    `?returnPath=...`，`code_challenge`/`state` 丢失，登录页报「回环重定向必须发送PKCE挑战」。
+  - VPS nginx 日志实锤：Windows 尝试的 referer 只有 returnPath（400），mac 尝试带完整 query（200）。
+  - 改用 `rundll32 url.dll,FileProtocolHandler` 直启（不经 cmd 解析），URL 单参数完整；
+    `browserOpenCommand` 抽成纯函数并加 3 个单测锁死。
+- **放大右侧面板不再吃掉标题栏（64ab474）**
+  - 根因：放大态 `position:absolute` 缺 positioned 祖先，`top:0` 相对视口 ⇒ 盖掉 56px 顶栏，
+    Windows 上面板关闭键叠进系统按钮区 ⇒ 点不到。
+  - `.app-body` 补定位基准；`min-width` 夹进容器宽；退出路径 ×4：tab 行还原按钮 / Esc / 切 tab / 关面板。
+- **Windows 登录页中文/English 切换让开系统按钮区（3fd6636）**：win 右缘让位 160px，mac 维持 22px 原样。
+- **更新源发布改用固定路径（1685097）**：发版脚本不再把含换行的路径写进更新源，应用内检查更新解析更稳。
+
+### 工程
+
+- 新增 `scripts/diag/check-panel-maximize.mjs`、`scripts/diag/check-login-lang.mjs`：
+  真实浏览器里量几何断言，均带 `--control` 对照跑法（关掉修复 ⇒ 复现 bug），防"恒真断言"。
+
+### 已知限制
+
+- 两处 Windows 修复（登录、语言切换）依据服务端日志与浏览器实测几何验证，
+  **尚未在真实 Windows 机器上回归**；面板放大修复未在打包后的 Electron 壳里复测。
+
+---
+
 ## v1.3.0 (2026-10-28) — 先登录才能用
 
 ### 新功能

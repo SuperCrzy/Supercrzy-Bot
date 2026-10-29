@@ -37,6 +37,28 @@ export const APP_VERSION: string = typeof __APP_VERSION__ === 'string' ? __APP_V
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.3.1',
+    date: '2026-10-29',
+    title: 'Windows 登录修复，窗口细节顺手理顺',
+    titleEn: 'Windows sign-in fixed, window details tidied',
+    features: [
+      // no new features
+    ],
+    featuresEn: [
+      // no new features
+    ],
+    fixes: [
+      'Windows 端登录已修好：登录链接此前被系统命令行截断，登录页因此拒绝授权；现在完整送达。',
+      '放大右侧面板不再盖住标题栏：还原按钮、Esc、切换标签都能退出放大状态。',
+      'Windows 登录页的中文/English 切换不再被最小化、最大化、关闭按钮挡住。',
+    ],
+    fixesEn: [
+      'Windows sign-in works again: the login link the app opened was cut short by the command shell, so the sign-in page rejected it. The full link now arrives intact.',
+      'Maximising the right panel no longer covers the title bar: restore with the tab-strip button, Escape, or by switching tabs.',
+      'On Windows, the Chinese/English switch on the sign-in screen is no longer hidden behind the window control buttons.',
+    ],
+  },
+  {
     version: '1.3.0',
     date: '2026-10-28',
     title: '先登录，再使用',
