@@ -21,6 +21,8 @@ export const useAccountStore = defineStore('account', () => {
   const accountId = ref('')
   const expiresAt = ref(0)
   const ready = ref(false)
+  /** Last status request failed: signed-in state is stale, not absent. */
+  const degraded = ref(false)
 
   let bootPromise: Promise<void> | null = null
 
@@ -46,7 +48,8 @@ export const useAccountStore = defineStore('account', () => {
     if (ready.value) return Promise.resolve()
     if (!bootPromise) {
       bootPromise = fetchStatus().then((status) => {
-        apply(status)
+        if (status) apply(status)
+        else degraded.value = true
         ready.value = true
       })
     }
@@ -54,7 +57,14 @@ export const useAccountStore = defineStore('account', () => {
   }
 
   async function reload(): Promise<void> {
-    apply(await fetchStatus())
+    const status = await fetchStatus()
+    // 🔴 2026-11-01: a *failed* status request is not a sign-out.
+    // Applying null here flipped `signedIn` to false whenever the account host
+    // was unreachable (VPN / cross-border hiccup) while every API answered 401,
+    // and the router guard then bounced chat ↔ login every poll: the reported
+    // flicker. Keep the last known state; only a real answer may change it.
+    if (status) apply(status)
+    degraded.value = !status
   }
 
   /**
@@ -79,5 +89,5 @@ export const useAccountStore = defineStore('account', () => {
     apply(null)
   }
 
-  return { signedIn, email, accountId, expiresAt, ready, ensureReady, reload, startLogin, signOut }
+  return { signedIn, email, accountId, expiresAt, ready, degraded, ensureReady, reload, startLogin, signOut }
 })

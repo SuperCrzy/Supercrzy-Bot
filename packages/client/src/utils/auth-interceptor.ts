@@ -17,6 +17,11 @@ import { useAccountStore } from '@/stores/account'
 export function installAuthInterceptor(router: Router): void {
   const original = window.fetch.bind(window)
   let recovering = false
+  // Loop breaker: when the IdP is unreachable, several parallel requests answer
+  // 401 within the same tick. Each one would call router.replace('Login'); the
+  // guard bounces a still-signed-in user straight back, which reads as a
+  // strobing screen. One redirect per burst is enough.
+  let lastRedirectAt = 0
 
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const res = await original(input, init)
@@ -28,7 +33,9 @@ export function installAuthInterceptor(router: Router): void {
         try {
           const account = useAccountStore()
           await account.reload()
-          if (!account.signedIn && router.currentRoute.value.name !== 'Login') {
+          const quiet = Date.now() - lastRedirectAt < 3000
+          if (!account.signedIn && !quiet && router.currentRoute.value.name !== 'Login') {
+            lastRedirectAt = Date.now()
             void router.replace({ name: 'Login' })
           }
         } finally {
@@ -39,3 +46,4 @@ export function installAuthInterceptor(router: Router): void {
     return res
   }
 }
+

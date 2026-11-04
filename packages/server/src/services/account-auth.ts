@@ -38,9 +38,28 @@ function authOrigin(): string {
 
 let inFlightRefresh: Promise<boolean> | null = null
 
+/**
+ * Why the last refresh attempt failed — the difference matters to the client.
+ *
+ * `invalid`      → the IdP rejected the token (revoked/expired): the user really
+ *                  is signed out, so 401 and a login screen are correct.
+ * `unreachable`  → we never got an answer (cross-border timeout, VPN hiccup,
+ *                  proxy reset). The session on disk is probably fine, so
+ *                  answering 401 here makes the UI bounce between chat and
+ *                  login on every poll — the 2026-11-01 flicker report.
+ */
+export type RefreshOutcome = 'ok' | 'invalid' | 'unreachable'
+let lastRefreshOutcome: RefreshOutcome = 'ok'
+export function refreshOutcome(): RefreshOutcome {
+  return lastRefreshOutcome
+}
+
 async function rotate(): Promise<boolean> {
   const session = readSession()
-  if (!session?.refreshToken || !session.deviceId) return false
+  if (!session?.refreshToken || !session.deviceId) {
+    lastRefreshOutcome = 'invalid'
+    return false
+  }
 
   let res: Response
   try {
@@ -52,6 +71,7 @@ async function rotate(): Promise<boolean> {
   } catch {
     // Offline: keep the session on disk. The user stays "signed in" and the next
     // request retries; wiping it here would log people out on a flaky network.
+    lastRefreshOutcome = 'unreachable'
     return false
   }
 
@@ -59,21 +79,32 @@ async function rotate(): Promise<boolean> {
     // Another process already rotated this token; the newest one is on disk.
     const latest = readSession()
     if (latest && latest.refreshToken !== session.refreshToken) {
-      return !!currentAccessToken()
+      const ok = !!currentAccessToken()
+      lastRefreshOutcome = ok ? 'ok' : 'unreachable'
+      return ok
     }
+    lastRefreshOutcome = 'unreachable'
     return false
   }
   if (!res.ok) {
-    // The auth service rejected the refresh token outright. Keep the user signed
-    // out locally so the UI and the gate agree instead of looping.
-    if (res.status >= 400 && res.status < 500) clearSession()
+    // Rejected outright → signed out for real; keep UI and gate in agreement.
+    if (res.status >= 400 && res.status < 500) {
+      clearSession()
+      lastRefreshOutcome = 'invalid'
+    } else {
+      // 5xx: their problem, not the user's. Do NOT sign them out.
+      lastRefreshOutcome = 'unreachable'
+    }
     return false
   }
 
   const data = (await res.json().catch(() => null)) as
     | { accessToken?: string; refreshToken?: string; expiresIn?: number }
     | null
-  if (!data?.accessToken) return false
+  if (!data?.accessToken) {
+    lastRefreshOutcome = 'unreachable'
+    return false
+  }
 
   writeSession({
     ...session,
@@ -83,6 +114,7 @@ async function rotate(): Promise<boolean> {
     // Slide the offline window: this is the last time we reached the server.
     savedAt: Date.now(),
   })
+  lastRefreshOutcome = 'ok'
   return true
 }
 
@@ -109,6 +141,18 @@ export async function requireAccount(ctx: Context, next: Next): Promise<void> {
 
   const token = await ensureAccessToken()
   if (!token) {
+    // Distinguish "you are signed out" from "we could not reach the IdP".
+    // Answering 401 in the latter case makes the client treat a network outage
+    // as a logout, which is what produced the login-screen flicker on
+    // 2026-11-01: status said signed-in, every API said 401, the router bounced.
+    if (readSession() && refreshOutcome() === 'unreachable') {
+      ctx.status = 503
+      ctx.body = {
+        error: 'auth_unreachable',
+        message: 'Cannot reach the account service right now — retry shortly',
+      }
+      return
+    }
     ctx.status = 401
     ctx.body = { error: 'sign_in_required', message: 'Sign in to use SUPERCRZY BOT' }
     return
