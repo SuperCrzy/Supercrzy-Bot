@@ -121,6 +121,8 @@ packages/desktop/node_modules/
 packages/desktop/dist/
 packages/desktop/releases/
 packages/desktop/.deploy-server/
+# Android runtime payload (built by scripts/build-mobile-payload.mjs)
+packages/desktop/.mobile-payload/
 # 构建期工具独立目录（@electron/rebuild）—— 故意装在产物之外，绝不能被打进 App（2026-09-21 加）
 packages/desktop/.build-tools/
 
