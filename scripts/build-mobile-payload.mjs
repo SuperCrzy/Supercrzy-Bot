@@ -49,7 +49,14 @@ const PRUNE = [
   'pdf-parse',
   'pdfjs-dist',
   'mammoth',
+  // Native SQLite addon: replaced by the node:sqlite shim that the chroot build
+  // has been running on the phone since 2026-10-20. No toolchain needed on-device.
+  'better-sqlite3',
 ]
+
+/** Runtime shims that replace pruned native modules. */
+const SHIM_SOURCE = process.env.SUPERCRZY_SQLITE_SHIM
+  || join(ROOT, '..', 'supercrzy-bot-mobile', 'shims', 'better-sqlite3')
 
 /** Stubs keep `require()` from throwing at boot for code paths we pruned. */
 const STUBS = {
@@ -176,6 +183,8 @@ async function main() {
   // it keeps the prune list in one place (PRUNE above).
   const excludes = ['--exclude=.DS_Store']
   if (!KEEP_MAPS) excludes.push('--exclude=*.map')
+  // Declaration files are compile-time only; every byte they save is real.
+  excludes.push('--exclude=*.d.ts', '--exclude=*.d.mts', '--exclude=*.d.cts')
 
   execFileSync('rsync', ['-a', ...excludes, `${SRC_DIST}/`, `${OUT}/dist/`], { stdio: 'pipe' })
   for (const pkg of PRUNE) excludes.push(`--exclude=/${pkg}`, `--exclude=/${pkg}/**`)
@@ -209,6 +218,14 @@ async function main() {
   for (const pkg of [...PRUNE, 'tsx', 'esbuild']) {
     const size = await duBytes(join(SRC_NM, pkg))
     if (size) rows.push([pkg, size])
+  }
+
+  if (existsSync(SHIM_SOURCE)) {
+    await mkdir(join(OUT, 'node_modules', 'better-sqlite3'), { recursive: true })
+    execFileSync('rsync', ['-a', `${SHIM_SOURCE}/`, `${OUT}/node_modules/better-sqlite3/`], { stdio: 'pipe' })
+    rows.push(['shim better-sqlite3 (node:sqlite)', await duBytes(join(SRC_NM, 'better-sqlite3'))])
+  } else {
+    console.error('⚠️ 未找到 better-sqlite3 shim，手机端将无法打开数据库')
   }
 
   for (const [pkg, spec] of Object.entries(STUBS)) {

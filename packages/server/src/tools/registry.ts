@@ -27,6 +27,21 @@ import skillInstall from './skill-install'
 import askQuestion from './ask-question'
 import createPlan from './create-plan'
 import computerUse from './computer-use'
+
+/**
+ * Desktop-only tools, gated by host capability instead of being registered and
+ * failing at call time. Android is the case that matters: computer-use drives a
+ * GUI through nut.js, which does not exist there (the phone's own screen control
+ * is the accessibility service, a different mechanism).
+ */
+const DESKTOP_ONLY_TOOLS = new Set([
+  // nut.js GUI automation — macOS/Windows only.
+  'computerUse',
+  // Drive a *second* Android device over adb. On the phone itself this is the L2
+  // virtual-display feature's job, with its own transport — not this tool pair.
+  'androidScreen',
+  'androidAction',
+])
 import makeArticle from './make-article'
 import deepResearch from './deep-research'
 import browser from './browser'
@@ -115,7 +130,13 @@ export const directoryTools: ToolDef[] = [
   androidAction,
   // ---- 后台任务控制（启动走 shell_exec 的 run_in_background，本工具只管 list/output/cancel）----
   bgTask,
-]
+].filter((tool) => {
+  if (process.platform === 'android' && DESKTOP_ONLY_TOOLS.has(tool.name)) {
+    console.warn(`[registry] tool "${tool.name}" unavailable on android, skipped`)
+    return false
+  }
+  return true
+})
 
 /** 执行器映射：name → execute（供 toolExecutors 合并） */
 export const directoryExecutors: Record<string, ToolDef['execute']> = Object.fromEntries(
