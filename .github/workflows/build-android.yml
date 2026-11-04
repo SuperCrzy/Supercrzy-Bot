@@ -22,6 +22,10 @@ on:
         required: false
         default: ""
   push:
+    branches: [main]
+    paths:
+      - "apps/android/**"
+      - ".github/workflows/build-android.yml"
     tags:
       - "v*"
 
