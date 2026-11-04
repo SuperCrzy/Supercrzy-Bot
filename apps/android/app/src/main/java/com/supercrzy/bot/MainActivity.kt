@@ -65,7 +65,7 @@ class MainActivity : ComponentActivity() {
         }
         val clip = data.clipData
         val uris: Array<Uri> = when {
-            clip != null && clip.count > 0 -> Array(clip.count) { clip.getItemAt(it).uri }
+            clip != null && clip.itemCount > 0 -> Array(clip.itemCount) { clip.getItemAt(it).uri }
             data.data != null -> arrayOf(data.data!!)
             else -> emptyArray()
         }
