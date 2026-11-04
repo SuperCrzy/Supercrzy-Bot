@@ -6,7 +6,9 @@ is meant to stay small and boring so the Web UI remains the single source of tru
 
 ## What works now
 
-- WebView pointing at a Node server on the LAN (`settings → server address`)
+- WebView pointing at the runtime **on this phone** (`http://127.0.0.1:3000`) by default —
+  the chroot BOT install already listens there, so a fresh shell is usable immediately
+- Settings can repoint the same shell at a desktop on the LAN (`settings → server address`)
 - Back key routed through WebView history
 - File chooser (attachments, camera) via SAF
 - Downloads land in `Downloads/` through `DownloadManager`
@@ -41,15 +43,16 @@ Or, after one `gradle wrapper` (generates the wrapper jar), use `./gradlew`.
 
 ## Pointing the shell at a server
 
-The desktop server must listen on the LAN, not just loopback:
+Default: the runtime on the phone itself (`127.0.0.1:3000`). Nothing to configure.
+
+To drive a desktop instead, the desktop server must listen on the LAN, not just loopback:
 
 ```bash
 HOST=0.0.0.0 pnpm --filter @supercrzy/server start
 ```
 
-Then enter `192.168.x.x` in the app (the `:3000` port is added automatically if you
-omit it). Same Wi-Fi as the phone. In P1 the on-device runtime takes over and the
-stored address becomes the fallback.
+Then enter `192.168.x.x` in settings (the `:3000` port is added automatically if you
+omit it). Same Wi-Fi as the phone. "Use this phone" in the dialog clears the override.
 
 ## Layout
 

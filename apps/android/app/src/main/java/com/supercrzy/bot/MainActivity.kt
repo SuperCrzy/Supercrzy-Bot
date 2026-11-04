@@ -105,12 +105,10 @@ class MainActivity : ComponentActivity() {
             if (webView.canGoBack()) webView.goBack() else finish()
         }
 
-        val target = serverUrl()
-        if (target.isEmpty()) {
-            showSettings(firstRun = true)
-        } else {
-            load(target)
-        }
+        // The phone already hosts a BOT runtime (chroot today, PRoot from P1), so the
+        // default target is loopback. The settings dialog is only for pointing the
+        // same shell at a desktop on the LAN.
+        load(serverUrl())
 
         // Keeps the local runtime (P1) alive in the background. Harmless in P0.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -220,8 +218,10 @@ class MainActivity : ComponentActivity() {
 
     // ---- Server address -----------------------------------------------------
 
-    private fun serverUrl(): String =
-        getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_URL, "").orEmpty()
+    private fun serverUrl(): String {
+        val stored = getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_URL, "").orEmpty()
+        return stored.ifBlank { DEFAULT_URL }
+    }
 
     private fun saveServerUrl(raw: String) {
         val normalized = normalize(raw)
@@ -240,7 +240,7 @@ class MainActivity : ComponentActivity() {
         return value.trimEnd('/')
     }
 
-    private fun showSettings(firstRun: Boolean = false) {
+    private fun showSettings() {
         val input = EditText(this).apply {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
             hint = getString(R.string.server_hint)
@@ -261,8 +261,12 @@ class MainActivity : ComponentActivity() {
             .setTitle(R.string.server_title)
             .setView(box)
             .setPositiveButton(R.string.save) { _, _ -> saveServerUrl(input.text.toString()) }
-            .setNegativeButton(R.string.cancel) { _, _ -> if (firstRun && serverUrl().isEmpty()) showError("") }
-            .setCancelable(!firstRun)
+            .setNegativeButton(R.string.cancel, null)
+            .setNeutralButton(R.string.use_local) { _, _ ->
+                getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(KEY_URL).apply()
+                load(DEFAULT_URL)
+            }
+            .setCancelable(true)
             .create()
         dialog.show()
     }
@@ -288,7 +292,7 @@ class MainActivity : ComponentActivity() {
         bar.addView(errorText)
         bar.addView(Button(this).apply {
             text = getString(R.string.retry)
-            setOnClickListener { if (serverUrl().isEmpty()) showSettings() else load(serverUrl()) }
+            setOnClickListener { load(serverUrl()) }
         })
         bar.addView(Button(this).apply {
             text = getString(R.string.settings)
@@ -298,7 +302,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun showError(url: String) {
-        errorText.text = if (url.isEmpty()) getString(R.string.server_hint) else getString(R.string.cannot_reach, url)
+        errorText.text = getString(R.string.cannot_reach, url)
         errorBar.visibility = View.VISIBLE
     }
 
@@ -329,5 +333,7 @@ class MainActivity : ComponentActivity() {
     companion object {
         private const val PREFS = "supercrzy"
         private const val KEY_URL = "server_url"
+        /** The on-device runtime. Overridden in settings when targeting a desktop. */
+        private const val DEFAULT_URL = "http://127.0.0.1:3000"
     }
 }
