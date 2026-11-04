@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">SUPERCRZY BOT</string>
+    <string name="server_title">Server address</string>
+    <string name="server_hint">192.168.1.10:3000</string>
+    <string name="server_help">Point this at the computer running SUPERCRZY BOT (same Wi-Fi), or leave it as is once the on-device runtime is available.</string>
+    <string name="save">Save</string>
+    <string name="cancel">Cancel</string>
+    <string name="settings">Settings</string>
+    <string name="retry">Retry</string>
+    <string name="cannot_reach">Cannot reach %1$s</string>
+    <string name="accessibility_label">SUPERCRZY screen control</string>
+    <string name="accessibility_description">Lets the BOT read the screen and tap for you. It only acts on tasks you start, and you can turn it off at any time.</string>
+    <string name="notification_channel_runtime">Background runtime</string>
+    <string name="notification_channel_tasks">Task updates</string>
+    <string name="notification_runtime_title">SUPERCRZY is running</string>
+    <string name="notification_runtime_text">Keeps the local agent alive</string>
+</resources>

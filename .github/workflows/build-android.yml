@@ -1,0 +1,89 @@
+name: Build Android
+
+# Why CI: the Android SDK + JDK are ~600MB of one-off setup and GitHub's
+# ubuntu-latest image already ships both, so an APK never depends on someone
+# having a local toolchain (same reasoning as build-macos.yml).
+#
+# Scope: the WebView shell (P0). The on-device runtime (PRoot rootfs + Node) is
+# added later by copying a payload into app/src/main/assets/ before the build.
+#
+# Deliberately avoids actions/setup-java: the image's default JDK is 17, which is
+# what AGP 8.7 needs, and one less third-party action is one less thing to break.
+# The assert step fails loudly if that ever stops being true.
+#
+# Signing: debug keystore unless a real one is wired in. A debug-signed release
+# APK installs on a device but cannot be uploaded to a store.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Extra label for the artifact name (optional)"
+        required: false
+        default: ""
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    name: Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    defaults:
+      run:
+        working-directory: apps/android
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check JDK
+        run: |
+          set -e
+          java -version
+          major=$(java -version 2>&1 | awk -F'"' '/version/ {print $2}' | cut -d. -f1)
+          if [ "$major" != "17" ]; then
+            echo "::error::AGP 8.7 requires JDK 17, runner default is $major"
+            exit 1
+          fi
+
+      # Installs Gradle 8.11.1 and caches ~/.gradle between runs. No wrapper jar is
+      # committed, so the build calls `gradle` directly; locally `brew install gradle`
+      # gives the same command.
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Ensure SDK packages
+        run: |
+          set -e
+          echo "ANDROID_HOME=${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          SDKMANAGER="${ANDROID_HOME:-$ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$SDKMANAGER" && "$SDKMANAGER" --install "platforms;android-35" "build-tools;35.0.0" >/dev/null || true
+          ls "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/platforms" 2>/dev/null || true
+
+      - name: Assemble debug APK
+        run: gradle --no-daemon --stacktrace assembleDebug
+        env:
+          ANDROID_VERSION_CODE: ${{ github.run_number }}
+
+      - name: Assemble release APK
+        run: gradle --no-daemon --stacktrace assembleRelease
+        env:
+          ANDROID_VERSION_CODE: ${{ github.run_number }}
+
+      - name: List artifacts
+        run: find app/build/outputs -name "*.apk" -o -name "*.aab" | sort
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: supercrzy-bot-android-${{ github.run_number }}${{ github.event.inputs.version && format('-{0}', github.event.inputs.version) || '' }}
+          path: |
+            apps/android/app/build/outputs/apk/debug/*.apk
+            apps/android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+          retention-days: 14

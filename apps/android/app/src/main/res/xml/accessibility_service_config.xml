@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  P3 scope: read the foreground screen and dispatch taps. `canRetrieveWindowContent`
+  is what lets the agent see node text; `canPerformGestures` is what lets it act.
+  Deliberately NOT enabled here: canRequestFilterKeyEvents / canTakeScreenshot,
+  both of which are far more invasive than the feature needs.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeViewClicked|typeViewFocused"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagDefault|flagRetrieveInteractiveWindows|flagReportViewIds"
+    android:canPerformGestures="true"
+    android:canRetrieveWindowContent="true"
+    android:description="@string/accessibility_description"
+    android:notificationTimeout="120" />

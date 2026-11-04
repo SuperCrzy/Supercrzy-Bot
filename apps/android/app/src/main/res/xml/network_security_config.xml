@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The app talks to a plain-HTTP Node server: either the desktop instance on the
+  LAN (P0) or the on-device runtime on 127.0.0.1 (P1). Both are cleartext by
+  design, so cleartext is allowed globally rather than per-domain: users type
+  their own LAN address and we cannot enumerate it ahead of time.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

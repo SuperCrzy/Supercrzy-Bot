@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Platform theme on purpose: pulling in AppCompat/Material only to draw a
+         WebView shell is weight we do not need. -->
+    <style name="AppTheme" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">#0F1419</item>
+        <item name="android:navigationBarColor">#0F1419</item>
+        <item name="android:windowBackground">#0F1419</item>
+    </style>
+</resources>
