@@ -30,7 +30,7 @@ on:
       - "v*"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   android:
@@ -101,6 +101,23 @@ jobs:
 
       - name: List artifacts
         run: find app/build/outputs -name "*.apk" -o -name "*.aab" | sort
+
+      # A rolling pre-release: artifact zips need a login and a manual unzip, while a
+      # release asset is a direct link you can tap on the phone. Recreated each build
+      # so the name stays stable and no history piles up.
+      - name: Publish rolling pre-release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          gh release delete android-latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create android-latest \
+            --prerelease \
+            --title "Android · rolling build ${GITHUB_RUN_NUMBER}" \
+            --notes "Debug-signed build from ${GITHUB_SHA:0:7}. Install on a device to test the shell; not for distribution." \
+            "app/build/outputs/apk/debug/app-debug.apk#app-debug.apk" \
+            "app/build/outputs/apk/release/app-release.apk#app-release.apk"
 
       - uses: actions/upload-artifact@v7
         with:
