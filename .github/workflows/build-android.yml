@@ -70,15 +70,34 @@ jobs:
           test -x "$SDKMANAGER" && "$SDKMANAGER" --install "platforms;android-35" "build-tools;35.0.0" >/dev/null || true
           ls "${ANDROID_HOME:-$ANDROID_SDK_ROOT}/platforms" 2>/dev/null || true
 
+      # Build output is almost never visible to anyone without repo admin, so on
+      # failure we surface the interesting lines as annotations — those are public
+      # and show up in the run summary, which keeps CI debuggable without a token.
       - name: Assemble debug APK
-        run: gradle --no-daemon --stacktrace assembleDebug
-        env:
-          ANDROID_VERSION_CODE: ${{ github.run_number }}
+        id: debug
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon --stacktrace assembleDebug 2>&1 | tee build-debug.log
+
+      - name: Report debug build errors
+        if: failure()
+        shell: bash
+        run: |
+          set +e
+          grep -nE "^(e: |w: )?.*(error:|FAILURE:|Caused by:|> Task .* FAILED|Unresolved reference|e: file)" build-debug.log \
+            | grep -v "^Binary" | head -25 | while IFS= read -r line; do
+              echo "::error::${line}"
+            done
+          echo "--- last 40 lines ---"
+          tail -40 build-debug.log || true
+          exit 1
 
       - name: Assemble release APK
-        run: gradle --no-daemon --stacktrace assembleRelease
-        env:
-          ANDROID_VERSION_CODE: ${{ github.run_number }}
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon --stacktrace assembleRelease 2>&1 | tee build-release.log
 
       - name: List artifacts
         run: find app/build/outputs -name "*.apk" -o -name "*.aab" | sort
