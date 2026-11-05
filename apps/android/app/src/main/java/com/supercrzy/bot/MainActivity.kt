@@ -103,6 +103,10 @@ class MainActivity : ComponentActivity() {
         root.addView(errorBar)
         setContentView(root)
 
+        // The agent's browser lives in this same window, 1px, invisible.
+        BrowserHost.attach(root)
+        DeviceCommandWorker.start(this)
+
         configureWebView()
 
         // Back goes through WebView history first — the single most obvious bridge

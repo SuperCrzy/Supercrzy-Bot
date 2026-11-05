@@ -27,6 +27,8 @@ import skillInstall from './skill-install'
 import askQuestion from './ask-question'
 import createPlan from './create-plan'
 import computerUse from './computer-use'
+import deviceControl from './device-control'
+import mobileBrowser from './mobile-browser'
 
 /**
  * Desktop-only tools, gated by host capability instead of being registered and
@@ -34,6 +36,9 @@ import computerUse from './computer-use'
  * GUI through nut.js, which does not exist there (the phone's own screen control
  * is the accessibility service, a different mechanism).
  */
+/** Tools that only make sense on the phone (they ride the device bridge). */
+const MOBILE_ONLY_TOOLS = new Set(['deviceControl', 'mobileBrowser'])
+
 const DESKTOP_ONLY_TOOLS = new Set([
   // nut.js GUI automation — macOS/Windows only.
   'computerUse',
@@ -132,9 +137,15 @@ export const directoryTools: ToolDef[] = [
   androidAction,
   // ---- 后台任务控制（启动走 shell_exec 的 run_in_background，本工具只管 list/output/cancel）----
   bgTask,
+  deviceControl,
+  mobileBrowser,
 ].filter((tool) => {
   if (process.platform === 'android' && DESKTOP_ONLY_TOOLS.has(tool.name)) {
     console.warn(`[registry] tool "${tool.name}" unavailable on android, skipped`)
+    return false
+  }
+  if (process.platform !== 'android' && MOBILE_ONLY_TOOLS.has(tool.name)) {
+    console.warn(`[registry] tool "${tool.name}" is mobile-only, skipped`)
     return false
   }
   return true
