@@ -40,11 +40,12 @@ import androidx.core.content.ContextCompat
  * The whole shell: a WebView that hosts the existing Vue client, plus the bridges a
  * browser cannot provide on Android (back key, file chooser, downloads, notifications).
  *
- * The WebView always talks to a Node server over plain HTTP:
- *   P0 — the desktop instance on the LAN, address stored in [PREFS].
- *   P1 — the on-device runtime on 127.0.0.1, which will become the default and the
- *        stored address turns into the fallback.
- * Nothing here knows which one it is; that keeps the switch a one-line change.
+ * Address model:
+ *   stored value empty (default) → the on-device runtime managed by [RuntimeHost]
+ *   stored value set             → a Node server on the LAN, e.g. the desktop
+ *
+ * The on-device path starts proot first (rootfs extraction happens on first run) and
+ * only loads the page once /api/health answers.
  */
 class MainActivity : ComponentActivity() {
 
@@ -105,15 +106,95 @@ class MainActivity : ComponentActivity() {
             if (webView.canGoBack()) webView.goBack() else finish()
         }
 
-        // The phone already hosts a BOT runtime (chroot today, PRoot from P1), so the
-        // default target is loopback. The settings dialog is only for pointing the
-        // same shell at a desktop on the LAN.
-        load(serverUrl())
+        if (wantsLocal()) {
+            startLocalAndLoad()
+        } else {
+            load(targetUrl())
+        }
 
-        // Keeps the local runtime (P1) alive in the background. Harmless in P0.
+        // Keeps the local runtime alive while the app is backgrounded.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             ContextCompat.startForegroundService(this, Intent(this, BotRuntimeService::class.java))
         }
+    }
+
+    /** Boots the on-device runtime (idempotent), then loads its URL. */
+    private fun startLocalAndLoad() {
+        showStarting()
+        RuntimeHost.ensureStarted(this) { state ->
+            runOnUiThread {
+                when (state.status) {
+                    RuntimeHost.Status.RUNNING -> load(RuntimeHost.currentUrl(this))
+                    else -> {
+                        showError(RuntimeHost.currentUrl(this))
+                        errorText.text = listOf(
+                            getString(R.string.cannot_reach, RuntimeHost.currentUrl(this)),
+                            state.message.orEmpty().take(200),
+                        ).joinToString("\n")
+                    }
+                }
+            }
+        }
+    }
+
+    private fun showStarting() {
+        errorText.text = getString(R.string.starting_runtime)
+        errorBar.visibility = View.VISIBLE
+    }
+
+    // ---- Address resolution ---------------------------------------------------
+
+    /** Raw stored value; empty means "the runtime on this phone". */
+    private fun storedServer(): String =
+        getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_URL, "").orEmpty().trim()
+
+    private fun wantsLocal(): Boolean = storedServer().isBlank()
+
+    private fun targetUrl(): String {
+        if (wantsLocal()) return RuntimeHost.currentUrl(this)
+        var value = storedServer()
+        if (!value.startsWith("http://") && !value.startsWith("https://")) value = "http://" + value
+        val afterScheme = value.substringAfter("://")
+        if (Regex(":\\d+").containsMatchIn(afterScheme) == false) value = value.trimEnd('/') + ":3000"
+        return value.trimEnd('/')
+    }
+
+    private fun saveServerUrl(raw: String) {
+        // Empty input means "back to the on-device runtime".
+        val value = if (raw.trim().isEmpty()) "" else targetUrl()
+        getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_URL, value).apply()
+        if (wantsLocal()) startLocalAndLoad() else load(targetUrl())
+    }
+
+    private fun showSettings() {
+        val input = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+            hint = getString(R.string.server_hint)
+            setText(storedServer())
+            setSingleLine()
+        }
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(8), dp(20), 0)
+            addView(TextView(context).apply {
+                text = getString(R.string.server_help)
+                textSize = 13f
+                setPadding(0, 0, 0, dp(12))
+            })
+            addView(input)
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.server_title)
+            .setView(box)
+            .setPositiveButton(R.string.save) { _, _ -> saveServerUrl(input.text.toString()) }
+            .setNegativeButton(R.string.cancel, null)
+            .setNeutralButton(R.string.use_local) { _, _ ->
+                getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(KEY_URL).apply()
+                startLocalAndLoad()
+            }
+            .setCancelable(true)
+            .create()
+            .show()
     }
 
     // ---- WebView wiring -----------------------------------------------------
@@ -137,9 +218,9 @@ class MainActivity : ComponentActivity() {
         webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val url = request.url
-                // Keep our own origins inside the WebView; hand everything else to the OS.
                 if (url.scheme == "http" || url.scheme == "https") {
-                    if (url.host == webView.url?.let { Uri.parse(it).host }) return false
+                    val currentHost = webView.url?.let { Uri.parse(it).host }
+                    if (url.host != null && url.host == currentHost) return false
                     startActivity(Intent(Intent.ACTION_VIEW, url))
                     return true
                 }
@@ -153,7 +234,7 @@ class MainActivity : ComponentActivity() {
 
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
                 if (!request.isForMainFrame) return
-                showError(serverUrl())
+                showError(targetUrl())
             }
         }
 
@@ -216,61 +297,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // ---- Server address -----------------------------------------------------
-
-    private fun serverUrl(): String {
-        val stored = getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY_URL, "").orEmpty()
-        return stored.ifBlank { DEFAULT_URL }
-    }
-
-    private fun saveServerUrl(raw: String) {
-        val normalized = normalize(raw)
-        getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY_URL, normalized).apply()
-        load(normalized)
-    }
-
-    /** Accepts "1.2.3.4", "1.2.3.4:3000", "http://host:3000/" and returns a loadable URL. */
-    private fun normalize(raw: String): String {
-        var value = raw.trim()
-        if (value.isEmpty()) return ""
-        if (!value.startsWith("http://") && !value.startsWith("https://")) value = "http://$value"
-        if (!Regex(""":\d+""").containsMatchIn(value.substringAfter("://"))) {
-            value = value.trimEnd('/') + ":3000"
-        }
-        return value.trimEnd('/')
-    }
-
-    private fun showSettings() {
-        val input = EditText(this).apply {
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
-            hint = getString(R.string.server_hint)
-            setText(serverUrl().removePrefix("http://"))
-            setSingleLine()
-        }
-        val box = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(8), dp(20), 0)
-            addView(TextView(context).apply {
-                text = getString(R.string.server_help)
-                textSize = 13f
-                setPadding(0, 0, 0, dp(12))
-            })
-            addView(input)
-        }
-        val dialog = AlertDialog.Builder(this)
-            .setTitle(R.string.server_title)
-            .setView(box)
-            .setPositiveButton(R.string.save) { _, _ -> saveServerUrl(input.text.toString()) }
-            .setNegativeButton(R.string.cancel, null)
-            .setNeutralButton(R.string.use_local) { _, _ ->
-                getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(KEY_URL).apply()
-                load(DEFAULT_URL)
-            }
-            .setCancelable(true)
-            .create()
-        dialog.show()
-    }
-
     // ---- Error surface ------------------------------------------------------
 
     private fun buildErrorBar(): LinearLayout {
@@ -292,7 +318,7 @@ class MainActivity : ComponentActivity() {
         bar.addView(errorText)
         bar.addView(Button(this).apply {
             text = getString(R.string.retry)
-            setOnClickListener { load(serverUrl()) }
+            setOnClickListener { if (wantsLocal()) startLocalAndLoad() else load(targetUrl()) }
         })
         bar.addView(Button(this).apply {
             text = getString(R.string.settings)
@@ -316,7 +342,7 @@ class MainActivity : ComponentActivity() {
         }
 
         @JavascriptInterface
-        fun getServerUrl(): String = serverUrl()
+        fun getServerUrl(): String = targetUrl()
 
         @JavascriptInterface
         fun openSettings() = runOnUiThread { showSettings() }
@@ -326,14 +352,13 @@ class MainActivity : ComponentActivity() {
         fun getCapabilities(): String {
             val a11y = BotAccessibilityService.isEnabled(this@MainActivity)
             val wirelessDebug = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
-            return """{"sdk":${Build.VERSION.SDK_INT},"accessibility":$a11y,"wirelessDebug":$wirelessDebug}"""
+            val localRuntime = RuntimeHost.snapshot().status == RuntimeHost.Status.RUNNING
+            return """{"sdk":${Build.VERSION.SDK_INT},"accessibility":$a11y,"wirelessDebug":$wirelessDebug,"localRuntime":$localRuntime}"""
         }
     }
 
     companion object {
         private const val PREFS = "supercrzy"
         private const val KEY_URL = "server_url"
-        /** The on-device runtime. Overridden in settings when targeting a desktop. */
-        private const val DEFAULT_URL = "http://127.0.0.1:3000"
     }
 }

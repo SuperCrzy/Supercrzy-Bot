@@ -8,6 +8,7 @@
     <string name="use_local">Use this phone</string>
     <string name="cancel">Cancel</string>
     <string name="settings">Settings</string>
+    <string name="starting_runtime">Starting the on-device runtime…</string>
     <string name="retry">Retry</string>
     <string name="cannot_reach">Cannot reach %1$s\n\nIs the BOT runtime on this phone running? Or tap Settings to point at a computer.</string>
     <string name="accessibility_label">SUPERCRZY screen control</string>

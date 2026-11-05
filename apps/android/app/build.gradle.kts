@@ -58,6 +58,19 @@ android {
         jvmTarget = "17"
     }
 
+    sourceSets {
+        getByName("main") {
+            // proot and node ship as fake native libs: jniLibs is the only location
+            // Android still allows execve from on API 29+.
+            jniLibs.srcDir("runtime/jniLibs")
+        }
+    }
+
+    androidResources {
+        // The rootfs is already gzip-compressed; double compression wastes CPU.
+        noCompress += "tgz"
+    }
+
     buildFeatures {
         // BuildConfig.DEBUG gates WebView remote debugging; AGP 8 turns it off by default.
         buildConfig = true
@@ -65,6 +78,13 @@ android {
 
     packaging {
         resources.excludes += setOf("META-INF/*.kotlin_module", "META-INF/*.version")
+        jniLibs {
+            // Extract libs to disk (execve needs a real file, not an APK mmap) and
+            // never let the strip step touch our foreign ELF binaries.
+            useLegacyPackaging = true
+            keepDebugSymbols += "**/libproot.so"
+            keepDebugSymbols += "**/libnode.so"
+        }
     }
 }
 

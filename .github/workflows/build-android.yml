@@ -73,6 +73,47 @@ jobs:
       # Build output is almost never visible to anyone without repo admin, so on
       # failure we surface the interesting lines as annotations — those are public
       # and show up in the run summary, which keeps CI debuggable without a token.
+      # ---- runtime payload (proot + alpine rootfs + node + our server) ----
+
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: .
+
+      - name: Build client and server
+        run: |
+          pnpm --filter @supercrzy/client build
+          pnpm --filter @supercrzy/server build
+        working-directory: .
+
+      # The payload script reads prod-only node_modules from the desktop deploy
+      # tree; CI reproduces that tree without electron-builder.
+      - name: Install production node_modules
+        run: |
+          mkdir -p packages/desktop/.deploy-server
+          cp packages/server/package.json packages/desktop/.deploy-server/
+          cd packages/desktop/.deploy-server
+          npm install --omit=dev --ignore-scripts --no-audit --no-fund
+        working-directory: .
+
+      - name: Assemble mobile payload
+        run: node scripts/build-mobile-payload.mjs --no-verify
+        working-directory: .
+
+      - name: Fetch proot
+        run: bash runtime/fetch-proot.sh
+
+      - name: Build rootfs
+        run: bash runtime/build-rootfs.sh
+
+      # ---- APK ----
+
       - name: Assemble debug APK
         id: debug
         shell: bash

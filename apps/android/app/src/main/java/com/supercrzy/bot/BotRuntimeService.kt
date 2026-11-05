@@ -30,7 +30,8 @@ class BotRuntimeService : Service() {
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
-        // P1: RuntimeHost.start(this) goes here, guarded by a "already running" check.
+        // Owns the runtime lifecycle: starts it if not up, no-ops otherwise.
+        RuntimeHost.ensureStarted(this) { }
         return START_STICKY
     }
 
