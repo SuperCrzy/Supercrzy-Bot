@@ -64,6 +64,42 @@ class BotAccessibilityService : AccessibilityService() {
         return out
     }
 
+
+    /** Public for the ScreenControl extensions: nearest clickable at a point. */
+    fun findClickableAtPublic(x: Int, y: Int): AccessibilityNodeInfo? = findClickableAt(x, y)
+
+    /** Public for the ScreenControl extensions: focused or any editable node. */
+    fun findEditablePublic(): AccessibilityNodeInfo? = findEditable()
+
+    private fun findClickableAt(x: Int, y: Int): AccessibilityNodeInfo? {
+        val root: AccessibilityNodeInfo = rootInActiveWindow ?: return null
+        var best: AccessibilityNodeInfo? = null
+        fun walk(node: AccessibilityNodeInfo?, depth: Int) {
+            if (node == null || depth > 30) return
+            val rect = android.graphics.Rect()
+            node.getBoundsInScreen(rect)
+            if (rect.contains(x, y)) {
+                if (node.isClickable) best = node
+                for (i in 0 until node.childCount) walk(node.getChild(i), depth + 1)
+            }
+        }
+        walk(root, 0)
+        return best
+    }
+
+    private fun findEditable(): AccessibilityNodeInfo? {
+        val root: AccessibilityNodeInfo = rootInActiveWindow ?: return null
+        var found: AccessibilityNodeInfo? = null
+        fun walk(node: AccessibilityNodeInfo?, depth: Int) {
+            if (node == null || depth > 30 || found != null) return
+            if (node.isEditable && node.isFocused) { found = node; return }
+            if (node.isEditable) found = node
+            for (i in 0 until node.childCount) walk(node.getChild(i), depth + 1)
+        }
+        walk(root, 0)
+        return found
+    }
+
     companion object {
         private const val TAG = "BotA11y"
         private const val MAX_DEPTH = 40

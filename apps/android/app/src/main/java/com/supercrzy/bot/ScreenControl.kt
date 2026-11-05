@@ -15,7 +15,7 @@ import android.view.accessibility.AccessibilityNodeInfo
  * are blocked). Text input prefers ACTION_SET_TEXT on the focused editable.
  */
 fun BotAccessibilityService.tap(x: Int, y: Int): JSONObject {
-    val node = findClickableAt(x, y)
+    val node = findClickableAtPublic(x, y)
     val viaNode = node?.let { target ->
         runCatching {
             if (target.isClickable) target.performAction(AccessibilityNodeInfo.ACTION_CLICK)
@@ -34,7 +34,7 @@ fun BotAccessibilityService.tap(x: Int, y: Int): JSONObject {
 fun BotAccessibilityService.gestureTap(x: Int, y: Int): JSONObject {
     val path = Path().apply { moveTo(x.toFloat(), y.toFloat()) }
     val gesture = GestureDescription.Builder()
-        .addStroke(GestureDescription.StrokeDescription(path, 0, 60))
+        .addStroke(GestureDescription.StrokeDescription(path, 0L, 60L))
         .build()
     val ok = dispatchGesture(gesture, null, null)
     return JSONObject().put("ok", ok).put("data", if (ok) "tapped $x,$y" else JSONObject.NULL)
@@ -46,14 +46,14 @@ fun BotAccessibilityService.swipe(x1: Int, y1: Int, x2: Int, y2: Int, ms: Int): 
         lineTo(x2.toFloat(), y2.toFloat())
     }
     val gesture = GestureDescription.Builder()
-        .addStroke(GestureDescription.StrokeDescription(path, 0, ms.coerceIn(80, 2000)))
+        .addStroke(GestureDescription.StrokeDescription(path, 0L, ms.coerceIn(80, 2000).toLong()))
         .build()
     val ok = dispatchGesture(gesture, null, null)
     return JSONObject().put("ok", ok).put("data", if (ok) "swiped" else JSONObject.NULL)
 }
 
 fun BotAccessibilityService.inputText(text: String): JSONObject {
-    val node = findEditable()
+    val node = findEditablePublic()
         ?: return JSONObject().put("ok", false).put("error", "no focused editable field")
     val args = android.os.Bundle().apply {
         putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
@@ -76,31 +76,4 @@ fun BotAccessibilityService.globalKey(key: String): JSONObject {
     else JSONObject().put("ok", false).put("error", "global action rejected")
 }
 
-private fun findClickableAt(x: Int, y: Int): AccessibilityNodeInfo? {
-    val root: AccessibilityNodeInfo = rootInActiveWindow ?: return null
-    var best: AccessibilityNodeInfo? = null
-    fun walk(node: AccessibilityNodeInfo?, depth: Int) {
-        if (node == null || depth > 30) return
-        val rect = android.graphics.Rect()
-        node.getBoundsInScreen(rect)
-        if (rect.contains(x, y)) {
-            if (node.isClickable) best = node
-            for (i in 0 until node.childCount) walk(node.getChild(i), depth + 1)
-        }
-    }
-    walk(root, 0)
-    return best
-}
 
-private fun findEditable(): AccessibilityNodeInfo? {
-    val root: AccessibilityNodeInfo = rootInActiveWindow ?: return null
-    var found: AccessibilityNodeInfo? = null
-    fun walk(node: AccessibilityNodeInfo?, depth: Int) {
-        if (node == null || depth > 30 || found != null) return
-        if (node.isEditable && node.isFocused) { found = node; return }
-        if (node.isEditable) found = node
-        for (i in 0 until node.childCount) walk(node.getChild(i), depth + 1)
-    }
-    walk(root, 0)
-    return found ?: root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-}
