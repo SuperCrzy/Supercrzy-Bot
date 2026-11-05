@@ -3,27 +3,28 @@
 #
 # Contents:
 #   alpine minirootfs (base userland)
-#   + official Node.js linux-arm64 **musl** build under /usr/local
+#   + nodejs / npm / git installed with apk.static --arch aarch64 (cross-arch)
 #   + our runtime payload under /bot  (dist/ + node_modules/ + package.json + client/)
-#   + resolv.conf + a profile that puts node on PATH
+#   + resolv.conf + a root profile
 #
-# Why musl Node from nodejs.org instead of `apk add nodejs`: it avoids running apk
-# cross-arch at build time, pins the exact version, and matches what the chroot
-# build has been running on the phone.
+# Why apk.static instead of nodejs.org: upstream dropped musl builds, and a glibc
+# node will not run on Alpine. apk.static is a static x86_64 binary that can populate
+# an aarch64 rootfs from the CDN with dependency resolution — the standard way to
+# build Alpine images from a Linux CI host. (This script cannot run on macOS.)
 #
 # Inputs (env):
 #   PAYLOAD_DIR   default: ../../packages/desktop/.mobile-payload
 #   CLIENT_DIST   default: ../../packages/client/dist
-#   NODE_VERSION  default: v26.13.0
 # Output:
-#   ../app/src/main/assets/runtime/rootfs.tgz   (consumed by the APK at first run)
+#   ../app/src/main/assets/runtime/rootfs.tgz + rootfs.version
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../../.." && pwd)"
 PAYLOAD_DIR="${PAYLOAD_DIR:-$ROOT/packages/desktop/.mobile-payload}"
 CLIENT_DIST="${CLIENT_DIST:-$ROOT/packages/client/dist}"
-NODE_VERSION="${NODE_VERSION:-v26.13.0}"
+MIRROR="https://dl-cdn.alpinelinux.org/alpine"
+ALPINE_BRANCH="v3.22"
 OUT="$HERE/../app/src/main/assets/runtime"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
@@ -37,19 +38,24 @@ mkdir -p "$ROOTFS"
 
 echo "== alpine minirootfs =="
 curl -fsSL --noproxy '*' -o "$WORK/mini.tar.gz" \
-  "https://dl-cdn.alpinelinux.org/alpine/v3.22/releases/aarch64/alpine-minirootfs-3.22.1-aarch64.tar.gz"
+  "$MIRROR/$ALPINE_BRANCH/releases/aarch64/alpine-minirootfs-3.22.1-aarch64.tar.gz"
 tar -xzf "$WORK/mini.tar.gz" -C "$ROOTFS"
 
-echo "== node $NODE_VERSION (musl arm64) =="
-curl -fsSL --noproxy '*' -o "$WORK/node.tar.xz" \
-  "https://nodejs.org/dist/$NODE_VERSION/node-$NODE_VERSION-linux-arm64-musl.tar.xz"
-mkdir -p "$ROOTFS/usr/local"
-tar -xJf "$WORK/node.tar.xz" -C "$ROOTFS/usr/local" --strip-components=1
-"$ROOTFS/usr/local/bin/node" --version 2>/dev/null || {
-  # The binary is aarch64-musl; a mac/linux x86_64 host cannot run it. Presence check only.
-  test -f "$ROOTFS/usr/local/bin/node" || { echo "✘ node binary missing after extract"; exit 1; }
-  echo "  (cross-arch binary, presence verified)"
-}
+echo "== apk.static (x86_64, runs on the CI host) =="
+APK_APK_URL="$(curl -fsSL --noproxy '*' "$MIRROR/$ALPINE_BRANCH/main/x86_64/" | grep -oE 'apk-tools-static-[0-9.r-]+\.apk' | sort -V | tail -1)"
+[ -n "$APK_APK_URL" ] || { echo "✘ apk-tools-static not found on the mirror"; exit 1; }
+curl -fsSL --noproxy '*' -o "$WORK/apk-tools-static.apk" "$MIRROR/$ALPINE_BRANCH/main/x86_64/$APK_APK_URL"
+tar -xzf "$WORK/apk-tools-static.apk" -C "$WORK" sbin/apk.static 2>/dev/null \
+  || tar -xzf "$WORK/apk-tools-static.apk" -C "$WORK"
+APK="$WORK/sbin/apk.static"
+[ -x "$APK" ] || { echo "✘ apk.static missing after extract"; exit 1; }
+
+echo "== install nodejs / npm / git (aarch64) =="
+"$APK" --arch aarch64 -X "$MIRROR/$ALPINE_BRANCH/main" -U \
+  --root "$ROOTFS" --initdb --no-cache add nodejs npm git bash ca-certificates
+"$ROOTFS/usr/bin/node" --version 2>/dev/null || true # cross-arch: presence check only
+test -x "$ROOTFS/usr/bin/node" || { echo "✘ node missing after apk add"; exit 1; }
+rm -rf "$ROOTFS/var/cache/apk"/*
 
 echo "== payload + client =="
 mkdir -p "$ROOTFS/bot/data"
@@ -71,7 +77,7 @@ PROFILE
 echo "== pack =="
 VERSION="$(node -p "require('$ROOT/package.json').version")"
 STAMP="$(date +%Y%m%d-%H%M%S)"
-tar -czf "$OUT/rootfs.tgz" -C "$ROOTFS" .
+tar --format=gnu -czf "$OUT/rootfs.tgz" -C "$ROOTFS" .
 printf '%s\n' "$VERSION@$STAMP" > "$OUT/rootfs.version"
 
 echo "✔ $(du -h "$OUT/rootfs.tgz" | cut -f1) → $OUT/rootfs.tgz"
