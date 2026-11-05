@@ -97,6 +97,7 @@ jobs:
       - name: Install production node_modules
         id: npminstall
         shell: bash
+        working-directory: .
         run: |
           set -o pipefail
           mkdir -p packages/desktop/.deploy-server
@@ -116,6 +117,7 @@ jobs:
       - name: Assemble mobile payload
         id: payload
         shell: bash
+        working-directory: .
         run: |
           set -o pipefail
           node scripts/build-mobile-payload.mjs --no-verify 2>&1 | tee payload.log
