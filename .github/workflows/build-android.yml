@@ -108,7 +108,9 @@ jobs:
         if: failure() && steps.npminstall.outcome == 'failure'
         shell: bash
         run: |
-          grep -nE "npm error|ERR!" packages/desktop/.deploy-server/npm-install.log | head -15 | while IFS= read -r line; do echo "::error::$line"; done
+          cd "$GITHUB_WORKSPACE"
+          LOG=packages/desktop/.deploy-server/npm-install.log
+          tail -20 "$LOG" | while IFS= read -r line; do echo "::error::$line"; done
           exit 1
 
       - name: Assemble mobile payload
