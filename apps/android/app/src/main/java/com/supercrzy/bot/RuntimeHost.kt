@@ -210,6 +210,9 @@ object RuntimeHost {
 
     // ---- helpers ------------------------------------------------------------
 
+    /** Public health probe — used by the legacy-chroot fallback in MainActivity. */
+    fun probe(url: String): Boolean = isHealthy(url)
+
     private fun isHealthy(url: String): Boolean = runCatching {
         URL("$url/api/health").openConnection().let { connection ->
             (connection as java.net.HttpURLConnection).connectTimeout = 1200

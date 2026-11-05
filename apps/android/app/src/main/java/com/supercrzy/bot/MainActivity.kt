@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.AlertDialog
 import android.app.DownloadManager
 import android.content.Context
+import android.content.BroadcastReceiver
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -55,6 +56,9 @@ class MainActivity : ComponentActivity() {
     private lateinit var errorText: TextView
 
     private var fileCallback: ValueCallback<Array<Uri>>? = null
+    private var updateReceiver: BroadcastReceiver? = null
+    private var updateInfo: Updater.Info? = null
+    private var updateChip: Button? = null
 
     private val filePicker = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val callback = fileCallback ?: return@registerForActivityResult
@@ -112,6 +116,10 @@ class MainActivity : ComponentActivity() {
         } else {
             load(targetUrl())
         }
+        updateReceiver = Updater.registerCompletionReceiver(this) {
+            runOnUiThread { updateChip?.visibility = View.GONE }
+        }
+        Updater.check { info -> if (info != null) runOnUiThread { showUpdateChip(info) } }
 
         // Keeps the local runtime alive while the app is backgrounded.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -126,16 +134,59 @@ class MainActivity : ComponentActivity() {
             runOnUiThread {
                 when (state.status) {
                     RuntimeHost.Status.RUNNING -> load(RuntimeHost.currentUrl(this))
-                    else -> {
-                        showError(RuntimeHost.currentUrl(this))
-                        errorText.text = listOf(
-                            getString(R.string.cannot_reach, RuntimeHost.currentUrl(this)),
-                            state.message.orEmpty().take(200),
-                        ).joinToString("\n")
-                    }
+                    else -> tryLegacyFallback(state.message)
                 }
             }
         }
+    }
+
+    /**
+     * Fallback chain: if the packaged runtime cannot start on this device, try the
+     * legacy chroot server that may already be listening on 3000. This keeps the app
+     * usable while the proot path is being hardened on new devices.
+     */
+    private fun tryLegacyFallback(reason: String?) {
+        errorText.text = listOf(
+            getString(R.string.starting_runtime),
+            reason.orEmpty().take(200),
+            getString(R.string.fallback_legacy),
+        ).joinToString("\n")
+        errorBar.visibility = View.VISIBLE
+        Thread {
+            if (RuntimeHost.probe(LEGACY_URL)) {
+                runOnUiThread {
+                    load(LEGACY_URL)
+                    Notifications.post(
+                        this,
+                        Notifications.CHANNEL_TASKS,
+                        getString(R.string.fallback_title),
+                        LEGACY_URL,
+                    )
+                }
+            } else {
+                runOnUiThread {
+                    showError(RuntimeHost.currentUrl(this))
+                    errorText.text = listOf(
+                        getString(R.string.cannot_reach, RuntimeHost.currentUrl(this)),
+                        reason.orEmpty().take(200),
+                    ).joinToString("\n")
+                }
+            }
+        }.start()
+    }
+
+    private fun showUpdateChip(info: Updater.Info) {
+        updateInfo = info
+        updateChip?.apply {
+            text = getString(R.string.update_available, info.buildNumber)
+            visibility = View.VISIBLE
+        }
+        Notifications.post(
+            this,
+            Notifications.CHANNEL_TASKS,
+            getString(R.string.update_available, info.buildNumber),
+            getString(R.string.update_hint),
+        )
     }
 
     private fun showStarting() {
@@ -147,6 +198,11 @@ class MainActivity : ComponentActivity() {
             getString(R.string.starting_runtime) + "\n\n" + lastCrash
         }
         errorBar.visibility = View.VISIBLE
+    }
+
+    override fun onDestroy() {
+        updateReceiver?.let { unregisterReceiver(it) }
+        super.onDestroy()
     }
 
     // ---- Address resolution ---------------------------------------------------
@@ -331,6 +387,11 @@ class MainActivity : ComponentActivity() {
             text = getString(R.string.settings)
             setOnClickListener { showSettings() }
         })
+        updateChip = Button(this).apply {
+            visibility = View.GONE
+            setOnClickListener { updateInfo?.let { Updater.download(this@MainActivity, it) } }
+        }
+        bar.addView(updateChip)
         return bar
     }
 
@@ -367,5 +428,7 @@ class MainActivity : ComponentActivity() {
     companion object {
         private const val PREFS = "supercrzy"
         private const val KEY_URL = "server_url"
+        /** The chroot BOT that may already run on this phone; the fallback target. */
+        private const val LEGACY_URL = "http://127.0.0.1:3000"
     }
 }
