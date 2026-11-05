@@ -40,10 +40,7 @@
         <service
             android:name=".BotRuntimeService"
             android:exported="false"
-            android:foregroundServiceType="dataSync|specialUse">
-            <property
-                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Runs the on-device agent service the user started" />
+            android:foregroundServiceType="dataSync">
         </service>
 
         <!-- P3: read the screen and drive taps. Disabled until the user turns it on. -->

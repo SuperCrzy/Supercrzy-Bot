@@ -78,6 +78,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        CrashReporter.install(this)
 
         Notifications.ensureChannels(this)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
@@ -138,7 +139,13 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun showStarting() {
-        errorText.text = getString(R.string.starting_runtime)
+        val lastCrash = CrashReporter.consumeLastCrash(this)
+        errorText.text = if (lastCrash.isNullOrBlank()) {
+            getString(R.string.starting_runtime)
+        } else {
+            // The previous run died: surface it here, where the user can copy it to us.
+            getString(R.string.starting_runtime) + "\n\n" + lastCrash
+        }
         errorBar.visibility = View.VISIBLE
     }
 
