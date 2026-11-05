@@ -45,9 +45,9 @@ const {
   browserStatus, browserFailHint, browserUrl, browserUrlInput,
   browserScreenshotBase64, browserLoading, browserLog,
   browserTypeText, browserClickText, browserNative, browserNativeReady,
-  browserCanvasEl,
+  browserCanvasEl, browserDom, browserDomMode, domFocusIndex,
   goToUrl, refreshPage, browserGoBack, clickPage, onCanvasWheel,
-  doType, doKey, doClickText, keyButtons,
+  doType, doKey, doClickText, keyButtons, clickElem, focusElem, isEditable,
 } = useAiBrowser({
   sessionId: () => props.sessionId,
   active: () => props.active,
@@ -89,7 +89,7 @@ const {
         <span class="bc-dot" style="background:#ef4444" /><span class="bc-dot" style="background:#f59e0b" /><span class="bc-dot" style="background:#22c55e" />
         <span class="bc-url">{{ browserUrl || 'about:blank' }}</span>
       </div>
-      <div class="browser-canvas" :class="{ native: browserNative }" ref="browserCanvasEl">
+      <div class="browser-canvas" :class="{ native: browserNative, dom: browserDomMode }" ref="browserCanvasEl">
         <!-- 原生视图模式（桌面形态 + 后端 attach）：真正的网页是主进程的一层原生视图
              （WebContentsView），盖在这个 div 的位置上。所以这里**不放 img、不接点击** ——
              人直接在真网页里打字点击，AI 那边天生看得到（同一份 DOM）。
@@ -98,6 +98,45 @@ const {
           <span class="browser-placeholder" :class="{ loading: !browserNativeReady }">
             {{ browserNativeReady ? '' : t('aiBrowser.mounting') }}
           </span>
+        </div>
+        <!-- 结构化模式（手机）：没有像素。后端给的是页面正文 + 可点元素，
+             这里用 HTML 重画一份简版页面 —— 不占额外屏幕、不受前后台影响、点/填都按元素序号走。 -->
+        <div v-else-if="browserDomMode" class="browser-dom">
+          <div v-if="!browserDom" class="browser-placeholder" :class="{ loading: browserLoading }">
+            {{ browserLoading ? t('aiBrowser.navigatingHint') : t('aiBrowser.ready') }}
+          </div>
+          <template v-else>
+            <div class="bd-page">
+              <template v-for="(b, bi) in (browserDom.blocks || [])" :key="'b' + bi">
+                <div v-if="b.k === 'h1' || b.k === 'h2' || b.k === 'h3'" class="bd-h1">{{ b.t }}</div>
+                <div v-else-if="b.k === 'h4' || b.k === 'h5'" class="bd-h2">{{ b.t }}</div>
+                <pre v-else-if="b.k === 'pre'" class="bd-pre">{{ b.t }}</pre>
+                <div v-else-if="b.k === 'li'" class="bd-li">{{ b.t }}</div>
+                <div v-else class="bd-p">{{ b.t }}</div>
+              </template>
+              <div v-if="!(browserDom.blocks || []).length" class="bd-p muted">
+                {{ (browserDom.text || '').slice(0, 2000) }}
+              </div>
+            </div>
+            <div class="bd-sep">
+              <span>{{ t('aiBrowser.domActions', { n: browserDom.elements.length }) }}</span>
+            </div>
+            <div class="bd-acts">
+              <button
+                v-for="e in browserDom.elements"
+                :key="e.i"
+                class="bd-el"
+                :class="{ on: domFocusIndex === e.i, field: isEditable(e) }"
+                :disabled="e.disabled"
+                @click="focusElem(e.i)"
+              >
+                <span class="bd-tag">{{ e.tag }}</span>
+                <span class="bd-txt">{{ e.text || t('aiBrowser.domNoLabel') }}</span>
+                <span v-if="isEditable(e)" class="bd-fill">{{ t('aiBrowser.domFill') }}</span>
+              </button>
+              <div v-if="!browserDom.elements.length" class="bd-p muted">{{ t('aiBrowser.domNoActions') }}</div>
+            </div>
+          </template>
         </div>
         <template v-else>
           <div v-if="browserScreenshotBase64" class="browser-shot-wrap">
@@ -121,6 +160,20 @@ const {
            原生视图模式下这一整块**不需要**：那是真网页，人用真键盘鼠标即可。 -->
       <div class="browser-native-note" v-if="browserNative">
         {{ t('aiBrowser.liveHint') }}
+      </div>
+      <!-- 结构化模式的填字台：没有"回车提交"这种东西可依赖（DOM 模式下不做按键注入），
+           所以只留一个"填入选中的那一栏"，顺序就是先点输入框、再填。 -->
+      <div class="browser-cmd" v-else-if="browserDomMode">
+        <div class="bc-row">
+          <input
+            v-model="browserTypeText"
+            class="bc-input"
+            :placeholder="t('aiBrowser.domPhType')"
+            @keyup.enter="doType(false)"
+          />
+          <button class="bc-btn primary" @click="doType(false)">{{ t('aiBrowser.domFillBtn') }}</button>
+        </div>
+        <div class="bc-hint">{{ t('aiBrowser.domHint') }}</div>
       </div>
       <div class="browser-cmd" v-else>
         <div class="bc-row">
@@ -194,6 +247,31 @@ const {
 .browser-fail { font-size: 12px; color: var(--error); text-align: center; padding: 6px 10px; line-height: 1.5; }
 .browser-placeholder { font-size: 11px; color: var(--text-muted); padding: 10px; text-align: center; line-height: 1.5; }
 .browser-placeholder.loading { color: var(--text-secondary); }
+
+/* ---- 结构化模式（手机）：DOM 快照重画成一份简版页面 ----
+   这里刻意不用背景图/截图占位：手机侧栏的价值是"看得懂 + 点得准"，不是复刻像素。 */
+.browser-canvas.dom { display: block; align-items: stretch; justify-content: flex-start; overflow-y: auto; }
+.browser-dom { width: 100%; padding: 8px 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.bd-page { display: flex; flex-direction: column; gap: 5px; }
+.bd-h1 { font-size: 14px; font-weight: 600; color: var(--text-primary); line-height: 1.4; margin-top: 4px; }
+.bd-h2 { font-size: 12.5px; font-weight: 600; color: var(--text-primary); line-height: 1.45; }
+.bd-p { font-size: 12px; line-height: 1.62; color: var(--text-secondary); overflow-wrap: anywhere; }
+.bd-p.muted { color: var(--text-tertiary); }
+.bd-li { font-size: 12px; line-height: 1.6; color: var(--text-secondary); padding-left: 12px; position: relative; }
+.bd-li::before { content: '·'; position: absolute; left: 3px; color: var(--text-tertiary); }
+.bd-pre { font-family: var(--font-mono, monospace); font-size: 11px; line-height: 1.5; color: var(--text-secondary); background: var(--bg-tertiary); border-radius: var(--radius-sm); padding: 6px 8px; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
+.bd-sep { display: flex; align-items: center; gap: 8px; margin: 6px 0 2px; color: var(--text-tertiary); font-size: 10.5px; }
+.bd-sep::after { content: ''; flex: 1 1 auto; height: 1px; background: var(--border-color); }
+.bd-acts { display: flex; flex-direction: column; gap: 4px; }
+.bd-el { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left; border: 1px solid var(--border-color); background: var(--bg-primary); border-radius: var(--radius-sm); padding: 5px 8px; cursor: pointer; color: var(--text-primary); font-size: 12px; line-height: 1.4; }
+.bd-el:hover { border-color: var(--border-hover); background: var(--bg-hover); }
+.bd-el:disabled { opacity: .5; cursor: default; }
+.bd-el.on { border-color: var(--accent); }
+.bd-el.field { background: var(--bg-tertiary); }
+.bd-tag { flex: 0 0 auto; font-family: var(--font-mono, monospace); font-size: 9.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-tertiary); border: 1px solid var(--border-color); border-radius: 3px; padding: 1px 4px; }
+.bd-txt { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bd-fill { flex: 0 0 auto; font-size: 10px; color: var(--accent); }
+.bc-hint { font-size: 10.5px; color: var(--text-tertiary); line-height: 1.5; }
 .browser-console { background: #0f172a; border-radius: var(--radius-sm); padding: 6px 8px; font-family: var(--font-mono, monospace); font-size: 10px; color: #6ee7a0; max-height: 90px; overflow-y: auto; }
 .browser-log-line { margin: 2px 0; }
 .browser-log-line.muted { color: #64748b; }

@@ -38,6 +38,27 @@ export interface AiBrowserOptions {
   active: () => boolean
 }
 
+/** DOM 模式（手机）的一个可点元素。序号 `i` 是后端注入的 data-sc-idx，点击按它走。 */
+export interface BrowserDomElement {
+  i: number
+  tag: string
+  text: string
+  href?: string | null
+  rect?: number[]
+  disabled?: boolean
+  type?: string | null
+}
+
+/** DOM 模式下页面的一块内容（标题/段落/列表项…），用来重画简版页面。 */
+export interface BrowserDomBlock { k: string; t: string }
+
+export interface BrowserDomView {
+  ready?: string
+  text: string
+  elements: BrowserDomElement[]
+  blocks?: BrowserDomBlock[]
+}
+
 export function useAiBrowser(opts: AiBrowserOptions) {
   const browserStatus = ref('待机')
   const browserFailHint = ref('')
@@ -47,12 +68,46 @@ export function useAiBrowser(opts: AiBrowserOptions) {
   const browserLoading = ref(false)
   const browserLog = ref<string[]>([])
 
+  /**
+   * DOM 模式：手机上没有像素，只有结构。
+   *
+   * 为什么不是"把截图修好"：手机上被截的是系统 Chrome，聊天时它永远在后台被冻结，
+   * 截图只能超时（真机实测后台 8016ms / 0 字节，前台 1966ms / 890KB）；而且手机屏幕
+   * 同时放不下"聊天 + 浏览器画面"。所以侧栏在这一模式下**完全不碰像素**：把后端给的
+   * 正文与可点元素用 HTML 重画一份简版页面 —— 更快、稳定、还省电。
+   */
+  const browserDom = ref<BrowserDomView | null>(null)
+  const browserDomMode = ref(false)
+  /** DOM 模式下"当前选中的元素序号"：先点输入框、再打字，就是这个顺序。 */
+  const domFocusIndex = ref(-1)
+
   // 页面视口的 CSS 尺寸，由后端随每帧带回（见 ai-browser.ts 的 BrowserSnapshot.viewport 注释）。
   // 旧代码硬编码 1000×700 —— 那是 launch 模式写死的 viewport；attach 后视图尺寸随窗口变，
   // 且 retina 下截图会被放大 2 倍，用图片尺寸反推坐标必然点偏。
   const browserViewport = ref({ width: 1000, height: 700 })
   function applyViewport(v?: { width?: number; height?: number } | null) {
     if (v && v.width && v.height) browserViewport.value = { width: v.width, height: v.height }
+  }
+
+  /**
+   * 一帧的落地入口（唯一）。
+   *
+   * 旧实现把"取 url / 取截图 / 取 viewport"这三件事在 goToUrl、refresh、doAct、
+   * pollLiveFrame 里各抄了一遍 —— 加 DOM 模式时漏掉任何一处，就会出现"点开了但侧栏
+   * 还在显示上一页"这类只在某条路径上复现的怪事。集中到一处就不会漏。
+   */
+  function applyFrame(d: any) {
+    if (!d) return
+    if (d.url) browserUrl.value = d.url
+    if (typeof d.screenshot === 'string' && d.screenshot) browserScreenshotBase64.value = d.screenshot
+    if (d.dom && Array.isArray(d.dom.elements)) {
+      browserDom.value = d.dom as BrowserDomView
+      // 页面换了，之前选中的序号就失效了 —— 不清掉会让"填入"打进错的那个框。
+      if (domFocusIndex.value >= 0 && !browserDom.value.elements.some((e) => e.i === domFocusIndex.value)) {
+        domFocusIndex.value = -1
+      }
+    }
+    applyViewport(d.viewport)
   }
 
   // 人工操作用的输入
@@ -138,6 +193,14 @@ export function useAiBrowser(opts: AiBrowserOptions) {
       const r = await fetch('/api/collab/browser/sessions')
       if (!r.ok) return
       const d = await r.json() as { mode?: string; startPageUrl?: string }
+      // 'dom' = 手机：后端没有 Chromium 可驱动，改由 App 内 WebView 吐结构化快照。
+      // 这一条决定侧栏渲不渲 <img>，所以必须在拿到第一帧之前就定下来（否则会先闪一下空画布）。
+      const dom = d?.mode === 'dom'
+      if (dom !== browserDomMode.value) {
+        if (dom) browserLog.value.push('结构化模式（手机：正文 + 可点元素）')
+        else browserDom.value = null
+      }
+      browserDomMode.value = dom
       const on = d?.mode === 'attach' && !!desktopBridge()
       if (on !== browserNative.value) browserLog.value.push(on ? '原生视图模式（与 AI 共用同一个页面）' : '截图模式')
       browserNative.value = on
@@ -170,7 +233,7 @@ export function useAiBrowser(opts: AiBrowserOptions) {
       })
       if (r.ok) {
         const d = await r.json()
-        applyViewport(d.viewport)
+        applyFrame(d)
         if (d.error) {
           // 后端把导航失败的原因带回来了 —— 旧实现是静默吞掉，用户只能看到白屏，
           // 连"是不是网址写错了"都判断不了（2026-09-23 修）。
@@ -182,7 +245,6 @@ export function useAiBrowser(opts: AiBrowserOptions) {
         } else {
           browserUrl.value = d.url || url
           browserUrlInput.value = d.url || url
-          browserScreenshotBase64.value = d.screenshot || ''
           browserStatus.value = '实时'
           browserFailHint.value = ''
         }
@@ -203,9 +265,7 @@ export function useAiBrowser(opts: AiBrowserOptions) {
       const r = await fetch('/api/collab/browser/refresh', { method: 'POST', headers: bkHdr() })
       if (r.ok) {
         const d = await r.json()
-        browserUrl.value = d.url || browserUrl.value
-        browserScreenshotBase64.value = d.screenshot || ''
-        applyViewport(d.viewport)
+        applyFrame(d)
         browserStatus.value = '实时'
       } else { browserStatus.value = '失败' }
     } catch { browserStatus.value = '断开' }
@@ -218,8 +278,7 @@ export function useAiBrowser(opts: AiBrowserOptions) {
       const r = await fetch('/api/collab/browser/act', { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, bkHdr()), body: JSON.stringify(body) })
       if (r.ok) {
         const d = await r.json()
-        if (d?.snapshot?.screenshot) { browserScreenshotBase64.value = d.snapshot.screenshot; browserUrl.value = d.snapshot.url || browserUrl.value }
-        applyViewport(d?.snapshot?.viewport)
+        if (d?.snapshot) applyFrame(d.snapshot)
         // 返回成败：调用方要据此给用户反馈。
         // 旧实现不返回任何东西 → 调用方只能猜，很容易写出"恒真的失败提示"（那是假信号）。
         if (d?.result?.error) {
@@ -264,9 +323,19 @@ export function useAiBrowser(opts: AiBrowserOptions) {
   async function doType(withEnter: boolean) {
     const text = browserTypeText.value
     if (!text) return
+    const label = text.length > 18 ? text.slice(0, 18) + '…' : text
+    // DOM 模式：没有焦点概念可依赖，目标就是"上一次点中的那个元素"。
+    // 顺序也正好是人的自然顺序 —— 先点输入框，再打字。
+    if (browserDomMode.value) {
+      const idx = domFocusIndex.value
+      if (idx < 0) { browserFailHint.value = '先在下面的元素里点一下要填入的那一栏'; return }
+      const ok = await doAct({ action: 'type', text, index: idx })
+      browserLog.value.push(ok ? `填入「${label}」` : `填入「${label}」失败`)
+      if (ok) { browserTypeText.value = ''; browserFailHint.value = '' }
+      return
+    }
     const ok = await doAct({ action: 'type', text })
     const ok2 = withEnter ? await doAct({ action: 'key', key: 'Enter' }) : true
-    const label = text.length > 18 ? text.slice(0, 18) + '…' : text
     browserLog.value.push(ok && ok2 ? `输入「${label}」${withEnter ? ' + 回车' : ''}` : `输入「${label}」失败`)
     // 只在成功时清空：失败时保留内容，让人能直接重试（清除等于让人重打一遍）
     if (ok && ok2) browserTypeText.value = ''
@@ -275,6 +344,46 @@ export function useAiBrowser(opts: AiBrowserOptions) {
     await doAct({ action: 'key', key })
     browserLog.value.push(`按键 ${key}`)
   }
+  // ---- DOM 模式（手机）：点一个元素 / 选中一个输入框 ----
+  /**
+   * 点一个元素 = 替人点它（也是"选中"它）。
+   *
+   * 序号是后端注入的 `data-sc-idx`，跟滚动、重排无关 —— 比坐标稳。
+   * 点完顺手刷新一帧：点了链接页面就换了，不刷会把旧页面的元素继续挂在侧栏上。
+   */
+  async function clickElem(i: number) {
+    domFocusIndex.value = i
+    const el = browserDom.value?.elements.find((e) => e.i === i)
+    const ok = await doAct({ action: 'click_idx', index: i })
+    browserLog.value.push(ok ? `点击「${el?.text || '#' + i}」` : `点击「${el?.text || '#' + i}」失败`)
+  }
+
+  /** 只选中不点（给"填入"用）：输入框被 click 一下会清掉它自己的值，这里只标记目标。 */
+  function focusElem(i: number) {
+    const el = browserDom.value?.elements.find((e) => e.i === i)
+    if (el && isEditable(el)) {
+      domFocusIndex.value = i
+      browserFailHint.value = ''
+      browserLog.value.push(`选中「${el.text || '#' + i}」，可以填入`)
+      return
+    }
+    void clickElem(i)
+  }
+
+  /**
+   * 能不能"填入文字"。只认真的能打字的控件。
+   *
+   * ⚠️ `input[type=submit|button|checkbox|radio|file]` 看着是 input，但点它是"动作"不是"填字" ——
+   * 按可填处理的话，人点了「搜索」却只看到它变蓝、什么也没发生。
+   * `<select>` 同理：原生下拉框在侧栏里没画出来，点它才是唯一能做的动作。
+   */
+  function isEditable(el: BrowserDomElement) {
+    if (el.tag === 'textarea' || el.tag === 'contenteditable') return true
+    if (el.tag !== 'input') return false
+    const t = String(el.type || 'text').toLowerCase()
+    return !['submit', 'button', 'reset', 'image', 'checkbox', 'radio', 'file', 'color', 'range'].includes(t)
+  }
+
   async function doClickText() {
     const text = browserClickText.value.trim()
     if (!text) return
@@ -326,12 +435,15 @@ export function useAiBrowser(opts: AiBrowserOptions) {
       if (f?.ts) {
         const changed = f.ts !== lastFrameTs
         lastFrameTs = f.ts
-        if (changed && f.screenshot) { browserScreenshotBase64.value = f.screenshot; if (f.url) browserUrl.value = f.url; applyViewport(f.viewport) }
+        // 像素模式看 screenshot，DOM 模式看 dom —— 两者只有一个会非空，判「有新内容」必须都认
+        if (changed && (f.screenshot || f.dom)) applyFrame(f)
       } else if (lastFrameTs !== 0) {
         // ts=0 = 服务端该会话已无实例（任务结束自动清理 / 手动关闭）
         // → 清掉冻结的旧图，否则用户看不出浏览器已经被释放了
         lastFrameTs = 0
         browserScreenshotBase64.value = ''
+        browserDom.value = null
+        domFocusIndex.value = -1
         browserUrl.value = ''
         browserStatus.value = '已释放'
       }
@@ -387,9 +499,12 @@ export function useAiBrowser(opts: AiBrowserOptions) {
     browserScreenshotBase64, browserLoading, browserLog, browserViewport,
     browserTypeText, browserClickText, browserClickMode,
     browserNative, browserNativeReady, browserCanvasEl,
+    // DOM 模式（手机）
+    browserDom, browserDomMode, domFocusIndex,
     // 动作
     goToUrl, refreshPage, browserGoBack, clickPage, onCanvasWheel,
     doType, doKey, doClickText, doAct, detectBrowserMode,
+    clickElem, focusElem, isEditable,
     startNativeSync, stopNativeSync, syncNativeBounds,
     // 常量
     keyButtons,

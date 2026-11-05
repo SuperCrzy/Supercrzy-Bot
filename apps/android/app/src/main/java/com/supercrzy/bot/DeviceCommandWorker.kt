@@ -96,14 +96,19 @@ class DeviceCommandWorker private constructor(private val context: Context) {
         "key" -> a11y { BotAccessibilityService.get()?.globalKey(args.optString("key")) }
         "launch" -> launchApp(args)
         "browser_navigate", "browser_snapshot", "browser_click", "browser_type", "browser_back" -> {
-            // WebView commands complete through evaluateJavascript callbacks; ack
-            // now and let BrowserHost write the real response when JS answers.
+            // WebView commands complete through evaluateJavascript callbacks. Returning null
+            // tells pollOnce "no response yet" so only the real answer is ever written.
+            //
+            // 🔴 Returning a "pending" ack here instead was a real bug: pollOnce wrote it
+            // immediately, the runtime read it as the command result, and the genuine answer
+            // arrived later into an id nobody was reading. Symptoms: snapshot came back as
+            // the string "pending", and the orphan response file stayed on disk forever.
             handler.post {
                 BrowserHost.handle(kind, args) { response ->
                     writeResp(id, response)
                 }
             }
-            JSONObject().put("ok", true).put("data", "pending")
+            null
         }
         else -> JSONObject().put("ok", false).put("error", "unknown kind: $kind")
     }
@@ -117,7 +122,16 @@ class DeviceCommandWorker private constructor(private val context: Context) {
                 put("error", resp.opt("error") ?: JSONObject.NULL)
             }
             respDir.mkdirs()
-            File(respDir, "$id.json").writeText(out.toString())
+            // Write-then-rename: the runtime polls this directory, and a half-written file
+            // would make it parse garbage and fail the whole command. rename is atomic on
+            // the same filesystem, so the runtime only ever sees a complete answer.
+            val target = File(respDir, "$id.json")
+            val tmp = File(respDir, "$id.json.tmp")
+            tmp.writeText(out.toString())
+            if (!tmp.renameTo(target)) {
+                target.writeText(out.toString())
+                tmp.delete()
+            }
         }.onFailure { Log.w(TAG, "resp write failed: ${it.message}") }
     }
 

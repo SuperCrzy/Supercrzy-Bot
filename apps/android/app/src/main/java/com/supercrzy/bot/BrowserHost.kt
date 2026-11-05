@@ -79,11 +79,12 @@ object BrowserHost {
             "browser_click" -> {
                 val idx = args.optInt("index", -1)
                 val js = "(function(){" + """
-                    var el=document.querySelector('[data-sc-idx="$idx"]');
-                    if(!el) return JSON.stringify({ok:false,error:'no element with index $idx — snapshot again'});
+                    var idx = $idx;
+                    var el = idx >= 0 ? document.querySelector('[data-sc-idx="' + idx + '"]') : document.activeElement;
+                    if(!el) return JSON.stringify({ok:false,error:'no element with index ' + idx + ' — snapshot again'});
                     el.scrollIntoView({block:'center'});
                     el.click();
-                    return JSON.stringify({ok:true,data:'clicked index $idx, url '+location.href});
+                    return JSON.stringify({ok:true,data:'clicked index ' + idx + ', url ' + location.href});
                 """ + "})()"
                 view.evaluateJavascript(js) { raw -> respond(parsePayload(raw, "click")) }
             }
@@ -91,16 +92,17 @@ object BrowserHost {
                 val idx = args.optInt("index", -1)
                 val text = args.optString("text")
                 val js = "(function(){" + """
-                    var el=document.querySelector('[data-sc-idx="$idx"]');
-                    if(!el) return JSON.stringify({ok:false,error:'no element with index $idx — snapshot again'});
+                    var idx = $idx;
+                    var el = idx >= 0 ? document.querySelector('[data-sc-idx="' + idx + '"]') : document.activeElement;
+                    if(!el || !el.tagName) return JSON.stringify({ok:false,error:'no element with index ' + idx + ' — snapshot again'});
                     el.focus();
-                    var proto = el.tagName==='TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-                    var setter = Object.getOwnPropertyDescriptor(proto,'value');
+                    var proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+                    var setter = Object.getOwnPropertyDescriptor(proto, 'value');
                     if(setter && setter.set) setter.set.call(el, ${JSONObject.quote(text)});
                     else el.value = ${JSONObject.quote(text)};
-                    el.dispatchEvent(new Event('input',{bubbles:true}));
-                    el.dispatchEvent(new Event('change',{bubbles:true}));
-                    return JSON.stringify({ok:true,data:'typed into index $idx'});
+                    el.dispatchEvent(new Event('input', {bubbles:true}));
+                    el.dispatchEvent(new Event('change', {bubbles:true}));
+                    return JSON.stringify({ok:true,data:'typed into index ' + idx});
                 """ + "})()"
                 view.evaluateJavascript(js) { raw -> respond(parsePayload(raw, "type")) }
             }
@@ -112,45 +114,76 @@ object BrowserHost {
         }
     }
 
-    /** evaluateJavascript answers a JSON-encoded string; unwrap it once. */
+    /** evaluateJavascript answers a JSON string literal; decoding it as one is exact. */
     private fun parsePayload(raw: String?, kind: String): JSONObject {
-        val unquoted = raw?.let { if (it.length >= 2 && it.startsWith("\"") && it.endsWith("\"")) it.drop(1).dropLast(1) else it } ?: ""
-        val unescaped = unquoted.replace("\\\"", "\"").replace("\\\\", "\\")
+        if (raw.isNullOrBlank() || raw == "null") {
+            return JSONObject().put("ok", false)
+                .put("error", "$kind returned nothing — is the page still loading?")
+        }
+        // Why not hand-rolled unescaping: the old code did replace("\\\"", "\"").replace("\\\\", "\\").
+        // That leaves "\n" as a literal backslash-n (page text showed raw \n) and mangles any
+        // escaped quote inside the payload. Parsing it as a JSON value round-trips everything.
+        val decoded = runCatching {
+            JSONObject("{\"v\":$raw}").opt("v") as? String
+        }.getOrNull() ?: raw
         return runCatching {
-            val parsed = JSONObject(unescaped)
+            val parsed = JSONObject(decoded)
             parsed.put("ok", parsed.optBoolean("ok", true))
             parsed
         }.getOrElse {
-            Log.w(TAG, "$kind: unparseable js payload")
-            JSONObject().put("ok", true).put("data", unescaped.take(2000))
+            Log.w(TAG, "$kind: unparseable js payload: ${decoded.take(200)}")
+            JSONObject().put("ok", false).put("error", "page returned non-JSON: ${decoded.take(200)}")
         }
     }
 
     /**
      * Tags interactive elements and returns the flat list the agent reads.
      * Kept as a string constant: evaluateJavascript needs the whole body inline.
+     *
+     * Two payloads, one pass:
+     *  · `elements` — what can be pressed, with a stable index (data-sc-idx).
+     *  · `blocks`   — the page's reading order (headings/paragraphs/lists) so the side
+     *                 panel can redraw a simplified page instead of a screenshot.
+     * `text` stays for the agent: it is the whole readable body in one string.
      */
     private const val SNAPSHOT_BODY = """
-      var els = document.querySelectorAll('a,button,input,textarea,select,[role="button"],[onclick],[contenteditable]');
+      var norm = function(s){ return (s || '').replace(/[ \t\n\r]+/g, ' ').trim(); };
       var out = [];
       var i = 0;
-      els.forEach(function(el){
+      var nodes = document.querySelectorAll('a,button,input,textarea,select,[role="button"],[onclick],[contenteditable]');
+      for (var j = 0; j < nodes.length && i < 300; j++) {
+        var el = nodes[j];
         var r = el.getBoundingClientRect();
-        if (r.width < 2 && r.height < 2) return;
-        var style = getComputedStyle(el);
-        if (style.visibility === 'hidden' || style.display === 'none') return;
+        if (r.width < 2 && r.height < 2) continue;
+        var st = getComputedStyle(el);
+        if (st.visibility === 'hidden' || st.display === 'none' || st.opacity === '0') continue;
         el.setAttribute('data-sc-idx', String(i));
+        var label = norm(el.innerText || el.value || el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('title') || el.getAttribute('alt') || '').slice(0, 80);
         out.push({
           i: i,
           tag: el.tagName.toLowerCase(),
-          text: ((el.innerText || el.value || el.getAttribute('aria-label') || el.getAttribute('placeholder') || '') + '').trim().slice(0, 80),
-          href: el.getAttribute('href') || null,
+          text: label,
+          href: el.tagName === 'A' ? (el.href || null) : null,
+          type: el.getAttribute('type') || null,
           rect: [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)],
           disabled: !!el.disabled
         });
         i++;
-      });
-      return JSON.stringify({ ok: true, url: location.href, ready: document.readyState, title: document.title, elements: out });
+      }
+      var blocks = [];
+      var bn = document.querySelectorAll('h1,h2,h3,h4,h5,p,li,pre,blockquote,td');
+      for (var k = 0; k < bn.length && blocks.length < 220; k++) {
+        var b = bn[k];
+        var txt = norm(b.innerText);
+        if (!txt) continue;
+        if (txt.length > 400) txt = txt.slice(0, 400) + '…';
+        blocks.push({ k: b.tagName.toLowerCase(), t: txt });
+      }
+      if (!blocks.length && document.body) {
+        blocks.push({ k: 'p', t: norm(document.body.innerText).slice(0, 2000) });
+      }
+      var full = norm(document.body ? document.body.innerText : '');
+      return JSON.stringify({ ok: true, url: location.href, ready: document.readyState, title: document.title, text: full.slice(0, 8000), elements: out, blocks: blocks });
     """
 
     /** Guard for the [JavascriptInterface] annotation convention; unused today. */

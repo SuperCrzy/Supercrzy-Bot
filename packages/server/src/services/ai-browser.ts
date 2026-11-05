@@ -36,12 +36,51 @@ export function detectBrowserPath(): string {
   return ''
 }
 
+/**
+ * 一个可交互元素（DOM 模式）。
+ *
+ * 手机上不搬像素，只搬「有什么可点、上面写着什么」。`i` 是稳定地址：后端注入
+ * `data-sc-idx`，点/输入都按它找元素，不依赖坐标。
+ */
+export interface BrowserDomElement {
+  i: number
+  tag: string
+  text: string
+  href?: string | null
+  rect?: [number, number, number, number]
+  disabled?: boolean
+  /** input 的 type（text/search/password…），侧栏据此决定要不要按输入框渲染 */
+  type?: string | null
+}
+
+/** 阅读顺序上的一块内容：标题 / 段落 / 列表项 / 代码。侧栏用它重画简版页面。 */
+export interface BrowserDomBlock {
+  k: string
+  t: string
+}
+
 export interface BrowserSnapshot {
   url: string
   title: string
   screenshot: string
   ts: number
   error?: string
+  /**
+   * DOM 模式（手机）的载荷：没有像素，只有正文 + 可点元素。
+   *
+   * 为什么存在：手机屏幕上同时摆「聊天」和「浏览器画面」本来就放不下，而且靠
+   * 截图去镜像一个被系统压后台的 Chrome，渲染进程一冻就只剩超时（实测后台
+   * 8016ms / 0 字节，前台 1966ms / 890KB）。所以手机这条路**根本不用截图**，
+   * 由 App 内的 WebView 直接吐出结构化快照，侧栏用 HTML 重画一份简版页面。
+   * 副作用是更快、更省电、不受前后台影响 —— 而且人和 AI 看的是同一份 DOM。
+   */
+  dom?: {
+    ready?: string
+    text: string
+    elements: BrowserDomElement[]
+    /** 阅读顺序（h1-h5 / p / li / pre / blockquote / td），侧栏按它排版 */
+    blocks?: BrowserDomBlock[]
+  }
   /**
    * 页面视口的 CSS 尺寸（2026-09-23 新增）。
    *
@@ -587,6 +626,13 @@ export interface BrowserSessionHandle {
   goBack(): Promise<any>
   wheel(dy: number): Promise<any>
   interactive(): Promise<string[]>
+  /**
+   * DOM 模式专用（手机）: 按元素序号点击 / 输入。
+   * 像素模式（桌面）没有这两个方法 —— 那边靠坐标；这两条是可选成员，
+   * 所以调用方必须先判存在性，别假定人人都有。
+   */
+  clickIndex?(i: number): Promise<BrowserActionResult>
+  typeInto?(i: number, text: string): Promise<BrowserActionResult>
   lastFrame(): BrowserSnapshot | null
   waitAfter(afterTs: number): Promise<BrowserSnapshot | null>
   close(): Promise<void>

@@ -26,6 +26,13 @@ on:
     paths:
       - "apps/android/**"
       - ".github/workflows/build-android.yml"
+      # The APK bakes packages/server/dist and packages/client/dist into its rootfs,
+      # so a runtime change that does not rebuild the APK leaves the phone running
+      # stale code — silently, since nothing on the device knows a newer build exists.
+      - "packages/server/src/**"
+      - "packages/client/src/**"
+      - "scripts/build-mobile-payload.mjs"
+      - "pnpm-lock.yaml"
     tags:
       - "v*"
 

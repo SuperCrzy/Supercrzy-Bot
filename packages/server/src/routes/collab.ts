@@ -6,7 +6,8 @@
 import Router from 'koa-router'
 import type { Context } from 'koa'
 import { createCollabTask, getCollabTask, listCollabTasks, stopCollabTask, decideCollabTask, promoteCollabTask } from '../services/collab-engine'
-import { aiBrowserUnavailable, browserSession, browserKey, closeBrowserForSession, activeBrowserKeys, browserMode, attachEndpoint, getAttachReport, browserStartPageUrl, browserSessionPages } from '../services/ai-browser'
+import { aiBrowserUnavailable, browserSession, browserKey, closeBrowserForSession, activeBrowserKeys, browserMode, attachEndpoint, getAttachReport, browserStartPageUrl, browserSessionPages, type BrowserSessionHandle } from '../services/ai-browser'
+import { mobileBrowserAvailable, mobileBrowserSession } from '../services/ai-browser-mobile'
 import { createAuditTask, getAuditTask, listAuditTasks } from '../services/collab-audit'
 
 export const collabRouter = new Router({ prefix: '/api/collab' })
@@ -23,15 +24,18 @@ function browserKeyOf(ctx: Context): string {
   const q = ctx.query as { sid?: string }
   return browserKey(b.sessionId || q.sid || 'default')
 }
-function bs(ctx: Context) {
+function bs(ctx: Context): BrowserSessionHandle {
+  // 手机端走 DOM 模式（App 内 WebView，结构化快照），桌面端走原来的像素模式。
+  // 为什么不是"修好手机上的截图"：那台设备上被截的是系统 Chrome，聊天时它永远在
+  // 后台被冻结，截图只能超时（真机实测后台 8016ms / 0 字节）；而且手机屏幕也放不下
+  // 「聊天 + 浏览器画面」两块。所以手机上不搬像素，只搬"有什么可点、写着什么"。
+  if (!aiBrowserUnavailable()) return browserSession(browserKeyOf(ctx))
+  if (mobileBrowserAvailable()) return mobileBrowserSession()
   const reason = aiBrowserUnavailable()
-  if (reason) {
-    const error = new Error(reason) as Error & { status?: number; expose?: boolean }
-    error.status = 400
-    error.expose = true
-    throw error
-  }
-  return browserSession(browserKeyOf(ctx))
+  const error = new Error(reason || 'AI browser unavailable') as Error & { status?: number; expose?: boolean }
+  error.status = 400
+  error.expose = true
+  throw error
 }
 
 
@@ -157,7 +161,9 @@ collabRouter.post('/browser/close', async (ctx: Context) => {
 // 2026-09-23 增补 mode / attach：attach 模式下"接错了哪一页"是最难查的一类故障，
 // 把决策过程（候选、跳过原因、最终选中）直接摊开，省掉一轮猜。
 collabRouter.get('/browser/sessions', (ctx: Context) => {
-  const mode = browserMode()
+  // 手机端（没有桌面内核、但 App 命令通道在）报 'dom'：前端据此**根本不渲染 <img>**，
+  // 而是把结构化快照重画成一份可点的简版页面。这一条是整个手机侧栏的前置开关。
+  const mode = aiBrowserUnavailable() && mobileBrowserAvailable() ? 'dom' : browserMode()
   ctx.body = {
     keys: activeBrowserKeys(),
     count: activeBrowserKeys().length,
@@ -176,14 +182,24 @@ collabRouter.get('/browser/sessions', (ctx: Context) => {
 // ---- AI 浏览器动作层 L2 (经单会话实例: 人点画面/AI动统一) ----
 // POST /api/collab/browser/act { action, x?, y?, text?, into?, key?, deltaY?, sessionId? }
 collabRouter.post('/browser/act', async (ctx: Context) => {
-  const b = ctx.request.body as { action?: string; x?: number; y?: number; text?: string; into?: string; key?: string; deltaY?: number }
+  const b = ctx.request.body as { action?: string; x?: number; y?: number; text?: string; into?: string; key?: string; deltaY?: number; index?: number }
   const a = b.action || ''
   try {
     const h = bs(ctx)
     let out: any
     if (a === 'click_at' && typeof b.x === 'number' && typeof b.y === 'number') out = await h.clickAt(b.x, b.y)
+    // DOM 模式（手机）：按元素序号点。序号是后端注入的 data-sc-idx，滚动/重排都不会错位，
+    // 比坐标稳 —— 侧栏里那一列可点元素就是它。
+    else if (a === 'click_idx' && typeof b.index === 'number') {
+      if (!h.clickIndex) return ctx.status = 400, ctx.body = { error: 'this backend has no element indices (desktop pixel mode)' }
+      out = await h.clickIndex(b.index)
+    }
     else if (a === 'click_text') out = await h.clickText(String(b.text || ''))
-    else if (a === 'type') out = await h.typeText(String(b.text || ''), b.into ? String(b.into) : undefined)
+    else if (a === 'type') {
+      // 带 index 就是"打进第 N 个输入框"；不带就退回像素模式的语义（焦点/占位符）。
+      if (typeof b.index === 'number' && h.typeInto) out = await h.typeInto(b.index, String(b.text || ''))
+      else out = await h.typeText(String(b.text || ''), b.into ? String(b.into) : undefined)
+    }
     else if (a === 'key') out = await h.press(String(b.key || ''))
     else if (a === 'scroll') out = await h.wheel(Number(b.deltaY) || 300)
     else if (a === 'back') out = await h.goBack()

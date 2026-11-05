@@ -29,6 +29,7 @@ import createPlan from './create-plan'
 import computerUse from './computer-use'
 import deviceControl from './device-control'
 import mobileBrowser from './mobile-browser'
+import { deviceBridgeReady } from '../services/device-bridge'
 
 /**
  * Desktop-only tools, gated by host capability instead of being registered and
@@ -36,16 +37,40 @@ import mobileBrowser from './mobile-browser'
  * GUI through nut.js, which does not exist there (the phone's own screen control
  * is the accessibility service, a different mechanism).
  */
-/** Tools that only make sense on the phone (they ride the device bridge). */
-const MOBILE_ONLY_TOOLS = new Set(['deviceControl', 'mobileBrowser'])
+/**
+ * Tools that only make sense on the phone (they ride the device bridge).
+ *
+ * 🔴 Names must be the tool's real `name` field (snake_case). This set once held
+ * camelCase identifiers — `deviceControl`, `mobileBrowser` — which matched nothing,
+ * so the gate silently did nothing at all. `registry-gate.test.ts` now fails if any
+ * name in either set is absent from the tool array, so a rename cannot quietly
+ * disconnect a gate again.
+ */
+const MOBILE_ONLY_TOOLS = new Set(['device_control', 'mobile_browser'])
+
+/**
+ * Are we running on the phone?
+ *
+ * 🔴 `process.platform === 'android'` alone is wrong and was a silent, total failure:
+ * the phone runs a stock aarch64 Node inside proot, so it reports `'linux'`. Gating on
+ * `'android'` therefore never fired — the mobile-only tools were skipped as
+ * "desktop" and the desktop-only ones stayed registered, which is the exact opposite
+ * of the intent. Both gates were dead code on the only device they were written for.
+ *
+ * The truthful signal is the device bridge: only the app creates that directory.
+ * (`'android'` is kept for a future nodejs-mobile style build.)
+ */
+function isMobileRuntime(): boolean {
+  return process.platform === 'android' || deviceBridgeReady()
+}
 
 const DESKTOP_ONLY_TOOLS = new Set([
   // nut.js GUI automation — macOS/Windows only.
-  'computerUse',
+  'computer_use',
   // Drive a *second* Android device over adb. On the phone itself this is the L2
   // virtual-display feature's job, with its own transport — not this tool pair.
-  'androidScreen',
-  'androidAction',
+  'android_screen',
+  'android_action',
   // Drives a desktop Chromium through playwright-core; pruned from the mobile payload.
   'browser',
 ])
@@ -140,11 +165,11 @@ export const directoryTools: ToolDef[] = [
   deviceControl,
   mobileBrowser,
 ].filter((tool) => {
-  if (process.platform === 'android' && DESKTOP_ONLY_TOOLS.has(tool.name)) {
-    console.warn(`[registry] tool "${tool.name}" unavailable on android, skipped`)
+  if (isMobileRuntime() && DESKTOP_ONLY_TOOLS.has(tool.name)) {
+    console.warn(`[registry] tool "${tool.name}" unavailable on mobile, skipped`)
     return false
   }
-  if (process.platform !== 'android' && MOBILE_ONLY_TOOLS.has(tool.name)) {
+  if (!isMobileRuntime() && MOBILE_ONLY_TOOLS.has(tool.name)) {
     console.warn(`[registry] tool "${tool.name}" is mobile-only, skipped`)
     return false
   }

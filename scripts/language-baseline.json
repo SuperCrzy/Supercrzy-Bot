@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-26",
+  "generatedAt": "2026-11-05",
   "note": "Chinese-only files grandfathered by the English-first policy. MAY ONLY SHRINK.",
   "files": [
     "packages/client/src/App.vue",
@@ -52,7 +52,6 @@
     "packages/client/src/composables/useSpeechPreview.ts",
     "packages/client/src/composables/useWelcomePanel.ts",
     "packages/client/src/data/task-templates.ts",
-    "packages/client/src/router/index.ts",
     "packages/client/src/stores/ctx-usage.test.ts",
     "packages/client/src/stores/plan.ts",
     "packages/client/src/types/index.ts",
@@ -104,7 +103,6 @@
     "packages/desktop/.deploy-server/src/pdf-parse.d.ts",
     "packages/desktop/.deploy-server/src/routes/mcp.ts",
     "packages/desktop/.deploy-server/src/routes/news.ts",
-    "packages/desktop/.deploy-server/src/routes/ocr.ts",
     "packages/desktop/.deploy-server/src/routes/settings.test.ts",
     "packages/desktop/.deploy-server/src/routes/task-state-stats.test.ts",
     "packages/desktop/.deploy-server/src/routes/task-state.ts",
@@ -229,7 +227,6 @@
     "packages/server/src/tools/lint-file.ts",
     "packages/server/src/tools/make-article.ts",
     "packages/server/src/tools/multi-edit.ts",
-    "packages/server/src/tools/registry.ts",
     "packages/server/src/tools/terminal-close.ts",
     "packages/server/src/tools/terminal-list.ts",
     "packages/server/src/tools/terminal-open.ts",
