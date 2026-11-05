@@ -1,6 +1,7 @@
 package com.supercrzy.bot
 
 import android.accessibilityservice.AccessibilityService
+import org.json.JSONObject
 import android.accessibilityservice.GestureDescription
 import android.graphics.Path
 import android.util.Log

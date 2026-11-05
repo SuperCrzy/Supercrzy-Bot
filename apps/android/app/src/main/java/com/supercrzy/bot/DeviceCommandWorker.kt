@@ -22,6 +22,9 @@ import java.io.File
  * Kinds:
  *   snapshot | tap | swipe | text | key | launch | browser_navigate |
  *   browser_snapshot | browser_click | browser_type | browser_back
+ *
+ * Browser commands answer asynchronously (the WebView JS callback writes the
+ * response later); [execute] signals that by returning null.
  */
 class DeviceCommandWorker private constructor(private val context: Context) {
 
@@ -62,27 +65,26 @@ class DeviceCommandWorker private constructor(private val context: Context) {
         val requests = reqDir.listFiles { f -> f.isFile && f.name.endsWith(".json") } ?: return
         for (file in requests) {
             val body = runCatching { file.readText() }.getOrNull() ?: continue
-            file.delete() // claim it before executing so a second poll never double-runs
+            file.delete() // claim before executing so the next poll never double-runs
             val request = runCatching { JSONObject(body) }.getOrElse {
                 Log.w(TAG, "bad request json: ${it.message}")
-                continue
-            }
+                null
+            } ?: continue
             val id = request.optString("id")
             if (id.isEmpty()) continue
             val kind = request.optString("kind")
             val args = request.optJSONObject("args") ?: JSONObject()
-            val response = execute(kind, args)
-            val out = JSONObject().apply {
-                put("id", id)
-                put("ok", response.optBoolean("ok", false))
-                put("data", response.opt("data") ?: JSONObject.NULL)
-                put("error", response.opt("error") ?: JSONObject.NULL)
-            }
-            File(respDir, "$id.json").writeText(out.toString())
+
+            val response = execute(kind, args, id)
+            if (response != null) writeResp(id, response)
         }
     }
 
-    private fun execute(kind: String, args: JSONObject): JSONObject = when (kind) {
+    /**
+     * Runs one command on the main thread. Returns the response object, or null when
+     * the response will be written asynchronously (browser commands).
+     */
+    private fun execute(kind: String, args: JSONObject, id: String): JSONObject? = when (kind) {
         "snapshot" -> a11y { BotAccessibilityService.get()?.snapshot() }
         "tap" -> a11y { BotAccessibilityService.get()?.tap(args.optInt("x"), args.optInt("y")) }
         "swipe" -> a11y {
@@ -94,19 +96,11 @@ class DeviceCommandWorker private constructor(private val context: Context) {
         "key" -> a11y { BotAccessibilityService.get()?.globalKey(args.optString("key")) }
         "launch" -> launchApp(args)
         "browser_navigate", "browser_snapshot", "browser_click", "browser_type", "browser_back" -> {
-            // WebView commands are async (evaluateJavascript callbacks on the main
-            // thread) — acknowledge now and let BrowserHost write the real response.
+            // WebView commands complete through evaluateJavascript callbacks; ack
+            // now and let BrowserHost write the real response when JS answers.
             handler.post {
                 BrowserHost.handle(kind, args) { response ->
-                    runCatching {
-                        val out = JSONObject().apply {
-                            put("id", id)
-                            put("ok", response.optBoolean("ok", false))
-                            put("data", response.opt("data") ?: JSONObject.NULL)
-                            put("error", response.opt("error") ?: JSONObject.NULL)
-                        }
-                        File(respDir, "$id.json").writeText(out.toString())
-                    }
+                    writeResp(id, response)
                 }
             }
             JSONObject().put("ok", true).put("data", "pending")
@@ -114,47 +108,47 @@ class DeviceCommandWorker private constructor(private val context: Context) {
         else -> JSONObject().put("ok", false).put("error", "unknown kind: $kind")
     }
 
+    private fun writeResp(id: String, resp: JSONObject) {
+        runCatching {
+            val out = JSONObject().apply {
+                put("id", id)
+                put("ok", resp.optBoolean("ok", false))
+                put("data", resp.opt("data") ?: JSONObject.NULL)
+                put("error", resp.opt("error") ?: JSONObject.NULL)
+            }
+            respDir.mkdirs()
+            File(respDir, "$id.json").writeText(out.toString())
+        }.onFailure { Log.w(TAG, "resp write failed: ${it.message}") }
+    }
+
     /** Wraps a11y-backed actions with the availability check in one place. */
-    private inline fun a11y(block: () -> Any?): JSONObject = JSONObject().apply {
+    private inline fun a11y(block: () -> Any?): JSONObject {
         val service = BotAccessibilityService.get()
         if (service == null) {
-            put("ok", false)
-            put("error", "accessibility service is not enabled — enable SUPERCRZY in system settings")
-            return@apply
+            return JSONObject()
+                .put("ok", false)
+                .put("error", "accessibility service is not enabled — enable SUPERCRZY in system settings")
         }
-        runCatching {
+        return runCatching {
             val data = block()
-            put("ok", true)
-            put("data", data ?: JSONObject.NULL)
-        }.onFailure {
-            put("ok", false)
-            put("error", it.message ?: it.javaClass.simpleName)
+            JSONObject().put("ok", true).put("data", data ?: JSONObject.NULL)
+        }.getOrElse {
+            JSONObject().put("ok", false).put("error", it.message ?: it.javaClass.simpleName)
         }
     }
 
-    private inline fun browser(block: () -> Any?): JSONObject = JSONObject().apply {
-        runCatching {
-            val data = block()
-            put("ok", true)
-            put("data", data ?: JSONObject.NULL)
-        }.onFailure {
-            put("ok", false)
-            put("error", it.message ?: it.javaClass.simpleName)
-        }
-    }
-
-    private fun launchApp(args: JSONObject): JSONObject = JSONObject().apply {
+    private fun launchApp(args: JSONObject): JSONObject {
         val pkg = args.optString("package")
         if (pkg.isEmpty()) {
-            put("ok", false); put("error", "package required"); return@apply
+            return JSONObject().put("ok", false).put("error", "package required")
         }
         val intent = context.packageManager.getLaunchIntentForPackage(pkg)
         if (intent == null) {
-            put("ok", false); put("error", "app not installed: $pkg"); return@apply
+            return JSONObject().put("ok", false).put("error", "app not installed: $pkg")
         }
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         context.startActivity(intent)
-        put("ok", true); put("data", "launched $pkg")
+        return JSONObject().put("ok", true).put("data", "launched $pkg")
     }
 
     companion object {
