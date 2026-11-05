@@ -58,14 +58,14 @@ object TarExtractor {
                         var left = size
                         val buf = ByteArray(1 shl 16)
                         while (left > 0) {
-                            val n = input.read(buf, 0, minOf(buf.size.toLong(), left).toInt())
+                            val n = input.read(buf, 0, minOf(buf.size.toLong(), left).toInt().coerceAtLeast(0))
                             if (n <= 0) break
                             out.write(buf, 0, n)
                             left -= n
                         }
                         out.close()
                         val mode = octal(header, 100, 8)
-                        if (mode and 0o111 != 0) target.setExecutable(true, false)
+                        if (mode and 0x49 != 0) target.setExecutable(true, false) // 0o111 = owner+group+other exec
                         count++
                     }
                     '2' -> { // symlink
@@ -130,7 +130,9 @@ object TarExtractor {
     }
 
     private fun str(header: ByteArray, off: Int, len: Int): String {
-        val end = header.indexOf(0.toByte(), off).let { if (it in off until off + len) it else off + len }
+        var end = off
+        val limit = minOf(off + len, header.size)
+        while (end < limit && header[end] != 0.toByte()) end++
         return String(header, off, end - off, Charsets.UTF_8).trim()
     }
 
