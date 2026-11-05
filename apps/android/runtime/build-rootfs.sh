@@ -51,8 +51,10 @@ APK="$WORK/sbin/apk.static"
 [ -x "$APK" ] || { echo "✘ apk.static missing after extract"; exit 1; }
 
 echo "== install nodejs / npm / git (aarch64) =="
+# --no-scripts: the CI host is not root, so post-install scripts that chroot fail.
+# musl resolves shared libraries without an ldconfig cache, so skipping is safe here.
 "$APK" --arch aarch64 -X "$MIRROR/$ALPINE_BRANCH/main" -U \
-  --root "$ROOTFS" --initdb --no-cache add nodejs npm git bash ca-certificates
+  --root "$ROOTFS" --initdb --no-cache --no-scripts add nodejs npm git bash ca-certificates
 "$ROOTFS/usr/bin/node" --version 2>/dev/null || true # cross-arch: presence check only
 test -x "$ROOTFS/usr/bin/node" || { echo "✘ node missing after apk add"; exit 1; }
 rm -rf "$ROOTFS/var/cache/apk"/*
