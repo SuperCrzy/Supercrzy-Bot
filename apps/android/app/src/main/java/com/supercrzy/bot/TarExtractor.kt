@@ -65,7 +65,7 @@ object TarExtractor {
                         }
                         out.close()
                         val mode = octal(header, 100, 8)
-                        if (mode and 0x49 != 0) target.setExecutable(true, false) // 0o111 = owner+group+other exec
+                        if (mode and 0x49L != 0L) target.setExecutable(true, false) // 0o111 = owner+group+other exec
                         count++
                     }
                     '2' -> { // symlink
@@ -90,7 +90,7 @@ object TarExtractor {
                 }
                 // Entries are padded to 512-byte blocks; 'L'/'x' already consumed above.
                 if (typeFlag !in "Lx") {
-                    val padding = (512 - (size % 512)) % 512
+                    val padding = ((512 - (size % 512)) % 512).toInt()
                     if (padding > 0) {
                         val skip = ByteArray(padding)
                         if (!readFully(input, skip)) break
