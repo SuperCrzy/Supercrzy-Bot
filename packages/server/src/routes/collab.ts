@@ -6,7 +6,7 @@
 import Router from 'koa-router'
 import type { Context } from 'koa'
 import { createCollabTask, getCollabTask, listCollabTasks, stopCollabTask, decideCollabTask, promoteCollabTask } from '../services/collab-engine'
-import { browserSession, browserKey, closeBrowserForSession, activeBrowserKeys, browserMode, attachEndpoint, getAttachReport, browserStartPageUrl, browserSessionPages } from '../services/ai-browser'
+import { aiBrowserUnavailable, browserSession, browserKey, closeBrowserForSession, activeBrowserKeys, browserMode, attachEndpoint, getAttachReport, browserStartPageUrl, browserSessionPages } from '../services/ai-browser'
 import { createAuditTask, getAuditTask, listAuditTasks } from '../services/collab-audit'
 
 export const collabRouter = new Router({ prefix: '/api/collab' })
@@ -23,7 +23,16 @@ function browserKeyOf(ctx: Context): string {
   const q = ctx.query as { sid?: string }
   return browserKey(b.sessionId || q.sid || 'default')
 }
-function bs(ctx: Context) { return browserSession(browserKeyOf(ctx)) }
+function bs(ctx: Context) {
+  const reason = aiBrowserUnavailable()
+  if (reason) {
+    const error = new Error(reason) as Error & { status?: number; expose?: boolean }
+    error.status = 400
+    error.expose = true
+    throw error
+  }
+  return browserSession(browserKeyOf(ctx))
+}
 
 
 /**

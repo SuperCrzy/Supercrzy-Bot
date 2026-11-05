@@ -41,6 +41,8 @@ const DESKTOP_ONLY_TOOLS = new Set([
   // virtual-display feature's job, with its own transport — not this tool pair.
   'androidScreen',
   'androidAction',
+  // Drives a desktop Chromium through playwright-core; pruned from the mobile payload.
+  'browser',
 ])
 import makeArticle from './make-article'
 import deepResearch from './deep-research'

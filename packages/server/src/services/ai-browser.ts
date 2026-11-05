@@ -87,6 +87,19 @@ export function normalizeUrl(raw: string): string {
  * 现在路由与工具都调本函数，key 必然一致。前缀保留 `wb:` 以兼容既有前端（X-Browser-Key 语义不变）。
  */
 export const BROWSER_KEY_PREFIX = 'wb:'
+/**
+ * Why the AI browser cannot run on this host, or null when it can.
+ *
+ * The phone is the case that matters: there is no Chromium to drive, and the
+ * mobile payload prunes playwright-core entirely. Callers turn this into a clean
+ * 400 instead of letting chromium.launch() blow up into a 500.
+ */
+export function aiBrowserUnavailable(): string | null {
+  return detectBrowserPath()
+    ? null
+    : 'AI browser needs a desktop browser kernel (Chrome/Edge). Not available on this device; the mobile app will use an embedded WebView instead.'
+}
+
 export function browserKey(sessionId?: string | null): string {
   const raw = String(sessionId || 'default').slice(0, 64)
   // 幂等：传已带前缀的 key 不二次拼接（路由/工具两侧都可能传全量 key）
