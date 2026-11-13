@@ -27,6 +27,7 @@ import {
   ttsProxyFromEnv,
   prewarmTts,
   resetTtsWarmPool,
+  resetFamilyHint,
   TTS_FORMATS,
   formatForQuality,
 } from './tts'
@@ -170,6 +171,9 @@ function resetTtsStub(opts: { failFirstN?: number; failMessage?: string } = {}) 
   state.errorAfterChunk = false
   state.socketEvents = []
   state.rawFrame = false
+  // The remembered address family is module state: without this, one test's outcome
+  // decides which family the next test tries first.
+  resetFamilyHint()
 }
 
 /**
@@ -328,7 +332,10 @@ describe('synthesizeSpeech 退避重试', () => {
     let msg = ''
     try { await synthesizeSpeech('一句测试文本。') } catch (e: any) { msg = e?.message }
     expect(msg).toBe('read ECONNRESET')
-    expect(state.connectAttempts).toBe(TTS_MAX_ATTEMPTS)
+    // Each logical attempt may probe two address families (IPv4, then IPv6). The bound
+    // is what matters — "gives up, does not spin" — not the exact socket count: the
+    // first attempt probes both, then the hint stops it from paying twice per retry.
+    expect(state.connectAttempts).toBeLessThanOrEqual(TTS_MAX_ATTEMPTS + 1)
   })
 
   it('非瞬时错误（音色不存在）→ 只试 1 次就抛，不浪费时间', async () => {
@@ -418,6 +425,25 @@ describe('出口代理 TTS_PROXY（不设 = 直连，行为与改造前逐字一
     process.env.HTTPS_PROXY = 'http://127.0.0.1:49247'
     await synthesizeSpeech('一句测试文本。')
     expect(state.lastOpts.agent).toBeUndefined()
+  })
+
+  /**
+   * 2026-11-13, measured on a mainland-China mobile hotspot (IPv6 preferred by the OS):
+   * IPv6 never reached the upstream — 0/6, reset after ~192ms every time — while IPv4
+   * reached it 6/6 in ~700ms. Since the OS order prefers IPv6, a direct connection must
+   * pin `family: 4` or every retry lands on the family that is guaranteed to fail.
+   * This assertion is the whole fix: remove the pin and users go back to silence.
+   */
+  it('直连必须钉住 IPv4（系统默认 IPv6 优先，而那条路 100% 被重置）', async () => {
+    await synthesizeSpeech('一句测试文本。')
+    expect(state.lastOpts.agent).toBeUndefined()
+    expect(state.lastOpts.family).toBe(4)
+  })
+
+  it('走代理时不指定 family（连的是代理的字面 IP，没有选择余地）', async () => {
+    process.env.TTS_PROXY = 'http://127.0.0.1:7890'
+    await synthesizeSpeech('一句测试文本。')
+    expect(state.lastOpts.family).toBeUndefined()
   })
 
   it('设了 TTS_PROXY → 建出指向它的 agent（URL 不做改写）', async () => {

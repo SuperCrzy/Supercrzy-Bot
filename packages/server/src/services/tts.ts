@@ -288,17 +288,12 @@ export function ssmlFrame(requestId: string, text: string, voice: string, lang: 
  *     不监听就会一路挂到我们自己超时，把"快速失败"伪装成"网络慢"
  *   · `open` 之前的 `error` —— TLS/DNS 层失败走这里
  */
-export async function openUpstream(
+async function connectOnce(
   connectionId: string,
-  /**
-   * 显式指定出口：
-   *   · `undefined` = 用当前选路结果（`ttsProxyFromEnv()`，含自动选中的中继）
-   *   · `null` = **强制直连**（探测直连基线时用）
-   *   · `string` = 强制走这个代理（探测各中继时用）
-   */
-  proxyOverride?: string | null,
+  proxy: string | undefined,
+  family: 4 | 6 | undefined,
+  timeoutMs: number,
 ): Promise<UpstreamSocket> {
-  const proxy = proxyOverride === undefined ? ttsProxyFromEnv() : proxyOverride === null ? undefined : proxyOverride
   // muid：上游 `DRM.generate_muid()` = 16 随机字节的 hex 大写，Cookie 形如 `muid=<MUID>;`
   // （v2 握手必带；缺了会被当作非 Edge 客户端拒绝）。
   const muid = randomBytes(16).toString('hex').toUpperCase()
@@ -312,7 +307,10 @@ export async function openUpstream(
     },
     // 未设 TTS_PROXY 时为 undefined ⇒ 真直连（不自动采用宿主 HTTP_PROXY，见 ttsProxyFromEnv 注释）
     agent: proxy ? new HttpsProxyAgent(proxy) : undefined,
-  })
+    // `family` is not part of ws' ClientOptions but passes straight through to
+    // http.request, which honours it (verified on device 2026-11-13).
+    ...(family ? { family } : {}),
+  } as WebSocket.ClientOptions)
 
   // 🔴 永久哑监听器（2026-10-20 事故修复）：`ws` 在握手被拒（429/403）时会走
   // abortHandshake → `req.destroy()` → 随后 `emit('error')`。而 EventEmitter 对 `'error'`
@@ -341,13 +339,96 @@ export async function openUpstream(
     function onUnexpected(_req: ClientRequest, res: IncomingMessage) {
       finish(new Error(`上游握手失败 HTTP ${res.statusCode ?? '?'}`))
     }
-    timer = setTimeout(() => finish(new Error('连接上游超时')), TTS_HANDSHAKE_TIMEOUT_MS)
+    timer = setTimeout(() => finish(new Error('连接上游超时')), timeoutMs)
     ws.on('open', onOpen)
     ws.on('error', onError)
     ws.on('unexpected-response', onUnexpected)
   })
 
   return ws as unknown as UpstreamSocket
+}
+
+/**
+ * Handshake budget for the first attempt, pinned to IPv4.
+ *
+ * Measured 2026-11-13, Shenzhen / China Unicom hotspot, same host, same minute:
+ *   · IPv6 (the system's default order prefers it): 0/6 reached the upstream —
+ *     6/6 killed with `read ECONNRESET` after ~192ms.
+ *   · IPv4 (`family: 4`): 6/6 reached, ~700ms.
+ *   · US relay (:3128): 6/6 reached, ~1967ms — slower than plain IPv4.
+ *
+ * So "Edge TTS needs a relay in mainland China" was only half true: it needs IPv4.
+ * The relay was compensating for a path we were picking ourselves, and the old
+ * "3 of 4 handshakes reset" record is an IPv6-only symptom.
+ */
+export const TTS_IPV4_FIRST_TIMEOUT_MS = 8000
+
+/**
+ * Which family to use first, and until when.
+ *
+ * Without this, a host where both families are down pays the double attempt on every
+ * logical retry (3 × 20s). With it: the first attempt probes both, then we stick to the
+ * winner — or, if neither won, stop paying for the second probe for a minute.
+ */
+let familyHint: { family: 4 | 6; until: number } | null = null
+/** Happy path: one family works, so keep using it for a while. */
+const FAMILY_HINT_TTL_MS = 10 * 60_000
+/** Both families just failed: skip the second probe briefly instead of doubling every retry. */
+const FAMILY_FAILURE_COOLDOWN_MS = 60_000
+
+/** Test seam: forget the remembered family. */
+export function resetFamilyHint(): void {
+  familyHint = null
+}
+
+/** True when the failure is "this address family cannot reach the host", not "upstream refused". */
+export function isFamilyFailure(e: unknown): boolean {
+  const msg = e instanceof Error ? e.message : String(e)
+  if (msg.startsWith('上游握手失败 HTTP')) return false // upstream answered; another family will not help
+  const code = (e as { code?: string })?.code || ''
+  return (
+    /ECONNRESET|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|EAI_AGAIN|EPIPE|连接上游超时/.test(msg) ||
+    /ECONNRESET|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|EAI_AGAIN/.test(code)
+  )
+}
+
+export async function openUpstream(
+  connectionId: string,
+  /**
+   * 显式指定出口：
+   *   · `undefined` = 用当前选路结果（`ttsProxyFromEnv()`，含自动选中的中继）
+   *   · `null` = **强制直连**（探测直连基线时用）
+   *   · `string` = 强制走这个代理（探测各中继时用）
+   */
+  proxyOverride?: string | null,
+): Promise<UpstreamSocket> {
+  const proxy = proxyOverride === undefined ? ttsProxyFromEnv() : proxyOverride === null ? undefined : proxyOverride
+  // Through a proxy there is no address-family decision: the socket targets the proxy's
+  // literal IP. Keep it single-shot so relay behaviour is unchanged.
+  if (proxy) return connectOnce(connectionId, proxy, undefined, TTS_HANDSHAKE_TIMEOUT_MS)
+
+  const known = familyHint && Date.now() < familyHint.until ? familyHint.family : null
+  if (known) return connectOnce(connectionId, undefined, known, TTS_HANDSHAKE_TIMEOUT_MS)
+
+  // 🔴 IPv4 first (2026-11-13). The system prefers IPv6 on mobile networks and that path
+  // is reset ~192ms into the upgrade every time; all three retries then hit the same dead
+  // family, which users experience as "no sound / 502". IPv4 reaches the same host in
+  // ~700ms. IPv6 stays as the fallback for IPv6-only networks (NAT64 / DNS64).
+  try {
+    const sock = await connectOnce(connectionId, undefined, 4, TTS_IPV4_FIRST_TIMEOUT_MS)
+    familyHint = { family: 4, until: Date.now() + FAMILY_HINT_TTL_MS }
+    return sock
+  } catch (e) {
+    if (!isFamilyFailure(e)) throw e
+    try {
+      const sock = await connectOnce(connectionId, undefined, 6, TTS_HANDSHAKE_TIMEOUT_MS)
+      familyHint = { family: 6, until: Date.now() + FAMILY_HINT_TTL_MS }
+      return sock
+    } catch (e2) {
+      familyHint = { family: 4, until: Date.now() + FAMILY_FAILURE_COOLDOWN_MS }
+      throw e2
+    }
+  }
 }
 
 /**

@@ -1,6 +1,6 @@
 {
   "updatedAt": "2026-10-26",
-  "note": "Bundled fallback for the TTS relay list. The app reads this file when fetching the online manifest fails — which is the normal case for users in mainland China, because the manifest host (updates.supercrzy.com) sits behind the same cross-border link that makes direct Edge-TTS handshakes take 1.5-30s. Shipping it inside the package means the relay is usable on first launch with no network round-trip. Keep in sync with updates.supercrzy.com/releases/tts-relays.json.",
+  "note": "Bundled fallback for the TTS relay list. The app reads this file when fetching the online manifest fails — which is the normal case for users in mainland China, because the manifest host (updates.supercrzy.com) sits behind the same cross-border link that makes direct Edge-TTS handshakes take 1.5-30s. Shipping it inside the package means the relay is usable on first launch with no network round-trip. Keep in sync with updates.supercrzy.com/releases/tts-relays.json. NOTE (2026-11-13): a relay is no longer the fast path from mainland China — pinned-IPv4 direct reaches the upstream in ~700ms while this relay takes ~1.9s, so route selection should normally decline it. It stays as the fallback for networks where IPv4 is unusable.",
   "relays": [
     "http://scbot:960e7c07f2d3712523fcdd6c0ab321c2@107.174.107.199:3128"
   ]
