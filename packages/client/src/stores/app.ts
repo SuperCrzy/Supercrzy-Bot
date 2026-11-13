@@ -7,7 +7,8 @@ import { DEFAULT_AUTO_READ_MODE, normalizeAutoReadMode, type AutoReadMode } from
 import type { CustomModel } from '@/types'
 
 export const useAppStore = defineStore('app', () => {
-  const darkMode = ref(false)
+  const settingsImmersive = ref(false)
+const darkMode = ref(false)
   // Agent 模式（默认开）：全局共享，桌面端横栏按钮与聊天页 header 同步高亮/切换
   const agentMode = ref(true)
   // 不预置默认模型：由用户在模型页自行配置并选择（当前模型为空 = 未选择）。
@@ -463,6 +464,7 @@ export const useAppStore = defineStore('app', () => {
     userAvatar,
     notifyProvidersChanged,
     toggleDarkMode,
+    settingsImmersive,
     setModel,
     toggleDetailPanel,
     setDetailPanelTab,

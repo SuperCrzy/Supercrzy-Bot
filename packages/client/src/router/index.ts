@@ -18,6 +18,20 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/components/layout/MainLayout.vue'),
     children: [
       { path: '', name: 'Chat', component: () => import('@/views/ChatView.vue'), meta: { title: 'nav.chat' } },
+      // ---- Media space (2026-11-13): Home / News / Lab / Rank ----
+      // The space split only exists on mobile (SpaceDock); on desktop these four pages sit
+      // beside the BOT pages with no gating.
+      { path: 'home', name: 'Home', component: () => import('@/views/HomeView.vue'), meta: { title: 'nav.home' } },
+      { path: 'lab', name: 'Lab', component: () => import('@/views/LabView.vue'), meta: { title: 'nav.lab' } },
+      { path: 'rank', name: 'Rank', component: () => import('@/views/RankView.vue'), meta: { title: 'nav.rank' } },
+      // Content search (articles / lab / rankings) — the site's own /search page, embedded.
+      // The app's /search is chat-history search; both exist and must not be conflated.
+      { path: 'explore', name: 'Explore', component: () => import('@/views/ExploreView.vue'), meta: { title: 'nav.explore' } },
+      // Site account (subscription / history) — same auth system as the app, different job
+      // than the BOT space's Settings page. This is the page the top-bar user icon opens.
+      { path: 'account', name: 'Account', component: () => import('@/views/AccountView.vue'), meta: { title: 'nav.account' } },
+      // Native "About" second-level page: legal links, version row with release-channel check.
+      { path: 'about', name: 'AppAbout', component: () => import('@/views/AboutView.vue'), meta: { title: 'about.title' } },
       { path: 'collab', name: 'Collab', component: () => import('@/views/CollabWorkbenchView.vue'), meta: { title: 'nav.collab' } },
       { path: 'search', name: 'Search', component: () => import('@/views/SearchView.vue'), meta: { title: 'nav.search' } },
       { path: 'automations', name: 'Automations', component: () => import('@/views/AutomationHubView.vue'), meta: { title: 'nav.automations' } },
@@ -43,6 +57,20 @@ const router = createRouter({
 })
 
 router.beforeEach(async (to) => {
+  // Set the title first: every early return below (preview bypass, redirect) would otherwise
+  // skip it, and the window would keep the static <title> from index.html.
+  const title = to.meta.title as string
+  // Brand is SUPERCRZY; "BOT" is the product line inside it, not the suffix of every page title.
+  if (title) document.title = `${i18n().global.t(title)} - SUPERCRZY`
+
+  // Dev-only preview bypass. The auth service (auth.supercrzy.com) is unreachable from
+  // mainland China, so layout work cannot otherwise be looked at locally. Visit any route
+  // with ?preview=1 once; the rest of the session stays unlocked. Never active in a build.
+  if (import.meta.env.DEV) {
+    if (to.query.preview === '1') sessionStorage.setItem('dev-preview', '1')
+    if (sessionStorage.getItem('dev-preview') === '1') return
+  }
+
   // The app requires an account, so resolve who is signed in before the first
   // route renders. ensureReady() is memoised — this costs one request per boot.
   const account = useAccountStore()
@@ -50,9 +78,6 @@ router.beforeEach(async (to) => {
 
   if (!account.signedIn && !to.meta.public) return { name: 'Login' }
   if (account.signedIn && to.name === 'Login') return { name: 'Chat' }
-
-  const title = to.meta.title as string
-  if (title) document.title = `${i18n().global.t(title)} - SUPERCRZY BOT`
 })
 
 export { routes }

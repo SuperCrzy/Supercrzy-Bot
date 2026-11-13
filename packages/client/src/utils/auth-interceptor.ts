@@ -25,7 +25,11 @@ export function installAuthInterceptor(router: Router): void {
 
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const res = await original(input, init)
-    if (res.status === 401 && !recovering) {
+    // Dev preview (same flag the router guard honours): layout work has to be viewable
+    // without a reachable auth service. A 401 then just leaves the view with no data
+    // instead of bouncing to /login.
+    const previewing = import.meta.env.DEV && sessionStorage.getItem('dev-preview') === '1'
+    if (res.status === 401 && !recovering && !previewing) {
       const url =
         typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url
       if (url.includes('/api/') && !url.includes('/api/account/')) {

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">SUPERCRZY BOT</string>
+    <string name="app_name">SUPERCRZY</string>
     <string name="server_title">Server address</string>
     <string name="server_hint">192.168.1.10:3000</string>
     <string name="server_help">Leave empty to use the runtime on this phone (127.0.0.1:3000). Enter a computer address only when you want to drive the desktop instead.</string>

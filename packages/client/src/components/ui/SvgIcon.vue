@@ -71,6 +71,35 @@ const icons: Record<string, IconDef> = {
   'super': { paths: ['M12 2v4M12 18v4M2 12h4M18 12h4'], circles: [{ cx: '12', cy: '12', r: '5' }], polylines: [{ points: '9 9 15 9 15 15 9 15 9 9' }] },
   'user': { paths: ['M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2'], circles: [{ cx: '12', cy: '7', r: '4' }] },
 
+  // Site dock icons — copied verbatim from supercrzy.com's mobile dock so the app and the
+  // site use the same marks. Do not "improve" these paths: they are the brand's.
+  'dock-home': { paths: ['M3 12L12 3l9 9', 'M5 10v10h5v-5h4v5h5V10'] },
+  'dock-news': {
+    rects: [{ x: '4', y: '4', width: '16', height: '16', rx: '2' }],
+    lines: [
+      { x1: '8', y1: '9', x2: '16', y2: '9' },
+      { x1: '8', y1: '13', x2: '14', y2: '13' },
+      { x1: '8', y1: '17', x2: '11', y2: '17' },
+    ],
+  },
+  'dock-bot': {
+    rects: [{ x: '4', y: '8', width: '16', height: '12', rx: '3' }],
+    paths: ['M12 4v4', 'M9.5 17h5'],
+    circles: [
+      { cx: '12', cy: '3', r: '1.2' },
+      { cx: '9', cy: '13.5', r: '1.2' },
+      { cx: '15', cy: '13.5', r: '1.2' },
+    ],
+  },
+  'dock-lab': { paths: ['M9 3h6v5l4 7H5l4-7z'], circles: [{ cx: '12', cy: '18', r: '1.5' }] },
+  'dock-rank': {
+    rects: [
+      { x: '3', y: '18', width: '4', height: '2' },
+      { x: '10', y: '12', width: '4', height: '8' },
+      { x: '17', y: '5', width: '4', height: '15' },
+    ],
+  },
+
   // Tools & Actions
   'search': { circles: [{ cx: '11', cy: '11', r: '8' }], lines: [{ x1: '21', y1: '21', x2: '16.65', y2: '16.65' }] },
   'file': { paths: ['M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z'], polylines: [{ points: '14 2 14 8 20 8' }] },

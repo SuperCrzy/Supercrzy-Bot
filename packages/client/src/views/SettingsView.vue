@@ -1,13 +1,83 @@
 <template>
   <div class="settings-page">
-    <header class="settings-header">
+    <header v-if="!isMobileSettings" class="settings-header">
       <h2>{{ $t('settings.title') }}</h2>
     </header>
 
     <div class="settings-body">
+      <!-- ======== 移动端：分组列表（WorkBuddy 风格）；桌面保持 tabs ======== -->
+      <div v-if="isMobileSettings && !mobileSection" class="settings-groups">
+        <button class="settings-row settings-row-account" @click="goSection('account')">
+          <ProfileAvatar :avatar="form.userAvatar" :name="form.userName || accountStore.email || 'S'" :size="44" :radius="12" />
+          <span class="settings-row-text">
+            <strong>{{ form.userName || accountStore.email || $t('settings.noAccountInfo') }}</strong>
+            <em v-if="accountStore.email">{{ accountStore.email }}</em>
+          </span>
+          <SvgIcon name="chevron-right" :size="16" />
+        </button>
+
+        <div class="settings-group">
+          <button class="settings-row" @click="goSection('display')">
+            <span class="settings-row-icon"><SvgIcon name="monitor" :size="16" /></span>
+            <span class="settings-row-text">{{ $t('settings.tabDisplay') }}</span>
+            <SvgIcon name="chevron-right" :size="16" />
+          </button>
+          <button class="settings-row" @click="goSection('speech')">
+            <span class="settings-row-icon"><SvgIcon name="zap" :size="16" /></span>
+            <span class="settings-row-text">{{ $t('settings.tabSpeech') }}</span>
+            <SvgIcon name="chevron-right" :size="16" />
+          </button>
+        </div>
+
+        <!-- 管理入口：紧跟通用组。核心/高级的子标题只在桌面 aside 保留——手机列表里
+             两个小标题只是噪音，全部行平铺成一张卡。 -->
+        <div class="settings-group">
+          <button
+            v-for="m in manageGroups.flatMap((g) => g.items)"
+            :key="m.path"
+            class="settings-row"
+            @click="router.push(m.path)"
+          >
+            <span class="settings-row-icon"><SvgIcon :name="m.icon" :size="16" /></span>
+            <span class="settings-row-text">{{ m.label }}</span>
+            <SvgIcon name="chevron-right" :size="16" />
+          </button>
+        </div>
+
+        <div class="settings-group">
+          <button class="settings-row" @click="goSection('agent')">
+            <span class="settings-row-icon"><SvgIcon name="brain" :size="16" /></span>
+            <span class="settings-row-text">{{ $t('settings.tabAgent') }}</span>
+            <SvgIcon name="chevron-right" :size="16" />
+          </button>
+          <button class="settings-row" @click="goSection('mcp')">
+            <span class="settings-row-icon"><SvgIcon name="plug" :size="16" /></span>
+            <span class="settings-row-text">{{ $t('settings.tabMcp') }}</span>
+            <SvgIcon name="chevron-right" :size="16" />
+          </button>
+        </div>
+
+        <div class="settings-group">
+          <button class="settings-row" @click="router.push('/about')">
+            <span class="settings-row-icon"><SvgIcon name="info" :size="16" /></span>
+            <span class="settings-row-text">{{ $t('about.title') }}</span>
+            <SvgIcon name="chevron-right" :size="16" />
+          </button>
+          <button class="settings-row" @click="openAppDownload">
+            <span class="settings-row-icon"><SvgIcon name="download" :size="16" /></span>
+            <span class="settings-row-text">
+              <strong>{{ $t('about.version') }} {{ APP_VERSION }}</strong>
+              <em v-if="appHasUpdate">{{ $t('about.newVersion', { v: appLatest }) }}</em>
+              <em v-else-if="appChecked">{{ $t('about.upToDate') }}</em>
+            </span>
+            <SvgIcon v-if="appHasUpdate" name="chevron-right" :size="16" />
+          </button>
+        </div>
+      </div>
+
       <!-- ======== 主列：设置标签页 ======== -->
-      <div class="settings-main">
-        <n-card size="small" class="tabs-card" content-style="padding:0">
+      <div v-show="!isMobileSettings || !!mobileSection" class="settings-main">
+        <n-card size="small" class="tabs-card" :class="{ 'nav-hidden': isMobileSettings }" content-style="padding:0">
           <n-tabs v-model:value="activeTab" type="line" animated>
           <!-- Tab 1: 账户 -->
           <n-tab-pane name="account" :tab="$t('settings.tabAccount')">
@@ -417,8 +487,8 @@
       </div>
       </div>
 
-      <!-- ======== 右侧栏：管理入口 + 关于 ======== -->
-      <aside class="settings-aside">
+      <!-- ======== 右侧栏：管理入口 + 关于（桌面 only；移动端这两块已并入上方分组列表） ======== -->
+      <aside v-if="!isMobileSettings" class="settings-aside">
         <div class="settings-card">
           <h3 class="section-title">{{ $t('settings.manageTitle') }}</h3>
           <!-- P1-01：核心 / 高级分区（此前 6 项平铺，无从判断该先配哪个） -->
@@ -436,7 +506,7 @@
           </div>
         </div>
 
-        <div class="settings-card">
+        <div v-if="!isMobileSettings" class="settings-card">
           <h3 class="section-title">{{ $t('settings.aboutTitle') }}</h3>
           <UpdatePanel />
         </div>
@@ -446,8 +516,8 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, onMounted, computed, watch, h } from 'vue'
-import { useRouter } from 'vue-router'
+import { reactive, ref, onMounted, onBeforeUnmount, computed, watch, h } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { useMessage, NButton } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { detectLocale } from '@/utils/locale'
@@ -470,8 +540,10 @@ import {
 import { useSpeechPreview, formatTtsRate } from '@/composables/useSpeechPreview'
 import { DEFAULT_TTS_VOICES, fallbackVoiceSample, toVoiceOptions, type TtsVoiceEntry } from '@/utils/tts-voices'
 import { AUTO_READ_MODES, DEFAULT_AUTO_READ_MODE, normalizeAutoReadMode } from '@/utils/auto-read'
+import { APP_VERSION } from '@/data/changelog'
 
 const router = useRouter()
+const route = useRoute()
 const appStore = useAppStore()
 const accountStore = useAccountStore()
 const signOutBusy = ref(false)
@@ -491,6 +563,50 @@ const nMessage = useMessage()
 const { locale, t } = useI18n({ useScope: 'global' })
 
 const activeTab = ref('account')
+
+// ---- Mobile: iOS-style grouped list (WorkBuddy-style). Desktop keeps the tab bar. ----
+// The desktop layout crams five tabs into one screen; on a 390px phone that forced the card
+// to ~460px and sideways scrolling. On mobile we show a grouped list instead, and each row
+// opens the same panel as a second-level page (the tab bar itself is hidden there).
+const isMobileSettings = ref(window.innerWidth <= 768)
+const mobileSection = ref<string | null>(null)
+function goSection(name: string) {
+  activeTab.value = name
+  mobileSection.value = name
+}
+function backToGroups() {
+  mobileSection.value = null
+}
+
+// While inside a Settings sub-section the whole app goes immersive (no dock) — tell the
+// layout, and make sure leaving (back or route change) resets it.
+watch(mobileSection, (v) => { appStore.settingsImmersive = !!v })
+watch(() => route.query.section, (v) => {
+  if (typeof v === 'string' && ['account', 'display', 'speech', 'agent', 'mcp'].includes(v)) goSection(v)
+}, { immediate: true })
+
+onBeforeUnmount(() => { appStore.settingsImmersive = false })
+
+// Release-channel check for the version row in the mobile group list (silent on failure).
+// The row itself IS the update status: no detour to the About page. Tapping it only does
+// something when there is an update (opens the download page); otherwise it's inert.
+const appLatest = ref<string | null>(null)
+const appHasUpdate = ref(false)
+const appChecked = ref(false)
+const APP_DOWNLOAD_URL = 'https://supercrzy.com/bot'
+function openAppDownload() {
+  if (appHasUpdate.value) window.open(APP_DOWNLOAD_URL, '_blank', 'noopener')
+}
+onMounted(async () => {
+  try {
+    const res = await fetch(`/api/system/app-update?version=${encodeURIComponent(APP_VERSION)}`)
+    const d = await res.json()
+    appLatest.value = d?.latest || null
+    appHasUpdate.value = !!d?.hasUpdate
+  } catch { /* offline → no badge */ } finally {
+    appChecked.value = true
+  }
+})
 
 // ---- MCP 连接器管理 ----
 interface McpServer {
@@ -1126,9 +1242,82 @@ async function saveSettings() {
   gap: 20px;
 }
 @media (max-width: 900px) {
-  .settings-body { flex-direction: column; }
+  /* align-items must become stretch here: in column mode flex-start leaves children at their
+     content width, and the tabs row (账户/界面/语音/AI与安全/连接器) forces the card to ~460px
+     on a 390px phone — the whole page then scrolls sideways. */
+  .settings-body { flex-direction: column; align-items: stretch; padding: 16px; }
   .settings-aside { width: 100%; }
+  .settings-header { padding: 14px 16px; }
+  /* 管理入口：网格 → 单列行（与上方分组列表同一形态），卡片拼成一张列表卡 */
+  .manage-grid { grid-template-columns: 1fr; gap: 0; }
+  .manage-card { border: none; border-radius: 0; padding: 12px 14px; }
+  .manage-card + .manage-card { border-top: 1px solid var(--border-color); }
+  .manage-arrow { margin-left: auto; }
+  /* 表单行：横排（label 左 / 控件右）在 390px 下会把 label 压成一字一行的竖条。
+     单列化：标签在上，控件占满整行。 */
+  .setting-row { flex-direction: column; align-items: stretch; gap: 8px; }
+  .setting-info { flex-direction: column; align-items: flex-start; gap: 4px; }
+  .setting-label { white-space: normal; }
+  .setting-desc { text-align: left; flex: none; }
+  .setting-range { width: 100%; }
+  .token-row { flex-direction: column; }
 }
+
+/* ===== Mobile: grouped list (WorkBuddy-style) ===== */
+.settings-groups { width: 100%; display: flex; flex-direction: column; gap: 14px; }
+.settings-group {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 14px 16px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.settings-group .settings-row + .settings-row { border-top: 1px solid var(--border-color); }
+.settings-row:active { background: var(--bg-hover, rgba(127,127,127,.08)); }
+.settings-row-account {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+}
+.settings-row-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.settings-row-text strong { font-size: 14px; font-weight: 600; }
+.settings-row-text em { font-size: 11.5px; font-style: normal; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-row-icon {
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+}
+.settings-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 10px;
+  padding: 6px 10px;
+  border: none;
+  background: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--accent);
+}
+.tabs-card.nav-hidden :deep(.n-tabs-nav) { display: none; }
 .settings-card { background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 12px; padding: 20px 24px; margin-bottom: 20px; }
 .section-title { font-size: 14px; font-weight: 600; margin: 0 0 16px; color: var(--text-primary); }
 /* P2-01 高级折叠组：与常用项在视觉上分层 */

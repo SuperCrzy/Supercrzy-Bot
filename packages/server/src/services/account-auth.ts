@@ -20,6 +20,12 @@ const PUBLIC_PATHS = new Set([
   '/api/account/status',
   '/api/account/login/start',
   '/api/account/logout',
+  // Editorial content is public on the site, so it is public here too. Gating it meant a
+  // signed-out (or auth-service-unreachable) user got an empty Home tab and an empty News
+  // list — the app looked broken rather than locked.
+  '/api/system/app-update',
+  '/api/news',
+  '/api/news/image',
 ])
 
 /**

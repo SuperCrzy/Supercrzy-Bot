@@ -114,6 +114,32 @@ systemRouter.get('/version', async (ctx: Context) => {
 })
 
 // 检查是否有更新：git fetch 后比较本地/远程 HEAD
+// App release check for phone/web builds: compares the client's APP_VERSION against the
+// version published on the release channel (updates.supercrzy.com/releases/latest.yml — the
+// same file electron-updater consumes). Deliberately NOT the /check-update git diff above:
+// that answers "is this checkout behind", which is meaningless for an APK install.
+const UPDATES_ORIGIN = 'https://updates.supercrzy.com'
+
+function semverGt(a: string, b: string): boolean {
+  const pa = a.split('.').map((n) => parseInt(n, 10) || 0)
+  const pb = b.split('.').map((n) => parseInt(n, 10) || 0)
+  for (let i = 0; i < 3; i++) {
+    if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) > (pb[i] || 0)
+  }
+  return false
+}
+
+systemRouter.get('/app-update', async (ctx: Context) => {
+  const current = String(ctx.query.version || '').trim()
+  let latest: string | null = null
+  try {
+    const res = await fetch(`${UPDATES_ORIGIN}/releases/latest.yml`)
+    if (res.ok) latest = (await res.text()).match(/^version:\s*(\S+)/m)?.[1] || null
+  } catch { /* offline → latest stays null, the client stays silent */ }
+  const hasUpdate = !!(latest && current && semverGt(latest, current))
+  ctx.body = { latest, hasUpdate, downloadUrl: 'https://supercrzy.com/bot' }
+})
+
 systemRouter.get('/check-update', async (ctx: Context) => {
   if (!isLocalhost(ctx)) {
     ctx.status = 403

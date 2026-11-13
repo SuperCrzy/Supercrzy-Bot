@@ -139,7 +139,6 @@
           <span class="welcome-brand">
             {{ $t('chat.welcomePrefix') }}
             <span class="brand-name">SUPERCRZY</span>
-            <span class="bot-badge">BOT</span>
           </span>
         </h1>
         <p class="welcome-subtitle">{{ $t('chat.welcomeDesc') }}</p>
@@ -1146,6 +1145,13 @@ const plusMenuOptions = computed(() => [
   { label: t('chat.plusSkill'), key: 'skill', icon: () => h('svg', { width: '15', height: '15', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [h('path', { d: 'M13 2L3 14h9l-1 8 10-12h-9l1-8z' })]) },
   { label: t('chat.plusReference'), key: 'reference', icon: () => h('svg', { width: '15', height: '15', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [h('circle', { cx: '12', cy: '12', r: '10' }), h('path', { d: 'M12 8v4l3 3' })]) },
   { label: t('chat.plusCompare'), key: 'compare', icon: () => h('svg', { width: '15', height: '15', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [h('rect', { x: '3', y: '4', width: '8', height: '16', rx: '1.5' }), h('rect', { x: '13', y: '4', width: '8', height: '16', rx: '1.5' })]) },
+  // 导航组（2026-11-13，M1）：WorkBuddy 的 + 抽屉下半区是"能力页面"入口。命名区分：
+  // 上面的"技能"是 @ 注入（把技能插进输入框），这里"技能库"是去管理页。
+  { type: 'divider', key: 'nav-divider' },
+  { label: t('nav.automations'), key: 'goto-automations', icon: () => h('svg', { width: '15', height: '15', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [h('circle', { cx: '12', cy: '12', r: '10' }), h('polyline', { points: '12 6 12 12 16 14' })]) },
+  { label: t('nav.skills') + t('chat.plusSkillLibSuffix'), key: 'goto-skills', icon: () => h('svg', { width: '15', height: '15', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [h('path', { d: 'M13 2L3 14h9l-1 8 10-12h-9l1-8z' })]) },
+  { label: t('settings.tabMcp'), key: 'goto-mcp', icon: () => h('svg', { width: '15', height: '15', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [h('path', { d: 'M9 6h6M7 12h10M9 18h6' }), h('circle', { cx: '12', cy: '12', r: '10' })]) },
+  { label: t('nav.memory'), key: 'goto-memory', icon: () => h('svg', { width: '15', height: '15', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [h('path', { d: 'M9 18h6M10 21h4' }), h('path', { d: 'M12 3a6 6 0 0 0-4 10c1 .8 1 1.6 1 2.5h6c0-.9 0-1.7 1-2.5a6 6 0 0 0-4-10z' })]) },
 ])
 function onPlusMenu(key: string) {
   if (key === 'image') {
@@ -1160,6 +1166,10 @@ function onPlusMenu(key: string) {
     openArtifactPicker()
   } else if (key === 'compare') {
     openComparePicker()
+  } else if (key.startsWith('goto-')) {
+    // M1 导航组：+ 菜单下半区直达能力页面（定时任务/技能库/连接器/记忆库）
+    const target = { 'goto-automations': '/automations', 'goto-skills': '/skills', 'goto-mcp': '/settings?section=mcp', 'goto-memory': '/memory' }[key]
+    if (target) router.push(target)
   }
 }
 /** 输入框插入 @ 并触发候选管线（直接改 value 不触发 @input，故由 composable 手动置态 + 拉候选） */

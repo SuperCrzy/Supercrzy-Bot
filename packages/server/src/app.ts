@@ -54,6 +54,8 @@ import { systemRouter } from './routes/system'
 import { collabRouter } from './routes/collab'
 import { recoverInterruptedTasks } from './services/collab-engine'
 import { newsRouter } from './routes/news'
+// Same-origin proxy for the site's own pages (used by the app's embedded views).
+import { siteRouter } from './routes/site'
 import { ttsRouter } from './routes/tts'
 import { terminalRouter } from './routes/terminal'
 import { bgTasksRouter } from './routes/bg-tasks'
@@ -455,7 +457,7 @@ async function bootstrap() {
   }
 
   // API Routes
-  const routers = [accountRouter, uploadRouter, chatRouter, fsRouter, settingsRouter, sessionRouter, historyRouter, statsRouter, memoryRouter, gatewayRouter, skillsRouter, tasksRouter, automationsRouter, modelsRouter, workspaceRouter, ocrRouter, checkpointsRouter, playbookRouter, rolesRouter, systemRouter, collabRouter, newsRouter, ttsRouter, mcpRouter, routineRouter, terminalRouter, taskStateRouter, bgTasksRouter, capabilitiesRouter]
+  const routers = [accountRouter, uploadRouter, chatRouter, fsRouter, settingsRouter, sessionRouter, historyRouter, statsRouter, memoryRouter, gatewayRouter, skillsRouter, tasksRouter, automationsRouter, modelsRouter, workspaceRouter, ocrRouter, checkpointsRouter, playbookRouter, rolesRouter, systemRouter, collabRouter, newsRouter, siteRouter, ttsRouter, mcpRouter, routineRouter, terminalRouter, taskStateRouter, bgTasksRouter, capabilitiesRouter]
   // 统一任务状态机：回填历史任务（进程重启后仍可查询上次状态，幽灵任务自动收敛为 cancelled）
   try { const n = restoreFromDB(); if (n > 0) console.log(`[task-state] 已回填 ${n} 条历史任务`) } catch { /* 不影响启动 */ }
   for (const r of routers) {

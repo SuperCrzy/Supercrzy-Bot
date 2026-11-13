@@ -1,8 +1,12 @@
 <template>
-  <div class="app-layout" :style="{ '--sidebar-w': sidebarCollapsed ? '48px' : sidebarWidth + 'px' }">
+  <div class="app-layout" :class="{ immersive: isImmersive }" :style="{ '--sidebar-w': sidebarCollapsed ? '48px' : sidebarWidth + 'px' }">
     <!-- ========== MOBILE TOP BAR ========== -->
     <div class="mobile-topbar">
-      <button class="hamburger-btn" @click="mobileMenuOpen = !mobileMenuOpen">
+      <!-- Manage pages: back arrow. Session pages: drawer. Everything else: title only. -->
+      <button v-if="showTopBarBack" class="hamburger-btn" @click="topBarBack">
+        <SvgIcon name="chevron-left" :size="18" />
+      </button>
+      <button v-else-if="showDrawerButton" class="hamburger-btn" @click="mobileMenuOpen = !mobileMenuOpen">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <line x1="3" y1="6" x2="21" y2="6" v-if="!mobileMenuOpen"/>
           <line x1="3" y1="12" x2="21" y2="12" v-if="!mobileMenuOpen"/>
@@ -11,7 +15,33 @@
           <line x1="6" y1="6" x2="18" y2="18" v-if="mobileMenuOpen"/>
         </svg>
       </button>
-      <span class="mobile-title">{{ currentPageTitle }}</span>
+      <!-- Brand pill, copied from the site header: gradient wordmark + breathing dot.
+           The site has no logo image in its header — the wordmark IS the logo. -->
+      <template v-if="route.name === 'Home'">
+        <a class="brand-pill" role="link" aria-label="SUPERCRZY" @click="router.push('/home')">
+          <span class="brand-wordmark">SUPERCRZY</span>
+          <span class="brand-dot"></span>
+        </a>
+      </template>
+      <span v-else class="mobile-title">{{ currentPageTitle }}</span>
+
+      <!-- Media-space actions: search, theme, account. No "new task" here — the media space
+           is for reading, and the dock's orb is the way into working. -->
+      <div v-if="isMediaSpace" class="mobile-actions">
+        <!-- Content search: the site's own /search over articles, lab reviews and rankings.
+             The app's /search (chat history) lives in the BOT space, where sessions live. -->
+        <button class="mobile-action-btn" @click="router.push('/explore')">
+          <SvgIcon name="search" :size="16" />
+        </button>
+        <button class="mobile-action-btn" @click="appStore.toggleDarkMode()" :title="$t('nav.theme')">
+          <SvgIcon :name="appStore.darkMode ? 'sun' : 'moon'" :size="16" />
+        </button>
+        <!-- Site account (subscription / history), NOT the app settings — those live under
+             "Me" in the BOT space. Same account system, two different jobs. -->
+        <button class="mobile-action-btn" @click="router.push('/account')">
+          <SvgIcon name="user" :size="16" />
+        </button>
+      </div>
       <!-- 移动端操作组（聊天页）：产物 / 搜索 / 分享 / 详情面板 —— 与 ChatView header 合并避免双层标题栏 -->
       <div v-if="route.name === 'Chat'" class="mobile-actions">
         <button class="mobile-action-btn" @click="dispatchChatAction('artifacts')" :title="$t('chat.artifactsTitle')">
@@ -27,9 +57,8 @@
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
         </button>
       </div>
-      <button class="mobile-new-chat" @click="handleNewChat" :title="$t('nav.newTask')">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-      </button>
+      <!-- The "+" was removed: new task lives in the drawer (session pages) and the dock's
+           chat tab. A compose button over Settings/About was noise. -->
     </div>
 
     <!-- Mobile overlay backdrop -->
@@ -92,9 +121,10 @@
 
     <div class="app-body">
     <!-- ========== LEFT SIDEBAR ========== -->
-    <aside class="sidebar" :class="{ collapsed: sidebarCollapsed, 'mobile-open': mobileMenuOpen }">
+    <aside v-if="!(isMobile && isMediaSpace)" class="sidebar" :class="{ collapsed: sidebarCollapsed, 'mobile-open': mobileMenuOpen }">
       <!-- Logo：点击伸缩侧边栏（展开顺时针 360° / 收起逆时针 360°），旋转与伸缩进度同步 -->
       <div
+        v-if="!isMobile"
         class="sidebar-header"
         @click="onLogoClick"
         :title="sidebarCollapsed ? $t('nav.expand') : $t('nav.collapse')"
@@ -121,8 +151,9 @@
           </router-link>
         </nav>
 
-      <!-- Navigation Groups -->
-      <nav class="nav-groups" v-show="!sidebarCollapsed">
+      <!-- Navigation Groups — desktop only. On mobile the SpaceDock owns navigation; keeping
+           this list as well meant every destination existed twice on a phone. -->
+      <nav class="nav-groups" v-show="!sidebarCollapsed && !isMobile">
         <!-- 导航平铺（无分组标题）：新建任务(常规用多,第1) + 超级协作平台(第2) -->
         <div class="nav-items" style="padding: 2px 8px;">
           <!-- 新建任务：点击创建新会话并进入欢迎页；已有对话从下方会话列表进入 -->
@@ -150,6 +181,17 @@
           </router-link>
         </div>
       </nav>
+
+      <!-- Mobile drawer: starts with the primary action, then goes straight to the session list.
+           No logo, no nav list — the logo lives in the Home top bar and navigation lives in the
+           dock; repeating either here just eats the drawer's width (WorkBuddy's drawer does the
+           same: mode → new task → history → account, nothing else). -->
+      <div v-if="isMobile" class="drawer-newtask">
+        <button class="drawer-newtask-btn" @click="handleNewChat">
+          <SvgIcon name="plus" :size="16" />
+          <span>{{ $t('nav.newTask') }}</span>
+        </button>
+      </div>
 
       <!-- ===== Session List (integrated in sidebar) ===== -->
       <div class="sidebar-chats" v-show="!sidebarCollapsed">
@@ -253,7 +295,10 @@
       </div>
 
       <!-- Footer: 展开态单行（用户 + 收起|主题|设置）/ 收起态仅头像（展开入口改为顶部 LOGO 点击） -->
-      <div class="sidebar-footer" :class="{ collapsed: sidebarCollapsed }">
+      <!-- Desktop footer only. On mobile every item in it is duplicated elsewhere: the
+           account lives in the Settings tab (which is a dock item), the theme toggle in the
+           media top bar and Settings, and the wordmark in the Home top bar. -->
+      <div v-if="!isMobile" class="sidebar-footer" :class="{ collapsed: sidebarCollapsed }">
         <button v-if="sidebarCollapsed" class="footer-user collapsed-user" @click="openProfile" :title="$t('nav.user')">
           <span class="footer-avatar-wrap">
             <ProfileAvatar :avatar="appStore.userAvatar" :name="appStore.userName || 'U'" :size="26" :radius="7" />
@@ -308,12 +353,16 @@
       @toggle="appStore.toggleDetailPanel"
       @update:tab="appStore.setDetailPanelTab"
     />
+
+    <!-- Mobile space dock (2026-11-13): pill + orb switching between the media space
+         (Home/News/Lab/Rank) and the BOT space. Desktop keeps the left rail untouched. -->
+    <SpaceDock v-if="isMobile && !isImmersive" />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { reactive, ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useMessage } from 'naive-ui'
 import { useAppStore } from '@/stores/app'
@@ -322,6 +371,8 @@ import { useChatStore, formatRelativeTime } from '@/stores/chat'
 import SvgIcon from '@/components/ui/SvgIcon.vue'
 import ProfileAvatar from '@/components/ui/ProfileAvatar.vue'
 import DetailPanel from '@/components/layout/DetailPanel.vue'
+// Mobile-only navigation: pill + orb switching media / BOT spaces.
+import SpaceDock from '@/components/layout/SpaceDock.vue'
 import ContextUsageRing from '@/components/chat/ContextUsageRing.vue'
 import PlanCapsule from '@/components/chat/PlanCapsule.vue'
 import AppUpdateBanner from '@/components/layout/AppUpdateBanner.vue'
@@ -329,7 +380,61 @@ import WorkspacePickerModal from '@/components/workspace/WorkspacePickerModal.vu
 
 const router = useRouter()
 const route = useRoute()
+
+/**
+ * Media space (Home / News / Lab / Rank).
+ *
+ * On mobile those pages are driven by the dock alone: no session list, no hamburger, no
+ * sidebar. The sidebar exists to reach conversations, and conversations belong to the BOT
+ * space — showing it over the media space is what made the top-left button open the wrong
+ * navigation. Desktop keeps the sidebar everywhere.
+ */
+const MEDIA_ROUTE_NAMES = new Set(['Home', 'News', 'Lab', 'Rank'])
+const isMediaSpace = computed(() => MEDIA_ROUTE_NAMES.has(String(route.name || '')))
+
+/**
+ * Manage pages (models / memory / images / gateway / logs / usage) are standalone routes
+ * opened from Settings — on mobile the top bar must offer a way back, otherwise the only
+ * exit is the app's back gesture or killing the tab.
+ */
+const MANAGE_ROUTE_NAMES = new Set(['Models', 'Memory', 'ImagesSettings', 'Gateway', 'Logs', 'Usage', 'AppAbout'])
+const showTopBarBack = computed(
+  () => MANAGE_ROUTE_NAMES.has(String(route.name || '')) || route.name === 'Settings',
+)
+
+/**
+ * Back must be deterministic, never history.pop: "从自动执行 → 设置 → 二级页 → 返回" must
+ * land on the Settings list, not on Automations. Only the Settings ROOT follows history
+ * (it was entered from the dock — going back to whatever came before is what "back" means
+ * there), and a cold load falls back to the chat page.
+ */
+function topBarBack() {
+  const name = String(route.name || '')
+  if (name === 'Settings' && !appStore.settingsImmersive) {
+    if (window.history.length > 1) router.back()
+    else router.push('/')
+    return
+  }
+  router.push('/settings')
+}
+
+// The drawer is a session-list tool: only the working pages get the hamburger. Settings,
+// About and manage pages are configuration — a session drawer there is noise (WorkBuddy's
+// "我的" page likewise has no sidebar entry in its top bar).
+const DRAWER_ROUTE_NAMES = new Set(['Chat', 'Collab', 'Automations'])
+const showDrawerButton = computed(() => DRAWER_ROUTE_NAMES.has(String(route.name || '')))
+
 const appStore = useAppStore()
+
+/**
+ * Immersive second-level pages (manage routes, About, Settings sub-sections): WorkBuddy-style
+ * — return + title + content, nothing else. The dock and its bottom strip are chrome of a
+ * top-level page, not of a drill-in. Deliberately stricter than showTopBarBack: the Settings
+ * ROOT keeps its dock (it is a top-level tab), it only gets the back arrow.
+ */
+const isImmersive = computed(
+  () => MANAGE_ROUTE_NAMES.has(String(route.name || '')) || appStore.settingsImmersive,
+)
 const chatStore = useChatStore()
 
 const sidebarCollapsed = ref(false)
@@ -354,6 +459,10 @@ function cancelRename() { editingTitle.value = false }
 const sidebarWidth = ref(220)
 
 const mobileMenuOpen = ref(false)
+
+// Leaving the BOT space closes the drawer; otherwise it would reappear pre-opened when the
+// user comes back to a page that has a sidebar.
+watch(isMediaSpace, () => { mobileMenuOpen.value = false })
 const isMobile = ref(false)
 const chatsCollapsed = ref(false)
 
@@ -409,7 +518,7 @@ const currentPageTitle = computed(() => {
   if (route.path.startsWith('/chat')) {
     return chatStore.currentSession?.title || t('nav.newTask')
   }
-  return route.meta.title ? t(route.meta.title as string) : 'SUPERCRZY BOT'
+  return route.meta.title ? t(route.meta.title as string) : 'SUPERCRZY'
 })
 
 function toggleSidebar() { sidebarCollapsed.value = !sidebarCollapsed.value }
@@ -1230,17 +1339,23 @@ onMounted(() => {
    ================================================================= */
 @media (max-width: 768px) {
   /* app-layout needs top padding to account for fixed topbar */
-  .app-layout { flex-direction: column; padding-top: 48px; }
+  /* Top offset must include the notch: the bar itself is fixed and paints behind it.
+     60px = the site's 8px top margin + 44px brand pill + 8px bottom margin. */
+  .app-layout { flex-direction: column; padding-top: calc(60px + env(safe-area-inset-top, 0px)); }
 
   /* Top bar — fixed so it stays visible when scrolling */
   .mobile-topbar {
     display: flex;
     align-items: center;
     gap: 8px;
-    height: 48px;
-    padding: 0 12px;
-    background: var(--bg-sidebar);
-    border-bottom: 1px solid var(--border-color);
+    /* Matches the site header: no background, no border — it is a floating strip whose two
+       pills carry their own surface. Writing a page-coloured bar here is what made it look
+       like a "bar" rather than part of the page. */
+    height: calc(60px + env(safe-area-inset-top, 0px));
+    padding: calc(env(safe-area-inset-top, 0px) + 8px) 12px 8px;
+    box-sizing: border-box;
+    background: transparent;
+    border-bottom: none;
     flex-shrink: 0;
     position: fixed;
     top: 0;
@@ -1357,6 +1472,26 @@ onMounted(() => {
     flex: 1;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
+    /* Reserve the space dock's strip (56px + 10px offset + 6px breathing room) once,
+       here, instead of padding every view: views use height:100%, so they shrink to the
+       content box automatically and nothing gets covered by the fixed dock. */
+    padding-bottom: 72px;
+    box-sizing: border-box;
+  }
+
+  /* Immersive drill-in pages: no dock below, so the reserved strip becomes breathing room. */
+  .app-layout.immersive .main-content { padding-bottom: 16px; }
+
+  /* Page title sits dead-centre between the leading button and the action pill —
+     WorkBuddy-style. Home skips .mobile-title (it renders the brand pill instead). */
+  .mobile-title {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    max-width: 50%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   /* Detail panel on mobile: 竖屏准全屏（2026-10-20 修老板报「手机端右侧面板适配有问题」）
@@ -1401,6 +1536,75 @@ onMounted(() => {
 
 /* ===== Hide mobile topbar on desktop ===== */
 .mobile-topbar { display: none; }
+
+/* ===== Brand pill + action pill (mobile top bar) =====
+   Both are lifted from the site header: `.brand-pill` (gradient wordmark + breathing dot)
+   and `.mobile-actions` (a rounded pill holding the icon buttons). The site deliberately has
+   no logo image in the header — the wordmark is the logo — so neither does the app. */
+.brand-pill {
+  display: inline-flex;
+  align-items: center;
+  /* The site's mobile brand pill is 44px tall with 14px side padding (--logo-height is 52px
+     on desktop, 44/48px once the layout goes narrow). */
+  height: 44px;
+  padding: 0 14px;
+  margin-right: auto;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-elevated);
+  backdrop-filter: blur(24px) saturate(1.6);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.brand-wordmark {
+  font-family: 'Saira Stencil One', 'Arial Black', 'Avenir Next Condensed', 'Segoe UI', sans-serif;
+  font-size: 15px;
+  letter-spacing: 1.24px;
+  line-height: 1;
+  background: linear-gradient(90deg, #4263ff, #36b3ff, #915cff, #ff66c8, #4263ff);
+  background-size: 400% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: logoGrad 8s linear infinite;
+}
+.brand-dot {
+  width: 6px;
+  height: 6px;
+  margin-left: 6px;
+  border-radius: 999px;
+  background: #00ff88;
+  box-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
+  animation: brandPulse 3s ease-in-out infinite;
+}
+@keyframes logoGrad {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 400% 50%; }
+}
+@keyframes brandPulse {
+  0%, 100% { transform: scale(1); opacity: 0.9; }
+  50% { transform: scale(1.3); opacity: 0.55; }
+}
+
+/* Icon buttons sit in one pill, same as the site's `.mobile-actions`: 34px targets inside 5px
+   padding, which adds up to the 44px brand-pill height next to it. */
+.mobile-topbar .mobile-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 5px 8px 5px 10px;
+  margin-left: 0;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-elevated);
+  backdrop-filter: blur(24px) saturate(1.6);
+  flex: 0 0 auto;
+}
+.mobile-topbar .mobile-action-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+}
 .mobile-overlay { display: none; }
 
 @media (max-width: 768px) {
@@ -1427,4 +1631,23 @@ onMounted(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ===== Mobile drawer: primary action on top ===== */
+.drawer-newtask { padding: 6px 10px 10px; }
+.drawer-newtask-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 11px 14px;
+  border-radius: 12px;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.drawer-newtask-btn:active { transform: scale(0.985); }
 </style>
