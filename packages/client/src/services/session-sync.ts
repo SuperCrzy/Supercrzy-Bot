@@ -44,13 +44,22 @@ export interface SyncDeps {
   decryptBlob: <T>(dek: CryptoKey, blob: string) => Promise<T>
 }
 
+async function syncErrorCode(res: Response): Promise<string> {
+  const body = await res.clone().json().catch(() => ({})) as { error?: string | { code?: string } }
+  if (res.status === 401) return 'not_signed_in'
+  return typeof body.error === 'string' ? body.error : body.error?.code || ''
+}
+
+function isAccountBoundaryError(code: string): boolean {
+  return code === 'account_changed' || code === 'not_signed_in' || code === 'account_header_required'
+}
+
 /** Fetch one session (with messages and artifacts) from the local server. */
 export async function fetchLocalSession(sessionId: string): Promise<SyncedSession | null> {
-  const res = await fetch(`/api/sessions/${sessionId}`)
+  const encodedId = encodeURIComponent(sessionId)
+  const res = await fetch(`/api/sessions/${encodedId}`)
   if (res.status === 404) return null
   if (!res.ok) throw new Error(`session_read_failed:${res.status}`)
-  // D3 fix (2026-11-17 audit): artifacts must ALWAYS have a default — the
-  // dedicated endpoint may fail, and downstream code reads `.length`.
   const raw = (await res.json()) as SyncedSession & { created_at?: string; updated_at?: string }
   const session: SyncedSession = {
     ...raw,
@@ -61,12 +70,12 @@ export async function fetchLocalSession(sessionId: string): Promise<SyncedSessio
       return { ...row, createdAt: row.createdAt ?? row.created_at ?? '' }
     }),
   }
-  session.artifacts = session.artifacts ?? []
-  const artRes = await fetch(`/api/sessions/${sessionId}/artifacts`)
-  if (artRes.ok) {
-    const body = (await artRes.json()) as { artifacts?: SyncedSession['artifacts'] } | SyncedSession['artifacts']
-    session.artifacts = Array.isArray(body) ? body : (body.artifacts ?? [])
-  }
+  const artRes = await fetch(`/api/sessions/${encodedId}/artifacts`)
+  if (!artRes.ok) throw new Error(`artifacts_read_failed:${artRes.status}`)
+  const body = (await artRes.json()) as { artifacts?: unknown } | unknown[] | null
+  const artifacts = Array.isArray(body) ? body : body?.artifacts
+  if (!Array.isArray(artifacts)) throw new Error('invalid_artifacts_response')
+  session.artifacts = artifacts as SyncedSession['artifacts']
   return session
 }
 
@@ -135,16 +144,21 @@ export async function pushSession(
   const headers = { 'Content-Type': 'application/json', ...(expectedAccountId ? { 'X-Supercrzy-Account': expectedAccountId } : {}) }
   const push = () => fetch('/api/auth-sync/push', { method: 'POST', headers, body: JSON.stringify({ items }) })
   let res = await push()
+  const initialError = !res.ok ? await syncErrorCode(res) : ''
+  if (isAccountBoundaryError(initialError)) throw new Error(initialError)
   // Existing users may have uploaded before this device recorded base versions.
   // Adopt cloud versions only when every existing item decrypts to identical
   // content; a second CAS still protects against concurrent changes.
-  if (res.status === 409 && crypto_.decryptBlob && expectedAccountId) {
+  if (res.status === 409 && initialError === 'sync_conflict' && crypto_.decryptBlob && expectedAccountId) {
     try {
       const found = new Map<string, { blob: string; deleted: boolean; version: number }>()
       let cursor = 0
       for (;;) {
         const page = await fetch('/api/auth-sync/pull', { method: 'POST', headers, body: JSON.stringify({ sinceVersion: cursor, limit: 1000 }) })
-        if (!page.ok) throw new Error('pull_failed')
+        if (!page.ok) {
+          const error = await syncErrorCode(page)
+          throw new Error(isAccountBoundaryError(error) ? error : 'pull_failed')
+        }
         const data = await page.json() as { items: Array<{ scope: string; key: string; blob: string; deleted: boolean; version: number }>; nextCursor: number; hasMore: boolean }
         for (const row of data.items) if (row.key === session.id && items.some((item) => item.scope === row.scope)) found.set(row.scope, row)
         if (!data.hasMore) break
@@ -161,11 +175,15 @@ export async function pushSession(
         item.expectedVersion = cloud.version
       }
       res = await push()
-    } catch { return { pushed: 0, skipped: 'sync_conflict' } }
+    } catch (error) {
+      if (error instanceof Error && isAccountBoundaryError(error.message)) throw error
+      return { pushed: 0, skipped: error instanceof Error && error.message === 'pull_failed' ? 'sync_recovery_failed' : 'sync_conflict' }
+    }
   }
   if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as { error?: string | { code?: string; message?: string } }
-    return { pushed: 0, skipped: typeof body.error === 'string' ? body.error : body.error?.code || `push ${res.status}` }
+    const error = await syncErrorCode(res)
+    if (isAccountBoundaryError(error)) throw new Error(error)
+    return { pushed: 0, skipped: error || `push ${res.status}` }
   }
   const body = (await res.json()) as { results?: Array<{ scope: string; key: string; version: number }> }
   if (!Array.isArray(body.results) || body.results.length !== items.length || items.some((item) => !body.results!.some((result) => result.scope === item.scope && result.key === item.key && Number.isSafeInteger(result.version) && result.version > 0))) {
@@ -191,6 +209,7 @@ export async function pushAllSessions(
       if (r.pushed > 0) items += r.pushed
       else failures.push(`${s.id}: ${r.skipped}`)
     } catch (error) {
+      if (error instanceof Error && isAccountBoundaryError(error.message)) throw error
       failures.push(`${s.id}: ${error instanceof Error ? error.message : 'sync_failed'}`)
     }
   }
@@ -227,15 +246,24 @@ export async function pullChanges(
       headers: { 'Content-Type': 'application/json', ...(expectedAccountId ? { 'X-Supercrzy-Account': expectedAccountId } : {}) },
       body: JSON.stringify({ sinceVersion: cursor, limit: 1000 }),
     })
-    if (!res.ok) throw new Error(`pull ${res.status}`)
+    if (!res.ok) {
+      const error = await syncErrorCode(res)
+      throw new Error(isAccountBoundaryError(error) ? error : `pull ${res.status}`)
+    }
     const body = (await res.json()) as {
       items: Array<{ scope: string; key: string; blob: string; deleted: boolean; version: number }>
       latestVersion: number
       nextCursor?: number
       hasMore?: boolean
     }
-    const lastVersion = body.items.length ? body.items[body.items.length - 1].version : cursor
+    if (!Array.isArray(body.items) || !Number.isSafeInteger(body.latestVersion) || body.latestVersion < 0 || (body.hasMore !== undefined && typeof body.hasMore !== 'boolean')) throw new Error('Invalid sync page')
+    let lastVersion = cursor
+    for (const item of body.items) {
+      if (!item || typeof item.scope !== 'string' || typeof item.key !== 'string' || !item.key || typeof item.blob !== 'string' || typeof item.deleted !== 'boolean' || !Number.isSafeInteger(item.version) || item.version <= lastVersion) throw new Error('Invalid sync page')
+      lastVersion = item.version
+    }
     const nextCursor = body.nextCursor ?? lastVersion
+    if (!Number.isSafeInteger(nextCursor) || nextCursor !== lastVersion) throw new Error('Invalid sync cursor')
     hasMore = body.hasMore ?? (body.items.length === 1000 && body.latestVersion > nextCursor)
     if (nextCursor < cursor || (hasMore && nextCursor <= cursor)) throw new Error('Invalid sync cursor')
     for (const item of body.items) {
@@ -246,12 +274,15 @@ export async function pullChanges(
       try {
         if (item.scope === 'conversations') {
           const d = await crypto_.decryptBlob<Record<string, unknown> & { title: string }>(dek, item.blob)
+          if (!d || typeof d !== 'object' || Array.isArray(d) || typeof d.title !== 'string' || !d.title) throw new Error('invalid_sync_item')
           out.conversations.push({ ...d, id: item.key })
         } else if (item.scope === 'messages') {
           const d = await crypto_.decryptBlob<{ messages: SyncedSession['messages'] }>(dek, item.blob)
+          if (!d || !Array.isArray(d.messages) || d.messages.length > 10_000 || d.messages.some((m) => !m || typeof m !== 'object' || typeof m.id !== 'string' || !m.id || !['user', 'assistant', 'system'].includes(m.role) || typeof m.content !== 'string' || typeof m.createdAt !== 'string' || !m.createdAt)) throw new Error('invalid_sync_item')
           out.messageSets[item.key] = d.messages
         } else if (item.scope === 'artifacts') {
           const d = await crypto_.decryptBlob<{ artifacts: Array<{ id: string; name: string }> }>(dek, item.blob)
+          if (!d || !Array.isArray(d.artifacts) || d.artifacts.some((a) => !a || typeof a !== 'object' || typeof a.id !== 'string' || typeof a.name !== 'string')) throw new Error('invalid_sync_item')
           out.artifactSets[item.key] = d.artifacts
         }
       } catch {

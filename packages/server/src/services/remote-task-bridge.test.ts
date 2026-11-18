@@ -40,6 +40,22 @@ describe('remote task bridge', () => {
     expect(db.prepare("SELECT content FROM messages WHERE role='assistant'").get()).toEqual({ content: 'partial' })
   })
 
+  it('does not claim success for a terminal event truncated before its delimiter', async () => {
+    const fetcher = vi.fn(async () => new Response('event: content\ndata: {"content":"partial"}\n\nevent: done\ndata: {"finished":true}\n'))
+    const result = await runRemoteTask({ db, accountId: 'account-a', taskId: 'truncated', prompt: 'work', baseUrl: 'http://localhost', fetcher, onEvent: () => {} })
+    expect(result.status).toBe('interrupted')
+    expect(db.prepare("SELECT content FROM messages WHERE role = 'assistant'").get()).toEqual({ content: 'partial' })
+  })
+
+  it('parses multiline events across arbitrary UTF-8 and CRLF chunks', async () => {
+    const bytes = new TextEncoder().encode('event: content\r\ndata: {"content":\r\ndata: "完成"}\r\n\r\nevent: done\r\ndata: {"finished":true}\r\n\r\n')
+    const stream = new ReadableStream<Uint8Array>({ start(controller) { for (const byte of bytes) controller.enqueue(Uint8Array.of(byte)); controller.close() } })
+    const fetcher = vi.fn(async () => new Response(stream))
+    const result = await runRemoteTask({ db, accountId: 'account-a', taskId: 'split', prompt: 'work', baseUrl: 'http://localhost', fetcher, onEvent: () => {} })
+    expect(result.status).toBe('completed')
+    expect(db.prepare("SELECT content FROM messages WHERE role = 'assistant'").get()).toEqual({ content: '完成' })
+  })
+
   it('recovers only runs whose owning process is confirmed gone and keeps task IDs reserved', () => {
     const dead = reserveRemoteTask(db, { accountId: 'account-a', taskId: 'dead-run', prompt: 'first' })
     reserveRemoteTask(db, { accountId: 'account-a', taskId: 'live-run', prompt: 'second' })

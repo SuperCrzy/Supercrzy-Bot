@@ -2,7 +2,7 @@
  * E2E crypto unit tests. Web Crypto is available in Node 22 (globalThis.crypto),
  * so the full wrap/unwrap round-trip is testable without a browser.
  */
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import {
   createEnvelope,
   unlockEnvelope,
@@ -10,9 +10,21 @@ import {
   decryptBlob,
   passphraseError,
   parseKdf,
+  E2eApi,
 } from './e2e-crypto'
 
 describe('e2e-crypto', () => {
+  it('binds envelope writes to the expected account', async () => {
+    const fetcher = vi.fn(async () => new Response('{}'))
+    vi.stubGlobal('fetch', fetcher)
+    try {
+      const api = new E2eApi(() => null)
+      await expect(api.putEnvelope({}, '')).rejects.toThrow('account_header_required')
+      expect(fetcher).not.toHaveBeenCalled()
+      await api.putEnvelope({ wrappedDek: 'encrypted' }, 'account-a')
+      expect(fetcher).toHaveBeenCalledWith('/api/account/e2e', expect.objectContaining({ headers: expect.objectContaining({ 'X-Supercrzy-Account': 'account-a' }) }))
+    } finally { vi.unstubAllGlobals() }
+  })
   it('round-trips: create → unlock → encrypt → decrypt', async () => {
     const { envelope, unlocked } = await createEnvelope('correct horse battery staple')
     expect(envelope.version).toBe(1)
@@ -33,6 +45,14 @@ describe('e2e-crypto', () => {
   it('rejects a wrong passphrase at unlock', async () => {
     const { envelope } = await createEnvelope('correct horse battery staple')
     await expect(unlockEnvelope('wrong horse battery staple', envelope)).rejects.toThrow()
+  })
+
+  it('encrypts and decrypts a large session within the cloud item limit', async () => {
+    const { unlocked } = await createEnvelope('correct horse battery staple')
+    const payload = { messages: [{ role: 'user', content: '长会话🙂'.repeat(45_000) }] }
+    const blob = await encryptBlob(unlocked.dek, payload)
+    expect(blob.length).toBeLessThan(1024 * 1024)
+    expect(await decryptBlob(unlocked.dek, blob)).toEqual(payload)
   })
 
   it('wrong DEK cannot decrypt a blob (authenticity)', async () => {

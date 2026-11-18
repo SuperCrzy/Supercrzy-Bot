@@ -106,6 +106,11 @@ sessionRouter.get('/:id/artifacts/:artifactId/file', async (ctx: Context) => {
     const data = await readFile(art.path)
     ctx.status = 200
     ctx.set('Content-Type', art.mime || 'application/octet-stream')
+    // Generated files are untrusted. In particular, HTML/SVG must not execute
+    // with the application's origin or call its local APIs. Omit
+    // allow-same-origin even when scripts are needed for interactive previews.
+    ctx.set('Content-Security-Policy', "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; form-action 'none'; base-uri 'none'")
+    ctx.set('X-Content-Type-Options', 'nosniff')
     // 浏览器能内联渲染的类型直接打开；其余（pptx/docx 等）下载
     const inlineTypes = ['text/', 'image/', 'application/javascript', 'application/json', 'application/xml']
     const inline = inlineTypes.some((t) => (art.mime || '').startsWith(t))

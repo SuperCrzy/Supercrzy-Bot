@@ -32,6 +32,7 @@
 import http from 'node:http'
 import { createHmac, randomBytes, randomInt, timingSafeEqual } from 'node:crypto'
 import { WebSocketServer, WebSocket } from 'ws'
+import { expirePendingPairing } from './pairing-expiry.js'
 
 const PORT = Number(process.env.RELAY_PORT || 8787)
 
@@ -59,6 +60,12 @@ const bindings = new Map<string, string>()
 /** pairing code → { token, expiresAt } */
 const pendingCodes = new Map<string, { token: string; expiresAt: number }>()
 const claimAttempts = new Map<string, { count: number; resetAt: number }>()
+
+function expireCode(code: string, now: number): boolean {
+  return expirePendingPairing(code, now, pendingCodes, issuedMobileTokens, (token) => {
+    mobiles.get(token)?.ws.close(4002, 'pairing expired')
+  })
+}
 
 function newToken(): string {
   return randomBytes(24).toString('hex')
@@ -242,8 +249,7 @@ const server = http.createServer((req, res) => {
         deviceName = String(parsed.deviceName || 'My Computer').slice(0, 64)
       } catch { /* keep defaults */ }
       const entry = pendingCodes.get(code)
-      if (!entry || entry.expiresAt < Date.now()) {
-        pendingCodes.delete(code)
+      if (!entry || expireCode(code, Date.now())) {
         res.writeHead(404, { 'content-type': 'application/json' })
         res.end(JSON.stringify({ error: 'code_invalid_or_expired' }))
         return
@@ -357,7 +363,7 @@ const issuedMobileTokens = new Set<string>()
 // Reap dead peers and expired codes every 15s.
 setInterval(() => {
   const now = Date.now()
-  for (const [code, entry] of pendingCodes) if (entry.expiresAt < now) { pendingCodes.delete(code); issuedMobileTokens.delete(entry.token) }
+  for (const code of pendingCodes.keys()) expireCode(code, now)
   for (const [peer, attempts] of claimAttempts) if (attempts.resetAt <= now) claimAttempts.delete(peer)
   for (const entry of [...desktops.values(), ...mobiles.values(), ...workspaces.values()]) {
     if (entry.ws.readyState !== WebSocket.OPEN) continue

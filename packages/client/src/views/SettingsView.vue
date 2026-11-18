@@ -626,6 +626,7 @@ import { PERMISSION_TIERS, TIER_I18N, isPermissionTier, DEFAULT_PERMISSION_TIER 
 import { useReasoningDisplay } from '@/utils/reasoning-display'
 import { useAppStore } from '@/stores/app'
 import { useAccountStore } from '@/stores/account'
+import { syncErrorMessageKey } from '@/services/sync-error-message'
 import { getModelSelectOptions } from '@/data/models'
 import ProfileAvatar from '@/components/ui/ProfileAvatar.vue'
 import SvgIcon from '@/components/ui/SvgIcon.vue'
@@ -656,6 +657,8 @@ async function handleSignOut() {
   try {
     await accountStore.signOut()
     router.replace({ name: 'Login' })
+  } catch {
+    nMessage.error(t('account.signOutUnconfirmed'))
   } finally {
     signOutBusy.value = false
   }
@@ -927,18 +930,21 @@ async function e2eUnlock(): Promise<void> {
 }
 
 async function e2eSyncNow(): Promise<void> {
+  e2eSyncMsg.value = ''
   try {
     const r = await accountStore.syncNow()
     e2eSyncMsg.value = t('settings.e2eSyncOk', { sessions: r.sessions - r.failures.length, items: r.items })
     if (r.failures.some((failure) => failure.endsWith(': sync_conflict'))) nMessage.warning(t('settings.e2eConflictHint'))
     if (r.failures.some((failure) => failure.endsWith(': item_too_large'))) nMessage.warning(t('settings.e2eSizeHint'))
+    if (r.failures.some((failure) => failure.includes(': artifacts_read_failed:') || failure.endsWith(': invalid_artifacts_response'))) nMessage.warning(t('settings.e2eArtifactsReadHint'))
     if (r.failures.length) nMessage.warning(r.failures.join('; '))
   } catch (e) {
-    nMessage.error(String(e))
+    nMessage.error(t(syncErrorMessageKey(e)))
   }
 }
 
 async function e2eRestore(): Promise<void> {
+  e2eSyncMsg.value = ''
   try {
     const result = await accountStore.restoreSessions()
     e2eSyncMsg.value = t('settings.e2eRestoreOk', { imported: result.imported, skipped: result.skipped })
@@ -947,7 +953,7 @@ async function e2eRestore(): Promise<void> {
       const { useChatStore } = await import('@/stores/chat')
       await useChatStore().loadSessions(true)
     }
-  } catch (e) { nMessage.error(String(e)) }
+  } catch (e) { nMessage.error(t(syncErrorMessageKey(e))) }
 }
 
 watch(() => accountStore.accountId, (id) => {

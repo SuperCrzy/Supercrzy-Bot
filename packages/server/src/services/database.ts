@@ -1,8 +1,9 @@
 import Database from 'better-sqlite3'
-import { existsSync, mkdirSync, copyFileSync } from 'fs'
+import { existsSync, mkdirSync } from 'fs'
 import { dirname } from 'path'
 import { config } from '../config'
 import { CATEGORY_ALIASES, MEMORY_CATEGORIES } from './memory-category'
+import { migrateLegacyDatabase } from './legacy-database-migration'
 
 let db: Database.Database
 
@@ -25,10 +26,10 @@ export function initDatabase() {
     ]
     for (const leg of legacyCandidates) {
       if (existsSync(leg)) {
-        try {
-          copyFileSync(leg, config.db.path)
-          break
-        } catch {}
+        // Do not silently start an empty database if the old one cannot be
+        // migrated: that would hide the user's history and complicate recovery.
+        migrateLegacyDatabase(leg, config.db.path)
+        break
       }
     }
   }

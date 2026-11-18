@@ -273,12 +273,14 @@ async function handleFromRelay(raw: string): Promise<void> {
 
 async function cancelRemoteRequest(params: Record<string, unknown>): Promise<void> {
   const session = isSignedIn() ? readSession() : null
+  const requestGeneration = generation
   const taskId = typeof params.taskId === 'string' ? params.taskId : ''
   if (!session || !taskId || taskId.length > 200 || (params.submittedBy && params.submittedBy !== session.accountId)) return
   try {
     const { requestStop } = await import('./agent')
+    if (stopped || generation !== requestGeneration || !isSignedIn() || readSession()?.accountId !== session.accountId) return
     const accepted = cancelRemoteTask(getDB(), session.accountId, taskId, requestStop)
-    if (isSignedIn() && readSession()?.accountId === session.accountId) {
+    if (!stopped && generation === requestGeneration && isSignedIn() && readSession()?.accountId === session.accountId) {
       sendToRelay({ method: 'session/update', params: { type: accepted ? 'cancel_requested' : 'cancel_unavailable', taskId } })
     }
   } catch (error) {
@@ -299,6 +301,7 @@ async function bridgePromptToChat(params: Record<string, unknown>): Promise<void
   const sessionId = params.sessionId ? String(params.sessionId) : undefined
   const taskId = params.taskId ? String(params.taskId) : randomUUID()
   const session = isSignedIn() ? readSession() : null
+  const requestGeneration = generation
   if (!session || (params.submittedBy && params.submittedBy !== session.accountId)) return
   if (!text.trim() || text.length > 32_000 || taskId.length > 200 || (sessionId && sessionId.length > 200)) return
   try {
@@ -307,16 +310,16 @@ async function bridgePromptToChat(params: Record<string, unknown>): Promise<void
       db: getDB(), accountId: session.accountId, taskId, prompt: text, sessionId, baseUrl: base,
       onEvent: (event) => {
         // Do not deliver a previous account's results to a later login.
-        if (isSignedIn() && readSession()?.accountId === session.accountId) {
+        if (!stopped && generation === requestGeneration && isSignedIn() && readSession()?.accountId === session.accountId) {
           sendToRelay({ method: 'session/update', params: event })
         }
       },
     })
-    if (result.duplicate && isSignedIn() && readSession()?.accountId === session.accountId) {
+    if (result.duplicate && !stopped && generation === requestGeneration && isSignedIn() && readSession()?.accountId === session.accountId) {
       sendToRelay({ method: 'session/update', params: { type: 'duplicate', taskId, ...result } })
     }
   } catch (e) {
-    if (isSignedIn() && readSession()?.accountId === session.accountId) {
+    if (!stopped && generation === requestGeneration && isSignedIn() && readSession()?.accountId === session.accountId) {
       sendToRelay({ method: 'session/update', params: { type: 'error', taskId, message: String(e) } })
     }
   }

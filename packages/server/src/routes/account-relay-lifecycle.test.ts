@@ -58,4 +58,21 @@ describe('account relay lifecycle', () => {
     }
     expect(fetchMock).not.toHaveBeenCalled()
   })
+
+  it('requires the expected account for encrypted writes and never forwards missing or stale requests', async () => {
+    const start = await request(app.callback()).post('/api/account/login/start')
+    await request(app.callback()).get('/auth/callback').query({ state: start.body.state, code: 'test-code' })
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockClear()
+    for (const route of ['/api/account/e2e', '/api/auth-sync/push']) {
+      const withoutAccount = route.endsWith('/e2e') ? await request(app.callback()).put(route) : await request(app.callback()).post(route)
+      expect(withoutAccount.status).toBe(428)
+      expect(withoutAccount.body.error).toBe('account_header_required')
+      const stale = route.endsWith('/e2e') ? await request(app.callback()).put(route).set('X-Supercrzy-Account', 'old-account') : await request(app.callback()).post(route).set('X-Supercrzy-Account', 'old-account')
+      expect(stale.status).toBe(409)
+    }
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect((await request(app.callback()).post('/api/auth-sync/push').set('X-Supercrzy-Account', 'test-account')).status).toBe(200)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
 })

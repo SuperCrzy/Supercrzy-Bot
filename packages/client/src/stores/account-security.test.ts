@@ -59,4 +59,59 @@ describe('account encryption state', () => {
     expect(store.unlockedDek).toBeNull()
     expect(store.e2eUnlocked).toBe(false)
   })
+
+  it('ignores an older status response after a newer account response', async () => {
+    let finishOld!: (value: Response) => void
+    let statusCount = 0
+    vi.stubGlobal('fetch', vi.fn(() => {
+      statusCount++
+      if (statusCount === 1) return Promise.resolve(new Response(JSON.stringify({ signedIn: true, accountId: 'account-a' })))
+      if (statusCount === 2) return new Promise<Response>((resolve) => { finishOld = resolve })
+      return Promise.resolve(new Response(JSON.stringify({ signedIn: true, accountId: 'account-b' })))
+    }))
+    const store = useAccountStore()
+    await store.ensureReady()
+    const old = store.reload()
+    await store.reload()
+    finishOld(new Response(JSON.stringify({ signedIn: true, accountId: 'account-a' })))
+    await old
+    expect(store.accountId).toBe('account-b')
+  })
+
+  it('ignores stale status and does not poll while logout is pending', async () => {
+    let finishStatus!: (value: Response) => void
+    let finishLogout!: (value: Response) => void
+    let statusCount = 0
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+      if (String(input) === '/api/account/logout') return new Promise<Response>((resolve) => { finishLogout = resolve })
+      statusCount++
+      if (statusCount === 1) return Promise.resolve(new Response(JSON.stringify({ signedIn: true, accountId: 'account-a' })))
+      return new Promise<Response>((resolve) => { finishStatus = resolve })
+    }))
+    const store = useAccountStore()
+    await store.ensureReady()
+    const old = store.reload()
+    const logout = store.signOut()
+    await store.reload()
+    expect(statusCount).toBe(2)
+    finishStatus(new Response(JSON.stringify({ signedIn: true, accountId: 'account-a' })))
+    await old
+    expect(store.signedIn).toBe(false)
+    finishLogout(new Response('{}'))
+    await logout
+    expect(store.accountId).toBe('')
+  })
+
+  it('reports an unconfirmed logout while clearing in-memory encryption keys', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => String(input) === '/api/account/status'
+      ? new Response(JSON.stringify({ signedIn: true, accountId: 'account-a' }))
+      : new Response('', { status: 503 })))
+    const store = useAccountStore()
+    await store.ensureReady()
+    store.unlockedDek = {} as CryptoKey
+    await expect(store.signOut()).rejects.toThrow('logout_unconfirmed')
+    expect(store.signedIn).toBe(false)
+    expect(store.unlockedDek).toBeNull()
+    expect(store.degraded).toBe(true)
+  })
 })

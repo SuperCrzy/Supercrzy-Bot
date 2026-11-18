@@ -75,7 +75,7 @@ export function useArtifacts(opts: UseArtifactsOptions) {
     const mime = a.mime || ''
     const browserOpenable = mime.startsWith('text/html') || mime.startsWith('image/')
     if (browserOpenable) {
-      window.open(`/api/sessions/${a.session_id}/artifacts/${a.id}/file`, '_blank')
+      window.open(`/api/sessions/${encodeURIComponent(a.session_id)}/artifacts/${encodeURIComponent(a.id)}/file`, '_blank', 'noopener,noreferrer')
     } else {
       fetch(`/api/sessions/${a.session_id}/artifacts/${a.id}/open`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
         .then((r) => r.json())

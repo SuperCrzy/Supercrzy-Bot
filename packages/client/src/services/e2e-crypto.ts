@@ -53,7 +53,19 @@ function randomBytes(n: number): Uint8Array {
 }
 
 function toB64(bytes: Uint8Array | ArrayBuffer): string {
-  return btoa(String.fromCharCode(...new Uint8Array(bytes)))
+  const view = new Uint8Array(bytes)
+  const chunks: string[] = []
+  for (let offset = 0; offset < view.length; offset += 0x8000) {
+    chunks.push(String.fromCharCode(...view.subarray(offset, offset + 0x8000)))
+  }
+  return btoa(chunks.join(''))
+}
+
+function pack(iv: Uint8Array, ciphertext: ArrayBuffer): Uint8Array {
+  const packed = new Uint8Array(iv.length + ciphertext.byteLength)
+  packed.set(iv)
+  packed.set(new Uint8Array(ciphertext), iv.length)
+  return packed
 }
 
 function fromB64(s: string): Uint8Array {
@@ -79,7 +91,7 @@ export async function createEnvelope(
   const iv = randomBytes(12)
   const wrapped = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv as unknown as BufferSource }, kek, rawDek as unknown as BufferSource)
   // wrappedDek = base64(iv || ciphertext) so unwrap is self-contained.
-  const wrappedB64 = toB64(new Uint8Array([...iv, ...new Uint8Array(wrapped)]))
+  const wrappedB64 = toB64(pack(iv, wrapped))
   return {
     envelope: {
       version: ENVELOPE_VERSION,
@@ -113,7 +125,7 @@ export async function encryptBlob(dek: CryptoKey, payload: unknown): Promise<str
   const iv = randomBytes(12)
   const plaintext = new TextEncoder().encode(JSON.stringify(payload))
   const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv as unknown as BufferSource }, dek, plaintext as unknown as BufferSource)
-  return toB64(new Uint8Array([...iv, ...new Uint8Array(ciphertext)]))
+  return toB64(pack(iv, ciphertext))
 }
 
 /** Decrypt a blob produced by encryptBlob. */
@@ -140,10 +152,11 @@ export class E2eApi {
     return res.json()
   }
 
-  async putEnvelope(envelope: Record<string, unknown>): Promise<void> {
+  async putEnvelope(envelope: Record<string, unknown>, accountId: string): Promise<void> {
+    if (!accountId) throw new Error('account_header_required')
     const res = await fetch('/api/account/e2e', {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Supercrzy-Account': accountId },
       body: JSON.stringify(envelope),
     })
     if (!res.ok) throw new Error(`e2e PUT ${res.status}`)

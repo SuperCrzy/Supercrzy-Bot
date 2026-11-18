@@ -217,7 +217,8 @@ accountRouter.get('/api/account/e2e', async (ctx: Context) => {
 accountRouter.put('/api/account/e2e', async (ctx: Context) => {
   const s = readSession()
   if (!s?.accessToken) { ctx.status = 401; ctx.body = { error: 'not_signed_in' }; return }
-  if (ctx.get('X-Supercrzy-Account') && ctx.get('X-Supercrzy-Account') !== s.accountId) { ctx.status = 409; ctx.body = { error: 'account_changed' }; return }
+  if (!ctx.get('X-Supercrzy-Account')) { ctx.status = 428; ctx.body = { error: 'account_header_required' }; return }
+  if (ctx.get('X-Supercrzy-Account') !== s.accountId) { ctx.status = 409; ctx.body = { error: 'account_changed' }; return }
   try {
     const res = await fetch(authOrigin() + '/auth/me/e2e', {
       method: 'PUT',
@@ -239,6 +240,7 @@ accountRouter.put('/api/account/e2e', async (ctx: Context) => {
 async function forwardSync(ctx: Context, path: string): Promise<void> {
   const s = readSession()
   if (!s?.accessToken) { ctx.status = 401; ctx.body = { error: 'not_signed_in' }; return }
+  if (path === '/sync/push' && !ctx.get('X-Supercrzy-Account')) { ctx.status = 428; ctx.body = { error: 'account_header_required' }; return }
   if (ctx.get('X-Supercrzy-Account') && ctx.get('X-Supercrzy-Account') !== s.accountId) { ctx.status = 409; ctx.body = { error: 'account_changed' }; return }
   try {
     const res = await fetch(authOrigin() + path, {
@@ -270,6 +272,7 @@ accountRouter.post('/api/account/logout', async (ctx: Context) => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ refreshToken: s.refreshToken }),
+        signal: AbortSignal.timeout(5000),
       })
     } catch {
       /* offline sign-out is still a sign-out */

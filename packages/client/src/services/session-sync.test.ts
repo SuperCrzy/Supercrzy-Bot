@@ -134,6 +134,32 @@ describe('session-sync', () => {
     const result = await pushAllSessions(unlocked.dek, { encryptBlob })
     expect(result).toEqual({ sessions: 2, items: 3, failures: ['broken: session_read_failed:503'] })
   })
+  it('stops the batch immediately on account change instead of treating it as a conflict', async () => {
+    const originalFetch = vi.mocked(fetch)
+    const paths: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      paths.push(url)
+      if (url === '/api/sessions?archived=all') return new Response(JSON.stringify([{ id: 'sess-1' }, { id: 'second' }]))
+      if (url === '/api/auth-sync/push') return new Response(JSON.stringify({ error: 'account_changed' }), { status: 409 })
+      return originalFetch(input, init)
+    }))
+    const { unlocked } = await createEnvelope('correct horse battery staple')
+    await expect(pushAllSessions(unlocked.dek, { encryptBlob, decryptBlob }, 'owner')).rejects.toThrow('account_changed')
+    expect(paths).not.toContain('/api/auth-sync/pull')
+    expect(paths).not.toContain('/api/sessions/second')
+  })
+  it('propagates an account switch during conflict recovery and restore', async () => {
+    const originalFetch = vi.mocked(fetch)
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/auth-sync/push') return new Response(JSON.stringify({ error: { code: 'sync_conflict' } }), { status: 409 })
+      if (String(input) === '/api/auth-sync/pull') return new Response(JSON.stringify({ error: 'account_changed' }), { status: 409 })
+      return originalFetch(input, init)
+    }))
+    const { unlocked } = await createEnvelope('correct horse battery staple')
+    await expect(pushSession('sess-1', unlocked.dek, { encryptBlob, decryptBlob }, 'owner')).rejects.toThrow('account_changed')
+    await expect(importNewSessions(unlocked.dek, { decryptBlob }, 'owner')).rejects.toThrow('account_changed')
+  })
   it('pushes one session as conversations/messages/artifacts items', async () => {
     const { envelope, unlocked } = await createEnvelope('correct horse battery staple')
     expect(envelope.wrappedDek).toBeTruthy()
@@ -202,10 +228,30 @@ describe('session-sync', () => {
           messages: [{ id: 'm1', role: 'user', content: 'hello', created_at: 'message-created' }],
         }))
       }
-      return new Response('unavailable', { status: 503 })
+      return new Response(JSON.stringify([]))
     }) as unknown as typeof fetch)
     const session = await fetchLocalSession('sess-1')
     expect(session).toMatchObject({ createdAt: 'created', updatedAt: 'updated', artifacts: [], messages: [{ createdAt: 'message-created' }] })
+  })
+
+  it('does not upload a session when its artifact list cannot be read', async () => {
+    const originalFetch = vi.mocked(fetch)
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/sessions/sess-1/artifacts') return new Response('', { status: 503 })
+      return originalFetch(input, init)
+    }))
+    const { unlocked } = await createEnvelope('correct horse battery staple')
+    expect(await pushAllSessions(unlocked.dek, { encryptBlob })).toEqual({ sessions: 1, items: 0, failures: ['sess-1: artifacts_read_failed:503'] })
+    expect(pushLog).toHaveLength(0)
+  })
+
+  it('rejects a malformed artifact response instead of treating it as empty', async () => {
+    const originalFetch = vi.mocked(fetch)
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/sessions/sess-1/artifacts') return new Response(JSON.stringify({ error: 'unavailable' }))
+      return originalFetch(input, init)
+    }))
+    await expect(fetchLocalSession('sess-1')).rejects.toThrow('invalid_artifacts_response')
   })
 
   it('includes archived sessions and encrypts their archived state', async () => {
@@ -243,6 +289,24 @@ describe('session-sync', () => {
     const out = await pullChanges({} as CryptoKey, { decryptBlob: async () => { throw new Error('bad key') } }, 5)
     expect(out.decryptFailures).toBe(1)
     expect(out.latestVersion).toBe(5)
+  })
+  it('does not advance or import when decrypted messages have an invalid shape', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      items: [{ scope: 'messages', key: 'one', blob: 'ciphertext', deleted: false, version: 8 }],
+      latestVersion: 8, nextCursor: 8, hasMore: false,
+    }))) as unknown as typeof fetch)
+    const crypto = { decryptBlob: async () => ({ messages: 'not-an-array' }) as never }
+    const out = await pullChanges({} as CryptoKey, crypto, 5)
+    expect(out.decryptFailures).toBe(1)
+    expect(out.latestVersion).toBe(5)
+    await expect(importNewSessions({} as CryptoKey, crypto, 'owner')).rejects.toThrow('decrypt_failed:1')
+  })
+  it('rejects a page cursor that skips entries not present in the response', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      items: [{ scope: 'messages', key: 'one', blob: 'ciphertext', deleted: false, version: 2 }],
+      latestVersion: 10, nextCursor: 10, hasMore: false,
+    }))) as unknown as typeof fetch)
+    await expect(pullChanges({} as CryptoKey, { decryptBlob: async () => ({ messages: [] }) as never })).rejects.toThrow('Invalid sync cursor')
   })
   it('keeps special session IDs as ordinary keys', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({

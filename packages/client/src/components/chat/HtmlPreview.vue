@@ -34,6 +34,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { sandboxedPreviewDocument } from '@/utils/sandboxed-preview'
 
 const { t } = useI18n({ useScope: 'global' })
 
@@ -103,9 +104,9 @@ function reload() {
 }
 function openInTab() {
   if (props.content) {
-    const blob = new Blob([props.content], { type: 'text/html' })
+    const blob = new Blob([sandboxedPreviewDocument(srcdocContent.value)], { type: 'text/html' })
     const url = URL.createObjectURL(blob)
-    window.open(url, '_blank')
+    window.open(url, '_blank', 'noopener,noreferrer')
     setTimeout(() => URL.revokeObjectURL(url), 60000)
   }
 }

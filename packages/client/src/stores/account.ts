@@ -26,6 +26,8 @@ export const useAccountStore = defineStore('account', () => {
 
   let bootPromise: Promise<void> | null = null
   let accountEpoch = 0
+  let statusRequestId = 0
+  let logoutPending = false
 
   async function fetchStatus(): Promise<AccountStatus | null> {
     try {
@@ -58,9 +60,12 @@ export const useAccountStore = defineStore('account', () => {
   function ensureReady(): Promise<void> {
     if (ready.value) return Promise.resolve()
     if (!bootPromise) {
+      const requestId = ++statusRequestId
       bootPromise = fetchStatus().then((status) => {
-        if (status) apply(status)
-        else degraded.value = true
+        if (requestId === statusRequestId && !logoutPending) {
+          if (status) apply(status)
+          else degraded.value = true
+        }
         ready.value = true
       })
     }
@@ -68,7 +73,10 @@ export const useAccountStore = defineStore('account', () => {
   }
 
   async function reload(): Promise<void> {
+    if (logoutPending) return
+    const requestId = ++statusRequestId
     const status = await fetchStatus()
+    if (requestId !== statusRequestId || logoutPending) return
     // 🔴 2026-11-01: a *failed* status request is not a sign-out.
     // Applying null here flipped `signedIn` to false whenever the account host
     // was unreachable (VPN / cross-border hiccup) while every API answered 401,
@@ -92,11 +100,18 @@ export const useAccountStore = defineStore('account', () => {
   }
 
   async function signOut(): Promise<void> {
+    if (logoutPending) return
+    logoutPending = true
+    statusRequestId++
     apply(null)
     try {
-      await fetch('/api/account/logout', { method: 'POST' })
+      const response = await fetch('/api/account/logout', { method: 'POST', signal: AbortSignal.timeout(10000) })
+      if (!response.ok) throw new Error('logout_unconfirmed')
     } catch {
-      /* offline sign-out still clears local state below */
+      degraded.value = true
+      throw new Error('logout_unconfirmed')
+    } finally {
+      logoutPending = false
     }
   }
 

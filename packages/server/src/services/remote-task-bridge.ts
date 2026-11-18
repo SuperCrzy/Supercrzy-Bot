@@ -128,23 +128,37 @@ export async function runRemoteTask(options: {
     const decoder = new TextDecoder()
     let buffer = ''
     let eventName = ''
-    const consumeLine = (line: string) => {
-      if (line.startsWith('event:')) { eventName = line.slice(6).trim(); return }
-      if (!line.startsWith('data:')) return
+    let dataLines: string[] = []
+    const dispatchEvent = () => {
+      if (!dataLines.length) { eventName = ''; return }
+      const name = eventName || 'message'
+      const rawData = dataLines.join('\n')
+      eventName = ''
+      dataLines = []
       let data: Record<string, unknown>
-      try { data = JSON.parse(line.slice(5).trim()) } catch { return }
-      if (eventName === 'content_chunk' && typeof data.text === 'string') content += data.text
-      if (eventName === 'content' && typeof data.content === 'string') finalContent = data.content
+      try { data = JSON.parse(rawData) } catch { return }
+      if (!data || typeof data !== 'object' || Array.isArray(data)) return
+      if (name === 'content_chunk' && typeof data.text === 'string') content += data.text
+      if (name === 'content' && typeof data.content === 'string') finalContent = data.content
       // The Agent also emits recoverable warnings as `error`. The final task
       // state and checkpoint events, not an isolated warning, decide outcome.
-      if (eventName === 'error' && typeof data.message === 'string') failure = data.message
-      if (eventName === 'checkpoint_available' || eventName === 'turn_limit_reached') finalState = 'interrupted'
-      if (eventName === 'task_state' && ['completed', 'failed', 'cancelled', 'paused'].includes(String(data.status))) {
+      if (name === 'error' && typeof data.message === 'string') failure = data.message
+      if (name === 'checkpoint_available' || name === 'turn_limit_reached') finalState = 'interrupted'
+      if (name === 'task_state' && ['completed', 'failed', 'cancelled', 'paused'].includes(String(data.status))) {
         finalState = data.status as typeof finalState
       }
-      if (eventName === 'done') completed = data.finished !== false
-      emit('sse', { event: eventName, payload: data })
-      eventName = ''
+      if (name === 'done') completed = data.finished !== false
+      emit('sse', { event: name, payload: data })
+    }
+    const consumeLine = (line: string) => {
+      if (!line) { dispatchEvent(); return }
+      if (line.startsWith(':')) return
+      const colon = line.indexOf(':')
+      const field = colon < 0 ? line : line.slice(0, colon)
+      let value = colon < 0 ? '' : line.slice(colon + 1)
+      if (value.startsWith(' ')) value = value.slice(1)
+      if (field === 'event') eventName = value
+      if (field === 'data') dataLines.push(value)
     }
     for (;;) {
       const { done, value } = await reader.read()
@@ -154,8 +168,8 @@ export async function runRemoteTask(options: {
       buffer = lines.pop() || ''
       for (const line of lines) consumeLine(line.replace(/\r$/, ''))
     }
-    buffer += decoder.decode()
-    if (buffer) consumeLine(buffer.replace(/\r$/, ''))
+    // EOF does not terminate an SSE event. An incomplete terminal event must
+    // not turn an interrupted run into a claimed success.
   } catch (error) {
     // A broken transport after dispatch does not prove the agent failed:
     // tools may already have changed external state. Never suggest a retry is safe.
