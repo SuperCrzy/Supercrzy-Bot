@@ -126,9 +126,9 @@ jobs:
           Pop-Location
           Write-Host "better-sqlite3 rebuilt for Electron $ver"
 
-      # ── ④ 修剪 peer 依赖死重 ──
-      # openclaw: no longer a dependency (helpers vendored), nothing to prune.
-      # The gate below still asserts it never comes back.
+          # ── ④ 修剪 peer 依赖死重 ──
+          # openclaw: no longer a dependency (helpers vendored), nothing to prune.
+          # The gate below still asserts it never comes back.
 
           $bad = @()
           foreach ($p in @("openclaw","typescript","vite","vitest","rolldown","@rolldown","@electron")) {
