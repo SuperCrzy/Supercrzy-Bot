@@ -31,7 +31,9 @@ permissions:
 jobs:
   macos:
     name: macOS dmg + zip
-    runs-on: macos-14
+    # 2026-11-18: GitHub retired the 'macos-14-arm64-us-default' runner config;
+    # macos-15 is the current GA arm64 image (hdiutil present, same behaviour).
+    runs-on: macos-15
     timeout-minutes: 45
 
     steps:
