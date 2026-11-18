@@ -3,27 +3,8 @@
  * 启动后持续长轮询微信消息，转发给 Agent 处理
  */
 import { getUpdates, sendMessage, loadCredentials, clearCredentials, notifyStart, notifyStop, downloadFile, sendTyping, sendMediaFileToWeChat, type LoginCredentials, type DownloadedFile } from './wechat-ilink'
-// Lazy-loaded for the same reason as wechat-ilink: the package drags `openclaw`
-// onto the backend startup chain, and the desktop build prunes it. Degrades to a
-// pass-through filter (raw text) when the SDK is unavailable.
-// @ts-ignore - StreamingMarkdownFilter 无类型声明，但运行时有效
-let StreamingMarkdownFilter: any = null
-async function ensureMarkdownFilter(): Promise<any> {
-  if (!StreamingMarkdownFilter) {
-    try {
-      // @ts-ignore - no type declarations shipped for this entry point
-      const mod = await import('@tencent-weixin/openclaw-weixin/dist/src/messaging/markdown-filter.js')
-      StreamingMarkdownFilter = mod.StreamingMarkdownFilter
-    } catch (error) {
-      console.warn('[wechat] openclaw-weixin unavailable, using pass-through markdown filter:', error instanceof Error ? error.message : error)
-      StreamingMarkdownFilter = class {
-        feed(text: string) { return text }
-        flush() { return '' }
-      }
-    }
-  }
-  return StreamingMarkdownFilter
-}
+// @ts-ignore - vendored class, see markdown-filter.ts
+import { StreamingMarkdownFilter } from './markdown-filter'
 import { randomBytes } from 'crypto'
 import { resolveFfmpeg } from './ffmpeg'
 import { channelSessionId } from './channel-session-id'
@@ -353,7 +334,7 @@ async function processMessage(
     console.log('[WeChat] Sending agent reply')
 
     // 流式 Markdown 过滤：去掉微信不支持的语法，保留代码/表格/加粗等
-    const mdFilter = new (await ensureMarkdownFilter())()
+    const mdFilter = new StreamingMarkdownFilter()
     // 过滤 emoji（用户要求不用 emoji）：移除所有非 ASCII、非 CJK、非基本拉丁的字符
     const noEmoji = reply.replace(
       /[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F1E0}-\u{1F1FF}\u{1FA00}-\u{1FAFF}]/gu,

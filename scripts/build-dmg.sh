@@ -220,23 +220,12 @@ printf '{"name":"supercrzy-build-tools","version":"0.0.0","private":true}\n' \
 "$ROOT/packages/desktop/.build-tools/node_modules/.bin/electron-rebuild" \
   -f -w better-sqlite3 -v "$ELECTRON_VERSION"
 
-# ── 体积修剪：干掉 peer 依赖死重 ──────────────────────────────────────────────
-# openclaw 是 @tencent-weixin/openclaw-weixin 声明的 peerDependency（">=2026.5.12"），
-# npm 7+ 默认自动安装 peer → 白拉进来 342M（占整个 App 37%，其中嵌套 node_modules 236M +
-# 自带 dist 96M，内含 openai / @anthropic-ai / @google / @mistralai / tree-sitter-bash /
-# highlight.js / typescript…）。而本仓库对它的引用只有一处：
-#   services/wechat-bot-runner.ts:7  import { StreamingMarkdownFilter } from '…/markdown-filter.js'
-# 该文件 13298 字节、零 import/require（自包含），openclaw 本身全仓零 import。
-# 这里不用 --legacy-peer-deps：那会连带跳过 hono 等「被别的 prod 包依赖的 peer」，有误伤风险；
-# 精确删除 + 出厂断言更安全（后端起不来会在下面门禁 2 和装机自检里被抓到）。
-if [ -d node_modules/openclaw ]; then
-  b="$(du -sh node_modules/openclaw | cut -f1)"
-  prune_dir node_modules/openclaw
-  echo "  修剪 peer 死重: openclaw ($b)"
-fi
-# .bin 里的软链不在被挪走的目录内部，会变成悬空软链留在包里（1.0.3 实测：
-# xattr -dr 时报 `No such file: .../node_modules/.bin/openclaw`）—— 虽无害，但属包内残渣，清掉。
-rm -f node_modules/.bin/openclaw node_modules/.bin/openclaw.cmd 2>/dev/null || true
+# ── openclaw: no longer present at all ──────────────────────────────────────
+# 2026-11-18: the two helpers we used from @tencent-weixin/openclaw-weixin are
+# vendored under services/weixin-json.ts and services/markdown-filter.ts, and
+# the package is no longer a dependency. npm therefore never pulls `openclaw`
+# (342 MB peer) and there is nothing to prune. The factory gate below still
+# asserts it never comes back — if it does, something re-introduced the dep.
 
 # 出厂门禁 1.5：不该进产物的东西一个都不许留
 # （先打印尺寸再拒 —— 一次失败就能看出「是哪一类重新长回来了」，不用再跑一轮复现）

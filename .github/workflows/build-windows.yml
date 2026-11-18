@@ -127,17 +127,8 @@ jobs:
           Write-Host "better-sqlite3 rebuilt for Electron $ver"
 
       # ── ④ 修剪 peer 依赖死重 ──
-      # openclaw 是 @tencent-weixin/openclaw-weixin 的 peerDependency，npm 7+ 自动装，
-      # 白拉 342MB（App 体积的 37%）。全仓对它只有一处 import，见 build-dmg.sh 的说明。
-      - name: Prune dead weight and assert package hygiene
-        working-directory: packages/desktop/.deploy-server
-        shell: pwsh
-        run: |
-          if (Test-Path "node_modules/openclaw") {
-            Remove-Item -Recurse -Force "node_modules/openclaw"
-            Write-Host "Pruned openclaw peer dependency"
-          }
-          Remove-Item -Force "node_modules/.bin/openclaw","node_modules/.bin/openclaw.cmd" -ErrorAction SilentlyContinue
+      # openclaw: no longer a dependency (helpers vendored), nothing to prune.
+      # The gate below still asserts it never comes back.
 
           $bad = @()
           foreach ($p in @("openclaw","typescript","vite","vitest","rolldown","@rolldown","@electron")) {

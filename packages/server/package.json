@@ -21,7 +21,6 @@
     "@koa/multer": "^4.0.0",
     "@larksuiteoapi/node-sdk": "1.75.0",
     "@modelcontextprotocol/sdk": "^1.32.1",
-    "@tencent-weixin/openclaw-weixin": "^2.4.10",
     "@types/koa-static": "^4.0.4",
     "better-sqlite3": "^11.7.0",
     "dotenv": "^16.4.0",
