@@ -270,7 +270,12 @@ if [ -n "${PACK_TARGET:-}" ]; then
   # egress IP gets 429 from huaweicloud; official GitHub releases are fastest there.
   MIRROR_ARG=""
   if [ -n "${ELECTRON_MIRROR+x}" ]; then MIRROR_ARG="--config.electronDownload.mirror=$ELECTRON_MIRROR"; fi
-  UPDATE_URL="$UPDATE_URL" pnpm exec electron-builder --mac "$PACK_TARGET" $MIRROR_ARG
+  # ELECTRON_MIRROR: unset → keep electron-builder.yml's mirror (fast on a home IP);
+  # set (even to "") → override via CLI. CI passes "" because the shared Actions
+  # egress IP gets 429 from huaweicloud; official GitHub releases are fastest there.
+  MIRROR_ARG=""
+  if [ -n "${ELECTRON_MIRROR+x}" ]; then MIRROR_ARG="--config.electronDownload.mirror=$ELECTRON_MIRROR"; fi
+  UPDATE_URL="$UPDATE_URL" pnpm exec electron-builder --mac "$PACK_TARGET" $MIRROR_ARG $MIRROR_ARG
 else
   UPDATE_URL="$UPDATE_URL" pnpm dist
 fi
