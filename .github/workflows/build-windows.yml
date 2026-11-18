@@ -177,7 +177,9 @@ jobs:
             # 写死的 huaweicloud 镜像（那份配置是为本机打包写的，在 Actions 的共享出口 IP
             # 上会被 429 限流）。CLI 参数优先级高于配置文件，env 覆盖不了。
             # 留空 ⇒ 回落到 Electron 的官方 GitHub release，runner 访问走高速通道。
-            pnpm exec electron-builder --win nsis --publish never --config.electronDownload.mirror=
+            # productName 沿用 "SUPERCRZY BOT"：1.3.2 的更新链（latest.yml 引用名）
+            # 与已装用户的自动更新按旧名生效，改名留到下个版本统一。
+            pnpm exec electron-builder --win nsis --publish never --config.electronDownload.mirror= --config.productName="SUPERCRZY BOT"
             if ($LASTEXITCODE -eq 0) { $ok = $true }
             else {
               Write-Host "attempt $attempt failed (exit $LASTEXITCODE)"
