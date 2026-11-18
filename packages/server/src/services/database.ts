@@ -26,9 +26,20 @@ export function initDatabase() {
     ]
     for (const leg of legacyCandidates) {
       if (existsSync(leg)) {
-        // Do not silently start an empty database if the old one cannot be
-        // migrated: that would hide the user's history and complicate recovery.
-        migrateLegacyDatabase(leg, config.db.path)
+        // A migration failure must never take the whole backend down (it did on
+        // Windows in v1.3.2: the app only ever showed a blank window). The old
+        // database is left untouched, we start on a fresh one, and the situation
+        // is surfaced loudly instead of silently hiding the user's history.
+        try {
+          migrateLegacyDatabase(leg, config.db.path)
+        } catch (error) {
+          console.error('[database] legacy migration failed — keeping the old file untouched:', {
+            legacy: leg,
+            destination: config.db.path,
+            error: error instanceof Error ? error.message : String(error),
+          })
+          process.env.SUPERCRZY_MIGRATION_FAILED = '1'
+        }
         break
       }
     }

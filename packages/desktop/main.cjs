@@ -86,7 +86,13 @@ function seedWorkspace() {
 }
 
 const PORT = Number(process.env.PORT || 3000)
-const BACKEND_URL = `http://localhost:${PORT}`
+// 2026-11-18 fix (Windows white screen): the backend binds 127.0.0.1 (IPv4 only,
+// security hardening in v1.3.2). Chromium resolves "localhost" to ::1 first on
+// Windows (its hosts file leaves localhost commented), so http://localhost:PORT
+// got ERR_CONNECTION_REFUSED while isPortOpen(127.0.0.1) reported "ready" — the
+// window loaded a dead origin and stayed blank. Loading 127.0.0.1 matches the
+// actual bind on every platform and keeps the loopback-only security property.
+const BACKEND_URL = `http://127.0.0.1:${PORT}`
 // 当前前端源（dev 模式可能切到 vite dev 5173 实现 HMR 实时同步）
 let activeFrontUrl = BACKEND_URL
 
@@ -284,6 +290,19 @@ function createWindow() {
       // 允许开发调试（生产可关闭）
       devTools: true,
     },
+  })
+
+  // 2026-11-18: a dead backend used to leave users staring at a blank window.
+  // Show the actual reason instead, and keep the app recoverable.
+  const showStartupFailure = (detail) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    const html = `<body style="background:#0f1115;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;margin:0;color:#e5e7eb;font-family:system-ui;gap:14px;padding:0 32px;text-align:center"><h2 style="margin:0;font-size:18px">后端启动失败</h2><p style="margin:0;color:#9ca3af;font-size:13px;line-height:1.6;max-width:560px">${detail}</p><p style="margin:0;color:#6b7280;font-size:12px">可尝试：完全退出应用后重新打开；若问题持续，请把此提示截图反馈。</p></body>`
+    mainWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
+  }
+  mainWindow.webContents.on('did-fail-load', (_e, code, desc, url, isMainFrame) => {
+    if (isMainFrame && url && url.startsWith('http://127.0.0.1:')) {
+      showStartupFailure(`无法连接到 ${url}（${desc || code}）。`)
+    }
   })
 
   // 外部链接用系统浏览器打开
