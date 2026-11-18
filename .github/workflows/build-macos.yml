@@ -59,7 +59,18 @@ jobs:
         env:
           UPDATE_URL: https://updates.supercrzy.com/releases
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
-        run: bash scripts/build-dmg.sh
+          # Empty string ⇒ override electron-builder.yml's huaweicloud mirror with the
+          # official GitHub release. The shared Actions egress IP gets HTTP 429 from
+          # huaweicloud (measured 2026-11-18, same reason build-windows.yml does this).
+          ELECTRON_MIRROR: ""
+        run: |
+          attempt=0
+          until bash scripts/build-dmg.sh; do
+            attempt=$((attempt+1))
+            if [ "$attempt" -ge 4 ]; then echo "build failed after $attempt attempts"; exit 1; fi
+            echo "attempt $attempt failed — backing off $((30 * attempt))s"
+            sleep $((30 * attempt))
+          done
 
       - name: List artifacts
         working-directory: packages/desktop/dist

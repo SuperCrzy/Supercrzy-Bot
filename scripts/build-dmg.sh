@@ -265,7 +265,12 @@ cd "$ROOT/packages/desktop"
 #   拿来在 AI 工具里出「可安装的 .app」时用 PACK_TARGET=zip。
 if [ -n "${PACK_TARGET:-}" ]; then
   echo "  (PACK_TARGET=${PACK_TARGET} → 只出 .app + ${PACK_TARGET}，不生成 dmg)"
-  UPDATE_URL="$UPDATE_URL" pnpm exec electron-builder --mac "$PACK_TARGET"
+  # ELECTRON_MIRROR: unset → keep electron-builder.yml's mirror (fast on a home IP);
+  # set (even to "") → override via CLI. CI passes "" because the shared Actions
+  # egress IP gets 429 from huaweicloud; official GitHub releases are fastest there.
+  MIRROR_ARG=""
+  if [ -n "${ELECTRON_MIRROR+x}" ]; then MIRROR_ARG="--config.electronDownload.mirror=$ELECTRON_MIRROR"; fi
+  UPDATE_URL="$UPDATE_URL" pnpm exec electron-builder --mac "$PACK_TARGET" $MIRROR_ARG
 else
   UPDATE_URL="$UPDATE_URL" pnpm dist
 fi
