@@ -9,7 +9,7 @@
  * —— 台词里名字写错，真机上听起来只像"音色不对"，极难定位。
  *
  * 台词模板与后端 `services/tts.ts` 的 `TTS_VOICES[].sample` 保持同一形状：
- * 中文音色「您好，我是X，是你的 Super Crazy.」（中英混读，品牌名不翻译）。
+ * 中文音色「您好，我是X，是你的 SUPERCRZY.」（中英混读，品牌名不翻译）。
  */
 
 /** 后端 `/api/tts/voices` 下发的一条音色 */
@@ -28,7 +28,7 @@ export interface TtsVoiceOption {
 }
 
 /** 品牌名：中英混读时不翻译，故两种模板都带上 */
-const BRAND = 'Super Crazy'
+const BRAND = 'SUPERCRZY'
 
 /** label 形如「晓晓（女声·自然）」/「Aria（English）」→ 只取名字部分 */
 export function voiceDisplayName(label: string): string {

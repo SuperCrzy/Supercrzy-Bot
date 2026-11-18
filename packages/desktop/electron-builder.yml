@@ -1,5 +1,5 @@
 appId: com.supercrzy.bot
-productName: SUPERCRZY BOT
+productName: SUPERCRZY
 # 更新源（App 自动更新）：generic 静态源，URL 由环境变量注入（打包时 UPDATE_URL=https://xxx 指定；
 # 不设则用默认示例。dev 形态本地测试读 dev-app-update.yml，不受此影响）
 publish:
