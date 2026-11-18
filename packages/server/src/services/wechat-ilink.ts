@@ -9,7 +9,25 @@ import QRCode from 'qrcode'
 import { existsSync, readFileSync, writeFileSync } from 'fs'
 // The installed Tencent iLink SDK preserves uint64 message IDs before JSON.parse.
 // @ts-ignore - the package exposes this runtime module without TypeScript declarations
-import { parseWeixinApiJson } from '@tencent-weixin/openclaw-weixin/dist/src/api/api.js'
+// The openclaw-weixin package statically imports `openclaw` (342 MB peer that the
+// desktop build prunes). Importing it at module load put the whole WeChat SDK on
+// the backend startup chain: with openclaw pruned, v1.3.2 crashed on boot with
+// ERR_MODULE_NOT_FOUND and the desktop window sat on its failure page. Load it
+// lazily and degrade to plain JSON.parse when unavailable.
+let parseWeixinApiJson: ((rawText: string) => unknown) | null = null
+async function ensureWeixinJsonParser(): Promise<(rawText: string) => unknown> {
+  if (!parseWeixinApiJson) {
+    try {
+      // @ts-ignore - no type declarations shipped for this entry point
+      const mod = await import('@tencent-weixin/openclaw-weixin/dist/src/api/api.js')
+      parseWeixinApiJson = mod.parseWeixinApiJson as (rawText: string) => unknown
+    } catch (error) {
+      console.warn('[wechat-ilink] openclaw-weixin unavailable, falling back to JSON.parse:', error instanceof Error ? error.message : error)
+      parseWeixinApiJson = (rawText: string) => JSON.parse(rawText)
+    }
+  }
+  return parseWeixinApiJson
+}
 
 // ============================
 // 随机 UIN
@@ -331,7 +349,7 @@ async function ilinkPost<T>(baseUrl: string, path: string, body: Record<string, 
       throw new Error(`iLink HTTP ${res.status}`)
     }
 
-    const result = (path === 'getupdates' ? parseWeixinApiJson(await res.text()) : await res.json()) as T
+    const result = (path === 'getupdates' ? (await ensureWeixinJsonParser())(await res.text()) : await res.json()) as T
     // getupdates intentionally returns its error codes to the polling loop,
     // but send/upload callers must not report a business rejection as success.
     if ((path === 'sendmessage' || path === 'getuploadurl') && result && typeof result === 'object') {

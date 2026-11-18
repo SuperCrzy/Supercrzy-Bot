@@ -92,9 +92,15 @@ const PORT = Number(process.env.PORT || 3000)
 // got ERR_CONNECTION_REFUSED while isPortOpen(127.0.0.1) reported "ready" — the
 // window loaded a dead origin and stayed blank. Loading 127.0.0.1 matches the
 // actual bind on every platform and keeps the loopback-only security property.
-const BACKEND_URL = `http://127.0.0.1:${PORT}`
+// The backend falls back to the next free port (3000 -> 3019) when the
+// configured one is taken. Hard-coding the URL meant a healthy backend on
+// 3001 still produced a blank window (main process waited on 3000 forever).
+const PORT_BASE = PORT
+const PORT_SCAN = 20
+let activeBackendPort = PORT_BASE
+function backendUrl() { return `http://127.0.0.1:${activeBackendPort}` }
 // 当前前端源（dev 模式可能切到 vite dev 5173 实现 HMR 实时同步）
-let activeFrontUrl = BACKEND_URL
+let activeFrontUrl = backendUrl()
 
 let backendProc = null
 let mainWindow = null
@@ -124,9 +130,14 @@ async function waitForBackend(timeoutMs = 30000) {
   }
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
-    if (await isPortOpen(PORT)) {
+    let found = null
+    for (let i = 0; i < PORT_SCAN; i++) {
+      if (await isPortOpen(PORT_BASE + i)) { found = PORT_BASE + i; break }
+    }
+    if (found !== null) {
+      activeBackendPort = found
       backendReady = true
-      console.log(`[Desktop] Backend ready at ${BACKEND_URL}`)
+      console.log(`[Desktop] Backend ready at ${backendUrl()}`)
       backendWaiters.forEach((r) => r())
       backendWaiters.length = 0
       return
@@ -214,7 +225,7 @@ function stopBackend() {
 // ---- dev 模式前端源：优先 vite dev（5173，HMR 实时同步，改代码窗口即时刷新），
 // vite 未启动时回退后端 serve 的 dist（3000）。生产/打包（非 --dev）固定用 3000。
 async function detectDevFrontend() {
-  if (!DEV) return BACKEND_URL
+  if (!DEV) return backendUrl()
   try {
     const ctl = new AbortController()
     const timer = setTimeout(() => ctl.abort(), 900)
@@ -226,7 +237,7 @@ async function detectDevFrontend() {
     }
   } catch { /* vite 未启动 */ }
   console.log('[Desktop] 前端源: 后端 dist (3000)')
-  return BACKEND_URL
+  return backendUrl()
 }
 
 // ---- 深链接（supercrzy://）----
@@ -365,8 +376,8 @@ function createWindow() {
 
 // ---- preload 桥 ----
 ipcMain.handle('backend:status', async () => {
-  if (backendReady) return { status: 'ready', url: BACKEND_URL }
-  try { await waitForBackend(8000); return { status: 'ready', url: BACKEND_URL } } catch { return { status: 'starting' } }
+  if (backendReady) return { status: 'ready', url: backendUrl() }
+  try { await waitForBackend(8000); return { status: 'ready', url: backendUrl() } } catch { return { status: 'starting' } }
 })
 
 // 主题同步：前端切换主题 → 窗口标题栏（macOS 红绿灯行）+ 背景色跟随
