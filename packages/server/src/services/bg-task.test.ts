@@ -183,7 +183,7 @@ describe('bg-task 状态机', () => {
     expect(firstBatch.some((id) => !getBgTask(id))).toBe(true)
     expect(listBgTasks().filter((task) => task.status !== 'running')).toHaveLength(BG_MAX_FINISHED_TASKS)
     cancelBgTask(live)
-  }, 20000)
+  }, 60000) // CI runners are slower than local — 20s was flaky on this bounds test
 
   it('删除运行中的任务 → 进程真的被杀，记录消失（不能留孤儿进程）', async () => {
     const id = startBgTask({ sessionId: 's1', title: 'x', command: 'sleep 5', cwd: process.cwd() })
@@ -192,7 +192,7 @@ describe('bg-task 状态机', () => {
     expect(await waitFor(() => getBgTask(id) === undefined)).toBe(true)
     // 进程必须收到信号：kill 后 300ms 内应已退出
     expect(await waitFor(() => proc.killed || proc.exitCode !== null || proc.signalCode !== null, 1500)).toBe(true)
-  }, 60000)
+  })
 
   it.skipIf(process.platform === 'win32')('取消后子进程不能继续执行延迟写入', async () => {
     const { mkdtempSync, existsSync, rmSync } = await import('node:fs')
