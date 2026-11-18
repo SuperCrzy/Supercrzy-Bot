@@ -37,6 +37,36 @@ export const APP_VERSION: string = typeof __APP_VERSION__ === 'string' ? __APP_V
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.3.2',
+    date: '2026-11-18',
+    title: '账号、多设备与远程任务',
+    titleEn: 'Accounts, multi-device and remote tasks',
+    features: [
+      '账号体系与端到端加密同步：邮箱验证码登录，会话加密备份，口令永不离开设备',
+      '多设备远程任务：选择在线的电脑，从手机或其他设备提交任务并查看状态',
+      '移动端界面改版：空间停靠栏、内嵌站点页与沉浸式设置',
+      'Android 应用：内置运行时、内置 AI 浏览器、应用内自更新',
+    ],
+    featuresEn: [
+      'Accounts with end-to-end encrypted sync: email code sign-in, encrypted session backup, passphrase never leaves your device',
+      'Remote tasks: pick an online computer and submit work from your phone or another device',
+      'Mobile interface refresh: space dock, embedded site pages, immersive settings',
+      'Android app: on-device runtime, built-in AI browser, in-app self-update',
+    ],
+    fixes: [
+      '安全加固：默认只监听回环、终端单次票据、路径解析符号链接、密钥只显示掩码',
+      '中国大陆语音合成改走 IPv4 直连',
+      '账号服务不可达不再被当作登出；登出不会被旧状态拉回',
+      '面板与下拉菜单布局修复',
+    ],
+    fixesEn: [
+      'Security hardening: loopback-only by default, single-use terminal tickets, symlink-resolved paths, masked secrets only',
+      'Text-to-speech now connects over IPv4 in mainland China',
+      'An unreachable account service no longer forces a sign-out; stale state cannot undo a logout',
+      'Panel and dropdown layout fixes',
+    ],
+  },
+  {
     version: '1.3.1',
     date: '2026-10-29',
     title: 'Windows 登录修复，窗口细节顺手理顺',
