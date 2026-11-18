@@ -15,7 +15,7 @@
  * Concurrency and memory are capped per process: 16 live tasks, 100KB of output each (ring, keeps
  * the tail). Both caps exist because an unbounded registry is a leak, not a feature.
  */
-import { spawn, type ChildProcess } from 'child_process'
+import { execFile, spawn, type ChildProcess } from 'child_process'
 import { EventEmitter } from 'events'
 import { randomUUID } from 'crypto'
 
@@ -39,6 +39,9 @@ export interface BgTask {
   buffer: string
   /** Read cursor for incremental `readBgTaskOutput` */
   consumed: number
+  droppedChars: number
+  cancelRequested: boolean
+  deleteWhenStopped: boolean
   proc: ChildProcess | null
 }
 
@@ -56,10 +59,12 @@ export interface BgTaskView {
   lastOutputAt: number
   /** Last ~600 chars of output, for one-line previews */
   tail: string
+  cancelRequested: boolean
 }
 
 export const BG_MAX_LIVE_TASKS = 16
 export const BG_MAX_BUFFER = 100 * 1024
+export const BG_MAX_FINISHED_TASKS = 200
 
 const tasks = new Map<string, BgTask>()
 const events = new EventEmitter()
@@ -78,6 +83,7 @@ function appendOutput(t: BgTask, chunk: string) {
   if (t.buffer.length > BG_MAX_BUFFER) {
     const drop = t.buffer.length - BG_MAX_BUFFER
     t.buffer = t.buffer.slice(drop)
+    t.droppedChars += drop
     t.consumed = Math.max(0, t.consumed - drop)
   }
 }
@@ -95,6 +101,7 @@ export function toView(t: BgTask): BgTaskView {
     bytes: t.bytes,
     lastOutputAt: t.lastOutputAt,
     tail: t.buffer.slice(-600),
+    cancelRequested: t.cancelRequested,
   }
 }
 
@@ -138,6 +145,9 @@ export function startBgTask(opts: {
     lastOutputAt: Date.now(),
     buffer: '',
     consumed: 0,
+    droppedChars: 0,
+    cancelRequested: false,
+    deleteWhenStopped: false,
     proc: null,
   }
   tasks.set(id, t)
@@ -147,6 +157,7 @@ export function startBgTask(opts: {
       cwd: opts.cwd || process.cwd(),
       env: { ...process.env, TERM: 'dumb' },
       stdio: ['ignore', 'pipe', 'pipe'],
+      detached: !win,
     })
     t.proc = proc
     proc.stdout?.on('data', (d: Buffer) => appendOutput(t, d.toString()))
@@ -155,8 +166,8 @@ export function startBgTask(opts: {
       appendOutput(t, `\n[spawn error] ${err.message}\n`)
       settle(t, null, 'failed')
     })
-    proc.on('exit', (code) => {
-      settle(t, code, code === 0 ? 'done' : 'failed')
+    proc.on('close', (code) => {
+      settle(t, code, t.cancelRequested ? 'cancelled' : code === 0 ? 'done' : 'failed')
     })
   } catch (e: any) {
     appendOutput(t, `\n[spawn error] ${e?.message || e}\n`)
@@ -176,6 +187,9 @@ function settle(t: BgTask, code: number | null, status: BgTaskStatus) {
   try {
     events.emit('done', toView(t))
   } catch { /* a listener must never break the exit path */ }
+  if (t.deleteWhenStopped) tasks.delete(t.id)
+  const finished = [...tasks.values()].filter((task) => task.status !== 'running').sort((a, b) => (a.endedAt ?? 0) - (b.endedAt ?? 0))
+  for (const old of finished.slice(0, Math.max(0, finished.length - BG_MAX_FINISHED_TASKS))) tasks.delete(old.id)
 }
 
 export function getBgTask(id: string): BgTask | undefined {
@@ -186,10 +200,11 @@ export function getBgTask(id: string): BgTask | undefined {
 export function listBgTasks(sessionId?: string): BgTaskView[] {
   const out: BgTaskView[] = []
   for (const t of tasks.values()) {
-    if (sessionId && t.sessionId && t.sessionId !== sessionId) continue
+    if (sessionId && t.sessionId !== sessionId) continue
     out.push(toView(t))
   }
-  out.sort((a, b) => b.startedAt - a.startedAt)
+  // Preserve newest insertion first when multiple tasks start in one millisecond.
+  out.reverse().sort((a, b) => b.startedAt - a.startedAt)
   return out
 }
 
@@ -204,20 +219,30 @@ export function readBgTaskOutput(
 ): { ok: true; text: string; next: number; truncated: boolean } | { ok: false; error: string } {
   const t = tasks.get(id)
   if (!t) return { ok: false, error: `任务不存在: ${id}` }
-  const start = Math.max(0, Math.min(Number.isFinite(from) ? from : 0, t.buffer.length))
-  const truncated = start < (Number.isFinite(from) ? from : 0)
-  return { ok: true, text: t.buffer.slice(start), next: t.buffer.length, truncated }
+  const requested = Math.max(0, Number.isFinite(from) ? from : 0)
+  const end = t.droppedChars + t.buffer.length
+  const start = Math.max(0, Math.min(requested - t.droppedChars, t.buffer.length))
+  return { ok: true, text: t.buffer.slice(start), next: end, truncated: requested < t.droppedChars }
 }
 
-/** Cancel a running task. Kill is SIGTERM first; the exit handler records `cancelled`. */
+/** Request cancellation. Completion is recorded only after the process closes. */
 export function cancelBgTask(id: string): { ok: boolean; error?: string } {
   const t = tasks.get(id)
   if (!t) return { ok: false, error: `任务不存在: ${id}` }
   if (t.status !== 'running') return { ok: false, error: `任务已结束（${t.status}），无需取消` }
+  if (t.cancelRequested) return { ok: true }
+  const proc = t.proc
+  if (!proc?.pid) return { ok: false, error: '无法确认任务进程' }
   try {
-    t.proc?.kill('SIGTERM')
-  } catch { /* already gone */ }
-  settle(t, null, 'cancelled')
+    if (process.platform === 'win32') {
+      execFile('taskkill', ['/pid', String(proc.pid), '/T', '/F'], { windowsHide: true }, (error) => { if (error) { try { proc.kill() } catch {} } })
+    } else {
+      process.kill(-proc.pid, 'SIGKILL')
+    }
+    t.cancelRequested = true
+  } catch (error) {
+    return { ok: false, error: `无法停止任务: ${error instanceof Error ? error.message : String(error)}` }
+  }
   return { ok: true }
 }
 
@@ -243,7 +268,10 @@ export function deleteBgTask(id: string): { ok: boolean; error?: string } {
   const t = tasks.get(id)
   if (!t) return { ok: false, error: `任务不存在: ${id}` }
   if (t.status === 'running') {
-    try { t.proc?.kill('SIGTERM') } catch { /* already gone */ }
+    const result = cancelBgTask(id)
+    if (!result.ok) return result
+    t.deleteWhenStopped = true
+    return { ok: true }
   }
   tasks.delete(id)
   return { ok: true }
@@ -252,7 +280,7 @@ export function deleteBgTask(id: string): { ok: boolean; error?: string } {
 /** Test hook: forget everything. Never call this in product code. */
 export function __resetBgTasksForTest(): void {
   for (const t of tasks.values()) {
-    try { t.proc?.kill('SIGKILL') } catch { /* ignore */ }
+    try { if (t.proc?.pid && process.platform !== 'win32') process.kill(-t.proc.pid, 'SIGKILL'); else t.proc?.kill('SIGKILL') } catch { /* ignore */ }
   }
   tasks.clear()
 }

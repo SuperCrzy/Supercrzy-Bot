@@ -55,6 +55,11 @@
             <span class="settings-row-text">{{ $t('settings.tabMcp') }}</span>
             <SvgIcon name="chevron-right" :size="16" />
           </button>
+          <button class="settings-row" @click="goSection('relay')">
+            <span class="settings-row-icon"><SvgIcon name="globe" :size="16" /></span>
+            <span class="settings-row-text">{{ $t('settings.tabRelay') }}</span>
+            <SvgIcon name="chevron-right" :size="16" />
+          </button>
         </div>
 
         <div class="settings-group">
@@ -73,6 +78,13 @@
             <SvgIcon v-if="appHasUpdate" name="chevron-right" :size="16" />
           </button>
         </div>
+
+        <!-- 退出登录（WorkBuddy 式：版本下方独立红字卡，不再藏进二级页） -->
+        <button class="signout-card" :disabled="signOutBusy" @click="handleSignOut">
+          <span class="signout-text">{{ $t('account.signOut') }}</span>
+        </button>
+
+        <p class="settings-copyright">© 2026 SUPERCRZY. All Rights Reserved.</p>
       </div>
 
       <!-- ======== 主列：设置标签页 ======== -->
@@ -91,6 +103,53 @@
                   {{ $t('account.signOut') }}
                 </n-button>
               </div>
+              <!-- M8 P2：E2E 加密与跨设备同步（账号维度，zero-knowledge） -->
+              <div class="profile-section" v-if="accountStore.signedIn">
+                <div class="profile-head">
+                  <h3 class="profile-title">{{ t('settings.e2eTitle') }}</h3>
+                </div>
+                <p class="tab-desc">{{ t('settings.e2eDesc') }}</p>
+
+                <div v-if="accountStore.e2eStatus === 'idle' || accountStore.e2eStatus === 'loading'" class="tab-desc">{{ t('settings.e2eLoading') }}</div>
+                <div v-else-if="accountStore.e2eStatus === 'error'" class="form-group">
+                  <p class="tab-desc">{{ t('settings.e2eLoadError') }}</p>
+                  <n-button size="small" @click="accountStore.refreshE2eEnvelope()">{{ t('settings.e2eRetry') }}</n-button>
+                </div>
+                <template v-else-if="!accountStore.e2eEnvelope">
+                  <div class="form-group">
+                    <label>{{ t('settings.e2eNewPassphrase') }}</label>
+                    <n-input v-model:value="e2ePass1" type="password" show-password-on="click" :placeholder="t('settings.e2ePassPh')" />
+                  </div>
+                  <div class="form-group">
+                    <label>{{ t('settings.e2eConfirm') }}</label>
+                    <n-input v-model:value="e2ePass2" type="password" show-password-on="click" @keyup.enter="e2eSetup" />
+                  </div>
+                  <n-button size="small" type="primary" :loading="e2eBusy" :disabled="!e2ePass1 || e2ePass1 !== e2ePass2 || e2ePass1.length < 12" @click="e2eSetup">
+                    {{ t('settings.e2eSetup') }}
+                  </n-button>
+                </template>
+
+                <template v-else-if="!accountStore.e2eUnlocked">
+                  <div class="form-group">
+                    <label>{{ t('settings.e2eUnlock') }}</label>
+                    <n-input v-model:value="e2ePass1" type="password" show-password-on="click" @keyup.enter="e2eUnlock" />
+                  </div>
+                  <n-button size="small" type="primary" :loading="e2eBusy" :disabled="!e2ePass1" @click="e2eUnlock">
+                    {{ t('settings.e2eUnlockBtn') }}
+                  </n-button>
+                </template>
+
+                <template v-else>
+                  <div class="form-group">
+                    <n-button size="small" type="primary" :loading="accountStore.syncing" @click="e2eSyncNow">
+                      {{ t('settings.e2eSyncNow') }}
+                    </n-button>
+                    <n-button size="small" style="margin-left:8px" :disabled="accountStore.syncing" @click="e2eRestore">{{ t('settings.e2eRestore') }}</n-button>
+                    <span v-if="e2eSyncMsg" style="margin-left:10px;font-size:12px;opacity:.7">{{ e2eSyncMsg }}</span>
+                  </div>
+                </template>
+              </div>
+
               <!-- 个人资料：昵称 + 头像 -->
               <div class="profile-section">
                 <div class="profile-head">
@@ -475,6 +534,48 @@
               </n-modal>
             </div>
           </n-tab-pane>
+          <n-tab-pane name="relay" :tab="$t('settings.tabRelay')">
+            <div class="tab-content">
+              <p class="tab-desc">{{ $t('settings.relayDesc') }}</p>
+
+              <!-- 状态卡 -->
+              <div class="relay-status-card">
+                <span class="relay-status-dot" :class="relayStatus.connected ? 'on' : 'off'"></span>
+                <span class="relay-status-text">{{ relayStatus.connected ? $t('settings.relayConnected') : $t('settings.relayDisconnected') }}</span>
+                <n-tag v-if="relayStatus.deviceName" size="tiny" :bordered="false">{{ relayStatus.deviceName }}</n-tag>
+              </div>
+
+              <!-- 中继配置 -->
+              <div class="form-group">
+                <label>{{ $t('settings.relayUrl') }}</label>
+                <n-input v-model:value="relayUrl" size="small" placeholder="wss://relay.example.com" />
+              </div>
+              <div class="form-group">
+                <label>{{ $t('settings.relayDeviceName') }}</label>
+                <n-input v-model:value="relayDeviceName" size="small" :placeholder="$t('settings.relayDeviceNamePh')" />
+              </div>
+              <n-button size="small" type="primary" :loading="relayPairing" :disabled="!relayUrl.trim()" @click="relayPair">
+                {{ $t('settings.relayPair') }}
+              </n-button>
+
+              <!-- 配对码（生成后展示） -->
+              <div v-if="relayCode" class="relay-code-card">
+                <div class="relay-code">{{ relayCode }}</div>
+                <p class="relay-code-hint">{{ $t('settings.relayCodeHint', { seconds: relayCodeTtl }) }}</p>
+                <div class="form-group" style="margin-top:12px">
+                  <label>{{ $t('settings.relayActivateToken') }}</label>
+                  <n-input v-model:value="relayActivateToken" size="small" :placeholder="$t('settings.relayActivatePh')" />
+                </div>
+                <n-button size="small" type="primary" :disabled="!relayActivateToken.trim()" @click="relayActivate">
+                  {{ $t('settings.relayActivate') }}
+                </n-button>
+              </div>
+
+              <div class="relay-actions">
+                <n-button size="small" :disabled="!relayStatus.connected" @click="relayStop">{{ $t('settings.relayStop') }}</n-button>
+              </div>
+            </div>
+          </n-tab-pane>
         </n-tabs>
       </n-card>
 
@@ -569,18 +670,19 @@ const activeTab = ref('account')
 // to ~460px and sideways scrolling. On mobile we show a grouped list instead, and each row
 // opens the same panel as a second-level page (the tab bar itself is hidden there).
 const isMobileSettings = ref(window.innerWidth <= 768)
-const mobileSection = ref<string | null>(null)
+// Sub-section state lives in the store: the top-bar back button (MainLayout) closes it,
+// because the URL stays /settings and router navigation cannot reset component state.
+const mobileSection = computed({
+  get: () => appStore.settingsMobileSection,
+  set: (v: string | null) => { appStore.settingsMobileSection = v },
+})
 function goSection(name: string) {
   activeTab.value = name
   mobileSection.value = name
 }
-function backToGroups() {
-  mobileSection.value = null
-}
 
 // While inside a Settings sub-section the whole app goes immersive (no dock) — tell the
 // layout, and make sure leaving (back or route change) resets it.
-watch(mobileSection, (v) => { appStore.settingsImmersive = !!v })
 watch(() => route.query.section, (v) => {
   if (typeof v === 'string' && ['account', 'display', 'speech', 'agent', 'mcp'].includes(v)) goSection(v)
 }, { immediate: true })
@@ -792,6 +894,151 @@ const { liveExpanded: reasoningLiveExpanded, setLiveExpanded: setReasoningLive }
  * 分区依据：核心 = 用起来必须配的；高级 = 诊断与进阶集成，平时不碰。
  * 此前 6 项平铺，新手不知道先配哪个。
  */
+// ---- M8 P2：E2E 加密与同步 UI 状态 ----
+const e2ePass1 = ref('')
+const e2ePass2 = ref('')
+const e2eBusy = ref(false)
+const e2eSyncMsg = ref('')
+
+async function e2eSetup(): Promise<void> {
+  e2eBusy.value = true
+  try {
+    await accountStore.setupE2e(e2ePass1.value)
+    e2ePass1.value = ''
+    e2ePass2.value = ''
+    nMessage.success(t('settings.e2eSetupOk'))
+  } catch (e) {
+    nMessage.error(e instanceof Error && e.message === 'passphrase_too_short' ? t('settings.e2eTooShort') : String(e))
+  }
+  e2eBusy.value = false
+}
+
+async function e2eUnlock(): Promise<void> {
+  e2eBusy.value = true
+  try {
+    await accountStore.unlockE2e(e2ePass1.value)
+    e2ePass1.value = ''
+    nMessage.success(t('settings.e2eUnlockOk'))
+    await accountStore.refreshE2eEnvelope()
+  } catch {
+    nMessage.error(t('settings.e2eUnlockFail'))
+  }
+  e2eBusy.value = false
+}
+
+async function e2eSyncNow(): Promise<void> {
+  try {
+    const r = await accountStore.syncNow()
+    e2eSyncMsg.value = t('settings.e2eSyncOk', { sessions: r.sessions - r.failures.length, items: r.items })
+    if (r.failures.some((failure) => failure.endsWith(': sync_conflict'))) nMessage.warning(t('settings.e2eConflictHint'))
+    if (r.failures.some((failure) => failure.endsWith(': item_too_large'))) nMessage.warning(t('settings.e2eSizeHint'))
+    if (r.failures.length) nMessage.warning(r.failures.join('; '))
+  } catch (e) {
+    nMessage.error(String(e))
+  }
+}
+
+async function e2eRestore(): Promise<void> {
+  try {
+    const result = await accountStore.restoreSessions()
+    e2eSyncMsg.value = t('settings.e2eRestoreOk', { imported: result.imported, skipped: result.skipped })
+    if (result.failures.length) nMessage.warning(result.failures.join('; '))
+    if (result.imported) {
+      const { useChatStore } = await import('@/stores/chat')
+      await useChatStore().loadSessions(true)
+    }
+  } catch (e) { nMessage.error(String(e)) }
+}
+
+watch(() => accountStore.accountId, (id) => {
+  e2ePass1.value = ''
+  e2ePass2.value = ''
+  e2eSyncMsg.value = ''
+  if (id) void accountStore.refreshE2eEnvelope()
+}, { immediate: true })
+
+// ---- M8 远程连接（后端：routes/relay.ts + services/relay-client.ts）----
+const relayStatus = ref<{ connected: boolean; relayUrl: string; deviceName: string }>({ connected: false, relayUrl: '', deviceName: '' })
+const relayUrl = ref('')
+const relayDeviceName = ref('My Computer')
+const relayPairing = ref(false)
+const relayCode = ref('')
+const relayCodeTtl = ref(0)
+const relayActivateToken = ref('')
+let relayTimer: ReturnType<typeof setInterval> | undefined
+
+async function relayLoadStatus() {
+  try {
+    const r = await fetch('/api/relay/status')
+    if (r.ok) {
+      relayStatus.value = await r.json()
+      if (relayStatus.value.relayUrl && !relayUrl.value) relayUrl.value = relayStatus.value.relayUrl
+      if (relayStatus.value.deviceName && relayDeviceName.value === 'My Computer') relayDeviceName.value = relayStatus.value.deviceName
+    }
+  } catch { /* relay routes 未部署时静默 */ }
+}
+
+function relayTick() {
+  if (relayCodeTtl.value > 0) relayCodeTtl.value -= 1
+  else { if (relayTimer) clearInterval(relayTimer); relayTimer = undefined; relayCode.value = '' }
+}
+
+async function relayPair() {
+  if (!relayUrl.value.trim()) return
+  relayPairing.value = true
+  try {
+    const r = await fetch('/api/relay/pair', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ relayUrl: relayUrl.value.trim(), deviceName: relayDeviceName.value.trim() || 'My Computer' }),
+    })
+    const d = await r.json()
+    if (d.code) {
+      relayCode.value = d.code
+      relayCodeTtl.value = Math.max(0, Math.round((d.expiresAt - Date.now()) / 1000))
+      if (relayTimer) clearInterval(relayTimer)
+      relayTimer = setInterval(relayTick, 1000)
+    } else {
+      nMessage.error(d.error || t('settings.relayPairFailed'))
+    }
+  } catch (e) {
+    nMessage.error(String(e))
+  }
+  relayPairing.value = false
+}
+
+async function relayActivate() {
+  const token = relayActivateToken.value.trim()
+  if (!token) return
+  try {
+    const r = await fetch('/api/relay/activate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deviceToken: token }),
+    })
+    if (r.ok) {
+      relayCode.value = ''
+      relayActivateToken.value = ''
+      if (relayTimer) clearInterval(relayTimer)
+      await relayLoadStatus()
+      nMessage.success(t('settings.relayActivated'))
+    } else {
+      nMessage.error(t('settings.relayActivateFailed'))
+    }
+  } catch (e) {
+    nMessage.error(String(e))
+  }
+}
+
+async function relayStop() {
+  try {
+    await fetch('/api/relay/stop', { method: 'POST' })
+    await relayLoadStatus()
+  } catch { /* ignore */ }
+}
+
+onMounted(relayLoadStatus)
+
 const manageGroups = computed(() => [
   {
     key: 'core',
@@ -1304,19 +1551,54 @@ async function saveSettings() {
   background: var(--bg-elevated);
   color: var(--text-secondary);
 }
-.settings-back {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin: 0 0 10px;
-  padding: 6px 10px;
-  border: none;
-  background: none;
-  border-radius: 8px;
+/* 版本下方：退出登录（红字，WorkBuddy 式独立卡）+ 版权行 */
+.signout-card {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  padding: 14px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
   cursor: pointer;
-  font-size: 13px;
-  color: var(--accent);
 }
+
+.relay-status-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border: 1px solid var(--border-color, rgba(128,128,128,.25));
+  border-radius: 10px;
+  margin-bottom: 14px;
+}
+.relay-status-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+}
+.relay-status-dot.on { background: #18a058; box-shadow: 0 0 6px rgba(24,160,88,.6); }
+.relay-status-dot.off { background: rgba(128,128,128,.45); }
+.relay-status-text { font-size: 13px; }
+.relay-code-card {
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px dashed var(--border-color, rgba(128,128,128,.35));
+  border-radius: 10px;
+  text-align: center;
+}
+.relay-code {
+  font-size: 30px;
+  letter-spacing: 8px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.relay-code-hint { font-size: 12px; opacity: .65; margin-top: 6px; }
+.relay-actions { margin-top: 14px; display: flex; gap: 8px; }
+.signout-card:disabled { opacity: 0.5; cursor: default; }
+.signout-text { font-size: 13.5px; font-weight: 600; color: #e5484d; }
+.settings-copyright { margin: 4px 0 8px; text-align: center; font-size: 11px; color: var(--text-tertiary); }
 .tabs-card.nav-hidden :deep(.n-tabs-nav) { display: none; }
 .settings-card { background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 12px; padding: 20px 24px; margin-bottom: 20px; }
 .section-title { font-size: 14px; font-weight: 600; margin: 0 0 16px; color: var(--text-primary); }

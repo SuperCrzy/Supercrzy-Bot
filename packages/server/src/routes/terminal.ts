@@ -5,8 +5,23 @@
 import Router from 'koa-router'
 import type { Context } from 'koa'
 import { terminalOpen, terminalList, terminalSend, terminalRead, terminalSignal, terminalClose } from '../services/terminal-manager'
+import { isSignedIn, readSession } from '../services/account-store'
+import { issueTerminalTicket } from '../services/terminal-ticket'
 
 export const terminalRouter = new Router({ prefix: '/api/terminal' })
+
+// This route is behind the API network gate and signed-in account middleware.
+// The browser obtains a fresh ticket before opening the legacy WebSocket.
+terminalRouter.post('/ws-ticket', (ctx: Context) => {
+  const session = isSignedIn() ? readSession() : null
+  if (!session) {
+    ctx.status = 401
+    ctx.body = { error: 'sign_in_required' }
+    return
+  }
+  ctx.set('Cache-Control', 'no-store')
+  ctx.body = { ticket: issueTerminalTicket(session.accountId), expiresIn: 30 }
+})
 
 // 会话列表
 terminalRouter.get('/', (ctx: Context) => {

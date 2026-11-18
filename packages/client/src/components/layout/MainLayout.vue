@@ -43,7 +43,13 @@
         </button>
       </div>
       <!-- 移动端操作组（聊天页）：产物 / 搜索 / 分享 / 详情面板 —— 与 ChatView header 合并避免双层标题栏 -->
-      <div v-if="route.name === 'Chat'" class="mobile-actions">
+      <!-- 移动端操作组（聊天页）：产物 / 搜索 / 分享 / 详情面板 —— 只在有内容的会话里显示：
+           空会话（欢迎页）没有产物可看、没有消息可搜可分享，四个按钮全是死的。
+           bare-actions：Chat 页裸图标，不带白胶囊底（媒体 Home 保留胶囊 = 网站原版形态）。 -->
+      <div
+        v-if="route.name === 'Chat' && chatStore.currentMessages.length > 0"
+        class="mobile-actions bare-actions"
+      >
         <button class="mobile-action-btn" @click="dispatchChatAction('artifacts')" :title="$t('chat.artifactsTitle')">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
         </button>
@@ -130,7 +136,7 @@
         :title="sidebarCollapsed ? $t('nav.expand') : $t('nav.collapse')"
       >
         <img src="/logo.png" alt="SUPERCRZY" class="logo-icon" :style="{ transform: `rotate(${logoAngle}deg)` }" />
-        <span class="logo-text" v-show="!sidebarCollapsed"><span class="logo-brand"><span class="brand-name">SUPERCRZY</span> <span class="bot-badge">BOT</span></span></span>
+        <span class="logo-text" v-show="!sidebarCollapsed"><span class="logo-brand"><span class="brand-name">SUPERCRZY</span></span></span>
       </div>
 
       <!-- 伸缩按钮已移到侧边栏底部 footer（展开态在主题左侧 / 收起态在头像上方），不再骑缘 -->
@@ -410,11 +416,19 @@ const showTopBarBack = computed(
  */
 function topBarBack() {
   const name = String(route.name || '')
-  if (name === 'Settings' && !appStore.settingsImmersive) {
+  // Settings sub-page: the URL is still /settings, so navigation is a no-op — close the
+  // sub-section through the store instead.
+  if (name === 'Settings' && appStore.settingsMobileSection) {
+    appStore.settingsMobileSection = null
+    return
+  }
+  if (name === 'Settings') {
+    // Settings root: entered from the dock — history back if we have one, else home.
     if (window.history.length > 1) router.back()
     else router.push('/')
     return
   }
+  // Everything else with a back arrow drills from the Settings list.
   router.push('/settings')
 }
 
@@ -624,9 +638,9 @@ function onSessionMenu(key: string, sessionId: string) {
   if (key === 'workspace') {
     wsPickerSessionId.value = sessionId
   } else if (key === 'archive') {
-    chatStore.archiveSession(sessionId, true)
+    chatStore.archiveSession(sessionId, true).catch(() => nMessage.error(t('nav.archiveFailed')))
   } else if (key === 'restore') {
-    chatStore.archiveSession(sessionId, false)
+    chatStore.archiveSession(sessionId, false).catch(() => nMessage.error(t('nav.archiveFailed')))
   } else if (key === 'delete') {
     delSession(sessionId)
   }
@@ -1389,13 +1403,6 @@ onMounted(() => {
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
 
-  .mobile-new-chat {
-    display: flex; align-items: center; justify-content: center;
-    width: 32px; height: 32px;
-    border: none; background: none;
-    color: var(--text-secondary);
-    cursor: pointer; padding: 0;
-  }
 
   /* 移动端操作组（合并 ChatView header 后承载：产物/搜索/分享/详情） */
   .mobile-actions {
@@ -1593,12 +1600,22 @@ onMounted(() => {
   align-items: center;
   gap: 2px;
   padding: 5px 8px 5px 10px;
-  margin-left: 0;
+  /* Push to the right edge: the centred title is absolutely positioned and takes no flow
+     space, so without this the action pill slides into the middle and covers the title. */
+  margin-left: auto;
   border-radius: 999px;
   border: 1px solid var(--border-color);
   background: var(--bg-elevated);
   backdrop-filter: blur(24px) saturate(1.6);
   flex: 0 0 auto;
+}
+/* Chat 页的操作组：裸图标，不带胶囊底（WorkBuddy 同款；媒体 Home 的白胶囊是网站原版形态） */
+.mobile-topbar .bare-actions {
+  padding: 0;
+  gap: 6px;
+  border: none;
+  background: none;
+  backdrop-filter: none;
 }
 .mobile-topbar .mobile-action-btn {
   width: 34px;

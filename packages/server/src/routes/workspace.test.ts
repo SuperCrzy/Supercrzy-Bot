@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll } from 'vitest'
-import { mkdtempSync, rmSync } from 'fs'
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 
@@ -69,5 +69,20 @@ describe('safePath 路径白名单（防目录穿越）', () => {
     // 构造一个与 wsRoot 同前缀但确实在外的路径
     const evil = wsRoot + '-evil'
     expect(safePath(evil)).toBeNull()
+  })
+
+  it('拒绝指向工作区外同前缀目录的符号链接及其不存在的子路径', () => {
+    const outside = wsRoot + '-outside'
+    const link = join(wsRoot, 'external-link')
+    try {
+      mkdirSync(outside)
+      writeFileSync(join(outside, 'secret.txt'), 'outside')
+      symlinkSync(outside, link, 'dir')
+      expect(safePath(join(link, 'secret.txt'))).toBeNull()
+      expect(safePath(join(link, 'new-file.txt'))).toBeNull()
+    } finally {
+      rmSync(link, { force: true })
+      rmSync(outside, { recursive: true, force: true })
+    }
   })
 })

@@ -6,12 +6,10 @@
 -->
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import SvgIcon from '@/components/ui/SvgIcon.vue'
 import { APP_VERSION } from '@/data/changelog'
 
-const router = useRouter()
 const { t } = useI18n({ useScope: 'global' })
 
 const latest = ref<string | null>(null)
@@ -96,21 +94,6 @@ onMounted(async () => {
   text-align: center;
 }
 .about-head h2 { font-size: 16px; font-weight: 600; margin: 0; }
-.about-back {
-  position: absolute;
-  left: 10px;
-  top: 50%;
-  transform: translateY(-50%);
-  display: grid;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  border: none;
-  border-radius: 10px;
-  background: var(--bg-elevated);
-  color: var(--text-primary);
-  cursor: pointer;
-}
 .about-body { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
 .settings-group {
   background: var(--bg-primary);

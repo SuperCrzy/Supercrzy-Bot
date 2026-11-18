@@ -183,8 +183,8 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   // ---- 从后端加载会话列表 ----
-  async function loadSessions() {
-    if (loaded.value) return
+  async function loadSessions(force = false) {
+    if (loaded.value && !force) return
     // 跨端同步：优先从后端 settings 恢复上次会话（App/网页共享），settings 无值才用 localStorage
     try {
       const st = await fetch('/api/settings').then((r) => r.json())
@@ -194,7 +194,7 @@ export const useChatStore = defineStore('chat', () => {
       }
     } catch { /* settings 不可用时回退 localStorage */ }
     try {
-      const res = await fetch('/api/sessions')
+      const res = await fetch('/api/sessions?archived=all')
       if (res.ok) {
         const data: any[] = await res.json()
         // 规范化字段名：后端返回 created_at → 前端用 createdAt
@@ -206,16 +206,18 @@ export const useChatStore = defineStore('chat', () => {
           model: s.model || 'deepseek-v4-pro',
           workspaceDir: s.workspace_dir || '',
           permissionLevel: ['workspace-only', 'sandbox', 'full'].includes(s.permission_level) ? s.permission_level : 'sandbox',
+          archived: s.archived === 1 || s.archived === true,
           // 超级协作平台：协作会话标记（后端 collab_mode）
           collabMode: s.collab_mode === 'semi' || s.collab_mode === 'senate' ? s.collab_mode : undefined,
         }))
         // 恢复上次会话：localStorage 里的 id 若已被删除则回退到最新会话
-        if (currentSessionId.value && !data.some((s: any) => s.id === currentSessionId.value)) {
-          currentSessionId.value = data[0]?.id ?? null
+        const active = data.filter((s: any) => s.archived !== 1 && s.archived !== true)
+        if (currentSessionId.value && !active.some((s: any) => s.id === currentSessionId.value)) {
+          currentSessionId.value = active[0]?.id ?? null
         }
         // 没有当前会话，选第一个
-        if (!currentSessionId.value && data.length > 0) {
-          currentSessionId.value = data[0].id
+        if (!currentSessionId.value && active.length > 0) {
+          currentSessionId.value = active[0].id
         }
         loaded.value = true
         // 选中会话后必须同步加载消息：否则刷新后 messages 为空 → 显示欢迎页，
@@ -437,47 +439,43 @@ export const useChatStore = defineStore('chat', () => {
 
   /** 归档/恢复会话（PATCH archived；归档时若为当前会话则切走） */
   async function archiveSession(id: string, archived: boolean) {
+    const res = await fetch(`/api/sessions/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ archived }),
+    })
+    if (!res.ok) throw new Error(`archive_failed:${res.status}`)
     const idx = sessions.value.findIndex((s) => s.id === id)
     if (idx !== -1) sessions.value[idx] = { ...sessions.value[idx], archived }
     if (archived && currentSessionId.value === id) {
       const next = sessions.value.find((s) => !s.archived && s.id !== id)
-      currentSessionId.value = next?.id ?? null
-      if (currentSessionId.value) localStorage.setItem(SESSION_KEY, currentSessionId.value)
+      if (next) await selectSession(next.id)
+      else {
+        currentSessionId.value = null
+        localStorage.removeItem(SESSION_KEY)
+        useAppStore().resetCtxUsage()
+        void persistCurrentSession()
+      }
     }
-    try {
-      await fetch(`/api/sessions/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ archived }),
-      })
-    } catch (err) { console.error('Failed to archive session:', err) }
   }
 
   async function deleteSession(id: string) {
-    // 先删前端
+    // Only change the visible state after the server confirms deletion. Network
+    // failures leave the local session and its selection available for retry.
+    const res = await fetch(`/api/sessions/${id}`, { method: 'DELETE' })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const idx = sessions.value.findIndex((s) => s.id === id)
-    const removed = idx !== -1 ? sessions.value[idx] : null
     if (idx !== -1) sessions.value.splice(idx, 1)
-    const oldMsgs = messages.value.get(id)
     messages.value.delete(id)
     if (currentSessionId.value === id) {
-      currentSessionId.value = sessions.value[0]?.id ?? null
-      if (currentSessionId.value) localStorage.setItem(SESSION_KEY, currentSessionId.value)
-      else localStorage.removeItem(SESSION_KEY)
-      persistCurrentSession()
-    }
-    // 持久化删除
-    try {
-      const res = await fetch(`/api/sessions/${id}`, { method: 'DELETE' })
-      if (!res.ok) {
-        // 后端删除失败 → 回滚本地，避免"界面删了但刷新又出现"
-        if (removed) sessions.value.splice(idx < 0 ? 0 : idx, 0, removed)
-        if (oldMsgs) messages.value.set(id, oldMsgs)
-        throw new Error(`HTTP ${res.status}`)
+      const next = sessions.value.find((session) => !session.archived)
+      if (next) await selectSession(next.id)
+      else {
+        currentSessionId.value = null
+        localStorage.removeItem(SESSION_KEY)
+        useAppStore().resetCtxUsage()
+        void persistCurrentSession()
       }
-    } catch (err) {
-      console.error('Failed to delete session:', err)
-      throw err
     }
   }
 

@@ -2,7 +2,7 @@
  * API 集成测试 — 在测试内装配 mini Koa app（临时 DB + 临时 workspace）
  * 覆盖安全关键路径：settings 脱敏/空 key 保护、workspace 穿越拦截、checkpoint 防穿越、history search
  */
-import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import request from 'supertest'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
@@ -67,6 +67,39 @@ afterAll(() => {
 })
 
 describe('GET /api/settings 脱敏', () => {
+  it('does not expose relay credentials, pairing codes, or per-account host IDs', async () => {
+    const { getDB } = await import('../services/database')
+    const keys = ['relayDeviceToken', 'relayPendingCode', 'workspaceConnectionToken', 'workspaceChannel', 'workspaceAccountId', 'workspaceTokenExpiresAt', 'workspaceAuthOrigin', 'workspaceRelayUrl', 'relayHostId:account-a']
+    const insert = getDB().prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
+    for (const key of keys) insert.run(key, 'private-relay-fixture')
+    const response = await request(app.callback()).get('/api/settings')
+    expect(response.status).toBe(200)
+    for (const key of keys) expect(response.body[key]).toBeUndefined()
+    expect(response.text).not.toContain('private-relay-fixture')
+  })
+  it('never returns auxiliary provider keys or logs submitted secrets', async () => {
+    const secret = 'test-sensitive-provider-key-12345'
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const payload = { apiKey: secret, imageApiKey: secret, tavilyApiKey: secret, serperApiKey: secret, jinaApiKey: secret, embeddingApiKey: secret, systemPrompt: secret }
+      expect((await request(app.callback()).post('/api/settings').send(payload)).status).toBe(200)
+      const read = await request(app.callback()).get('/api/settings')
+      for (const key of ['imageApiKey', 'tavilyApiKey', 'serperApiKey', 'jinaApiKey', 'embeddingApiKey']) {
+        expect(read.body[key]).toBeUndefined()
+        expect(read.body[`${key}Configured`]).toBe(true)
+      }
+      expect(JSON.stringify([...log.mock.calls, ...warn.mock.calls, ...error.mock.calls])).not.toContain(secret)
+      await request(app.callback()).post('/api/settings').send({ imageApiKey: '' })
+      const { getDB } = await import('../services/database')
+      expect(getDB().prepare("SELECT value FROM settings WHERE key = 'imageApiKey'").get()).toEqual({ value: secret })
+    } finally {
+      log.mockRestore(); warn.mockRestore(); error.mockRestore()
+      const { getDB } = await import('../services/database')
+      getDB().prepare("UPDATE settings SET value = 'sk-test-0123456789abcdef0123456789abcdef' WHERE key = 'apiKey'").run()
+    }
+  })
   it('不返回明文 apiKey/qqAppSecret', async () => {
     const res = await request(app.callback()).get('/api/settings')
     expect(res.status).toBe(200)

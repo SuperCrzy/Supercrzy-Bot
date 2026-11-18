@@ -3,8 +3,26 @@ import type { Context } from 'koa'
 import { v4 as uuidv4 } from 'uuid'
 import { getDB } from '../services/database'
 import { upsertWorkspace } from './workspace'
+import { readSession, isSignedIn } from '../services/account-store'
+import { importCloudSession } from '../services/session-import'
 
 export const sessionRouter = new Router({ prefix: '/api/sessions' })
+
+sessionRouter.post('/import', (ctx: Context) => {
+  const account = isSignedIn() ? readSession() : null
+  if (!account) { ctx.status = 401; ctx.body = { error: 'not_signed_in' }; return }
+  if (ctx.get('X-Supercrzy-Account') !== account.accountId) { ctx.status = 409; ctx.body = { error: 'account_changed' }; return }
+  try {
+    const result = importCloudSession(getDB(), ctx.request.body)
+    ctx.status = result === 'created' ? 201 : 409
+    ctx.body = { result }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : ''
+    if (message === 'invalid_session' || message === 'invalid_message') { ctx.status = 400; ctx.body = { error: message }; return }
+    if (message.includes('UNIQUE constraint failed')) { ctx.status = 409; ctx.body = { error: 'message_id_conflict' }; return }
+    throw error
+  }
+})
 
 // List sessions（归档过滤：默认只列未归档，?archived=1 列归档区，?archived=all 全部）
 sessionRouter.get('/', (ctx: Context) => {
@@ -29,7 +47,7 @@ sessionRouter.get('/:id', (ctx: Context) => {
     return
   }
   const messages = db
-    .prepare('SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC')
+    .prepare('SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC, rowid ASC')
     .all(ctx.params.id) as Array<any>
   // Parse attachments JSON for each message
   for (const msg of messages) {
@@ -163,6 +181,16 @@ sessionRouter.post('/', (ctx: Context) => {
 sessionRouter.patch('/:id', (ctx: Context) => {
   const db = getDB()
   const body = ctx.request.body as { title?: string; model?: string; workspace_dir?: string; permission_level?: string; archived?: boolean }
+  if (!db.prepare('SELECT 1 FROM sessions WHERE id = ?').get(ctx.params.id)) {
+    ctx.status = 404
+    ctx.body = { error: 'Session not found' }
+    return
+  }
+  if (body.archived !== undefined && typeof body.archived !== 'boolean') {
+    ctx.status = 400
+    ctx.body = { error: 'Invalid archived state' }
+    return
+  }
   if (body.title) {
     db.prepare("UPDATE sessions SET title = ?, updated_at = datetime('now') WHERE id = ?")
       .run(body.title, ctx.params.id)
@@ -220,7 +248,7 @@ sessionRouter.delete('/:id/messages', (ctx: Context) => {
     ctx.body = { error: 'after is required' }
     return
   }
-  const row = db.prepare('SELECT created_at, id FROM messages WHERE id = ? AND session_id = ?').get(after, ctx.params.id) as any
+  const row = db.prepare('SELECT created_at, rowid AS message_order FROM messages WHERE id = ? AND session_id = ?').get(after, ctx.params.id) as { created_at: string; message_order: number } | undefined
   if (!row) {
     ctx.status = 404
     ctx.body = { error: 'Message not found' }
@@ -228,8 +256,8 @@ sessionRouter.delete('/:id/messages', (ctx: Context) => {
   }
   // 按 created_at 排序，删除 >= 目标消息序号之后的全部消息（含目标）
   db.prepare(
-    'DELETE FROM messages WHERE session_id = ? AND id IN (SELECT id FROM messages WHERE session_id = ? AND (created_at > ? OR (created_at = ? AND id >= ?)))',
-  ).run(ctx.params.id, ctx.params.id, row.created_at, row.created_at, after)
+    'DELETE FROM messages WHERE session_id = ? AND (created_at > ? OR (created_at = ? AND rowid >= ?))',
+  ).run(ctx.params.id, row.created_at, row.created_at, row.message_order)
   ctx.body = { success: true }
 })
 
@@ -291,12 +319,17 @@ sessionRouter.post('/:id/messages', (ctx: Context) => {
   const model = typeof body.model === 'string' && body.model.trim() ? body.model.trim() : null
 
   // 检查消息是否已存在（幂等）
-  const existing = db.prepare('SELECT id FROM messages WHERE id = ?').get(id)
+  const existing = db.prepare('SELECT id, session_id FROM messages WHERE id = ?').get(id) as { id: string; session_id: string } | undefined
   if (existing) {
+    if (existing.session_id !== ctx.params.id) {
+      ctx.status = 409
+      ctx.body = { error: 'message_id_conflict' }
+      return
+    }
     // 更新已有消息内容
     db.prepare(
-      'UPDATE messages SET content = ?, token_count = ?, token_estimated = ?, cost = ?, elapsed_ms = ?, model = ?, attachments = ?, created_at = datetime(\'now\') WHERE id = ?'
-    ).run(body.content, body.token_count || null, tokenEstimated, body.cost || null, body.elapsed_ms || null, model, attachmentsJson, id)
+      'UPDATE messages SET content = ?, token_count = ?, token_estimated = ?, cost = ?, elapsed_ms = ?, model = ?, attachments = ? WHERE id = ? AND session_id = ?'
+    ).run(body.content, body.token_count || null, tokenEstimated, body.cost || null, body.elapsed_ms || null, model, attachmentsJson, id, ctx.params.id)
   } else {
     db.prepare(
       'INSERT INTO messages (id, session_id, role, content, token_count, token_estimated, cost, elapsed_ms, model, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'

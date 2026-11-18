@@ -2,7 +2,7 @@
   <div class="update-panel">
     <div class="update-head">
       <div class="update-title">
-        SUPERCRZY <span class="bot-badge">BOT</span>
+        SUPERCRZY
       </div>
 
       <!--

@@ -11,9 +11,40 @@
  *   - 运行期判定不可用后，本进程不再重复探测（避免每条命令都撞一次 71）。
  */
 import { describe, it, expect } from 'vitest'
-import { homedir } from 'os'
+import { homedir, tmpdir } from 'os'
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from 'fs'
 import { join } from 'path'
 import { SANDBOX_PROBE_PROFILE, buildSandboxProfile, detectSandboxExec, markSandboxUnavailable, pathUnder, assertSafeFilePath, PROJECT_ROOT } from './sandbox'
+
+describe('file path symlinks', () => {
+  it('rejects existing and missing targets reached through a symlink to a sensitive directory', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sandbox-links-'))
+    try {
+      const secretDir = join(dir, '.ssh')
+      mkdirSync(secretDir)
+      writeFileSync(join(secretDir, 'secret'), 'private')
+      const link = join(dir, 'public-link')
+      symlinkSync(secretDir, link, 'dir')
+      expect(assertSafeFilePath(join(link, 'secret'))).not.toBeNull()
+      expect(assertSafeFilePath(join(link, 'new-file'))).not.toBeNull()
+      const dangling = join(dir, 'broken-link')
+      symlinkSync(join(dir, 'missing-target'), dangling)
+      expect(assertSafeFilePath(dangling)).not.toBeNull()
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+  it('allows a legitimate symlink that stays within the permitted root', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sandbox-links-'))
+    try {
+      const inner = join(dir, 'inner')
+      mkdirSync(inner)
+      writeFileSync(join(inner, 'file.txt'), 'ok')
+      const link = join(dir, 'link')
+      symlinkSync(inner, link, 'dir')
+      expect(assertSafeFilePath(join(link, 'file.txt'), { workspaceDir: dir })).toBeNull()
+      expect(assertSafeFilePath(join(link, 'new.txt'), { workspaceDir: dir })).toBeNull()
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+})
 
 describe('hard sandbox probe', () => {
   it('探针必须含收紧规则（deny）：只有 allow default 的探针会假阳性', () => {

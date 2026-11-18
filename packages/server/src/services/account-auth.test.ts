@@ -3,7 +3,7 @@ import type { Context, Next } from 'koa'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { readSession, writeSession, type StoredSession } from './account-store'
+import { clearSession, readSession, writeSession, type StoredSession } from './account-store'
 import { ensureAccessToken, requireAccount } from './account-auth'
 
 let dir: string
@@ -76,6 +76,29 @@ describe('signed-in gate', () => {
 })
 
 describe('silent rotation', () => {
+  it('does not restore a signed-out account when its pending refresh succeeds', async () => {
+    writeSession(session({ expiresAt: Date.now() - 1000 }))
+    let finish!: (value: Response) => void
+    vi.stubGlobal('fetch', () => new Promise<Response>((resolve) => { finish = resolve }))
+    const pending = ensureAccessToken()
+    clearSession()
+    finish(new Response(JSON.stringify({ accessToken: 'late', refreshToken: 'late-refresh' })))
+    expect(await pending).toBeNull()
+    expect(readSession()).toBeNull()
+  })
+
+  it('does not clear or replace a newer account when an old refresh completes', async () => {
+    for (const status of [200, 401, 409]) {
+      writeSession(session({ expiresAt: Date.now() - 1000 }))
+      let finish!: (value: Response) => void
+      vi.stubGlobal('fetch', () => new Promise<Response>((resolve) => { finish = resolve }))
+      const pending = ensureAccessToken()
+      writeSession(session({ accountId: 'acc-2', deviceId: 'dev-2', accessToken: 'new-account', refreshToken: 'refresh-new' }))
+      finish(new Response(JSON.stringify({ accessToken: 'old-result', refreshToken: 'old-refresh' }), { status }))
+      expect(await pending).toBeNull()
+      expect(readSession()).toMatchObject({ accountId: 'acc-2', accessToken: 'new-account', refreshToken: 'refresh-new' })
+    }
+  })
   it('rotates an expired access token and keeps the session', async () => {
     writeSession(session({ expiresAt: Date.now() - 1000 }))
     let calls = 0

@@ -38,6 +38,7 @@ const tool: ToolDef = {
     ctx.emitQuestion({ id, question, options })
     // 挂起等待答复
     const answer = await ctx.askQuestion(id, question, options)
+    if (answer === '__cancelled__') return '已请求停止，问题未回答。'
     if (answer === '__timeout__') return '⏰ 用户未在时限内答复，请基于现有信息合理假设后继续。'
     return `用户答复: ${answer}`
   },

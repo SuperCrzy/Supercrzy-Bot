@@ -6,7 +6,7 @@
  * place to classify, not two). This tool only lists, reads and cancels.
  */
 import type { ToolDef } from './types'
-import { listBgTasks, readBgTaskOutput, cancelBgTask } from '../services/bg-task'
+import { listBgTasks, readBgTaskOutput, cancelBgTask, getBgTask } from '../services/bg-task'
 
 function fmtElapsed(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000))
@@ -34,6 +34,7 @@ const tool: ToolDef = {
   async execute(args, ctx) {
     const action = String(args.action || '').trim()
     const sessionId = ctx?.sessionId || ''
+    if (!sessionId) return '当前会话未指定，无法管理后台任务。'
 
     if (action === 'list') {
       const list = listBgTasks(sessionId)
@@ -52,6 +53,7 @@ const tool: ToolDef = {
     if (action === 'output') {
       const id = String(args.id || '').trim()
       if (!id) return '缺少 id。'
+      if (getBgTask(id)?.sessionId !== sessionId) return '任务不存在或不属于当前会话。'
       const r = readBgTaskOutput(id, Number(args.from || 0))
       if (!r.ok) return r.error
       const head = r.truncated ? '[更早的输出已被丢弃]\n' : ''
@@ -62,8 +64,9 @@ const tool: ToolDef = {
     if (action === 'cancel') {
       const id = String(args.id || '').trim()
       if (!id) return '缺少 id。'
+      if (getBgTask(id)?.sessionId !== sessionId) return '任务不存在或不属于当前会话。'
       const r = cancelBgTask(id)
-      return r.ok ? `已取消 ${id}` : r.error || '取消失败'
+      return r.ok ? `已请求取消 ${id}，请等待任务停止` : r.error || '取消失败'
     }
 
     return `未知 action: ${action}（可选 list / output / cancel）`

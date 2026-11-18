@@ -13,6 +13,7 @@ import bodyParser from 'koa-bodyparser'
 import serve from 'koa-static'
 import { createServer } from 'http'
 import { config } from './config'
+import { startRelayClient } from './services/relay-client'
 import { initDatabase } from './services/database'
 import { startEventLoopMonitor, getEventLoopStats } from './services/event-loop-lag'
 import { getSseStats } from './services/sse-health'
@@ -24,10 +25,12 @@ import { mediaMimeOf, isNonPreviewableBinary, docxMimeOf } from './services/file
 import { warmUpTts } from './services/tts'
 import { pickTtsRoute } from './services/tts-route'
 import { accountRouter } from './routes/account'
-import { requireAccount } from './services/account-auth'
+import { requireAccount, isSignedIn } from './services/account-auth'
+import { allowsNetworkApi } from './services/network-access'
 import { chatRouter } from './routes/chat'
 import { fsRouter } from './routes/filesystem'
 import { settingsRouter } from './routes/settings'
+import relayRoutes from './routes/relay'
 import { sessionRouter } from './routes/session'
 import { historyRouter } from './routes/history'
 import { statsRouter } from './routes/stats'
@@ -85,6 +88,7 @@ import capabilitiesRouter from './routes/capabilities'
 import { restoreFromDB } from './services/task-state'
 import { stopAllMcp } from './services/mcp-manager'
 import { BROWSER_START_PAGE_PATH, browserStartPageHtml } from './services/ai-browser-start-page'
+import { readWechatAgentStream } from './services/wechat-agent-stream'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -196,7 +200,7 @@ async function bootstrap() {
   if (creds) {
     const db = getDB()
     setMessageHandlerFull(async (_userId, text, sessionId, contextToken) => {
-      console.log(`[WeChat Handler] START - userId=${_userId.slice(0,8)}, text=${text.slice(0,20)}`)
+      console.log('[WeChat Handler] START')
 
       try {
         // Ensure session exists
@@ -239,7 +243,6 @@ async function bootstrap() {
         }
 
         // Call Agent with history - 超时 8 分钟
-        let heartbeatInterval: NodeJS.Timeout | null = null
         const controller = new AbortController()
         // 从 settings 读取超时，默认 8 分钟
         const gatewayTimeoutRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('gatewayTimeout') as any
@@ -247,97 +250,33 @@ async function bootstrap() {
         const timeout = setTimeout(() => controller.abort(), gatewayTimeoutMs)
         try {
           const currentModel = (db.prepare('SELECT value FROM settings WHERE key = ?').get('model') as any)?.value || 'deepseek-v4-pro'
-          const body: any = { messages: apiMessages, model: currentModel }
+          const body: any = { messages: apiMessages, model: currentModel, sessionId }
           if (resumeCheckpoint) body.resumeCheckpoint = resumeCheckpoint
-          const res = await fetch(`http://localhost:${PORT}/api/chat/agent`, {
+          const res = await fetch(`http://127.0.0.1:${PORT}/api/chat/agent`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
             signal: controller.signal,
           })
-          clearTimeout(timeout)
           console.log(`[WeChat Handler] Agent response status: ${res.status}`)
-          if (!res.ok) return 'Agent is busy, try later.'
-          const reader = res.body?.getReader()
-          if (!reader) return ''
-          
-          const decoder = new TextDecoder()
-          let buf = ''
-          let result = ''
-          let hasFile = false
-          let filePath = ''
-          let lastToolName = ''
-          let checkpointCount = 0
-          let currentEvent = ''
-
-          // 心跳：每 60 秒通知一次，同时作为流超时检测
-          let lastStreamActivity = Date.now()
-          heartbeatInterval = setInterval(() => {
-            const idle = Date.now() - lastStreamActivity
-            console.log(`[WeChat Handler] Heartbeat... idle=${Math.round(idle/1000)}s`)
-            // 流超过 3 分钟无数据，视为卡死
-            if (idle > 180000) {
-              console.log('[WeChat Handler] Stream idle too long, aborting')
-              controller.abort()
-            }
-          }, 30000)
-          
-          while (true) {
-            // 每次 read 加 60 秒超时，防止永久阻塞
-            const readPromise = reader.read()
-            const timeoutPromise = new Promise<{ done: boolean; value: undefined }>((resolve) =>
-              setTimeout(() => resolve({ done: true, value: undefined }), 60000)
-            )
-            const { done, value } = await Promise.race([readPromise, timeoutPromise])
-            if (done) {
-              if (heartbeatInterval) { clearInterval(heartbeatInterval); heartbeatInterval = null }
-              break
-            }
-            lastStreamActivity = Date.now()
-            buf += decoder.decode(value, { stream: true })
-            
-            // 解析 SSE 行
-            const lines = buf.split('\n')
-            buf = lines.pop() || ''
-            
-            for (const line of lines) {
-              if (line.startsWith('event: ')) {
-                currentEvent = line.slice(7).trim()
-                continue
+          if (!res.ok) return '任务未确认完成，请在电脑端检查执行状态。'
+          if (!res.body) throw new Error('agent_stream_missing')
+          const streamResult = await readWechatAgentStream(res.body, controller, {
+            onEvent: (name, data) => {
+              if (name === 'tool_call') {
+                const desc = getToolDescription({ name: typeof data.name === 'string' ? data.name : '', arguments: typeof data.arguments === 'string' ? data.arguments : '' })
+                if (desc) console.log(`[Agent Tool] ${desc}`)
               }
-              if (!line.startsWith('data: ')) continue
-              try {
-                const d = JSON.parse(line.slice(6))
-                const now = Date.now()
-                
-                // ---- 进度追踪（仅日志，不消耗 contextToken 配额） ----
-                if (currentEvent === 'tool_call') {
-                  lastToolName = d.name || ''
-                  const desc = getToolDescription({ name: d.name, arguments: d.arguments })
-                  if (desc) console.log(`[Agent Tool] ${desc}`)
-                } else if (currentEvent === 'file_created') {
-                  const fname = d.name || d.path || '未知'
-                  console.log(`[Agent File] ${fname}`)
-                  if (d.path) { hasFile = true; filePath = d.path }
-                }
-                
-                // 收集最终结果：content_chunk 累积为主，content 仅在更完整时覆盖
-                if (currentEvent === 'content_chunk' && d.text) {
-                  result = result || ''
-                  result += d.text
-                }
-                if (currentEvent === "content" && typeof d.content === 'string' && d.content && d.content.length > result.length) result = d.content
-                if (currentEvent === 'done' && d.summary && !result) result = d.summary
-              } catch {}
-            }
-          }
-          if (heartbeatInterval) { clearInterval(heartbeatInterval); heartbeatInterval = null }
-          console.log(`[WeChat Handler] Stream done, result length: ${result.length}`)
+            },
+          })
+          const result = streamResult.text
+          const filePath = streamResult.filePath
+          console.log(`[WeChat Handler] Stream ended, result length: ${result.length}`)
 
           // Store assistant reply & 发送最终结果给用户
           const msgId = randomUUID()
-          let fullResult = result || '任务已完成，无文字输出。'
-          if (hasFile && filePath) {
+          let fullResult = streamResult.completed ? (result || '任务已完成，无文字输出。') : [result, '任务未确认完成，可能已中断；请在电脑端检查执行状态。'].filter(Boolean).join('\n\n')
+          if (filePath) {
             const previewUrl = createPreviewLink(filePath)
             fullResult += `\n\n产物: ${filePath}\n手机预览: ${previewUrl}`
           }
@@ -349,12 +288,10 @@ async function bootstrap() {
           // 全文返回，分段由 processMessage 统一处理
           return fullResult
         } catch (err: any) {
-          clearTimeout(timeout)
-          if (heartbeatInterval) { clearInterval(heartbeatInterval); heartbeatInterval = null }
           console.error(`[WeChat Handler] Error:`, err.message)
-          sendProgressMsg(_userId, contextToken, `出错: ${err.message?.slice(0, 80) || '未知错误'}`)
-          return '抱歉，处理消息时出错。'
-        }
+          sendProgressMsg(_userId, contextToken, '任务连接中断，请在电脑端检查执行状态。')
+          return '任务未确认完成，可能已中断；请在电脑端检查执行状态。'
+        } finally { clearTimeout(timeout) }
       } catch (err: any) {
         console.error(`[WeChat Handler] Outer error:`, err.message)
         sendProgressMsg(_userId, contextToken, '服务暂时不可用，请稍后重试。')
@@ -402,6 +339,11 @@ async function bootstrap() {
       return allowedOrigins.includes(origin) ? origin : ''
     },
   }))
+  const syncPushParser = bodyParser({ jsonLimit: '4mb' })
+  app.use(async (ctx, next) => {
+    if ((ctx.path === '/api/auth-sync/push' || ctx.path === '/api/sessions/import') && ctx.method === 'POST') return syncPushParser(ctx, next)
+    return next()
+  })
   app.use(bodyParser())
 
   // API 鉴权：配置访问令牌后，非本地来源的 /api 请求需 Authorization: Bearer <token>
@@ -418,11 +360,18 @@ async function bootstrap() {
     // 同理 `/api/tts/live/stream`（2026-10-21 会话式朗读）也要豁免：它是同一种
     // "<audio src> 直连"，鉴权同样由 48 位 token 承担。
     const ttsStreamPaths = ['/api/tts/stream', '/api/tts/live/stream']
-    if (!API_TOKEN || !ctx.path.startsWith('/api/') || ctx.path === '/api/health' || ttsStreamPaths.includes(ctx.path)) return next()
-    const origin = ctx.request.header.origin || ''
-    const isLocal = !origin || origin.includes('localhost') || origin.includes('127.0.0.1')
-    if (isLocal) return next()
-    if (ctx.request.header.authorization !== `Bearer ${API_TOKEN}`) {
+    if (!ctx.path.startsWith('/api/') || ctx.path === '/api/health' || ttsStreamPaths.includes(ctx.path)) return next()
+    // S2 fix (2026-11-17 audit): Origin alone is NOT identity. Local = request
+    // from a loopback address AND (no Origin, or an Origin exactly on the local
+    // allow-list). Substring matching previously let `https://localhost.evil.com`
+    // through.
+    if (!allowsNetworkApi({
+      ip: ctx.ip || '',
+      origin: ctx.request.header.origin || '',
+      authorization: ctx.request.header.authorization || '',
+      apiToken: API_TOKEN,
+      port: String(PORT),
+    })) {
       ctx.status = 401
       ctx.body = { error: 'Unauthorized: invalid or missing API token' }
       return
@@ -565,8 +514,12 @@ async function bootstrap() {
   // 绑定地址：默认不指定（Node 在 IPv6 可用时绑 `::`，双栈）——这是**原本就正确**的行为。
   // 2026-10-23 曾误判「手机端 adb forward 连不上 = 绑定错了」，实际是 forward 重建时序问题；
   // 这里保留一个可选的 HOST 逃生口（不设则完全维持默认），供确实需要显式绑 IPv4 的场景使用。
-  const BIND_HOST = process.env.HOST || ''
+  // S2 fix (2026-11-17 audit): default to loopback. Opt into LAN exposure
+  // explicitly via HOST=0.0.0.0 (which then REQUIRES the API token on every
+  // /api call — see the middleware above).
+  const BIND_HOST = process.env.HOST || '127.0.0.1'
   const onListening = () => {
+    if (isSignedIn()) startRelayClient()
     const localIP = getLocalIP()
     console.log(`\n🚀 SUPERCRZY BOT running on:`)
     console.log(`   Local:   http://localhost:${PORT}`)

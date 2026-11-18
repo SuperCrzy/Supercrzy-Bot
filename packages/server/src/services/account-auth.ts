@@ -66,6 +66,12 @@ async function rotate(): Promise<boolean> {
     lastRefreshOutcome = 'invalid'
     return false
   }
+  // An outstanding response must never resurrect a logout or replace a
+  // different login. Also avoid clearing a newer token on a stale 4xx.
+  const stillCurrent = () => {
+    const current = readSession()
+    return !!current && current.accountId === session.accountId && current.deviceId === session.deviceId && current.refreshToken === session.refreshToken
+  }
 
   let res: Response
   try {
@@ -73,6 +79,7 @@ async function rotate(): Promise<boolean> {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refreshToken: session.refreshToken, deviceId: session.deviceId }),
+      signal: AbortSignal.timeout(10_000),
     })
   } catch {
     // Offline: keep the session on disk. The user stays "signed in" and the next
@@ -84,7 +91,7 @@ async function rotate(): Promise<boolean> {
   if (res.status === 409) {
     // Another process already rotated this token; the newest one is on disk.
     const latest = readSession()
-    if (latest && latest.refreshToken !== session.refreshToken) {
+    if (latest && latest.accountId === session.accountId && latest.deviceId === session.deviceId && latest.refreshToken !== session.refreshToken) {
       const ok = !!currentAccessToken()
       lastRefreshOutcome = ok ? 'ok' : 'unreachable'
       return ok
@@ -95,7 +102,7 @@ async function rotate(): Promise<boolean> {
   if (!res.ok) {
     // Rejected outright → signed out for real; keep UI and gate in agreement.
     if (res.status >= 400 && res.status < 500) {
-      clearSession()
+      if (stillCurrent()) clearSession()
       lastRefreshOutcome = 'invalid'
     } else {
       // 5xx: their problem, not the user's. Do NOT sign them out.
@@ -111,6 +118,8 @@ async function rotate(): Promise<boolean> {
     lastRefreshOutcome = 'unreachable'
     return false
   }
+
+  if (!stillCurrent()) return false
 
   writeSession({
     ...session,
@@ -136,7 +145,8 @@ export async function ensureAccessToken(now = Date.now()): Promise<string | null
     })
   }
   const ok = await inFlightRefresh
-  return ok ? currentAccessToken() : null
+  const current = readSession()
+  return ok && current?.accountId === session.accountId && current.deviceId === session.deviceId ? currentAccessToken() : null
 }
 
 export async function requireAccount(ctx: Context, next: Next): Promise<void> {

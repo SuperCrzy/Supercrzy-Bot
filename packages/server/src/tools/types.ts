@@ -39,6 +39,8 @@ export interface ToolProgress {
 }
 
 export interface ToolContext {
+  /** Cooperative cancellation for tools that can stop their own work. */
+  shouldStop?: () => boolean
   /** 会话工作目录（绝对路径）；为空则用 WORKSPACE_ROOT */
   cwd?: string
   /** 会话 id（agent 注入） */

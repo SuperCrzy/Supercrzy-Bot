@@ -90,6 +90,7 @@ interface BgTaskView {
   title: string
   command: string
   status: 'running' | 'done' | 'failed' | 'cancelled'
+  cancelRequested?: boolean
   startedAt: number
   endedAt: number | null
   exitCode: number | null
@@ -129,6 +130,7 @@ function elapsedText(task: BgTaskView): string {
 
 /** 行内副标题：运行中给"已运行 22m59s"，结束给状态（失败附 exit code） */
 function rowMeta(task: BgTaskView): string {
+  if (task.status === 'running' && task.cancelRequested) return t('chat.bgTaskStopping')
   if (task.status === 'running') return t('chat.bgTaskElapsed', { t: elapsedText(task) })
   if (task.status === 'done') return t('chat.bgTaskDone')
   if (task.status === 'cancelled') return t('chat.bgTaskCancelled')

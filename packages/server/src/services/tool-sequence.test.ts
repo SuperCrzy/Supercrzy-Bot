@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { sanitizeToolCallSequence, hasOrphanToolCalls, ensureReasoningEcho, requestStop, isStopRequested, clearStop } from './agent'
+import { sanitizeToolCallSequence, hasOrphanToolCalls, ensureReasoningEcho, requestStop, isStopRequested, clearStop, registerStopSignal } from './agent'
+import { EventEmitter } from 'node:events'
 
 // 构造最小 AgentMessage
 const sys = { role: 'system' as const, content: 's' }
@@ -265,6 +266,26 @@ describe('反向孤立 tool 消息（2026-09-20 补）', () => {
 // 背景：此前 Agent 完全没有停止机制，前端"停止"只是断开 SSE，后端循环照跑到 maxTurns
 // （复杂任务 200 轮）。实测失控案例跑到 40+ 轮、上下文 285KB，用户只能干等。
 describe('停止机制 requestStop / isStopRequested / clearStop', () => {
+  it('stops on an aborted SSE response, but not when the POST body completes or response ends normally', () => {
+    const key = 'stream-lifecycle-test'
+    const req = new EventEmitter() as EventEmitter & { aborted?: boolean }
+    const res = new EventEmitter() as EventEmitter & { writableEnded?: boolean; destroyed?: boolean }
+    clearStop(key)
+    registerStopSignal({ req, res }, key)
+    req.emit('close')
+    expect(isStopRequested(key)).toBe(false)
+    res.writableEnded = true
+    res.emit('close')
+    expect(isStopRequested(key)).toBe(false)
+    const interrupted = new EventEmitter() as EventEmitter & { writableEnded?: boolean; destroyed?: boolean }
+    registerStopSignal({ req, res: interrupted }, key)
+    interrupted.emit('close')
+    expect(isStopRequested(key)).toBe(true)
+    clearStop(key)
+    registerStopSignal({ req, res: { destroyed: true } }, key)
+    expect(isStopRequested(key)).toBe(true)
+    clearStop(key)
+  })
   const key = 'session-stop-test'
 
   beforeEach(() => {

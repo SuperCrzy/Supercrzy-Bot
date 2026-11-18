@@ -41,6 +41,20 @@ const tool: ToolDef = {
     // 解析链 = 设置项 ffmpegPath / 环境变量 FFMPEG_PATH → PATH → ~/.supercrzy/bin → 常见包管理器安装位，
     // 每个候选真跑一次 `-version` 探测，能执行才算数；全不可用则返回可照抄的安装提示。
     // 仓库不再内置 ffmpeg（旧内置件 x86_64 在 Apple Silicon 上不可用，且带 GPL 分发义务）。
+    // 输出路径必须在工作区（防越权写盘）
+    // 带上 level：不传会退回 'sandbox'，full 授权对输出目录失效（2026-10-26 自检）
+    const outputError = assertSafeFilePath(output, { level: ctx?.permissionLevel, workspaceDir: cwd, extraAllowed: [cwd] })
+    if (outputError) return `❌ 输出路径不在允许的工作区: ${output}`
+    if (!op) return '❌ video_edit 需要 op 参数（trim/concat/convert/compress/extract/subtitle）'
+
+    // 校验输入路径在工作区内
+    const checkInput = (p: string) => {
+      if (!p) return ''
+      return assertSafeFilePath(p, { level: ctx?.permissionLevel, workspaceDir: cwd, extraAllowed: [cwd] }) ? `输入路径不合法: ${p}` : ''
+    }
+    const err = (args.input ? checkInput(String(args.input)) : '') || (args.subtitle_file ? checkInput(String(args.subtitle_file)) : '')
+    if (err) return `❌ ${err}`
+    if (Array.isArray(args.inputs)) for (const p of args.inputs) { const e2 = checkInput(String(p)); if (e2) return `❌ ${e2}` }
     const explicit = readSetting('ffmpegPath') || process.env.FFMPEG_PATH || ''
     const ff = await resolveFfmpeg(explicit)
     if (!ff.path) {
@@ -48,21 +62,6 @@ const tool: ToolDef = {
       return `❌ ${ffmpegInstallHint()}\n已尝试：\n${tried}`
     }
     const ffmpegPath = ff.path
-    // 输出路径必须在工作区（防越权写盘）
-    // 带上 level：不传会退回 'sandbox'，full 授权对输出目录失效（2026-10-26 自检）
-    try {
-      assertSafeFilePath(output, { level: ctx?.permissionLevel, workspaceDir: cwd, extraAllowed: [cwd] })
-    } catch (e: any) { return `❌ 输出路径不在允许的工作区: ${output}` }
-    if (!op) return '❌ video_edit 需要 op 参数（trim/concat/convert/compress/extract/subtitle）'
-
-    // 校验输入路径在工作区内
-    const checkInput = (p: string) => {
-      if (!p) return ''
-      try { assertSafeFilePath(p, { level: ctx?.permissionLevel, workspaceDir: cwd, extraAllowed: [cwd] }); return '' } catch (e: any) { return `输入路径不合法: ${p}` }
-    }
-    const err = (args.input ? checkInput(String(args.input)) : '') || (args.subtitle_file ? checkInput(String(args.subtitle_file)) : '')
-    if (err) return `❌ ${err}`
-    if (Array.isArray(args.inputs)) for (const p of args.inputs) { const e2 = checkInput(String(p)); if (e2) return `❌ ${e2}` }
 
     // 构建 ffmpeg 参数（用数组，不拼接 shell，防注入）
     const out = `-y ${output}`  // -y 覆盖

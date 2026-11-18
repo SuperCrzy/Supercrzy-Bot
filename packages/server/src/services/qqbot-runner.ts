@@ -5,6 +5,10 @@ import { QQBotClient, QQBotConfig, ensureToken, sendQQMessage, type QQMessageEve
 import { getDB } from './database'
 import { randomUUID } from 'crypto'
 import { createPreviewLink } from './tunnel'
+import { channelSessionId } from './channel-session-id'
+import { readWechatAgentStream } from './wechat-agent-stream'
+import { KeyedTaskQueue } from './keyed-task-queue'
+import { handleChannelMessageOnce } from './channel-message-dedup'
 
 export interface QQBotRunnerConfig extends QQBotConfig {
   agentPort: number
@@ -13,6 +17,7 @@ export interface QQBotRunnerConfig extends QQBotConfig {
 export class QQBotRunner {
   private config: QQBotRunnerConfig
   private client: QQBotClient
+  private readonly messageQueue = new KeyedTaskQueue()
 
   constructor(config: QQBotRunnerConfig) {
     this.config = config
@@ -22,7 +27,14 @@ export class QQBotRunner {
   /** 启动 Bot */
   async start(): Promise<void> {
     this.client.on('message', (type: QQEventType, msg: QQMessageEvent) => {
-      this.handleMessage(type, msg)
+      const conversation = type === 'GROUP_AT_MESSAGE_CREATE' ? msg.group_openid : type === 'AT_MESSAGE_CREATE' ? msg.channel_id : msg.author?.id
+      if (!conversation || !msg.author?.id) return
+      const key = channelSessionId('qq', this.config.appId, conversation, msg.author.id)
+      void this.messageQueue.run(key, () => handleChannelMessageOnce(getDB(), key, msg.id, () => this.handleMessage(type, msg))).catch((error) => {
+        if (error instanceof Error && error.message === 'channel_queue_full') {
+          void this.sendReply(type, msg, '待处理消息过多，请稍后再发送。').catch(() => {})
+        } else console.error('[QQBot] Message processing failed')
+      })
     })
 
     await this.client.start()
@@ -30,13 +42,15 @@ export class QQBotRunner {
 
   /** 处理消息 → Agent → 回复 */
   private async handleMessage(type: QQEventType, msg: QQMessageEvent): Promise<void> {
-    if (!msg.content?.trim()) return
+    if (!msg.content?.trim() || !msg.author?.id) return
 
     // 记录最后用户 openid，供 notifier 主动推送
     if (msg.author?.id) lastQQOpenId = msg.author.id
 
     try {
-      const reply = await this.callAgent(msg.author.id, msg.content)
+      const conversation = type === 'GROUP_AT_MESSAGE_CREATE' ? msg.group_openid : type === 'AT_MESSAGE_CREATE' ? msg.channel_id : msg.author.id
+      if (!conversation) throw new Error('channel_identity_missing')
+      const reply = await this.callAgent(msg.author.id, msg.content, conversation)
       if (!reply) {
         await this.sendReply(type, msg, '暂时无法处理，请稍后再试')
         return
@@ -53,19 +67,19 @@ export class QQBotRunner {
         await this.sendReply(type, msg, reply)
       }
 
-      console.log(`[QQBot] Reply sent to ${msg.author.id}: ${reply.slice(0, 60)}`)
+      console.log('[QQBot] Reply sent')
     } catch (err: any) {
       console.error(`[QQBot] Handle error:`, err.message)
       try {
-        await this.sendReply(type, msg, '出错了，请稍后再试')
+        await this.sendReply(type, msg, '任务未确认完成，请在电脑端检查执行状态。')
       } catch {}
     }
   }
 
   /** 调用 SUPERCRZY BOT */
-  private async callAgent(userId: string, text: string): Promise<string> {
+  private async callAgent(userId: string, text: string, conversationId: string): Promise<string> {
     // 稳定 sessionId
-    const sessionId = userId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 32)
+    const sessionId = channelSessionId('qq', this.config.appId, conversationId, userId)
     const db = getDB()
 
     // 确保 session 存在
@@ -89,46 +103,27 @@ export class QQBotRunner {
     const apiMessages = history.reverse().map(m => ({ role: m.role, content: m.content }))
 
     // 调 Agent
-    const res = await fetch(`http://localhost:${this.config.agentPort}/api/chat/agent`, {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 480_000)
+    try {
+    const res = await fetch(`http://127.0.0.1:${this.config.agentPort}/api/chat/agent`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: apiMessages, model: 'deepseek-v4-pro' }),
+      body: JSON.stringify({ messages: apiMessages, model: 'deepseek-v4-pro', sessionId }),
+      signal: controller.signal,
     })
-    if (!res.ok) return 'Agent is busy, try later.'
-
-    const reader = res.body?.getReader()
-    if (!reader) return ''
-
-    const decoder = new TextDecoder()
-    let buf = ''
-    let result = ''
-    let hasFile = false
-    let filePath = ''
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buf += decoder.decode(value, { stream: true })
-      for (const line of buf.split('\n')) {
-        if (line.startsWith('data: ')) {
-          try {
-            const d = JSON.parse(line.slice(6))
-            if (d.content) result = d.content
-            if (d.event === 'file_created' || d.path) { hasFile = true; filePath = d.path || filePath }
-          } catch {}
-        }
-      }
-      const nl = buf.lastIndexOf('\n')
-      buf = nl >= 0 ? buf.slice(nl + 1) : buf
-    }
+    if (!res.ok) return '任务未确认完成，请在电脑端检查执行状态。'
+    if (!res.body) throw new Error('agent_stream_missing')
+    const stream = await readWechatAgentStream(res.body, controller)
+    const result = stream.completed ? (stream.text || '任务已完成，无文字输出。') : [stream.text, '任务未确认完成，请在电脑端检查执行状态。'].filter(Boolean).join('\n\n')
 
     // 存 assistant 回复
     if (result) {
       const msgId = randomUUID()
       let fullResult = result
-      if (hasFile && filePath) {
-        const previewUrl = createPreviewLink(filePath)
-        fullResult += `\n\n📁 ${filePath.split('/').pop()}\n🔗 ${previewUrl}`
+      if (stream.filePath) {
+        const previewUrl = createPreviewLink(stream.filePath)
+        fullResult += `\n\n📁 ${stream.filePath.split('/').pop()}\n🔗 ${previewUrl}`
       }
       db.prepare("INSERT INTO messages (id, session_id, role, content) VALUES (?, ?, ?, ?)").run(
         msgId, sessionId, 'assistant', fullResult
@@ -137,6 +132,7 @@ export class QQBotRunner {
     }
 
     return ''
+    } finally { clearTimeout(timeout) }
   }
 
   /** 发送回复 */

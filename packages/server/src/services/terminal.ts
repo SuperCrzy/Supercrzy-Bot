@@ -8,9 +8,13 @@ import { spawn, exec } from 'child_process'
 import { readFile, writeFile, readdir, stat, mkdir, rm, rename } from 'fs/promises'
 import { join, resolve, basename, dirname } from 'path'
 import { getDB } from './database'
+import { isSignedIn, readSession } from './account-store'
+import { consumeTerminalTicket } from './terminal-ticket'
+import { allowsNetworkApi } from './network-access'
 
 interface TerminalSession {
   ws: WebSocket
+  accountId: string
   process: ReturnType<typeof spawn> | null
   cwd: string
   id: string
@@ -20,6 +24,14 @@ const sessions = new Map<string, TerminalSession>()
 let sessionCounter = 0
 
 const WORKSPACE_ROOT = process.env.WORKSPACE_ROOT || process.cwd()
+
+/** Account changes invalidate existing connections as well as new handshakes. */
+export function revokeTerminalSessions(): void {
+  for (const session of sessions.values()) {
+    killProcess(session)
+    session.ws.close(1008, 'Account session ended')
+  }
+}
 
 /**
  * 工作区初始目录：优先取最近会话的绑定目录（AI 真正干活的地方），
@@ -44,18 +56,36 @@ export function createTerminalServer(server: Server) {
   // noServer 模式 + 手动 upgrade：避免与幽灵工作台（/ws/ghost）共享 server 时
   // {server,path} 实例对不匹配 path 的请求 abort(400)/干扰已升级连接
   const wss = new WebSocketServer({ noServer: true })
+  const authenticatedAccounts = new WeakMap<WebSocket, string>()
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url || '/', 'http://localhost')
     if (url.pathname !== '/ws/terminal') return
+    // S1 fix (2026-11-17 audit): the terminal executes commands — it must never
+    // accept an unauthenticated upgrade. Gate on loopback source + signed-in
+    // session + local Origin, mirroring the HTTP middleware rules.
+    const ip = req.socket.remoteAddress || ''
+    const isLoopback = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(ip)
+    const origin = req.headers.origin || ''
+    const localOriginOk = allowsNetworkApi({ ip, origin, authorization: '', apiToken: '', port: process.env.PORT })
+    const accountId = isSignedIn() ? readSession()?.accountId : undefined
+    const ticket = url.searchParams.get('ticket') || ''
+    if (!isLoopback || !localOriginOk || !accountId || !consumeTerminalTicket(ticket, accountId)) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n')
+      socket.destroy()
+      return
+    }
     wss.handleUpgrade(req, socket, head, (ws) => {
+      authenticatedAccounts.set(ws, accountId)
       wss.emit('connection', ws, req)
     })
   })
 
   wss.on('connection', (ws) => {
+    const accountId = authenticatedAccounts.get(ws)!
     const sessionId = `term_${++sessionCounter}`
     const session: TerminalSession = {
       ws,
+      accountId,
       process: null,
       cwd: getInitialCwd(),
       id: sessionId,
@@ -69,6 +99,11 @@ export function createTerminalServer(server: Server) {
     }))
 
     ws.on('message', async (raw) => {
+      if (!isSignedIn() || readSession()?.accountId !== session.accountId) {
+        killProcess(session)
+        ws.close(1008, 'Account session ended')
+        return
+      }
       try {
         const msg = JSON.parse(raw.toString())
         await handleMessage(session, msg)

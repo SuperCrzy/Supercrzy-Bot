@@ -7,6 +7,7 @@
  */
 import WebSocket from 'ws'
 import { EventEmitter } from 'events'
+import { createHash } from 'node:crypto'
 
 const API_BASE = 'https://api.sgroup.qq.com'
 const TOKEN_URL = 'https://bots.qq.com/app/getAppAccessToken'
@@ -37,20 +38,23 @@ export type QQEventType =
   | 'DIRECT_MESSAGE_CREATE'     // 频道私信
 
 // Token 缓存
-let accessToken = ''
-let tokenExpiresAt = 0
+const tokenCache = new Map<string, { token: string; expiresAt: number }>()
+const tokenRequests = new Map<string, Promise<string>>()
 
 /** 获取/刷新 AccessToken（自动处理过期） */
 export async function ensureToken(config: QQBotConfig): Promise<string> {
-  const now = Date.now()
-  if (accessToken && now < tokenExpiresAt - 60000) {
-    return accessToken
-  }
-
+  const cacheKey = createHash('sha256').update(JSON.stringify([config.appId, config.appSecret])).digest('hex')
+  const cached = tokenCache.get(cacheKey)
+  if (cached && Date.now() < cached.expiresAt - 60_000) return cached.token
+  const pending = tokenRequests.get(cacheKey)
+  if (pending) return pending
+  const request = (async () => {
+  const requestedAt = Date.now()
   const res = await fetch(TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ appId: config.appId, clientSecret: config.appSecret }),
+    signal: AbortSignal.timeout(30_000),
   })
 
   if (!res.ok) {
@@ -58,14 +62,19 @@ export async function ensureToken(config: QQBotConfig): Promise<string> {
   }
 
   const data = await res.json() as any
-  if (!data.access_token) {
+  if (typeof data.access_token !== 'string' || !data.access_token) {
     throw new Error('QQ Token API: no access_token in response')
   }
-
-  accessToken = data.access_token
-  tokenExpiresAt = now + (data.expires_in || 7200) * 1000
+  if (data.expires_in === undefined) return data.access_token as string
+  const lifetime = Number(data.expires_in)
+  if (!Number.isFinite(lifetime) || lifetime <= 0) throw new Error('QQ Token API: invalid expires_in')
+  if (tokenCache.size >= 128 && !tokenCache.has(cacheKey)) tokenCache.delete(tokenCache.keys().next().value!)
+  tokenCache.set(cacheKey, { token: data.access_token, expiresAt: requestedAt + lifetime * 1000 })
   console.log(`[QQBot] Token refreshed, expires in ${data.expires_in}s`)
-  return accessToken
+  return data.access_token as string
+  })()
+  tokenRequests.set(cacheKey, request)
+  try { return await request } finally { if (tokenRequests.get(cacheKey) === request) tokenRequests.delete(cacheKey) }
 }
 
 /** 获取网关 WebSocket 地址 */
@@ -162,7 +171,7 @@ export class QQBotClient extends EventEmitter {
 
     this.token = await ensureToken(this.config)
     const wssUrl = await getGatewayUrl(this.token)
-    console.log(`[QQBot] Connecting to ${wssUrl}`)
+    console.log('[QQBot] Connecting to gateway')
 
     return new Promise((resolve, reject) => {
       this.ws = new WebSocket(wssUrl)
@@ -283,9 +292,14 @@ export class QQBotClient extends EventEmitter {
     if (!qqType) return // 忽略不关注的事件
 
     const author = d.author || d.member || {}
+    const authorId = qqType === 'C2C_MESSAGE_CREATE'
+      ? author.user_openid || author.id || d.user_openid || ''
+      : qqType === 'GROUP_AT_MESSAGE_CREATE'
+        ? author.member_openid || author.id || d.member_openid || ''
+        : author.id || ''
     const qqMsg: QQMessageEvent = {
       id: d.id || eventId,
-      author: { id: author.id || d.user_openid || '', username: author.username },
+      author: { id: authorId, username: author.username },
       content: d.content || '',
       channel_id: d.channel_id,
       guild_id: d.guild_id,
@@ -293,7 +307,7 @@ export class QQBotClient extends EventEmitter {
       timestamp: d.timestamp || new Date().toISOString(),
     }
 
-    console.log(`[QQBot] Event ${qqType} from ${qqMsg.author.id}: ${qqMsg.content.slice(0, 60)}`)
+    console.log(`[QQBot] Event ${qqType}`)
     this.emit('message', qqType, qqMsg)
   }
 

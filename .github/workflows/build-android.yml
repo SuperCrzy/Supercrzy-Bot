@@ -52,6 +52,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # 2026-11-14: ubuntu-latest drifted off JDK 17 (Check JDK failed on 7735af5) —
+      # pin the toolchain instead of trusting the runner image default.
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
       - name: Check JDK
         run: |
           set -e

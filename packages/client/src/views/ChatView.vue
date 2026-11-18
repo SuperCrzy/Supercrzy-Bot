@@ -981,6 +981,7 @@ import QuestionFloating from '@/components/chat/QuestionFloating.vue'
 import QuestionNavRail from '@/components/chat/QuestionNavRail.vue'
 import ErrorBanner from '@/components/chat/ErrorBanner.vue'
 import InputBanner from '@/components/chat/InputBanner.vue'
+import { plusNavOptions, PLUS_NAV_TARGETS } from '@/components/chat/plus-nav'
 import WorkspacePickerModal from '@/components/workspace/WorkspacePickerModal.vue'
 import WelcomeTemplates from '@/components/chat/WelcomeTemplates.vue'
 import ModelSelect from '@/components/chat/ModelSelect.vue'
@@ -1145,13 +1146,9 @@ const plusMenuOptions = computed(() => [
   { label: t('chat.plusSkill'), key: 'skill', icon: () => h('svg', { width: '15', height: '15', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [h('path', { d: 'M13 2L3 14h9l-1 8 10-12h-9l1-8z' })]) },
   { label: t('chat.plusReference'), key: 'reference', icon: () => h('svg', { width: '15', height: '15', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [h('circle', { cx: '12', cy: '12', r: '10' }), h('path', { d: 'M12 8v4l3 3' })]) },
   { label: t('chat.plusCompare'), key: 'compare', icon: () => h('svg', { width: '15', height: '15', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [h('rect', { x: '3', y: '4', width: '8', height: '16', rx: '1.5' }), h('rect', { x: '13', y: '4', width: '8', height: '16', rx: '1.5' })]) },
-  // 导航组（2026-11-13，M1）：WorkBuddy 的 + 抽屉下半区是"能力页面"入口。命名区分：
-  // 上面的"技能"是 @ 注入（把技能插进输入框），这里"技能库"是去管理页。
-  { type: 'divider', key: 'nav-divider' },
-  { label: t('nav.automations'), key: 'goto-automations', icon: () => h('svg', { width: '15', height: '15', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [h('circle', { cx: '12', cy: '12', r: '10' }), h('polyline', { points: '12 6 12 12 16 14' })]) },
-  { label: t('nav.skills') + t('chat.plusSkillLibSuffix'), key: 'goto-skills', icon: () => h('svg', { width: '15', height: '15', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [h('path', { d: 'M13 2L3 14h9l-1 8 10-12h-9l1-8z' })]) },
-  { label: t('settings.tabMcp'), key: 'goto-mcp', icon: () => h('svg', { width: '15', height: '15', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [h('path', { d: 'M9 6h6M7 12h10M9 18h6' }), h('circle', { cx: '12', cy: '12', r: '10' })]) },
-  { label: t('nav.memory'), key: 'goto-memory', icon: () => h('svg', { width: '15', height: '15', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [h('path', { d: 'M9 18h6M10 21h4' }), h('path', { d: 'M12 3a6 6 0 0 0-4 10c1 .8 1 1.6 1 2.5h6c0-.9 0-1.7 1-2.5a6 6 0 0 0-4-10z' })]) },
+  // 导航组（M1）：能力页面入口，构造抽到 plus-nav.ts（巨石闸门余量）。命名区分：
+  // 上面的"技能"是 @ 注入（把技能插进输入框），"技能库"是去管理页。
+  ...plusNavOptions(t),
 ])
 function onPlusMenu(key: string) {
   if (key === 'image') {
@@ -1168,7 +1165,7 @@ function onPlusMenu(key: string) {
     openComparePicker()
   } else if (key.startsWith('goto-')) {
     // M1 导航组：+ 菜单下半区直达能力页面（定时任务/技能库/连接器/记忆库）
-    const target = { 'goto-automations': '/automations', 'goto-skills': '/skills', 'goto-mcp': '/settings?section=mcp', 'goto-memory': '/memory' }[key]
+    const target = PLUS_NAV_TARGETS[key]
     if (target) router.push(target)
   }
 }
@@ -2503,16 +2500,14 @@ async function sendAgentMessage(assistantMsg: ChatMessage, apiMessages: Array<{ 
   // 绑定流实例：打字机 + flow 更新集中到 stores/chat-stream.ts（SSE 直写，可多实例）
   bindStream(reactiveMsg)
 
-  // ---- SSE 流式读取：带事件 id 解析 + 按 seq 去重 + 断线安全重试（P1-4，对齐主流实现 accumulator） ----
-  // 事件 id 由后端 emitSSE 自增写入（agent.ts）；重试从头重跑，前端靠 seq 过滤旧事件实现"无感续播"。
-  // 副作用保护：已收到 tool_call/tool_result（工具已执行）后断线 → 不自动重试（避免重复执行），改为提示。
+  // Event IDs only deduplicate this response. A fresh POST starts another run;
+  // missing tool events do not prove that the server hasn't executed a tool.
+  // Do not replay a disconnected run until the server supports idempotent resume.
   const decoder = new TextDecoder()
   let receivedDone = false
-  // 函数级 lastSeq：重试时保留（P1-4 修正）——后端每次请求 seq 从头计数，
-  // 重跑事件 seq ≤ lastSeq 被去重过滤，UI 不重复渲染；副作用保护见 toolExecuted
   let lastSeq = 0
 
-  async function attemptStream(retryLeft: number): Promise<boolean> {
+  async function attemptStream(): Promise<boolean> {
     const res = await fetch('/api/chat/agent', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -2526,7 +2521,6 @@ async function sendAgentMessage(assistantMsg: ChatMessage, apiMessages: Array<{ 
     let buffer = ''
     let currentEvent = ''
     let currentId = ''
-    let toolExecuted = false
 
     try {
       while (true) {
@@ -2542,7 +2536,7 @@ async function sendAgentMessage(assistantMsg: ChatMessage, apiMessages: Array<{ 
           } else if (line.startsWith('event: ')) {
             currentEvent = line.slice(7).trim()
           } else if (line.startsWith('data: ')) {
-            // 按函数级 lastSeq 去重：重连后重跑的事件 seq 从头开始，≤ lastSeq 的旧事件直接丢弃
+            // Only deduplicate events within this single response.
             const seq = currentId ? parseInt(currentId, 10) : 0
             if (seq > lastSeq) {
               lastSeq = seq
@@ -2550,7 +2544,6 @@ async function sendAgentMessage(assistantMsg: ChatMessage, apiMessages: Array<{ 
               try {
                 const data = JSON.parse(dataStr)
                 if (currentEvent === 'done') receivedDone = true
-                if (currentEvent === 'tool_call' || currentEvent === 'tool_result' || currentEvent === 'tool_args_chunk') toolExecuted = true
                 handleAgentEvent(currentEvent, data, reactiveMsg, sessionId)
               } catch {}
             }
@@ -2564,20 +2557,13 @@ async function sendAgentMessage(assistantMsg: ChatMessage, apiMessages: Array<{ 
     }
 
     if (receivedDone) return true
-    // 流中断：未执行工具（无副作用）才自动重试；已执行过工具 → 提示用户，避免重复执行副作用
-    if (retryLeft > 0 && !toolExecuted && !abortController.value!.signal.aborted) {
-      await new Promise((r) => setTimeout(r, 800))
-      return attemptStream(retryLeft - 1)
-    }
-    if (!toolExecuted && !abortController.value!.signal.aborted) {
-      nMessage.warning(t('chat.streamReconnectFailed'))
-    } else if (toolExecuted && !receivedDone && !abortController.value!.signal.aborted) {
+    if (!abortController.value!.signal.aborted) {
       nMessage.warning(t('chat.streamInterrupted'))
     }
     return false
   }
 
-  const streamOk = await attemptStream(2)
+  const streamOk = await attemptStream()
   // 注意：此处不强制 flushAllPending —— 让限速定时器自然播完剩余，
   // 保证打字机效果完整（done/content 事件也不会打断）。
   // 流自然结束（非用户手动停止）→ 提示音 + 自动朗读（见 finishTurn）
@@ -3026,6 +3012,11 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage, sessionId?
         msg.elapsedMs = Date.now() - msg.startedAt
         msg.startedAt = undefined
       }
+      break
+    }
+    case 'tool_slow': {
+      aiStatus.value = 'chat.statusToolSlow'
+      aiStatusTarget.value = ''
       break
     }
     case 'error': {

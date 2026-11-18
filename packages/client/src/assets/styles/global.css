@@ -125,22 +125,6 @@ html.theme-switching * {
 /* ===== 品牌徽章（BOT 圆角矩形底）=====
    浅色模式：黑底白字；深色模式：白底黑字（独立产品线标识）
    对齐：父级用 inline-flex + align-items:center 实现垂直居中 */
-.bot-badge {
-  display: inline-block;
-  padding: 2px 7px;
-  border-radius: 5px;
-  background: #0a0a0a;
-  color: #ffffff;
-  font-size: 0.82em;
-  font-weight: 700;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  letter-spacing: 0.5px;
-  line-height: 1.4;
-}
-.dark .bot-badge {
-  background: #ffffff;
-  color: #0a0a0a;
-}
 
 /* ===== Mobile Responsive ===== */
 /* Tablet: allow sidebar collapse but keep vertical layout */

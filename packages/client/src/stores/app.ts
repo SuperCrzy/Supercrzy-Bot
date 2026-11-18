@@ -8,6 +8,10 @@ import type { CustomModel } from '@/types'
 
 export const useAppStore = defineStore('app', () => {
   const settingsImmersive = ref(false)
+  // Which Settings sub-section is open on mobile (null = group list). Lives here so the
+  // layout's top-bar back button can close it — the URL never changes inside Settings,
+  // so router.back()/push() cannot reset internal view state.
+  const settingsMobileSection = ref<string | null>(null)
 const darkMode = ref(false)
   // Agent 模式（默认开）：全局共享，桌面端横栏按钮与聊天页 header 同步高亮/切换
   const agentMode = ref(true)
@@ -465,6 +469,7 @@ const darkMode = ref(false)
     notifyProvidersChanged,
     toggleDarkMode,
     settingsImmersive,
+    settingsMobileSection,
     setModel,
     toggleDetailPanel,
     setDetailPanelTab,

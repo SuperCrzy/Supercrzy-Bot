@@ -14,6 +14,8 @@ import type { Context } from 'koa'
 import { createHash, randomBytes } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { clearSession, readSession, writeSession, isSignedIn } from '../services/account-store'
+import { startRelayClient, stopRelayClient } from '../services/relay-client'
+import { revokeTerminalSessions } from '../services/terminal'
 
 export const accountRouter = new Router()
 
@@ -160,6 +162,7 @@ accountRouter.get('/auth/callback', async (ctx: Context) => {
     if (!data.accessToken || !data.refreshToken || !data.account?.id) {
       return htmlPage(ctx, 400, '登录未通过', '服务端返回的数据不完整，请稍后重试。')
     }
+    revokeTerminalSessions()
     writeSession({
       accountId: data.account.id,
       email: data.account.email || '',
@@ -169,6 +172,8 @@ accountRouter.get('/auth/callback', async (ctx: Context) => {
       expiresAt: Date.now() + (data.expiresIn ?? 900) * 1000,
       savedAt: Date.now(),
     })
+    stopRelayClient()
+    startRelayClient()
     console.log('[account] signed in as', data.account.email)
     return htmlPage(ctx, 200, '登录成功', '可以关闭这个窗口，回到 SUPERCRZY BOT。')
   } catch (err) {
@@ -188,8 +193,76 @@ accountRouter.get('/api/account/status', (ctx: Context) => {
   }
 })
 
-accountRouter.post('/api/account/logout', async (ctx: Context) => {
+/**
+ * E2E envelope passthrough (M8 P2). The local server never reads or stores the
+ * envelope contents — it forwards the client's zero-knowledge blob to the IdP
+ * with the session's access token, exactly like /auth/logout does.
+ */
+accountRouter.get('/api/account/e2e', async (ctx: Context) => {
   const s = readSession()
+  if (!s?.accessToken) { ctx.status = 401; ctx.body = { error: 'not_signed_in' }; return }
+  if (ctx.get('X-Supercrzy-Account') && ctx.get('X-Supercrzy-Account') !== s.accountId) { ctx.status = 409; ctx.body = { error: 'account_changed' }; return }
+  try {
+    const res = await fetch(authOrigin() + '/auth/me/e2e', {
+      headers: { Authorization: `Bearer ${s.accessToken}` },
+    })
+    ctx.status = res.status
+    ctx.body = await res.json().catch(() => ({}))
+  } catch (e) {
+    ctx.status = 502
+    ctx.body = { error: `auth unreachable: ${String(e)}` }
+  }
+})
+
+accountRouter.put('/api/account/e2e', async (ctx: Context) => {
+  const s = readSession()
+  if (!s?.accessToken) { ctx.status = 401; ctx.body = { error: 'not_signed_in' }; return }
+  if (ctx.get('X-Supercrzy-Account') && ctx.get('X-Supercrzy-Account') !== s.accountId) { ctx.status = 409; ctx.body = { error: 'account_changed' }; return }
+  try {
+    const res = await fetch(authOrigin() + '/auth/me/e2e', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${s.accessToken}` },
+      body: JSON.stringify(ctx.request.body ?? {}),
+    })
+    ctx.status = res.status
+    ctx.body = await res.json().catch(() => ({}))
+  } catch (e) {
+    ctx.status = 502
+    ctx.body = { error: `auth unreachable: ${String(e)}` }
+  }
+})
+
+/**
+ * Sync passthrough (M8 P2): /sync/{push,pull,status} on the IdP. The server is
+ * a blind pipe — blobs are client-side E2E ciphertext it cannot read.
+ */
+async function forwardSync(ctx: Context, path: string): Promise<void> {
+  const s = readSession()
+  if (!s?.accessToken) { ctx.status = 401; ctx.body = { error: 'not_signed_in' }; return }
+  if (ctx.get('X-Supercrzy-Account') && ctx.get('X-Supercrzy-Account') !== s.accountId) { ctx.status = 409; ctx.body = { error: 'account_changed' }; return }
+  try {
+    const res = await fetch(authOrigin() + path, {
+      method: ctx.method === 'GET' ? 'GET' : 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${s.accessToken}` },
+      body: ctx.method === 'GET' ? undefined : JSON.stringify(ctx.request.body ?? {}),
+    })
+    ctx.status = res.status
+    ctx.body = await res.json().catch(() => ({}))
+  } catch (e) {
+    ctx.status = 502
+    ctx.body = { error: `auth unreachable: ${String(e)}` }
+  }
+}
+
+accountRouter.post('/api/auth-sync/push', async (ctx) => forwardSync(ctx, '/sync/push'))
+accountRouter.post('/api/auth-sync/pull', async (ctx) => forwardSync(ctx, '/sync/pull'))
+accountRouter.get('/api/auth-sync/status', async (ctx) => forwardSync(ctx, '/sync/status'))
+
+accountRouter.post('/api/account/logout', async (ctx: Context) => {
+  stopRelayClient()
+  revokeTerminalSessions()
+  const s = readSession()
+  clearSession()
   if (s?.refreshToken) {
     // Best effort: local state is dropped regardless of what the server says.
     try {
@@ -202,7 +275,6 @@ accountRouter.post('/api/account/logout', async (ctx: Context) => {
       /* offline sign-out is still a sign-out */
     }
   }
-  clearSession()
   ctx.body = { ok: true }
 })
 

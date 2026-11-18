@@ -81,6 +81,7 @@ const keyHint = computed(() => {
   }
 })
 const keyPlaceholder = computed(() => {
+  if (imageKeyConfigured.value) return t('settings.imageKeySavedPlaceholder')
   switch (form.imageProvider) {
     case 'gemini': return 'AIza…'
     case 'stability': return 'sk-…'
@@ -93,6 +94,7 @@ const saving = ref(false)
 const saved = ref(false)
 const testResult = ref('')
 const testOk = ref(false)
+const imageKeyConfigured = ref(false)
 const form = reactive({
   imageProvider: 'pollinations',
   imageApiKey: '',
@@ -116,7 +118,8 @@ onMounted(async () => {
     if (!res.ok) return
     const data = await res.json()
     if (data.imageProvider) form.imageProvider = data.imageProvider
-    form.imageApiKey = data.imageApiKey || ''
+    imageKeyConfigured.value = data.imageApiKeyConfigured === true
+    form.imageApiKey = ''
     if (data.doubaoModel) form.doubaoModel = data.doubaoModel
     if (data.geminiImageModel) form.geminiImageModel = data.geminiImageModel
     if (data.openaiImageModel) form.openaiImageModel = data.openaiImageModel
@@ -141,6 +144,8 @@ async function save() {
       }),
     })
     if (!res.ok) throw new Error('save failed')
+    if (form.imageApiKey.trim()) imageKeyConfigured.value = true
+    form.imageApiKey = ''
     nMessage.success(t('settings.savedTip'))
     saved.value = true
   } catch (e: any) {
@@ -153,6 +158,11 @@ async function save() {
 
 async function testKey() {
   testResult.value = ''
+  if (!form.imageApiKey.trim()) {
+    testOk.value = false
+    testResult.value = t('settings.imageKeyTestNeedsInput')
+    return
+  }
   nMessage.loading(t('settings.testingKey'), { duration: 0 })
   try {
     const p = form.imageProvider

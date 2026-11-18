@@ -34,16 +34,21 @@ export interface RequestChatOpts {
   apiKey: string
   body: string
   signal?: AbortSignal
+  /** Absolute time limit covers both connection and response body streaming. */
+  timeoutMs?: number
 }
 
 /** 底层发一次对话请求，返回未解析的 Response（流式/非流式皆可）。失败抛错（含 HTTP 状态与响应体）。 */
 export async function requestChat(o: RequestChatOpts): Promise<Response> {
   const url = `${normalizeBaseUrl(o.baseUrl)}/v1/chat/completions`
+  const timeoutMs = Number.isSafeInteger(o.timeoutMs) && o.timeoutMs! > 0 && o.timeoutMs! <= 2_147_483_647 ? o.timeoutMs! : 600_000
+  const timeoutSignal = AbortSignal.timeout(timeoutMs)
+  const signal = o.signal ? AbortSignal.any([o.signal, timeoutSignal]) : timeoutSignal
   const res = await fetch(url, {
     method: 'POST',
     headers: buildAuthHeaders(o.apiKey),
     agent: keepAliveAgent(o.baseUrl),
-    signal: o.signal,
+    signal,
     body: o.body,
   } as any)
   if (!res.ok) {
@@ -74,6 +79,7 @@ export interface ChatCompletionOpts {
   messages: Array<{ role: string; content: any }>
   temperature?: number
   maxTokens?: number
+  signal?: AbortSignal
 }
 
 /** 非流式对话，返回 choices[0].message.content（无内容返回 null）。 */
@@ -85,7 +91,7 @@ export async function chatCompletion(o: ChatCompletionOpts): Promise<string | nu
       temperature: o.temperature ?? 0.3,
       ...(o.maxTokens ? { max_tokens: o.maxTokens } : {}),
     })
-    const res = await requestChat({ baseUrl: o.baseUrl, apiKey: o.apiKey, body })
+    const res = await requestChat({ baseUrl: o.baseUrl, apiKey: o.apiKey, body, signal: o.signal })
     const data = await res.json() as any
     return data.choices?.[0]?.message?.content || null
   } catch {

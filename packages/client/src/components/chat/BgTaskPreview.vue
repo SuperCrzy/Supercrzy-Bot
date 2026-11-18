@@ -16,13 +16,14 @@
 
       <div class="bgt-label">
         {{ $t('chat.bgTasksLiveOutput') }}
-        <span v-if="meta?.status === 'running'" class="bgt-live">{{ $t('chat.bgTaskRunning') }}</span>
+        <span v-if="meta?.status === 'running'" class="bgt-live">{{ $t(meta.cancelRequested ? 'chat.bgTaskStopping' : 'chat.bgTaskRunning') }}</span>
       </div>
       <pre ref="outEl" class="bgt-pre bgt-out">{{ output || $t('chat.bgTasksNoOutput') }}</pre>
 
       <div class="bgt-foot">
         <button
           v-if="meta?.status === 'running'"
+          :disabled="meta.cancelRequested"
           class="bgt-btn bgt-btn-danger"
           type="button"
           @click="cancel"
@@ -54,6 +55,7 @@ interface BgTaskMeta {
   title: string
   command: string
   status: 'running' | 'done' | 'failed' | 'cancelled'
+  cancelRequested?: boolean
   startedAt: number
   endedAt: number | null
   exitCode: number | null
@@ -86,7 +88,7 @@ const elapsed = computed(() => {
 
 const statusText = computed(() => {
   const s = meta.value?.status
-  if (s === 'running') return t('chat.bgTaskRunning')
+  if (s === 'running') return t(meta.value?.cancelRequested ? 'chat.bgTaskStopping' : 'chat.bgTaskRunning')
   if (s === 'done') return t('chat.bgTaskDone')
   if (s === 'failed') return t('chat.bgTaskFailed')
   if (s === 'cancelled') return t('chat.bgTaskCancelled')

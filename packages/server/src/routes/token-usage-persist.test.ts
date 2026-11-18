@@ -58,6 +58,29 @@ async function getMessages(): Promise<any[]> {
 }
 
 describe('messages.token_estimated 落库', () => {
+  it('refuses to overwrite another session when a message ID collides', async () => {
+    const id = randomUUID()
+    expect((await postMessage({ id, role: 'user', content: 'original' })).status).toBe(201)
+    const other = randomUUID()
+    expect((await request(app.callback()).post('/api/sessions').send({ id: other, title: 'other' })).status).toBe(201)
+    const attempt = await request(app.callback()).post(`/api/sessions/${other}/messages`).send({ id, role: 'user', content: 'overwrite' })
+    expect(attempt.status).toBe(409)
+    expect((await getMessages()).find((row: { id: string }) => row.id === id).content).toBe('original')
+  })
+
+  it('truncates messages in insertion order when timestamps are equal', async () => {
+    const other = randomUUID()
+    await request(app.callback()).post('/api/sessions').send({ id: other, title: 'order' })
+    for (const id of ['z-first', 'a-middle', 'm-last']) {
+      expect((await request(app.callback()).post(`/api/sessions/${other}/messages`).send({ id, role: 'user', content: id })).status).toBe(201)
+    }
+    const { getDB } = await import('../services/database')
+    getDB().prepare("UPDATE messages SET created_at = '2026-01-01 00:00:00' WHERE session_id = ?").run(other)
+    await request(app.callback()).post(`/api/sessions/${other}/messages`).send({ id: 'z-first', role: 'user', content: 'updated' })
+    expect((await request(app.callback()).get(`/api/sessions/${other}`)).body.messages.map((m: { id: string }) => m.id)).toEqual(['z-first', 'a-middle', 'm-last'])
+    expect((await request(app.callback()).delete(`/api/sessions/${other}/messages`).query({ after: 'a-middle' })).status).toBe(200)
+    expect((await request(app.callback()).get(`/api/sessions/${other}`)).body.messages.map((m: { id: string }) => m.id)).toEqual(['z-first'])
+  })
   it('token_estimated=true 能读回 1', async () => {
     const id = randomUUID()
     const res = await postMessage({ id, role: 'assistant', content: '估算回复', token_count: 60, token_estimated: true })

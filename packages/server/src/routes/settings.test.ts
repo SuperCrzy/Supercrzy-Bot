@@ -12,8 +12,11 @@ describe('maskSecret 密钥脱敏', () => {
     expect(maskSecret(key, 4)).toBe('sk-t...cdef')
   })
 
-  it('短密钥不报错', () => {
-    expect(maskSecret('abc', 8)).toContain('...')
+  it('does not expose short or fully overlapping secrets', () => {
+    for (const secret of ['a', 'abc', '12345678', '123456789012']) {
+      expect(maskSecret(secret, 8)).toBe('••••')
+      expect(maskSecret(secret, 8)).not.toContain(secret)
+    }
   })
 
   it('不会泄露中间明文', () => {

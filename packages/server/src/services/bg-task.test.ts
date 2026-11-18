@@ -19,7 +19,9 @@ import {
   __resetBgTasksForTest,
   BG_MAX_LIVE_TASKS,
   BG_MAX_BUFFER,
+  BG_MAX_FINISHED_TASKS,
 } from './bg-task'
+import bgTool from '../tools/bg-task'
 
 const waitFor = async (fn: () => boolean, ms = 3000) => {
   const t0 = Date.now()
@@ -71,12 +73,11 @@ describe('bg-task 状态机', () => {
     })
     expect(getBgTask(id)?.status).toBe('running')
     expect(cancelBgTask(id).ok).toBe(true)
-    expect(getBgTask(id)?.status).toBe('cancelled')
+    expect(getBgTask(id)?.cancelRequested).toBe(true)
 
     // 进程真的收到 SIGTERM 后会再触发 exit（code 143/null）。
     // settle 必须幂等：晚到的事件不能覆盖 cancelled。
-    await new Promise((r) => setTimeout(r, 300))
-    expect(getBgTask(id)?.status).toBe('cancelled')
+    expect(await waitFor(() => getBgTask(id)?.status === 'cancelled')).toBe(true)
   })
 
   it('增量读不重复：cursor 之后的字节才返回', async () => {
@@ -160,13 +161,68 @@ describe('bg-task 状态机', () => {
     cancelBgTask(b)
   })
 
+  it('prevents an agent from reading or cancelling another session task', async () => {
+    const id = startBgTask({ sessionId: 'owner', title: 'private', command: 'sleep 5', cwd: process.cwd() })
+    expect(await bgTool.execute({ action: 'output', id }, { sessionId: 'other' })).toContain('不属于当前会话')
+    expect(await bgTool.execute({ action: 'cancel', id }, { sessionId: 'other' })).toContain('不属于当前会话')
+    expect(getBgTask(id)?.cancelRequested).toBe(false)
+    expect(await bgTool.execute({ action: 'list' }, {})).toContain('未指定')
+    expect(cancelBgTask(id).ok).toBe(true)
+  })
+
+  it('bounds finished records while preserving running tasks', async () => {
+    const live = startBgTask({ sessionId: 'owner', title: 'live', command: 'sleep 10', cwd: process.cwd() })
+    let firstBatch: string[] = []
+    for (let batch = 0; batch < Math.ceil((BG_MAX_FINISHED_TASKS + 1) / 10); batch++) {
+      const count = Math.min(10, BG_MAX_FINISHED_TASKS + 1 - batch * 10)
+      const ids = Array.from({ length: count }, () => startBgTask({ sessionId: 'owner', title: 'done', command: 'true', cwd: process.cwd() }))
+      if (!firstBatch.length) firstBatch = ids
+      expect(await waitFor(() => ids.every((id) => !getBgTask(id) || getBgTask(id)?.status === 'done'), 5000)).toBe(true)
+    }
+    expect(getBgTask(live)?.status).toBe('running')
+    expect(firstBatch.some((id) => !getBgTask(id))).toBe(true)
+    expect(listBgTasks().filter((task) => task.status !== 'running')).toHaveLength(BG_MAX_FINISHED_TASKS)
+    cancelBgTask(live)
+  }, 20000)
+
   it('删除运行中的任务 → 进程真的被杀，记录消失（不能留孤儿进程）', async () => {
     const id = startBgTask({ sessionId: 's1', title: 'x', command: 'sleep 5', cwd: process.cwd() })
     const proc = getBgTask(id)!.proc!
     expect(deleteBgTask(id).ok).toBe(true)
-    expect(getBgTask(id)).toBeUndefined()
+    expect(await waitFor(() => getBgTask(id) === undefined)).toBe(true)
     // 进程必须收到信号：kill 后 300ms 内应已退出
     expect(await waitFor(() => proc.killed || proc.exitCode !== null || proc.signalCode !== null, 1500)).toBe(true)
+  })
+
+  it.skipIf(process.platform === 'win32')('取消后子进程不能继续执行延迟写入', async () => {
+    const { mkdtempSync, existsSync, rmSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dir = mkdtempSync(join(tmpdir(), 'bg-cancel-'))
+    try {
+      const id = startBgTask({ sessionId: 's1', title: 'child', command: `node -e 'process.stdout.write("ready"); setTimeout(() => require("fs").writeFileSync("marker", "late"), 1000)'`, cwd: dir })
+      expect(await waitFor(() => (getBgTask(id)?.buffer || '').includes('ready'))).toBe(true)
+      expect(cancelBgTask(id).ok).toBe(true)
+      expect(await waitFor(() => getBgTask(id)?.status === 'cancelled')).toBe(true)
+      await new Promise((resolve) => setTimeout(resolve, 1100))
+      expect(existsSync(join(dir, 'marker'))).toBe(false)
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+
+  it('uses absolute output cursors when the buffer drops old content', async () => {
+    const id = startBgTask({ sessionId: 's1', title: 'output', command: `printf FIRST; sleep 0.15; yes x | head -c 150000; sleep 0.15; printf FINAL`, cwd: process.cwd() })
+    expect(await waitFor(() => (getBgTask(id)?.buffer || '').includes('FIRST'))).toBe(true)
+    const first = readBgTaskOutput(id, 0)
+    expect(first.ok).toBe(true)
+    if (!first.ok) return
+    expect(await waitFor(() => getBgTask(id)?.status === 'done')).toBe(true)
+    const remaining = readBgTaskOutput(id, first.next)
+    expect(remaining.ok).toBe(true)
+    if (!remaining.ok) return
+    expect(remaining.truncated).toBe(true)
+    expect(remaining.text).toContain('FINAL')
+    const empty = readBgTaskOutput(id, remaining.next)
+    expect(empty.ok && empty.text).toBe('')
   })
 
   it('删除已结束任务 → 只删记录；删不存在的任务 → 报错而不是静默成功', async () => {

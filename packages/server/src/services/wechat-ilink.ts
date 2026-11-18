@@ -3,10 +3,13 @@
  * 基于微信 ClawBot 的 iLink 协议实现个人微信扫码绑定
  * 协议文档: https://www.wechatbot.dev/zh/protocol
  */
-import { randomUUID, randomBytes, createDecipheriv } from 'crypto'
+import { randomUUID, randomBytes, createCipheriv, createDecipheriv } from 'crypto'
 // @ts-ignore - qrcode 类型声明缺失
 import QRCode from 'qrcode'
 import { existsSync, readFileSync, writeFileSync } from 'fs'
+// The installed Tencent iLink SDK preserves uint64 message IDs before JSON.parse.
+// @ts-ignore - the package exposes this runtime module without TypeScript declarations
+import { parseWeixinApiJson } from '@tencent-weixin/openclaw-weixin/dist/src/api/api.js'
 
 // ============================
 // 随机 UIN
@@ -22,6 +25,35 @@ const ILINK_BASE = 'https://ilinkai.weixin.qq.com'
 const CDN_BASE = 'https://novac2c.cdn.weixin.qq.com'
 const BOT_TYPE = 3
 const LONG_POLL_TIMEOUT = 35000
+// Match local attachment uploads, allowing one AES padding block.
+const MAX_ENCRYPTED_MEDIA_BYTES = 20 * 1024 * 1024 + 16
+
+async function readBoundedMedia(res: Response): Promise<Buffer> {
+  const length = res.headers.get('content-length')
+  if (length && /^\d+$/.test(length) && Number(length) > MAX_ENCRYPTED_MEDIA_BYTES) {
+    await res.body?.cancel().catch(() => {})
+    throw new Error('media_too_large')
+  }
+  if (!res.body) throw new Error('media_body_missing')
+  const reader = res.body.getReader()
+  const chunks: Buffer[] = []
+  let size = 0
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      size += value.byteLength
+      if (size > MAX_ENCRYPTED_MEDIA_BYTES) throw new Error('media_too_large')
+      chunks.push(Buffer.from(value))
+    }
+    return Buffer.concat(chunks, size)
+  } catch (error) {
+    await reader.cancel().catch(() => {})
+    throw error
+  } finally {
+    reader.releaseLock()
+  }
+}
 
 export interface LoginCredentials {
   token: string
@@ -111,7 +143,7 @@ function decodeAesKey(encoded: string): Buffer | null {
     }
   } catch { /* continue */ }
 
-  console.error(`[WeChat iLink] Could not decode AES key: ${encoded.slice(0, 20)}...`)
+  console.error('[WeChat iLink] Could not decode AES key')
   return null
 }
 
@@ -202,10 +234,20 @@ export async function downloadFile(
       return null
     }
 
-    console.log(`[WeChat iLink] Downloading: ${cdnUrl.slice(0, 100)}`)
+    let parsedUrl: URL
+    try { parsedUrl = new URL(cdnUrl) } catch { return null }
+    // The message supplies this URL; do not send the bot bearer token to an
+    // arbitrary host (including one reached through an HTTP redirect).
+    if (parsedUrl.origin !== CDN_BASE || parsedUrl.username || parsedUrl.password) {
+      console.error('[WeChat iLink] Rejected untrusted CDN URL')
+      return null
+    }
+    console.log('[WeChat iLink] Downloading encrypted media')
 
     // GET 下载加密文件
     const res = await fetch(cdnUrl, {
+      redirect: 'error',
+      signal: AbortSignal.timeout(30_000),
       headers: {
         Authorization: `Bearer ${token}`,
         'User-Agent': 'SUPERCRZY-BOT/1.0',
@@ -217,7 +259,7 @@ export async function downloadFile(
       return null
     }
 
-    const encrypted = Buffer.from(await res.arrayBuffer())
+    const encrypted = await readBoundedMedia(res)
     console.log(`[WeChat iLink] Downloaded ${encrypted.length} bytes (encrypted)`)
 
     // AES-128-ECB 解密
@@ -249,7 +291,7 @@ export async function downloadFile(
 
     return { fileName, fileSize, mimeType: getMimeType(fileName), buffer: decrypted, textContent }
   } catch (err: any) {
-    console.error(`[WeChat iLink] downloadFile error:`, err.message)
+    console.error('[WeChat iLink] downloadFile failed')
     return null
   }
 }
@@ -289,7 +331,16 @@ async function ilinkPost<T>(baseUrl: string, path: string, body: Record<string, 
       throw new Error(`iLink HTTP ${res.status}`)
     }
 
-    return (await res.json()) as T
+    const result = (path === 'getupdates' ? parseWeixinApiJson(await res.text()) : await res.json()) as T
+    // getupdates intentionally returns its error codes to the polling loop,
+    // but send/upload callers must not report a business rejection as success.
+    if ((path === 'sendmessage' || path === 'getuploadurl') && result && typeof result === 'object') {
+      const status = result as { ret?: unknown; errcode?: unknown }
+      if ((status.ret !== undefined && status.ret !== 0) || (status.errcode !== undefined && status.errcode !== 0)) {
+        throw new Error('ilink_request_rejected')
+      }
+    }
+    return result
   } finally {
     clearTimeout(timer)
   }
@@ -577,22 +628,22 @@ function encryptAesEcb(data: Buffer, key: Buffer): Buffer {
   const pad = BLOCK - (data.length % BLOCK)
   const padded = Buffer.alloc(data.length + pad, pad)
   data.copy(padded)
-  const cipher = require('crypto').createCipheriv('aes-128-ecb', key, null)
+  const cipher = createCipheriv('aes-128-ecb', key, null)
   cipher.setAutoPadding(false)
   return Buffer.concat([cipher.update(padded), cipher.final()])
 }
 
 // 上传文件到 CDN
 async function uploadToCdn(
-  cdnBaseUrl: string,
   buf: Buffer,
   uploadUrl: string,
-  filekey: string,
   aesKey: Buffer
 ): Promise<string> {
   const ciphertext = encryptAesEcb(buf, aesKey)
   const res = await fetch(uploadUrl, {
     method: 'POST',
+    redirect: 'error',
+    signal: AbortSignal.timeout(30_000),
     headers: { 'Content-Type': 'application/octet-stream' },
     body: new Uint8Array(ciphertext),
   })
@@ -623,12 +674,13 @@ export async function uploadMediaFile(
   token: string,
   filePath: string,
   toUserId: string,
-  mediaType: 'image' | 'video' | 'file'
+  mediaType: 'image' | 'video' | 'file',
+  authorizedContents?: Buffer,
 ): Promise<UploadedMedia> {
   const fs = await import('fs/promises')
   const crypto = await import('crypto')
   
-  const buf = await fs.readFile(filePath)
+  const buf = authorizedContents ?? await fs.readFile(filePath)
   const rawsize = buf.length
   const rawfilemd5 = crypto.createHash('md5').update(buf).digest('hex')
   const filekey = crypto.randomBytes(16).toString('hex')
@@ -656,8 +708,10 @@ export async function uploadMediaFile(
     cdnUrl = `${CDN_BASE}/c2c/upload?ukey=${encodeURIComponent(resp.upload_param)}&filekey=${filekey}`
   }
   if (!cdnUrl) throw new Error('No upload URL from getuploadurl')
+  const parsedUrl = new URL(cdnUrl)
+  if (parsedUrl.origin !== CDN_BASE || parsedUrl.username || parsedUrl.password) throw new Error('untrusted_upload_url')
   
-  const downloadParam = await uploadToCdn(CDN_BASE, buf, cdnUrl, filekey, aeskey)
+  const downloadParam = await uploadToCdn(buf, cdnUrl, aeskey)
   
   return {
     filekey,
@@ -787,65 +841,64 @@ export async function sendVideoMessage(
   }, token)
 }
 
-/** 自动识别文件类型并发送（支持本地路径和 HTTP URL） */
+/** 自动识别本地文件类型并发送。远程 URL 不可作为自动下载源。 */
 export async function sendMediaFileToWeChat(
   creds: LoginCredentials,
   toUserId: string,
   contextToken: string,
   mediaPath: string,
-  caption?: string
+  caption?: string,
+  sessionId?: string,
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const fs = await import('fs/promises')
     const path = await import('path')
     
-    let filePath = mediaPath
-    let isRemote = false
-    
-    // 如果是远程 URL，先下载
-    if (mediaPath.startsWith('http://') || mediaPath.startsWith('https://')) {
-      isRemote = true
-      console.log(`[WeChat] Downloading remote media: ${mediaPath.slice(0, 80)}`)
-      const res = await fetch(mediaPath)
-      if (!res.ok) throw new Error(`Download failed: ${res.status}`)
-      
-      // 写入临时文件
-      const buf = Buffer.from(await res.arrayBuffer())
-      const ext = mediaPath.split('.').pop() || 'tmp'
-      filePath = `/tmp/wechat-outbound-${Date.now()}.${ext}`
-      await fs.writeFile(filePath, buf)
-      console.log(`[WeChat] Remote media saved to: ${filePath}`)
-    }
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(mediaPath)) return { success: false, error: 'remote_media_not_supported' }
+    const filePath = mediaPath
+    if (!sessionId) return { success: false, error: 'artifact_not_authorized' }
+    const { getDB } = await import('./database')
+    const { assertSafeFilePath } = await import('./sandbox')
+    const registered = getDB().prepare('SELECT 1 FROM artifacts WHERE session_id = ? AND path = ?').get(sessionId, filePath)
+    if (!registered || assertSafeFilePath(filePath)) return { success: false, error: 'artifact_not_authorized' }
+    const realPath = await fs.realpath(filePath)
+    if (assertSafeFilePath(realPath)) return { success: false, error: 'artifact_not_authorized' }
     
     // 检查文件是否存在
-    const stats = await fs.stat(filePath)
-    if (!stats.isFile()) {
-      if (isRemote) await fs.unlink(filePath).catch(() => {})
-      throw new Error('Not a file')
-    }
+    const { constants } = await import('node:fs')
+    const file = await fs.open(realPath, constants.O_RDONLY | (constants.O_NOFOLLOW || 0))
+    let contents: Buffer
+    try {
+      const stats = await file.stat()
+      if (!stats.isFile() || stats.size > 20 * 1024 * 1024) throw new Error('invalid_media_file')
+      const buffer = Buffer.allocUnsafe(stats.size + 1)
+      let offset = 0
+      while (offset < buffer.length) {
+        const { bytesRead } = await file.read(buffer, offset, buffer.length - offset, null)
+        if (!bytesRead) break
+        offset += bytesRead
+      }
+      if (offset !== stats.size) throw new Error('media_file_changed')
+      contents = buffer.subarray(0, offset)
+    } finally { await file.close() }
     
     const ext = path.extname(filePath).toLowerCase()
     const mime = getMimeType(filePath)
     
     // 根据 MIME 类型选择发送方式
     if (mime.startsWith('image/')) {
-      const uploaded = await uploadMediaFile(creds.baseUrl, creds.token, filePath, toUserId, 'image')
+      const uploaded = await uploadMediaFile(creds.baseUrl, creds.token, filePath, toUserId, 'image', contents)
       await sendImageMessage(creds.baseUrl, creds.token, toUserId, contextToken, uploaded, caption)
       console.log(`[WeChat] Image sent: ${filePath}`)
     } else if (mime.startsWith('video/')) {
-      const uploaded = await uploadMediaFile(creds.baseUrl, creds.token, filePath, toUserId, 'video')
+      const uploaded = await uploadMediaFile(creds.baseUrl, creds.token, filePath, toUserId, 'video', contents)
       await sendVideoMessage(creds.baseUrl, creds.token, toUserId, contextToken, uploaded, caption)
       console.log(`[WeChat] Video sent: ${filePath}`)
     } else {
       const fileName = path.basename(filePath)
-      const uploaded = await uploadMediaFile(creds.baseUrl, creds.token, filePath, toUserId, 'file')
+      const uploaded = await uploadMediaFile(creds.baseUrl, creds.token, filePath, toUserId, 'file', contents)
       await sendFileMessage(creds.baseUrl, creds.token, toUserId, contextToken, fileName, uploaded, caption)
       console.log(`[WeChat] File sent: ${filePath}`)
-    }
-    
-    // 清理临时文件
-    if (isRemote) {
-      await fs.unlink(filePath).catch(() => {})
     }
     
     return { success: true }

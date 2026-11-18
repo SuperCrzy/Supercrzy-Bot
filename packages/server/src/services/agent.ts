@@ -23,6 +23,9 @@ import { resolveToolSearchHits } from '../tools/tool-search'
 import { pushMemorySync, pushReflection } from './memory-worker'
 import { upsertMemory } from './memory-service'
 import { safeWriteSse } from './sse-health'
+import { isRemoteRunStopRequested } from './remote-run-control'
+import { waitForToolBatch } from './tool-batch-wait'
+import { delayUntilAbort } from './abortable-delay'
 import {
   createTask as createTaskState,
   setTaskStatus,
@@ -137,8 +140,8 @@ export function resolveToolConfirmation(id: string, decision: 'allow' | 'deny') 
 function waitForToolConfirmation(
   id: string,
   timeoutMs = CONFIRMATION_TIMEOUT_MS,
-  opts: { irreversible?: boolean } = {},
-): Promise<'allow' | 'deny' | 'timeout'> {
+  opts: { irreversible?: boolean; signal?: AbortSignal } = {},
+): Promise<'allow' | 'deny' | 'timeout' | 'cancelled'> {
   // 自动允许等待（设置 toolAutoApproveSeconds：>0 秒后无人确认自动放行；0=关闭，保持超时拒绝兜底）
   //
   // 🔴 2026-10-22 老板裁决：**不可逆操作（block / 删除）永不自动放行**。
@@ -151,15 +154,27 @@ function waitForToolConfirmation(
   const autoAllow = wait.autoAllow
   const effective = wait.effectiveMs
   return new Promise((resolve) => {
+    let settled = false
+    const finish = (decision: 'allow' | 'deny' | 'timeout' | 'cancelled') => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      opts.signal?.removeEventListener('abort', onAbort)
+      if (pendingConfirmations.get(id) === onDecision) pendingConfirmations.delete(id)
+      resolve(decision)
+    }
+    const onDecision = (decision: 'allow' | 'deny') => finish(decision)
+    const onAbort = () => finish('cancelled')
     const timer = setTimeout(() => {
-      pendingConfirmations.delete(id)
       // 🔴 2026-10-14（#13）：超时必须与"用户点了拒绝"区分开。
       // 旧实现两者都返回 'deny' ⇒ 下游一律告诉模型"用户拒绝执行此操作"，
       // 而真实情况可能是**根本没人能点按钮**（客户端名单失配），
       // 模型据此换方案或放弃，用户只看到 BOT 卡了 2 分钟。这属于「对模型说假话」。
-      resolve(autoAllow ? 'allow' : 'timeout')
+      finish(autoAllow ? 'allow' : 'timeout')
     }, effective)
-    pendingConfirmations.set(id, (d) => { clearTimeout(timer); resolve(d) })
+    pendingConfirmations.set(id, onDecision)
+    opts.signal?.addEventListener('abort', onAbort, { once: true })
+    if (opts.signal?.aborted) onAbort()
   })
 }
 
@@ -170,7 +185,8 @@ function waitForToolConfirmation(
  *   - 'deny'    被授权档位或安全策略**直接**拒绝（压根没弹窗）
  * 只有用户在弹窗上显式点了拒绝，才谈得上"用户拒绝"。
  */
-function approvalDenialText(kind: 'deny' | 'timeout', toolName: string): string {
+function approvalDenialText(kind: 'deny' | 'timeout' | 'cancelled', toolName: string): string {
+  if (kind === 'cancelled') return `已请求停止：${toolName} 未执行。`
   return kind === 'timeout'
     ? `等待授权超时：${toolName} 需要授权，但 120 秒内没有人确认，已按拒绝处理。`
     : `该操作未获授权：${toolName} 属于敏感操作，被当前授权档位或安全策略直接拒绝。`
@@ -186,13 +202,25 @@ export function resolveQuestion(id: string, answer: string) {
 }
 
 /** Agent 提问：挂起等待用户选项/输入答复（10 分钟超时自动取消） */
-function waitForQuestion(id: string, timeoutMs = 600000): Promise<string> {
+function waitForQuestion(id: string, timeoutMs = 600000, signal?: AbortSignal): Promise<string> {
   return new Promise((resolve) => {
+    let settled = false
+    const finish = (answer: string) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', onAbort)
+      if (pendingQuestions.get(id) === onAnswer) pendingQuestions.delete(id)
+      resolve(answer)
+    }
+    const onAnswer = (answer: string) => finish(answer)
+    const onAbort = () => finish('__cancelled__')
     const timer = setTimeout(() => {
-      pendingQuestions.delete(id)
-      resolve('__timeout__')
+      finish('__timeout__')
     }, timeoutMs)
-    pendingQuestions.set(id, (a) => { clearTimeout(timer); resolve(a) })
+    pendingQuestions.set(id, onAnswer)
+    signal?.addEventListener('abort', onAbort, { once: true })
+    if (signal?.aborted) onAbort()
   })
 }
 
@@ -666,7 +694,7 @@ export function requestStop(runKey: string): boolean {
 
 /** 查询是否已被请求停止 */
 export function isStopRequested(runKey: string): boolean {
-  return STOP_REQUESTED.has(runKey)
+  return STOP_REQUESTED.has(runKey) || isRemoteRunStopRequested(runKey)
 }
 
 /** 清除停止标记（新任务开始时调用，避免上一次的停止状态残留） */
@@ -678,13 +706,16 @@ export function clearStop(runKey: string): void {
  * 监听 SSE 连接断开——用户关掉页面/刷新/断开网络时，等同于按下停止。
  * 这样失控任务不会在后台继续烧 token。
  */
-function registerStopSignal(ctx: any, runKey: string): void {
+export function registerStopSignal(ctx: any, runKey: string): void {
   if (!runKey) return
   const req = ctx?.req
-  if (!req || typeof req.on !== 'function') return
+  const res = ctx?.res
   const onClose = () => { STOP_REQUESTED.add(runKey) }
-  req.on('close', onClose)
-  req.on('aborted', onClose)
+  // IncomingMessage 'close' also fires when a POST body is read normally;
+  // the response socket is the actual lifetime of this SSE stream.
+  if (req?.aborted || res?.destroyed) onClose()
+  req?.once?.('aborted', onClose)
+  res?.once?.('close', () => { if (!res.writableEnded) onClose() })
 }
 
 /** 估计任务复杂度，返回建议 maxTurns */function estimateComplexity(userMessages: Array<{ role: string; content: string }>): number {
@@ -1255,6 +1286,11 @@ export async function runAgentLoop(
     : Math.min(agentConfig.maxTurns || 300, estimateComplexity(userMessages))
 
   const checkpointId = randomUUID()
+  const runKey = sessionId || checkpointId
+  // Install the listener before any asynchronous setup, so cancellation during
+  // model planning or tool discovery cannot be erased when the loop starts.
+  clearStop(runKey)
+  registerStopSignal(ctx, runKey)
   // P2-1 模型 fallback 标记（主模型失败切备用，只切一次避免循环）
   let modelFallbackUsed = false
 
@@ -1443,6 +1479,10 @@ export async function runAgentLoop(
       { role: 'system', content: '请列出执行计划（每行一个步骤，带编号）：' },
     ]
 
+    const plannerAbort = new AbortController()
+    const plannerStopTimer = setInterval(() => { if (isStopRequested(runKey)) plannerAbort.abort() }, 200)
+    plannerStopTimer.unref()
+    if (isStopRequested(runKey)) plannerAbort.abort()
     try {
       const planText = await chatCompletion({
         baseUrl: agentConfig.baseUrl || config.deepseek.baseUrl,
@@ -1451,6 +1491,7 @@ export async function runAgentLoop(
         messages: planMessages,
         temperature: 0.3,
         maxTokens: 800,
+        signal: plannerAbort.signal,
       })
       if (planText) {
         // 解析出步骤
@@ -1464,14 +1505,13 @@ export async function runAgentLoop(
       }
     } catch (planErr: any) {
       emitSSE(ctx, 'planner_plan', { steps: ['(规划调用失败，直接执行)'], error: planErr.message })
+    } finally {
+      clearInterval(plannerStopTimer)
     }
   }
 
   // 停止开关：前端点"停止"或 SSE 断开时置位，让失控的长任务能真正被掐断
   // （2026-08-28 加：此前完全没有停止机制，用户只能干等到跑满 200 轮或杀掉整个后端）
-  const runKey = sessionId || checkpointId
-  if (runKey) clearStop(runKey)
-  registerStopSignal(ctx, runKey)
 
   // ---- 统一任务状态机（P0-03，2026-09-16）----
   // 本会话的唯一权威状态源。所有前端进度/通知/恢复/自动化都从这里派生，
@@ -1639,6 +1679,12 @@ export async function runAgentLoop(
       })
     }
 
+    const modelAbort = new AbortController()
+    const shouldCancelModel = () => isStopRequested(runKey) || !!(taskRec && isCancelRequested(taskRec.task_id))
+    const modelStopTimer = setInterval(() => {
+      try { if (shouldCancelModel()) modelAbort.abort() } catch { /* a transient status read must not crash the process */ }
+    }, 200)
+    modelStopTimer.unref()
     try {
       const plainTurn = forcePlainOnce
       forcePlainOnce = false // 消费一次后复位,便于后续轮恢复用工具
@@ -1673,6 +1719,7 @@ export async function runAgentLoop(
         baseUrl,
         apiKey: agentConfig.apiKey,
         body,
+        signal: modelAbort.signal,
       })
 
       let response: Response
@@ -1685,6 +1732,7 @@ export async function runAgentLoop(
           throw buildApiError(response.status, errorText, 'API error')
         }
       } catch (err: any) {
+        if (modelAbort.signal.aborted) throw err
         // P2-1 模型 fallback：主模型失败 → 切备用模型重试一次（主流实现 fallbackModel 同款）
         // 2026-08-28：只对"换模型有意义"的错误 fallback。tool_sequence 是我们自己的消息序列问题
         // （换模型照样报），4xx 客户端错误（除 429 限流）换模型也不会变好——白烧一次贵请求。
@@ -1952,11 +2000,10 @@ export async function runAgentLoop(
         }
         messages.push(assistantMsg)
 
-        // P0: wrap executeToolCalls with 60s per-tool timeout
-        // 敏感工具先确认后执行：挂起等待用户 allow/deny（120s 超时自动拒绝）
+        // 敏感工具先确认后执行；停止请求会取消等待，超时仍按原策略处理。
         const sensitiveCalls = toolCalls.filter((tc: any) => SENSITIVE_TOOLS.has(tc.function.name))
         const regularCalls = toolCalls.filter((tc: any) => !SENSITIVE_TOOLS.has(tc.function.name))
-        let allowSensitive: ('allow' | 'deny' | 'timeout')[] = []
+        let allowSensitive: ('allow' | 'deny' | 'timeout' | 'cancelled')[] = []
         if (sensitiveCalls.length > 0) {
           // 裁决已在播报前算好（见上方 approvalPlan）—— 这里只按计划执行，**不再重算**，
           // 否则"播报时判 allow、执行时判 confirm"这类漂移会重新出现。
@@ -1973,9 +2020,9 @@ export async function runAgentLoop(
               //   两级判定取并集：planned.risk 是播报前算好的（可能缺失），分类器是当场真值。
               const irreversible = planById.get(tc.id)?.risk?.level === 'high'
                 || classifySensitiveTool(tc.function.name, args) === 'block'
-              const verdict = await waitForToolConfirmation(tc.id, CONFIRMATION_TIMEOUT_MS, { irreversible })
+              const verdict = await waitForToolConfirmation(tc.id, CONFIRMATION_TIMEOUT_MS, { irreversible, signal: modelAbort.signal })
               // "拦一次后记住"：block 类被用户显式允许 → 本会话记住，后续不再拦（拒绝不记）
-              if (verdict === 'allow' && sessionId && classifySensitiveTool(tc.function.name, args) === 'block') {
+              if (verdict === 'allow' && !shouldCancelModel() && sessionId && classifySensitiveTool(tc.function.name, args) === 'block') {
                 approveSessionBlockTools(sessionId)
               }
               return verdict
@@ -1984,7 +2031,7 @@ export async function runAgentLoop(
         }
         for (let i = 0; i < sensitiveCalls.length; i++) {
           if (allowSensitive[i] !== 'allow') {
-            const verdict = allowSensitive[i] as 'deny' | 'timeout'
+            const verdict = allowSensitive[i] as 'deny' | 'timeout' | 'cancelled'
             emitSSE(ctx, 'tool_result', {
               name: sensitiveCalls[i].function.name,
               // #13/I11：按真实原因出文案，不再一律"用户拒绝执行此操作"
@@ -2004,6 +2051,7 @@ export async function runAgentLoop(
         const toolCtx: ToolExecCtx = {
           cwd: sessionWorkspace || undefined,
           permissionLevel,
+          shouldStop: () => isStopRequested(runKey) || !!(taskRec && isCancelRequested(taskRec.task_id)),
           // 结构化进度（G5/I13，2026-09-24）：工具上报 {added,deleted,done,count,total,phase} →
           // 前端直接显示数字，**不再解析** "📝 写入 N/M 行" 这类中文文案（那条路改文案即静默失效）
           onProgress: (toolCallId, progress) => {
@@ -2025,7 +2073,7 @@ export async function runAgentLoop(
           // AskQuestion：提问挂起等待答复 + 推送给前端展示（options 归一化防模型传对象数组 → 前端 [object Object]，2026-08-27）
           askQuestion: async (qid, question, options) => {
             emitSSE(ctx, 'question', { id: qid, question, options: normalizeQuestionOptions(options) })
-            return waitForQuestion(qid)
+            return waitForQuestion(qid, 600000, modelAbort.signal)
           },
           emitQuestion: (data) => {
             emitSSE(ctx, 'question', { id: data.id, question: data.question, options: normalizeQuestionOptions(data.options) })
@@ -2081,36 +2129,19 @@ export async function runAgentLoop(
             }
           },
         }
-        const toolResults = await Promise.race([
-          executeToolCalls(executeList as any, toolCtx),
-          // 2026-08-28 关键修复：工具执行（尤其 deep_research）可能超时。
-          // 原实现 `reject` 会留下"带 tool_calls 的 assistantMsg 入 messages 但 tool 结果从未加入"
-          // 的坏序列 → 下一轮 DeepSeek 400 tool_sequence → 反复重试必败（"深研必卡"根因）。
-          // 现在超时**为所有未完成调用补占位 tool 结果**，保证 assistant.tool_calls 总有配对，
-          // 既不让序列变坏，也让模型知道哪些调用没跑完。
-          // deep_research 单独给更长时限（结构上需多轮搜索），其余工具 60s。
-          new Promise<any[]>((resolve) => {
-            const hasSlowTool = executeList.some((tc: any) => tc.function?.name === 'deep_research' || tc.function?.name === 'browser')
-            const toolTimeoutMs = hasSlowTool ? 360000 : 60000  // deep_research/browser(浏览器冷启+导航可达更长) 6 分钟，避免被 60s 误杀→空白/重试(2026-09-04)
-            setTimeout(() => {
-              console.warn(`[Tool] 工具执行超时（${toolTimeoutMs / 1000}s），为 ${executeList.length} 个未完成调用补占位结果`)
-              resolve(
-                executeList.map((tc: any) => ({
-                  role: 'tool' as const,
-                  tool_call_id: tc.id,
-                  content: '（该工具调用执行超时，未获得结果。请勿重试相同调用；基于已有信息继续或换一种方法。）',
-                  duration: toolTimeoutMs,
-                })),
-              )
-            }, toolTimeoutMs)
-          }),
-        ])
+        const hasSlowTool = executeList.some((tc: any) => tc.function?.name === 'deep_research' || tc.function?.name === 'browser')
+        const toolTimeoutMs = hasSlowTool ? 360000 : 60000
+        const toolResults = await waitForToolBatch(executeToolCalls(executeList as any, toolCtx), toolTimeoutMs, () => {
+          // A Promise timeout cannot stop its underlying side effects. Wait for
+          // real results instead of allowing the next agent turn to overlap them.
+          emitSSE(ctx, 'tool_slow', { elapsedMs: toolTimeoutMs })
+        })
 
         // 被拒绝的敏感工具调用也注入结果，让 LLM 感知并自主决策
         if (sensitiveCalls.length > 0) {
           for (let i = 0; i < sensitiveCalls.length; i++) {
               if (allowSensitive[i] !== 'allow') {
-                const verdict = allowSensitive[i] as 'deny' | 'timeout'
+                const verdict = allowSensitive[i] as 'deny' | 'timeout' | 'cancelled'
                 messages.push({
                   role: 'tool' as const,
                   tool_call_id: sensitiveCalls[i].id,
@@ -2170,7 +2201,7 @@ export async function runAgentLoop(
             messages.push({ role: 'system', content: guardResult.message! })
           }
 
-          if (toolName === 'file_write') {
+          if (toolName === 'file_write' && !result.skipped) {
             try {
               const args = JSON.parse(tc?.function?.arguments || '{}')
               const filePath = args.path || args.file_path || args.filePath
@@ -2296,6 +2327,12 @@ export async function runAgentLoop(
         })
       }
     } catch (err: any) {
+      if (modelAbort.signal.aborted && shouldCancelModel()) {
+        emitSSE(ctx, 'error', { message: '已收到停止指令，正在保存进度...', stopped: true })
+        interrupted = 'user_stopped'
+        finished = true
+        break
+      }
       const classified = classifyApiError(err)
       console.warn(`[Agent] Error (${classified.reason}): ${classified.message.slice(0, 200)}`)
 
@@ -2349,7 +2386,7 @@ export async function runAgentLoop(
               retrying: true,
               reason: 'tool_sequence',
             })
-            await new Promise(r => setTimeout(r, 500))
+            await delayUntilAbort(500, modelAbort.signal)
             continue
           }
           if (!orphan) {
@@ -2384,7 +2421,7 @@ export async function runAgentLoop(
             retrying: true,
             reason: classified.reason,
           })
-          await new Promise(r => setTimeout(r, backoffMs))
+          await delayUntilAbort(backoffMs, modelAbort.signal)
           continue
         }
       } else {
@@ -2398,6 +2435,8 @@ export async function runAgentLoop(
         interrupted = classified.reason  // 2026-08-26：不可重试错误 → 中断，保存检查点
         finished = true
       }
+    } finally {
+      clearInterval(modelStopTimer)
     }
   }
 

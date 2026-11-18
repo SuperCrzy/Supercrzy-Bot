@@ -3,9 +3,7 @@
  * 定义与执行器一体：加工具 = 加一个文件，不再双写。
  */
 import type { ToolDef } from './types'
-import { rm } from 'fs/promises'
-import { exec, spawn } from 'child_process'
-import { resolve } from 'path'
+import { execFile, spawn } from 'child_process'
 import { scanDangerousPath, sandboxify, markSandboxUnavailable, WORKSPACE_ROOT } from '../services/sandbox'
 import { startBgTask } from '../services/bg-task'
 import { scanDirFiles, diffFileSnapshots } from './shared'
@@ -35,6 +33,7 @@ const tool: ToolDef = {
     required: ['command', 'description'],
   },
   async execute(args, ctx) {
+    if (ctx?.shouldStop?.()) return '已请求停止，该命令未执行。'
     // L1 危险命令黑名单：无条件拦截（即使已确认也禁止）
     const cmd = String(args.command || '').trim()
     const BLOCKED = [
@@ -80,6 +79,7 @@ const tool: ToolDef = {
 
     // L3 硬沙箱：sandbox-exec 内核级隔离（不可用时自动降级，仍保留 L1/L2）
     const sb = await sandboxify(cmd)
+    if (ctx?.shouldStop?.()) return '已请求停止，该命令未执行。'
     if (!sb.sandboxed && sb.reason) {
       console.warn(`[Sandbox] ${sb.reason}，命令以软沙箱保护执行: ${cmd.slice(0, 60)}`)
     }
@@ -89,16 +89,22 @@ const tool: ToolDef = {
     const beforeSnap = ctx?.onArtifacts ? scanDirFiles(scanRoot) : null
 
     const runOnce = (useSandbox: boolean) => new Promise<ShellRun>((done) => {
-      const timeout = args.timeout || 30000
+      const timeout = typeof args.timeout === 'number' && Number.isFinite(args.timeout) && args.timeout > 0 ? Math.min(args.timeout, 2_147_483_647) : 30000
       // 会话级工作目录：AI 在用户指定的文件夹里执行命令（默认项目工作区）
       const cwd = ctx?.cwd || WORKSPACE_ROOT
       // 流式执行：spawn 分片输出（tool_output SSE 实时推送），同时收集完整输出做最终结果
       let stdoutBuf = ''
       let stderrBuf = ''
+      let ended = false
+      let stopped: 'timeout' | 'cancelled' | null = null
       const stream = (chunk: string) => {
         if (ctx?.onOutput) ctx.onOutput('', chunk)
       }
       const finish = (code: number | null, signal: string | null, spawnErr?: Error) => {
+        if (ended) return
+        ended = true
+        clearTimeout(killTimer)
+        clearInterval(stopTimer)
         // 执行后对比：命令产生的文件补录为产物
         if (beforeSnap && ctx?.onArtifacts) {
           try {
@@ -108,9 +114,11 @@ const tool: ToolDef = {
           } catch {}
         }
         // 硬沙箱自身起不来（不是命令失败）：exit 71 + "sandbox_apply: Operation not permitted"
-        const sandboxBlocked = !!useSandbox && (code === 71 || /sandbox_apply|sandbox-exec:/i.test(stderrBuf) || !!spawnErr && /sandbox-exec/i.test(spawnErr.message))
+        const sandboxBlocked = !stopped && !!useSandbox && (code === 71 || /sandbox_apply|sandbox-exec:/i.test(stderrBuf) || !!spawnErr && /sandbox-exec/i.test(spawnErr.message))
         let text: string
-        if (spawnErr) {
+        if (stopped) {
+          text = `❌ 命令${stopped === 'timeout' ? '超时' : '已请求停止'}（已尝试终止进程树）：\n${(stdoutBuf + stderrBuf).slice(0, 4000) || '无输出'}`
+        } else if (spawnErr) {
           text = `❌ 命令启动失败: ${spawnErr.message}`
         } else if (code !== 0) {
           // 部分成功回传（主流实现 isPartial 同款）：失败也保留已产生的部分输出
@@ -121,15 +129,27 @@ const tool: ToolDef = {
         }
         done({ text, ok: !spawnErr && code === 0, stderr: stderrBuf, sandboxBlocked })
       }
-      const opts = { cwd, env: { ...process.env } as NodeJS.ProcessEnv }
+      const opts = { cwd, env: { ...process.env } as NodeJS.ProcessEnv, detached: process.platform !== 'win32' }
       const child = (useSandbox && sb.args)
         ? spawn(sb.exec, sb.args, opts)
         : spawn(cmd, { ...opts, shell: true })
-      const killTimer = setTimeout(() => { child.kill(); finish(-1, null) }, timeout)
-      child.stdout?.on('data', (d: Buffer) => { const s = d.toString(); stdoutBuf += s; stream(s) })
-      child.stderr?.on('data', (d: Buffer) => { const s = d.toString(); stderrBuf += s; stream(s) })
-      child.on('error', (err) => { clearTimeout(killTimer); finish(-1, null, err) })
-      child.on('close', (code, signal) => { clearTimeout(killTimer); finish(code, signal) })
+      const stop = (reason: 'timeout' | 'cancelled') => {
+        if (stopped || ended) return
+        stopped = reason
+        if (process.platform === 'win32' && child.pid) {
+          execFile('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true }, (error) => { if (error) { try { child.kill() } catch {} } })
+        } else if (child.pid) {
+          try { process.kill(-child.pid, 'SIGKILL') } catch { try { child.kill('SIGKILL') } catch {} }
+        } else { try { child.kill('SIGKILL') } catch {} }
+      }
+      const killTimer = setTimeout(() => stop('timeout'), timeout)
+      const stopTimer = setInterval(() => { if (ctx?.shouldStop?.()) stop('cancelled') }, 200)
+      stopTimer.unref()
+      child.stdout?.on('data', (d: Buffer) => { const s = d.toString(); stdoutBuf = (stdoutBuf + s).slice(-1_000_000); stream(s) })
+      child.stderr?.on('data', (d: Buffer) => { const s = d.toString(); stderrBuf = (stderrBuf + s).slice(-1_000_000); stream(s) })
+      child.on('error', (err) => finish(-1, null, err))
+      child.on('close', (code, signal) => finish(code, signal))
+      if (ctx?.shouldStop?.()) stop('cancelled')
     })
 
     const first = await runOnce(sb.sandboxed)

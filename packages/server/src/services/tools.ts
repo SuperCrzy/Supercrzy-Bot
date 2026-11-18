@@ -61,6 +61,8 @@ export interface ToolResult {
 
 /** 工具执行上下文：会话级工作目录（用户新建任务时指定，AI 在该目录干活）+ 默认权限档位 */
 export interface ToolExecCtx {
+  /** Stop queued groups before they start; in-flight tools must finish or cancel themselves. */
+  shouldStop?: () => boolean
   /** 会话工作目录（绝对路径）；为空则用 WORKSPACE_ROOT */
   cwd?: string
   /** 会话 ID（create_plan 落库任务归属；模型可能不传 args.session_id，由 agent 注入兜底） */
@@ -793,6 +795,7 @@ export function getToolsByCategory(category: string): ToolDefinition[] {
 
 export interface ToolResultWithMeta extends ToolResult {
   duration?: number
+  skipped?: boolean
 }
 
 /** 互斥工具集（对齐 harness 工具调度器：写类工具=屏障，串行执行防冲突） */
@@ -886,6 +889,10 @@ export async function executeToolCalls(
   // 分组调度：组间串行（写类屏障保证），组内并行
   const groups = buildBarrierGroups(toolCalls)
   for (const group of groups) {
+    if (ctx?.shouldStop?.()) {
+      for (const { tc, idx } of group.calls) results[idx] = { tool_call_id: tc.id, role: 'tool', content: '已请求停止，该工具未执行。', skipped: true }
+      continue
+    }
     await Promise.all(group.calls.map(({ tc, idx }) => runOne(tc, idx)))
   }
 

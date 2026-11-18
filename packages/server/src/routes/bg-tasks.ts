@@ -70,6 +70,7 @@ bgTasksRouter.get('/:id', (ctx: Context) => {
     title: t.title,
     command: t.command,
     status: t.status,
+    cancelRequested: t.cancelRequested,
     startedAt: t.startedAt,
     endedAt: t.endedAt,
     exitCode: t.exitCode,
@@ -104,7 +105,7 @@ bgTasksRouter.delete('/:id', (ctx: Context) => {
   ctx.body = { ok: true }
 })
 
-/** Cancel a running task (SIGTERM; the exit handler records `cancelled`). */
+/** Request cancellation; the close handler records the final state. */
 bgTasksRouter.post('/:id/cancel', (ctx: Context) => {
   const r = cancelBgTask(ctx.params.id)
   if (!r.ok) {

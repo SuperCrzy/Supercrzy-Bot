@@ -8,6 +8,7 @@ export const settingsRouter = new Router({ prefix: '/api/settings' })
 
 /** 密钥脱敏：前 headLen 位 + ... + 后 4 位（导出供单测） */
 export function maskSecret(value: string, headLen: number): string {
+  if (value.length <= headLen + 4) return '••••'
   return value.slice(0, headLen) + '...' + value.slice(-4)
 }
 
@@ -16,6 +17,8 @@ const FLOAT_KEYS = ['temperature', 'maxTokens', 'maxTurns', 'gatewayTimeout', 'm
 
 // Boolean keys that should be parsed as boolean
 const BOOL_KEYS = ['streamingEnabled', 'compactMode', 'showReasoning', 'showCost', 'completionSound', 'busyInputMode', 'memoryEnabled', 'piiMaskingEnabled', 'memoryAutoConsolidate', 'streamRead', 'ttsLive']
+const PRIVATE_API_KEYS = ['tavilyApiKey', 'serperApiKey', 'jinaApiKey', 'embeddingApiKey', 'imageApiKey'] as const
+const INTERNAL_RELAY_SETTINGS = new Set(['relayDeviceToken', 'relayPendingCode', 'workspaceConnectionToken', 'workspaceChannel', 'workspaceAccountId', 'workspaceTokenExpiresAt', 'workspaceAuthOrigin', 'workspaceRelayUrl'])
 
 // Get all settings
 settingsRouter.get('/', (ctx: Context) => {
@@ -23,6 +26,8 @@ settingsRouter.get('/', (ctx: Context) => {
   const rows = db.prepare('SELECT key, value FROM settings').all() as Array<{ key: string; value: string }>
   const settings: Record<string, any> = {}
   for (const row of rows) {
+    // Internal relay credentials and per-account host IDs are never settings UI data.
+    if (INTERNAL_RELAY_SETTINGS.has(row.key) || row.key.startsWith('relayHostId:')) continue
     if (BOOL_KEYS.includes(row.key)) {
       settings[row.key] = row.value === 'true'
     } else if (FLOAT_KEYS.includes(row.key)) {
@@ -52,6 +57,10 @@ settingsRouter.get('/', (ctx: Context) => {
     settings.hasAccessToken = true
     delete settings.accessToken
   }
+  for (const key of PRIVATE_API_KEYS) {
+    if (settings[key]) settings[`${key}Configured`] = true
+    delete settings[key]
+  }
   ctx.body = settings
 })
 
@@ -60,7 +69,6 @@ settingsRouter.post('/', (ctx: Context) => {
   try {
     const db = getDB()
     const body = ctx.request.body as Record<string, any>
-    console.log('[settings] POST body:', JSON.stringify(body))
 
     if (!body || typeof body !== 'object') {
       ctx.status = 400
@@ -126,11 +134,11 @@ settingsRouter.post('/', (ctx: Context) => {
       if (UUID_RE.test(model)) {
         const cm = db.prepare('SELECT id FROM custom_models WHERE id = ? AND enabled = 1').get(model)
         if (!cm) {
-          console.log(`[settings] Rejecting unknown/disabled model UUID: ${model}`)
+          console.log('[settings] Rejecting unknown or disabled model UUID')
           delete body.model // strip invalid model, keep the rest
         }
       } else if (!validModels.has(model)) {
-        console.log(`[settings] Rejecting unknown model: ${model}`)
+        console.log('[settings] Rejecting unknown model')
         delete body.model
       }
     }
@@ -138,7 +146,7 @@ settingsRouter.post('/', (ctx: Context) => {
     for (const key of allowedKeys) {
       if (body[key] === undefined) continue
       // 保护：apiKey 空串不覆盖已有 key（脱敏后前端 form 回显为空，整体保存会误清空）
-      if (key === 'apiKey' && String(body[key]).trim() === '') continue
+      if ((key === 'apiKey' || (PRIVATE_API_KEYS as readonly string[]).includes(key)) && String(body[key]).trim() === '') continue
       const value = typeof body[key] === 'boolean' ? String(body[key]) : typeof body[key] === 'number' ? String(body[key]) : String(body[key])
       stmt.run(key, value)
     }

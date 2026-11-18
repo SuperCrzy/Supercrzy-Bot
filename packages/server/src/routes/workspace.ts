@@ -6,7 +6,8 @@
 import Router from 'koa-router'
 import type { Context } from 'koa'
 import { readdir, readFile, stat } from 'fs/promises'
-import { join, resolve } from 'path'
+import { join, resolve, dirname } from 'path'
+import { realpathSync, existsSync } from 'fs'
 import { config } from '../config'
 import { getDB } from '../services/database'
 import { mediaMimeOf, isNonPreviewableBinary, docxMimeOf, isMarkdownPath } from '../services/file-kind'
@@ -31,13 +32,33 @@ function resolveWorkspaceRoot(): string {
   }
 }
 
-/** 校验并规范化路径：必须在工作区根内，否则返回 null（导出供单测） */
+/** 校验并规范化路径：必须在工作区根内，否则返回 null（导出供单测）
+ *  S3 fix (2026-11-17 audit): resolve() 只做词法规范化、不解析符号链接——
+ *  root 内的 symlink 可指向外部再被 open() 跟随逃逸。这里先对最终路径
+ *  realpathSync 解析真实位置，解析失败（不存在）时退回词法结果并要求父目录已存在约束由调用方保证。 */
 export function safePath(input: string): string | null {
   if (!input || input.includes('\0')) return null
   const root = resolveWorkspaceRoot()
   const abs = resolve(root, input)
   if (abs !== root && !abs.startsWith(root + '/')) return null
-  return abs
+  try {
+    const realRoot = realpathSync(root)
+    // Follow symlinks to the REAL location; only accept if still inside root.
+    const real = realpathSync(abs)
+    if (real !== realRoot && !real.startsWith(realRoot + '/')) return null
+    return abs
+  } catch {
+    // Path does not exist yet (create/write case): validate the nearest
+    // existing ancestor so a symlinked parent can't be smuggled in either.
+    let dir = dirname(abs)
+    for (let i = 0; i < 16 && !existsSync(dir); i++) dir = dirname(dir)
+    try {
+      const realDir = realpathSync(dir)
+      const realRoot = realpathSync(root)
+      if (realDir !== realRoot && !realDir.startsWith(realRoot + '/')) return null
+    } catch { return null }
+    return abs
+  }
 }
 
 // ---- 工作区索引（参考 主流实现 workspaces 表）----

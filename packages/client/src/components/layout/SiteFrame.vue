@@ -14,7 +14,7 @@
   The top strip holds the site header, the bottom strip its dock.
 -->
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/app'
@@ -29,8 +29,19 @@ const SITE = 'https://supercrzy.com'
 const PROXY = '/site'
 
 // Strips trimmed off the embedded page: site header on top, site dock on the bottom.
+/**
+ * Site chrome to crop out. Measured 2026-11-14:
+ *  - mobile: sticky header 52px (crop 56) + bottom dock (crop 88)
+ *  - desktop (>=768px): same header, but the site renders NO dock — cropping 88px
+ *    there just hides real content, so bottom crop drops to 0.
+ */
 const CLIP_TOP = 56
-const CLIP_BOTTOM = 88
+const CLIP_MOBILE_BOTTOM = 88
+const isWideViewport = ref(window.innerWidth >= 768)
+const onViewportChange = () => { isWideViewport.value = window.innerWidth >= 768 }
+window.addEventListener('resize', onViewportChange)
+onBeforeUnmount(() => window.removeEventListener('resize', onViewportChange))
+const clipBottom = computed(() => (isWideViewport.value ? 0 : CLIP_MOBILE_BOTTOM))
 
 const loading = ref(true)
 const failed = ref(false)
@@ -135,8 +146,8 @@ function onError() {
       loading="eager"
       :style="{
         top: `-${CLIP_TOP}px`,
-        height: `calc(100% + ${CLIP_TOP + CLIP_BOTTOM}px)`,
-        clipPath: `inset(${CLIP_TOP}px 0 ${CLIP_BOTTOM}px 0)`,
+        height: `calc(100% + ${CLIP_TOP + clipBottom}px)`,
+        clipPath: `inset(${CLIP_TOP}px 0 ${clipBottom}px 0)`,
       }"
       @load="onLoad"
       @error="onError"

@@ -7,6 +7,12 @@ import { getUpdates, sendMessage, loadCredentials, clearCredentials, notifyStart
 import { StreamingMarkdownFilter } from '@tencent-weixin/openclaw-weixin/dist/src/messaging/markdown-filter.js'
 import { randomBytes } from 'crypto'
 import { resolveFfmpeg } from './ffmpeg'
+import { channelSessionId } from './channel-session-id'
+import { KeyedTaskQueue } from './keyed-task-queue'
+import { handleChannelMessageOnce, wechatMessageId } from './channel-message-dedup'
+import { getDB } from './database'
+
+const messageQueue = new KeyedTaskQueue()
 
 // ---- 延迟导入文件解析库（避免服务器启动时报错） ----
 async function tryParsePdf(buffer: Buffer): Promise<string | null> {
@@ -261,7 +267,7 @@ async function processMessage(
   // 如果既没有文字也没有文件也没有语音，跳过
   if (!rawText && rawFiles.length === 0 && !voiceText) return
 
-  console.log(`[WeChat] Message from ${toUserId}: text=${rawText.slice(0, 80) || '(none)'}, files=${rawFiles.length}, voice=${voiceItems.length}`)
+  console.log(`[WeChat] Message received, files=${rawFiles.length}, voice=${voiceItems.length}`)
 
   // 发送"正在输入"状态
   const typingTicket = msg.typing_ticket || ''
@@ -295,6 +301,8 @@ async function processMessage(
             fileContentText += `\n\n[文件: ${df.fileName} (${(df.fileSize / 1024).toFixed(1)}KB, ${df.mimeType})]`
           }
         }
+      } else {
+        fileContentText += `\n\n[文件下载失败: ${rf.item?.file_item?.file_name || 'unknown'}]`
       }
     } catch (err: any) {
       console.error(`[WeChat] File download failed:`, err.message)
@@ -305,8 +313,7 @@ async function processMessage(
   // 合并文本（文字 + 语音 + 文件内容）
   const fullText = rawText + voiceText + fileContentText
 
-  // Generate session ID from WeChat user ID (stable per user)
-  const sessionId = toUserId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 32)
+  const sessionId = channelSessionId('wechat', creds.accountId, toUserId, toUserId)
 
   try {
     let reply = ''
@@ -316,7 +323,7 @@ async function processMessage(
     } else if (messageHandler) {
       reply = await messageHandler(toUserId, fullText)
     }
-    console.log(`[WeChat] Handler returned: "${reply?.slice(0, 50)}..."`)
+    console.log('[WeChat] Handler returned')
 
     if (!reply) {
       console.log(`[WeChat] No reply from handler, skipping`)
@@ -324,7 +331,7 @@ async function processMessage(
       if (typingTicket) sendTyping(creds.baseUrl, creds.token, typingTicket, 2).catch(() => {})
       return
     }
-    console.log(`[WeChat] Agent reply: ${reply.slice(0, 80)}`)
+    console.log('[WeChat] Sending agent reply')
 
     // 流式 Markdown 过滤：去掉微信不支持的语法，保留代码/表格/加粗等
     const mdFilter = new StreamingMarkdownFilter()
@@ -345,18 +352,21 @@ async function processMessage(
     }
     
     // 发送所有媒体文件
+    let failedMedia = 0
     for (const m of mediaMatches) {
       const caption = filtered.slice(0, m.index).trim()
-      await sendMediaFileToWeChat(creds, toUserId, contextToken, m.path, caption)
-      console.log(`[WeChat] Media sent: ${m.path}`)
+      const result = await sendMediaFileToWeChat(creds, toUserId, contextToken, m.path, caption, sessionId)
+      if (!result.success) failedMedia++
     }
 
     // 提取纯文本（移除 MEDIA: 指令）
-    const pureText = filtered.replace(/^MEDIA:\s*\S+/gm, '').trim()
+    const pureText = [filtered.replace(/^MEDIA:\s*\S+/gm, '').trim(), failedMedia ? `有 ${failedMedia} 个文件发送失败，请在电脑端检查后重试。` : ''].filter(Boolean).join('\n\n')
 
     // 分段发送（微信建议单条 ≤ 2000 字符）
     const CHUNK = 1800
-    if (pureText.length <= CHUNK) {
+    if (!pureText) {
+      // A successfully sent media-only response needs no empty text message.
+    } else if (pureText.length <= CHUNK) {
       await sendMessage(creds.baseUrl, creds.token, toUserId, pureText, contextToken)
     } else {
       const chunks: string[] = []
@@ -431,7 +441,16 @@ export async function startBot(handler: MessageHandler): Promise<{ success: bool
           const CONCURRENCY = 2
           for (let i = 0; i < resp.msgs.length; i += CONCURRENCY) {
             const batch = resp.msgs.slice(i, i + CONCURRENCY)
-            await Promise.allSettled(batch.map((msg: any) => processMessage(creds, msg)))
+            await Promise.allSettled(batch.map(async (msg: any) => {
+              if (!msg.from_user_id || !msg.context_token) return
+              const key = channelSessionId('wechat', creds.accountId, msg.from_user_id, msg.from_user_id)
+              try { await messageQueue.run(key, () => handleChannelMessageOnce(getDB(), key, wechatMessageId(msg), () => processMessage(creds, msg))) }
+              catch (error) {
+                if (error instanceof Error && error.message === 'channel_queue_full') {
+                  await sendMessage(creds.baseUrl, creds.token, msg.from_user_id, '待处理消息过多，请稍后再发送。', msg.context_token).catch(() => {})
+                } else throw error
+              }
+            }))
           }
         }
 

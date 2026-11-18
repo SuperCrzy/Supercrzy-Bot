@@ -16,9 +16,9 @@
  * 参考：deepseek-harness 的 Landlock 沙箱思路（Linux LSM），macOS 对应实现为 sandbox-exec (SBPL)。
  */
 import { exec } from 'child_process'
-import { writeFileSync, existsSync } from 'fs'
+import { writeFileSync, existsSync, realpathSync, lstatSync } from 'fs'
 import { homedir, tmpdir } from 'os'
-import { join, resolve, dirname } from 'path'
+import { join, resolve, dirname, basename } from 'path'
 import { config } from '../config'
 
 // 工作区根：与 app.ts / workspace.ts 保持一致
@@ -346,6 +346,26 @@ export function isPathAllowed(
     .some((a) => pathUnder(resolved, toSlashes(a)))
 }
 
+/** Resolve existing symlinks and retain missing suffixes for future writes. */
+function resolveRealPath(path: string): string {
+  let cursor = resolve(path)
+  const missing: string[] = []
+  for (;;) {
+    try { return resolve(realpathSync(cursor), ...missing.reverse()) } catch (error) {
+      // A dangling symlink or inaccessible existing entry is not a safe missing path.
+      let entryExists = false
+      try { lstatSync(cursor); entryExists = true } catch (statError) {
+        if ((statError as NodeJS.ErrnoException).code !== 'ENOENT') throw statError
+      }
+      if (entryExists) throw error
+      const parent = dirname(cursor)
+      if (parent === cursor) throw error
+      missing.push(basename(cursor))
+      cursor = parent
+    }
+  }
+}
+
 /**
  * 文件工具路径校验：返回错误原因，安全返回 null。
  * 规则：①凭据文件/敏感目录一律禁止 ②必须位于对应权限档位的白名单内
@@ -359,5 +379,14 @@ export function assertSafeFilePath(
   if (CREDENTIAL_FILE.test(p)) return `凭据文件不可访问: ${p.slice(0, 80)}`
   if (SENSITIVE_DIR.test(p)) return `敏感目录不可访问: ${p.slice(0, 80)}`
   if (!isPathAllowed(p, o)) return `路径越权（当前权限: ${o.level || 'sandbox'}）: ${p.slice(0, 80)}`
+  try {
+    const actual = resolveRealPath(p)
+    if (CREDENTIAL_FILE.test(actual) || SENSITIVE_DIR.test(actual)) return '真实路径指向敏感文件或目录'
+    const allowed = allowedPrefixes(o.level || 'sandbox', o.workspaceDir).concat(o.extraAllowed || [])
+    const withinActualRoot = allowed.some((root) => {
+      try { return pathUnder(toSlashes(actual), toSlashes(resolveRealPath(root))) } catch { return false }
+    })
+    if (!withinActualRoot) return '真实路径不在允许范围内'
+  } catch { return '无法安全解析文件路径' }
   return null
 }
