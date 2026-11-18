@@ -34,7 +34,7 @@ describe('buildConversationMarkdown 对话导出', () => {
       plainText, meLabel: '我', assistantLabel: 'SUPERCRZY',
       generatedAt: '2026-09-18 12:00',
     })
-    expect(md.startsWith('# 测试会话\n\n> SUPERCRZY BOT · 2026-09-18 12:00\n')).toBe(true)
+    expect(md.startsWith('# 测试会话\n\n> Super Crazy · 2026-09-18 12:00\n')).toBe(true)
     expect(md).toContain('**我**\n\n你好')
     expect(md).toContain('**SUPERCRZY**\n\n你好，有什么可以帮你')
     expect(md.match(/---/g)).toHaveLength(2)
@@ -57,7 +57,7 @@ describe('buildConversationMarkdown 对话导出', () => {
 
   it('只有标题没有可导出消息时仍返回标题块', () => {
     const md = buildConversationMarkdown({ title: '空会话', messages: [], plainText, meLabel: '我', assistantLabel: 'AI', generatedAt: 'x' })
-    expect(md).toBe('# 空会话\n\n> SUPERCRZY BOT · x\n')
+    expect(md).toBe('# 空会话\n\n> Super Crazy · x\n')
   })
 })
 
@@ -156,7 +156,7 @@ describe('drawShareImage 绘制', () => {
     const { ctx, calls } = recorder()
     drawShareImage(ctx, blocks, { title: '会话标题', dateText: '2026/9/18', meLabel: '我', assistantLabel: 'SUPERCRZY' })
     const texts = calls.filter((c) => c[0] === 'text').map((c) => c[1])
-    expect(texts).toContain('SUPERCRZY BOT')
+    expect(texts).toContain('Super Crazy')
     expect(texts).toContain('会话标题')
     expect(texts).toContain('2026/9/18')
   })

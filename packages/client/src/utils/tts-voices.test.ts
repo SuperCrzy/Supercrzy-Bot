@@ -14,18 +14,18 @@ function mentionsOwnName(sample: string, label: string): boolean {
 
 describe('tts-voices — 试听台词', () => {
   it('中文音色：中文开场 + 中英混读品牌名（品牌名不翻译）', () => {
-    expect(fallbackVoiceSample('晓晓（女声·自然）')).toBe('您好，我是晓晓，是你的 SUPERCRZY BOT.')
+    expect(fallbackVoiceSample('晓晓（女声·自然）')).toBe('您好，我是晓晓，是你的 Super Crazy.')
   })
 
   it('英文音色：英文开场（拿英文音色念中文自我介绍会很出戏）', () => {
-    expect(fallbackVoiceSample('Aria（English）')).toBe("Hi, I'm Aria, your SUPERCRZY BOT.")
+    expect(fallbackVoiceSample('Aria（English）')).toBe("Hi, I'm Aria, your Super Crazy.")
   })
 
   it('label 无括号 / 半角括号 / 空值都能取名', () => {
     expect(voiceDisplayName('云希')).toBe('云希')
     expect(voiceDisplayName('晓北(东北话)')).toBe('晓北')
     expect(voiceDisplayName('  ')).toBe('')
-    expect(fallbackVoiceSample('')).toBe('您好，我是，是你的 SUPERCRZY BOT.') // 名字缺失也不崩，只是空洞
+    expect(fallbackVoiceSample('')).toBe('您好，我是，是你的 Super Crazy.') // 名字缺失也不崩，只是空洞
   })
 
   it('内置兜底清单：每一项的台词都必须提到自己的名字', () => {
@@ -36,7 +36,7 @@ describe('tts-voices — 试听台词', () => {
   it('内置兜底清单：每一项都带 sample 且含品牌名（否则后端挂了"点名字自动试听"会哑）', () => {
     for (const v of DEFAULT_TTS_VOICES) {
       expect(v.sample, `${v.id} 缺 sample`).toBeTruthy()
-      expect(v.sample).toContain('SUPERCRZY BOT')
+      expect(v.sample).toContain('Super Crazy')
     }
   })
 })
@@ -44,16 +44,16 @@ describe('tts-voices — 试听台词', () => {
 describe('tts-voices — toVoiceOptions', () => {
   /** 模拟后端下发（含一条缺 sample 的，模拟旧后端/漏填） */
   const fromServer: TtsVoiceEntry[] = [
-    { id: 'zh-CN-XiaoxiaoNeural', label: '晓晓（女声·自然）', sample: '您好，我是晓晓，是你的 SUPERCRZY BOT.' },
+    { id: 'zh-CN-XiaoxiaoNeural', label: '晓晓（女声·自然）', sample: '您好，我是晓晓，是你的 Super Crazy.' },
     { id: 'zh-CN-XiaoyiNeural', label: '晓伊（女声·活泼）' },
-    { id: 'en-US-AriaNeural', label: 'Aria（English）', sample: "Hi, I'm Aria, your SUPERCRZY BOT." },
+    { id: 'en-US-AriaNeural', label: 'Aria（English）', sample: "Hi, I'm Aria, your Super Crazy." },
   ]
 
   it('后端下发的 sample 优先（不被兜底覆盖）', () => {
     const opts = toVoiceOptions(fromServer)
-    expect(opts[0].sample).toBe('您好，我是晓晓，是你的 SUPERCRZY BOT.')
-    expect(opts[1].sample).toBe('您好，我是晓伊，是你的 SUPERCRZY BOT.')
-    expect(opts[2].sample).toBe("Hi, I'm Aria, your SUPERCRZY BOT.")
+    expect(opts[0].sample).toBe('您好，我是晓晓，是你的 Super Crazy.')
+    expect(opts[1].sample).toBe('您好，我是晓伊，是你的 Super Crazy.')
+    expect(opts[2].sample).toBe("Hi, I'm Aria, your Super Crazy.")
   })
 
   it('不管后端有没有给 sample，每一项都有能试听的台词、且提到自己的名字', () => {

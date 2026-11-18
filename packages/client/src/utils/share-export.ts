@@ -31,7 +31,7 @@ export function buildConversationMarkdown(opts: {
 }): string {
   const { title, messages, plainText, meLabel, assistantLabel } = opts
   const stamp = opts.generatedAt ?? new Date().toLocaleString()
-  const head = `# ${title}\n\n> SUPERCRZY BOT · ${stamp}\n`
+  const head = `# ${title}\n\n> Super Crazy · ${stamp}\n`
   const body: string[] = []
   for (const m of messages) {
     if (m.role !== 'user' && m.role !== 'assistant') continue
@@ -126,7 +126,7 @@ export function drawShareImage(
   // 标题区
   ctx.fillStyle = '#141414'
   ctx.font = '700 26px system-ui, sans-serif'
-  ctx.fillText('SUPERCRZY BOT', pad, 64)
+  ctx.fillText('Super Crazy', pad, 64)
   ctx.fillStyle = '#6b6b70'
   ctx.font = '400 16px system-ui, sans-serif'
   const sub = (opts.title || '').slice(0, 60)
