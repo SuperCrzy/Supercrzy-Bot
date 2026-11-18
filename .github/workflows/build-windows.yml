@@ -126,10 +126,16 @@ jobs:
           Pop-Location
           Write-Host "better-sqlite3 rebuilt for Electron $ver"
 
-          # ── ④ 修剪 peer 依赖死重 ──
-          # openclaw: no longer a dependency (helpers vendored), nothing to prune.
-          # The gate below still asserts it never comes back.
 
+      # ── ④ 出厂门禁：node_modules 里不许留不该进产物的大件 ──
+      # openclaw 已不是依赖（两个 helper 已本地化），这里只做断言：
+      # 如果它或其它死重重新出现，说明依赖树变了，拒绝打包。
+      # working-directory 必须是 .deploy-server —— 在仓库根判断会命中
+      # pnpm 装的 typescript/vite/vitest（那是开发依赖，不进产物）。
+      - name: Assert package hygiene
+        working-directory: packages/desktop/.deploy-server
+        shell: pwsh
+        run: |
           $bad = @()
           foreach ($p in @("openclaw","typescript","vite","vitest","rolldown","@rolldown","@electron")) {
             if (Test-Path "node_modules/$p") { $bad += $p }
