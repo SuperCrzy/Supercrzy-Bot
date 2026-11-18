@@ -26,7 +26,23 @@ const tool: ToolDef = {
     // 2) Jina Reader 免费层（无 key 兜底，服务端渲染 JS → Markdown，解决 403/SPA 空白）
     // 3) 原生 fetch + 文本提取（轻量兜底）
     // 4) 无头浏览器渲染（Chrome headless 兜底，JS 重页面/SPA 也能抓到 DOM）
+
+// Red-team fix (Gemini audit #6): only http/https, never loopback/private/
+// link-local/metadata targets (headless Chrome would fetch them from THIS host).
+function assertSafeFetchUrl(rawUrl: string): void {
+  let u: URL
+  try { u = new URL(rawUrl) } catch { throw new Error('invalid_url') }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error('protocol_not_allowed')
+  const host = u.hostname.toLowerCase()
+  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.internal') || host.endsWith('.local')) throw new Error('private_target')
+  if (/^(127\.|10\.|0\.|169\.254\.|192\.168\.)/.test(host)) throw new Error('private_target')
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) throw new Error('private_target')
+  if (host === '[::1]' || host.startsWith('[') && /fe80|fc00|fd/i.test(host)) throw new Error('private_target')
+  if (host === '169.254.169.254') throw new Error('metadata_target')
+}
+
     const rawUrl = String(args.url || '').trim()
+    try { assertSafeFetchUrl(rawUrl) } catch (e: any) { return `❌ URL 被安全策略拒绝：${e?.message || 'invalid'}` }
     if (!rawUrl) return '❌ 缺少 URL 参数'
     const maxLen = args.maxLength || 8000
     const jinaKey = readSetting('jinaApiKey')

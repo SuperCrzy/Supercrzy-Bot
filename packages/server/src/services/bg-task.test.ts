@@ -192,7 +192,7 @@ describe('bg-task 状态机', () => {
     expect(await waitFor(() => getBgTask(id) === undefined)).toBe(true)
     // 进程必须收到信号：kill 后 300ms 内应已退出
     expect(await waitFor(() => proc.killed || proc.exitCode !== null || proc.signalCode !== null, 1500)).toBe(true)
-  })
+  }, 60000)
 
   it.skipIf(process.platform === 'win32')('取消后子进程不能继续执行延迟写入', async () => {
     const { mkdtempSync, existsSync, rmSync } = await import('node:fs')

@@ -1,6 +1,6 @@
 import Router from 'koa-router'
 import { handleStreamChat, handleChat, handleAgentChat, handleCompareChat, handleCompareStreamChat } from '../services/chat'
-import { resolveToolConfirmation, approveSessionTools, resolveQuestion, requestStop, clearStop, isStopRequested } from '../services/agent'
+import { getPendingConfirmationMeta, resolveToolConfirmation, approveSessionTools, resolveQuestion, requestStop, clearStop, isStopRequested } from '../services/agent'
 import { getTaskBySession, requestTaskCancel, requestTaskPause, resumeTask } from '../services/task-state'
 
 export const chatRouter = new Router({ prefix: '/api/chat' })
@@ -116,13 +116,19 @@ chatRouter.post('/question-answer', async (ctx) => {
   ctx.body = { ok: true }
 })
 chatRouter.post('/tool-confirm', async (ctx) => {
-  const { toolCallId, decision, sessionId, toolName } = (ctx.request.body as any) || {}
+  const { toolCallId, decision } = (ctx.request.body as any) || {}
   if (!toolCallId || !['allow', 'deny', 'allow-session'].includes(decision)) {
     ctx.status = 400; ctx.body = { error: 'toolCallId and decision(allow|deny|allow-session) required' }; return
   }
-  // allow-session：本会话内该工具类别放行（按工具名记忆——对齐主流实现 Always Allow 按工具类别；file_delete 仍每次确认）
-  if (decision === 'allow-session') {
-    if (sessionId) approveSessionTools(sessionId, toolName)
+  // Red-team fix (Gemini audit #4): sessionId/toolName come from the SERVER-side
+  // pending map, never from the request body — a forged call cannot pre-approve
+  // tools for an arbitrary session.
+  const meta = getPendingConfirmationMeta(toolCallId)
+  if (!meta) {
+    ctx.status = 404; ctx.body = { error: 'unknown or expired toolCallId' }; return
+  }
+  if (decision === 'allow') {
+    if (meta.sessionId) approveSessionTools(meta.sessionId, meta.toolName)
     resolveToolConfirmation(toolCallId, 'allow')
   } else {
     resolveToolConfirmation(toolCallId, decision)

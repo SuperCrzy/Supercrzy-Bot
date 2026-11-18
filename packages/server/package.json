@@ -13,7 +13,7 @@
     "clean": "rm -rf dist node_modules",
     "validate:tools": "tsx scripts/validate-tools.ts",
     "validate:permission": "tsx scripts/validate-permission.ts",
-    "verify": "npm run lint && npm run test && npm run validate:tools",
+    "verify": "pnpm run lint && npm run test && npm run validate:tools",
     "build:ocr": "node scripts/build-ocr-helpers.mjs"
   },
   "dependencies": {

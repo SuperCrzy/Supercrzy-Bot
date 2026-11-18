@@ -50,6 +50,12 @@ import { isFfmpegAvailable, refreshFfmpegAvailability, ffmpegInstallHint } from 
 
 // ---- 敏感工具确认机制（先确认后执行）----
 const pendingConfirmations = new Map<string, (decision: 'allow' | 'deny') => void>()
+// Red-team fix (Gemini audit #4): remember what each pending toolCallId ACTUALLY
+// belongs to, so /tool-confirm can never trust client-supplied sessionId/toolName.
+const pendingMeta = new Map<string, { sessionId: string; toolName?: string }>()
+export function getPendingConfirmationMeta(id: string): { sessionId: string; toolName?: string } | undefined {
+  return pendingMeta.get(id)
+}
 
 // 工具流式输出累计字节（按 toolCallId 计数，防单工具输出刷爆死循环）
 const toolStreamBytes = new Map<string, number>()
@@ -135,13 +141,15 @@ export function approveSessionBlockTools(sessionId: string) {
 export function resolveToolConfirmation(id: string, decision: 'allow' | 'deny') {
   pendingConfirmations.get(id)?.(decision)
   pendingConfirmations.delete(id)
+  pendingMeta.delete(id)
 }
 
 function waitForToolConfirmation(
   id: string,
   timeoutMs = CONFIRMATION_TIMEOUT_MS,
-  opts: { irreversible?: boolean; signal?: AbortSignal } = {},
+  opts: { irreversible?: boolean; signal?: AbortSignal; meta?: { sessionId: string; toolName?: string } } = {},
 ): Promise<'allow' | 'deny' | 'timeout' | 'cancelled'> {
+  if (opts.meta) pendingMeta.set(id, opts.meta)
   // 自动允许等待（设置 toolAutoApproveSeconds：>0 秒后无人确认自动放行；0=关闭，保持超时拒绝兜底）
   //
   // 🔴 2026-10-22 老板裁决：**不可逆操作（block / 删除）永不自动放行**。
@@ -160,7 +168,7 @@ function waitForToolConfirmation(
       settled = true
       clearTimeout(timer)
       opts.signal?.removeEventListener('abort', onAbort)
-      if (pendingConfirmations.get(id) === onDecision) pendingConfirmations.delete(id)
+      if (pendingConfirmations.get(id) === onDecision) { pendingConfirmations.delete(id); pendingMeta.delete(id) }
       resolve(decision)
     }
     const onDecision = (decision: 'allow' | 'deny') => finish(decision)
@@ -2020,7 +2028,7 @@ export async function runAgentLoop(
               //   两级判定取并集：planned.risk 是播报前算好的（可能缺失），分类器是当场真值。
               const irreversible = planById.get(tc.id)?.risk?.level === 'high'
                 || classifySensitiveTool(tc.function.name, args) === 'block'
-              const verdict = await waitForToolConfirmation(tc.id, CONFIRMATION_TIMEOUT_MS, { irreversible, signal: modelAbort.signal })
+              const verdict = await waitForToolConfirmation(tc.id, CONFIRMATION_TIMEOUT_MS, { irreversible, signal: modelAbort.signal, meta: { sessionId: sessionId || '', toolName: tc.function?.name } })
               // "拦一次后记住"：block 类被用户显式允许 → 本会话记住，后续不再拦（拒绝不记）
               if (verdict === 'allow' && !shouldCancelModel() && sessionId && classifySensitiveTool(tc.function.name, args) === 'block') {
                 approveSessionBlockTools(sessionId)

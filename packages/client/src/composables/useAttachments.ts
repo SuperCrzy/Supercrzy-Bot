@@ -95,7 +95,9 @@ export function useAttachments(opts: UseAttachmentsOptions) {
   }
 
   function openAttachment(att: Attachment) {
-    window.open(att.url, '_blank')
+    // noopener: the opened tab must not be able to reach back into the app
+    // via window.opener (same-origin hardening, matches useArtifacts).
+    window.open(att.url, '_blank', 'noopener,noreferrer')
   }
 
   return { uploading, handleFileSelect, removeFile, openAttachment }
