@@ -171,7 +171,7 @@ describe('bg-task 状态机', () => {
   })
 
   it('bounds finished records while preserving running tasks', async () => {
-    const live = startBgTask({ sessionId: 'owner', title: 'live', command: 'sleep 10', cwd: process.cwd() })
+    const live = startBgTask({ sessionId: 'owner', title: 'live', command: 'sleep 600', cwd: process.cwd() }) // not sleep 10: on slow CI runners the 21 batches can outlive 10s and the live task expires before the assertion
     let firstBatch: string[] = []
     for (let batch = 0; batch < Math.ceil((BG_MAX_FINISHED_TASKS + 1) / 10); batch++) {
       const count = Math.min(10, BG_MAX_FINISHED_TASKS + 1 - batch * 10)
