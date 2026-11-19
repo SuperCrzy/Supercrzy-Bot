@@ -153,7 +153,18 @@ const serperProvider: SearchProvider = {
  * Query one SearXNG instance. Returns [] on any failure so the caller can
  * fall back to the other instance.
  */
-async function querySearxng(base: string, ctx: SearchContext): Promise<SearchResultItem[]> {
+/**
+ * Instances that recently failed are skipped for a while. Without this, a dead
+ * instance costs the full timeout on EVERY search (measured: a cross-border
+ * instance that answers in 10s locally hangs for 30s from outside, then the
+ * caller waits again on the fallback).
+ */
+const DEAD_INSTANCES = new Map<string, number>()
+const DEAD_TTL_MS = 60_000
+
+async function querySearxng(base: string, ctx: SearchContext, timeoutMs = 8000): Promise<SearchResultItem[]> {
+  const deadUntil = DEAD_INSTANCES.get(base) || 0
+  if (Date.now() < deadUntil) return []
   const p = new URLSearchParams({ q: ctx.query, format: 'json', safesearch: '0' })
   if (ctx.source === 'news') p.set('categories', 'news')
   // time_range is a native SearXNG parameter: the upstream engines do the
@@ -164,40 +175,55 @@ async function querySearxng(base: string, ctx: SearchContext): Promise<SearchRes
   try {
     const resp = await fetch(`${base}/search?${p.toString()}`, {
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; SUPERCRZY-BOT/1.0)', 'Accept': 'application/json' },
-      signal: AbortSignal.timeout(30000),
+      signal: AbortSignal.timeout(timeoutMs),
     })
-    if (!resp.ok) return []
+    if (!resp.ok) { DEAD_INSTANCES.set(base, Date.now() + DEAD_TTL_MS); return [] }
     const sd: any = await resp.json()
+    DEAD_INSTANCES.delete(base)
     return (sd.results || []).map((r: any) => ({
       title: r.title || '', url: r.url || '',
       description: (r.content || r.snippet || '').slice(0, 300),
       date: r.publishedDate || '',
       engine: r.engine ? (Array.isArray(r.engine) ? r.engine.join(',') : String(r.engine)) : '',
     })) as SearchResultItem[]
-  } catch { return [] }
+  } catch {
+    // Timeout / network failure: mark it dead so the next search does not pay
+    // this timeout again, then let the caller try the other instance.
+    DEAD_INSTANCES.set(base, Date.now() + DEAD_TTL_MS)
+    return []
+  }
 }
+
+/** Test hook: module-level state is shared by design. */
+export function resetDeadInstances(): void { DEAD_INSTANCES.clear() }
 
 /** 3) SearXNG：自建开源元搜索（聚合 70+ 引擎；美国 VPS 部署最佳） */
 const searxngProvider: SearchProvider = {
   name: 'searxng',
   async enabled() { return !!readSetting('searxngUrl') },
   async search(ctx) {
-    // Two self-hosted instances (2026-11-19):
-    //   CN  (116.181.17.27)  - upstreams reachable in mainland China (360search).
-    //                          Chinese queries are much faster and better here.
-    //   GLOBAL (107.174.107.199) - Google/Brave/DDG; required for English and
-    //                          technical queries, where the CN instance only
-    //                          returns Chinese blogspam.
-    // Pick by query language, then fall back to the other instance on failure.
-    // `searxngUrlGlobal` is optional: when unset only the CN instance is used.
-    const cn = readSetting('searxngUrl').replace(/\/+$/, '')
-    const global = readSetting('searxngUrlGlobal').replace(/\/+$/, '')
+    // Self-hosted instances (2026-11-19, reconciled after measurement):
+    //   searxngUrl       - the PRIMARY instance. Currently the overseas one
+    //                      (107.174.107.199:8080, Google/Brave/DDG upstreams,
+    //                      answers in ~1s and returns 20 rows).
+    //   searxngUrlGlobal - optional secondary. Kept as a distinct key so the
+    //                      mainland instance (116.181.17.27, 360search) can be
+    //                      promoted later — after ICP filing it becomes
+    //                      reachable over 443 with a domain. It answers 200
+    //                      locally but times out from outside mainland China,
+    //                      so it must not be the default while unfiled.
+    // Both are tried; the query language only decides the order.
+    const primary = readSetting('searxngUrl').replace(/\/+$/, '')
+    const secondary = readSetting('searxngUrlGlobal').replace(/\/+$/, '')
     const hasCJK = /[\u4e00-\u9fff]/.test(ctx.query)
-    const ordered = hasCJK ? [cn, global] : [global, cn]
+    const ordered = hasCJK ? [secondary, primary] : [primary, secondary]
     const bases = ordered.filter((b, i) => b && ordered.indexOf(b) === i)
     if (!bases.length) return []
     for (const base of bases) {
-      const rows = await querySearxng(base, ctx)
+      // Shorter budget for the first attempt so a dead instance cannot eat the
+      // whole request: 6s, then 12s for the fallback (it must actually answer).
+      const timeoutMs = base === bases[0] ? 6000 : 12000
+      const rows = await querySearxng(base, ctx, timeoutMs)
       if (rows.length) return rows
     }
     return []
