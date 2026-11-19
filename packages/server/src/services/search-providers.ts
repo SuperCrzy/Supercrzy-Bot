@@ -51,17 +51,19 @@ export function postProcessSearchResults<T extends { title: string; url: string;
 }
 
 /**
- * 读取 settings 表配置。
+ * Read a value from the settings table.
  *
- * 2026-11-19 修（实测 P0）：原来是 `require('./database')`。这个包是
- * "type": "module"，ESM 下没有 require —— 它抛 ERR_UNSUPPORTED_DIR_IMPORT
- * （目录导入 + 缺扩展名），被下面的 catch 吞成 ''，于是**所有需要 key 的
- * 引擎恒判"未配置"**（实测 deepseek/searxng/tavily/serper 全 false，只剩不需要
- * key 的 bing）。库里明明有 apiKey 和 searxngUrl，用户却只能拿到 bing 的结果。
+ * Fixed 2026-11-19 (measured P0): this used to be `require('./database')`. The
+ * package is "type": "module", so ESM has no require - it threw
+ * ERR_UNSUPPORTED_DIR_IMPORT (directory import + missing extension), the catch
+ * below swallowed it into '', and every keyed engine was therefore judged
+ * "unconfigured" (measured: deepseek/searxng/tavily/serper all false, leaving
+ * only bing, which needs no key). The DB did hold apiKey and searxngUrl; users
+ * still only ever saw bing results.
  *
- * 现在改用静态 import。这里不存在循环依赖：database.ts 不 import 本文件。
- * catch 仍然保留（DB 未初始化时 enabled() 不该炸启动），但会打日志 ——
- * 静默吞异常正是这个 bug 藏了这么久的原因。
+ * Now a static import. There is no cycle: database.ts does not import this file.
+ * The catch stays (enabled() must not blow up at boot when the DB is not ready)
+ * but it logs - swallowing the error silently is why this survived so long.
  */
 function readSetting(key: string): string {
   try {
@@ -197,7 +199,7 @@ async function querySearxng(base: string, ctx: SearchContext, timeoutMs = 8000):
 /** Test hook: module-level state is shared by design. */
 export function resetDeadInstances(): void { DEAD_INSTANCES.clear() }
 
-/** 3) SearXNG：自建开源元搜索（聚合 70+ 引擎；美国 VPS 部署最佳） */
+/** 3) SearXNG: self-hosted meta-search (aggregates 70+ engines) */
 const searxngProvider: SearchProvider = {
   name: 'searxng',
   async enabled() { return !!readSetting('searxngUrl') },

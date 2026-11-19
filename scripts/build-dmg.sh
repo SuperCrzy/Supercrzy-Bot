@@ -247,11 +247,12 @@ echo "  自检通过: tsx + better-sqlite3(Electron $ELECTRON_VERSION ABI) 就�
 
 echo "═══ ③ 打包 App ═══"
 cd "$ROOT/packages/desktop"
-# PACK_TARGET 控制 electron-builder 的 mac 目标（2026-09-23 加）：
-#   空（默认）= pnpm dist，出 dmg + zip（需要写 /Volumes，只能在真实 Terminal 跑）
-#   zip        = 只出 .app + zip。**不碰 /Volumes**，所以在受限沙箱里也能跑完；
-#                而且 zip 目标会顺带写出 latest-mac.yml（dmg 失败时它不会被重写，见更新通道排查）。
-#   拿来在 AI 工具里出「可安装的 .app」时用 PACK_TARGET=zip。
+# PACK_TARGET controls electron-builder's mac target (added 2026-09-23):
+#   empty (default) = pnpm dist, dmg + zip (needs /Volumes, so only from a real Terminal)
+#   zip             = .app + zip only. Never touches /Volumes, so it completes inside a
+#                     restricted sandbox; the zip target also writes latest-mac.yml
+#                     (a failed dmg run would otherwise leave it stale).
+#   Use PACK_TARGET=zip when producing an installable .app from an AI tool.
 # ELECTRON_MIRROR: unset -> keep electron-builder.yml's mirror (fast on a home IP);
 # set (even to "") -> override via CLI. CI passes "" because the shared Actions
 # egress IP gets HTTP 429 from huaweicloud; official GitHub releases work there.
@@ -266,11 +267,12 @@ cd "$ROOT/packages/desktop"
 MIRROR_ARG=""
 if [ -n "${ELECTRON_MIRROR+x}" ]; then MIRROR_ARG="--config.electronDownload.mirror=$ELECTRON_MIRROR"; fi
 
-# PACK_TARGET 控制 electron-builder 的 mac 目标（2026-09-23 加）：
-#   空（默认）= 出 dmg + zip（需要写 /Volumes，只能在真实 Terminal 跑）
-#   zip        = 只出 .app + zip。**不碰 /Volumes**，所以在受限沙箱里也能跑完；
-#                而且 zip 目标会顺带写出 latest-mac.yml（dmg 失败时它不会被重写）。
-#   拿来在 AI 工具里出「可安装的 .app」时用 PACK_TARGET=zip。
+# PACK_TARGET controls electron-builder's mac target (added 2026-09-23):
+#   empty (default) = pnpm dist, dmg + zip (needs /Volumes, so only from a real Terminal)
+#   zip             = .app + zip only. Never touches /Volumes, so it completes inside a
+#                     restricted sandbox; the zip target also writes latest-mac.yml
+#                     (a failed dmg run would otherwise leave it stale).
+#   Use PACK_TARGET=zip when producing an installable .app from an AI tool.
 if [ -n "${PACK_TARGET:-}" ]; then
   echo "  (PACK_TARGET=${PACK_TARGET} -> only .app + ${PACK_TARGET}, no dmg)"
   UPDATE_URL="$UPDATE_URL" pnpm exec electron-builder --mac "$PACK_TARGET" $MIRROR_ARG

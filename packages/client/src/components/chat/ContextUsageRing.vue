@@ -74,7 +74,8 @@ const hasMessages = computed(() => (chatStore.currentMessages?.length || 0) > 0)
 const wrapRef = ref<HTMLElement | null>(null)
 const hover = ref(false)
 const showDetail = ref(false)
-// 弹层坐标（position: fixed，见样式注释）：按圆环位置计算，避免被横栏 overflow 裁掉
+// Popover coordinates (position: fixed, see the style comment): derived from the
+// ring's position so the top bar's overflow cannot clip it.
 const popPos = ref({ top: 0, left: 0 })
 function updatePopPos() {
   const r = wrapRef.value?.getBoundingClientRect()
@@ -196,9 +197,10 @@ watch(() => appStore.ctxCompressedAt, (v, old) => {
 .fade-enter-from, .fade-leave-to { opacity: 0; }
 
 .ctx-tip {
-  /* 顶部会话栏下方弹出。position: fixed —— .traffic-spacer 有 overflow:hidden
-     （横栏 56px 高），absolute 的弹层会被整块裁掉（2026-11-19 实测）。
-     坐标由 JS 按圆环的 getBoundingClientRect 设置。 */
+  /* Drops below the session bar. position: fixed because .traffic-spacer is a
+     56px-tall row with overflow:hidden, which used to clip the whole popover
+     (measured 2026-11-19). Coordinates come from the ring's
+     getBoundingClientRect in JS. */
   position: fixed; transform: translateX(-50%);
   background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px;
   padding: 5px 8px; font-size: 11px; color: var(--text-secondary); white-space: nowrap; z-index: 60;
@@ -207,7 +209,7 @@ watch(() => appStore.ctxCompressedAt, (v, old) => {
 .ctx-tip-compress { color: var(--text-muted); margin-left: 4px; }
 
 .ctx-detail {
-  /* 同 .ctx-tip：fixed 才不会被横栏的 overflow:hidden 裁掉 */
+  /* Same as .ctx-tip: only fixed escapes the top bar's overflow:hidden. */
   position: fixed; transform: translateX(-50%);
   background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px;
   padding: 8px 10px; font-size: 11px; color: var(--text-secondary); white-space: nowrap; z-index: 60;

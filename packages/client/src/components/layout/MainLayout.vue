@@ -75,9 +75,10 @@
          sidebar 收缩不影响它；整行可拖拽；交互元素 no-drag。
          展开/收起：横栏收缩按钮、单击分隔条、Cmd+B（按钮式，无拖拽） -->
     <div v-if="isDesktop" class="traffic-spacer" :class="{ 'traffic-spacer--win': isWin }">
-      <!-- 2026-11-19：LOGO 移到顶栏左侧（原在 sidebar-header）。
-           作用：填充侧边栏上方的横栏区，避免"标题在工作区、左侧全空"的割裂感。
-           Mac 上它在红绿灯右侧，Windows 上从最左开始。 -->
+      <!-- 2026-11-19: the logo moved into the top bar's left zone (was in
+           sidebar-header). It fills the band above the sidebar so the left side
+           is not empty while the title sits over the workspace. On macOS it
+           starts right of the traffic lights; on Windows it starts at 12px. -->
       <div class="traffic-sidebar-zone">
         <div
           v-if="isWin"
@@ -786,8 +787,9 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  /* 2026-11-19: 原先是 +12px - 80px，标题落在侧边栏正上方（Windows 上尤其明显）。
-     改回贴侧边栏右缘 + 12px —— 标题必须在工作区上边，不压侧边栏。 */
+  /* 2026-11-19: was `+12px - 80px`, which parked the title over the sidebar
+     (especially visible on Windows). Back to sidebar width + 12px so the title
+     always sits over the workspace, never on the sidebar. */
   margin-left: calc(var(--sidebar-w, 220px) + 12px);
   min-width: 0;
   flex: 1;
@@ -967,7 +969,7 @@ onMounted(() => {
 .sidebar-header {
   display: flex;
   align-items: center;
-  justify-content: center; /* LOGO 组居中（2026-11-19） */
+  justify-content: center; /* centre the logo group (2026-11-19) */
   gap: 10px;
   height: 56px;
   min-height: 56px;
@@ -983,7 +985,7 @@ onMounted(() => {
 }
 
 .logo-icon {
-  /* 2026-11-19 老板要求：LOGO 放大 + 居中（原 28px） */
+  /* 2026-11-19: logo enlarged and centred per product review (was 28px). */
   width: 34px;
   height: 34px;
   border-radius: var(--radius-md);
