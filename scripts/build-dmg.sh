@@ -252,19 +252,34 @@ cd "$ROOT/packages/desktop"
 #   zip        = 只出 .app + zip。**不碰 /Volumes**，所以在受限沙箱里也能跑完；
 #                而且 zip 目标会顺带写出 latest-mac.yml（dmg 失败时它不会被重写，见更新通道排查）。
 #   拿来在 AI 工具里出「可安装的 .app」时用 PACK_TARGET=zip。
+# ELECTRON_MIRROR: unset -> keep electron-builder.yml's mirror (fast on a home IP);
+# set (even to "") -> override via CLI. CI passes "" because the shared Actions
+# egress IP gets HTTP 429 from huaweicloud; official GitHub releases work there.
+#
+# 2026-11-19 fix: this override used to exist only inside the PACK_TARGET branch,
+# so the default path (CI, which sets no PACK_TARGET) silently ignored it and
+# kept hitting huaweicloud's 429. Hoisted out of the branch so both paths honour it.
+# NOTE (2026-11-19, verified): app-builder-lib 25.1.8 does NOT read ELECTRON_MIRROR
+# from the environment (grep over the installed package: zero hits). The override
+# has to be a CLI --config flag, which is why the default path below runs
+# electron-builder directly instead of `pnpm dist`.
+MIRROR_ARG=""
+if [ -n "${ELECTRON_MIRROR+x}" ]; then MIRROR_ARG="--config.electronDownload.mirror=$ELECTRON_MIRROR"; fi
+
+# PACK_TARGET 控制 electron-builder 的 mac 目标（2026-09-23 加）：
+#   空（默认）= 出 dmg + zip（需要写 /Volumes，只能在真实 Terminal 跑）
+#   zip        = 只出 .app + zip。**不碰 /Volumes**，所以在受限沙箱里也能跑完；
+#                而且 zip 目标会顺带写出 latest-mac.yml（dmg 失败时它不会被重写）。
+#   拿来在 AI 工具里出「可安装的 .app」时用 PACK_TARGET=zip。
 if [ -n "${PACK_TARGET:-}" ]; then
-  echo "  (PACK_TARGET=${PACK_TARGET} → 只出 .app + ${PACK_TARGET}，不生成 dmg)"
-  # ELECTRON_MIRROR: unset → keep electron-builder.yml's mirror (fast on a home IP);
-  # set (even to "") → override via CLI. CI passes "" because the shared Actions
-  # egress IP gets 429 from huaweicloud; official GitHub releases are fastest there.
-  MIRROR_ARG=""
-  if [ -n "${ELECTRON_MIRROR+x}" ]; then MIRROR_ARG="--config.electronDownload.mirror=$ELECTRON_MIRROR"; fi
-  # ELECTRON_MIRROR: unset → keep electron-builder.yml's mirror (fast on a home IP);
-  # set (even to "") → override via CLI. CI passes "" because the shared Actions
-  # egress IP gets 429 from huaweicloud; official GitHub releases are fastest there.
-  MIRROR_ARG=""
-  if [ -n "${ELECTRON_MIRROR+x}" ]; then MIRROR_ARG="--config.electronDownload.mirror=$ELECTRON_MIRROR"; fi
-  UPDATE_URL="$UPDATE_URL" pnpm exec electron-builder --mac "$PACK_TARGET" $MIRROR_ARG $MIRROR_ARG
+  echo "  (PACK_TARGET=${PACK_TARGET} -> only .app + ${PACK_TARGET}, no dmg)"
+  UPDATE_URL="$UPDATE_URL" pnpm exec electron-builder --mac "$PACK_TARGET" $MIRROR_ARG
+elif [ -n "$MIRROR_ARG" ]; then
+  echo "  (mirror override via CLI: $ELECTRON_MIRROR)"
+  # Same three steps as \`pnpm dist\`, but electron-builder gets the mirror flag.
+  node ../../scripts/version.mjs
+  node scripts/sync-backend.mjs
+  UPDATE_URL="$UPDATE_URL" pnpm exec electron-builder $MIRROR_ARG
 else
   UPDATE_URL="$UPDATE_URL" pnpm dist
 fi
