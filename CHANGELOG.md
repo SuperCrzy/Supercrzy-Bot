@@ -9,6 +9,29 @@
 
 ---
 
+## v1.3.3 (2026-11-19) — 搜索恢复可用，Windows 白屏根治
+
+### 新功能
+
+- **双自建搜索后端**：中文查询走中国大陆实例（快、中文源），英文与技术类查询走海外实例（Google/Brave、官方文档），任一实例故障自动切换。**不产生任何按次搜索费用**（64c8a78）
+
+### 修复
+
+- **搜索几乎每次都没有结果**：`readSetting` 的 `require('./database')` 在 ESM 下抛 `ERR_UNSUPPORTED_DIR_IMPORT`，被 catch 吞成空串，导致五个引擎里的四个（deepseek/searxng/tavily/serper）恒判「未配置」，只剩会陷入重定向循环的 bing。改为静态 import + 异常打日志（cb3fbee）
+- **Windows 安装后白屏**：后端等待改为实际监听地址、数据迁移失败不再崩溃、启动失败显示真实原因而非白屏（d404c77）
+- **桌面端后端启动即崩溃**：构建剪掉的 342MB `openclaw` peer 依赖仍被静态引用，后端在监听端口前退出。两个 helper 已 vendored 到本地，依赖彻底移除（e78e331、251cb87）
+- **AI 浏览器被误判为死循环**：`snapshot`/截图重复调用是浏览器的正常工作方式，浏览器工具已豁免，通用阈值 4→6（b238630）
+- **发消息时两段朗读重叠**：`handleSend` 现在先停掉上一段朗读（9d2a3eb）
+- **上下文用量弹窗被裁掉**：`.traffic-spacer` 的 `overflow:hidden` 裁掉了 absolute 弹层，改为 `position:fixed` + 按圆环坐标定位（bade658）
+- **Windows 顶部横栏布局**：标题压在侧边栏上、LOGO 上方留空。Windows 现将 LOGO 移入该栏（macOS 不动），侧边栏顶部 LOGO 在 Windows 隐藏（938d4c4、6ba19ae、c13a2aa、92d1014）
+- **产品名统一为 SUPERCRZY**：此前在「Super Crazy」「SUPERCRZY BOT」之间漂移（337c5d3）
+
+### 工程
+
+- 从微信 SDK vendored 两个 helper（MIT，保留 Tencent 版权，逻辑逐字节一致），移除 342MB 依赖树，根除「剪掉了但仍在 import」这一类启动崩溃（251cb87）
+- CI：macOS runner 换成 macos-15（macos-14-arm64 被 GitHub 下线）、Docker 镜像 429 绕过 + 退避重试、Windows 打包门禁恢复到正确工作目录（190b76b、3ed1e79、4f18588、9cfb308、f18236f）
+- 打包 productName 临时锁定旧值，保证已装用户能继续自动更新（a63654b）
+
 ## v1.3.2 (2026-11-18) — 账号体系与多设备远程任务；Android 应用与移动端界面
 
 本次是本项目单版改动最大的一次：账号与加密同步、远程任务链路、一轮系统性安全加固，

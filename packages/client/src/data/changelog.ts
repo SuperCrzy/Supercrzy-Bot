@@ -37,6 +37,38 @@ export const APP_VERSION: string = typeof __APP_VERSION__ === 'string' ? __APP_V
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.3.3',
+    date: '2026-11-19',
+    title: '搜索恢复可用，Windows 白屏根治',
+    titleEn: 'Search works again; Windows blank window fixed',
+    features: [
+      '搜索改为双自建后端：中文查询走大陆实例，英文与技术查询走海外实例，故障自动切换，不产生按次费用',
+    ],
+    featuresEn: [
+      'Search now runs on two self-hosted backends: Chinese queries go to the mainland instance, English and technical queries go overseas, with automatic failover and no per-search fees',
+    ],
+    fixes: [
+      '搜索几乎每次都没有结果——配置读取的 bug 让五个引擎里的四个被误判为未配置',
+      'Windows 安装后白屏——改为在真实监听地址等待后端，迁移失败不再崩溃，并显示具体原因',
+      '桌面端后端启动即崩溃——移除被剪掉却仍被引用的 342MB 依赖',
+      'AI 浏览器在日常操作中被误判为死循环',
+      '发消息时上一段朗读不会停止，导致两个声音重叠',
+      '上下文用量弹窗被顶部横栏裁掉，看不到内容',
+      'Windows 顶部横栏：标题压在侧边栏上、LOGO 上方留白',
+      '产品名在多个写法之间漂移，现统一为 SUPERCRZY',
+    ],
+    fixesEn: [
+      'Search returned nothing on almost every query — a config bug made four of five engines look unconfigured',
+      'Windows blank window after install — now waits on the real listening address, survives a failed migration, and shows the reason',
+      'Desktop backend crashed on boot — removed a pruned 342 MB dependency that was still imported',
+      'The AI browser was flagged as a loop during ordinary use',
+      'Sending a message left the previous reply reading, so two voices overlapped',
+      'The context-usage popover was clipped by the top bar and never visible',
+      'Windows top bar: the title sat over the sidebar and left a gap above the logo',
+      'The product name drifted between spellings; it is now SUPERCRZY everywhere',
+    ],
+  },
+  {
     version: '1.3.2',
     date: '2026-11-18',
     title: '账号、多设备与远程任务',
