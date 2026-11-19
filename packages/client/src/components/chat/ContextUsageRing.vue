@@ -24,13 +24,13 @@
     </div>
 
     <!-- hover tooltip（顶部栏下方弹出，不遮挡横栏内容） -->
-    <div v-if="hover && !showDetail" class="ctx-tip">
+    <div v-if="hover && !showDetail" class="ctx-tip" :style="{ top: popPos.top + 'px', left: popPos.left + 'px' }">
       {{ tipLabel }} · {{ usedEstimated ? '~' : '' }}{{ usedK }}K / {{ windowK }}K
       <span v-if="lastCompressedAt" class="ctx-tip-compress">{{ $t('chat.ctxLastCompress') }} {{ lastCompressedAt }}</span>
     </div>
 
     <!-- 点击详情 -->
-    <div v-if="showDetail" class="ctx-detail">
+    <div v-if="showDetail" class="ctx-detail" :style="{ top: popPos.top + 'px', left: popPos.left + 'px' }">
       <div class="ctx-detail-title">{{ $t('chat.ctxDetailTitle') }}</div>
       <!-- 分类用量（对齐主流实现 usage-by-category-popover） -->
       <div v-if="catTokens.total > 0" class="ctx-cats">
@@ -74,6 +74,14 @@ const hasMessages = computed(() => (chatStore.currentMessages?.length || 0) > 0)
 const wrapRef = ref<HTMLElement | null>(null)
 const hover = ref(false)
 const showDetail = ref(false)
+// 弹层坐标（position: fixed，见样式注释）：按圆环位置计算，避免被横栏 overflow 裁掉
+const popPos = ref({ top: 0, left: 0 })
+function updatePopPos() {
+  const r = wrapRef.value?.getBoundingClientRect()
+  if (!r) return
+  popPos.value = { top: Math.round(r.bottom + 8), left: Math.round(r.left + r.width / 2) }
+}
+watch([hover, showDetail], () => { if (hover.value || showDetail.value) updatePopPos() })
 const compressedFlash = ref(false)
 
 // 点击组件外部 → 收回详情弹窗（点击自身由模板切换，不冲突）
@@ -188,8 +196,10 @@ watch(() => appStore.ctxCompressedAt, (v, old) => {
 .fade-enter-from, .fade-leave-to { opacity: 0; }
 
 .ctx-tip {
-  /* 顶部会话栏下方弹出 */
-  position: absolute; top: 26px; left: 50%; transform: translateX(-50%);
+  /* 顶部会话栏下方弹出。position: fixed —— .traffic-spacer 有 overflow:hidden
+     （横栏 56px 高），absolute 的弹层会被整块裁掉（2026-11-19 实测）。
+     坐标由 JS 按圆环的 getBoundingClientRect 设置。 */
+  position: fixed; transform: translateX(-50%);
   background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px;
   padding: 5px 8px; font-size: 11px; color: var(--text-secondary); white-space: nowrap; z-index: 60;
   pointer-events: none;
@@ -197,7 +207,8 @@ watch(() => appStore.ctxCompressedAt, (v, old) => {
 .ctx-tip-compress { color: var(--text-muted); margin-left: 4px; }
 
 .ctx-detail {
-  position: absolute; top: 26px; left: 50%; transform: translateX(-50%);
+  /* 同 .ctx-tip：fixed 才不会被横栏的 overflow:hidden 裁掉 */
+  position: fixed; transform: translateX(-50%);
   background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px;
   padding: 8px 10px; font-size: 11px; color: var(--text-secondary); white-space: nowrap; z-index: 60;
   display: flex; flex-direction: column; gap: 4px;
