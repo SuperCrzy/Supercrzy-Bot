@@ -798,21 +798,14 @@ onMounted(() => {
 .traffic-workspace-zone.collapsed {
   margin-left: calc(var(--sidebar-w, 220px) + 12px + 40px);
 }
-/* Windows：左侧没有红绿灯要让位（系统按钮在右侧 overlay 里），
-   标题若仍从"侧边栏右缘"开始，LOGO 上方 12~232px 会整段空着。
-   这里让标题从最左开始 —— 既没有空挡，也不存在"标题压在侧边栏上"的问题
-   （它本来就该是这一行的第一个内容）。macOS 保持工作区对齐：那边的 87px
-   是红绿灯，视觉上不空。 */
-.traffic-spacer--win .traffic-workspace-zone {
-  margin-left: 12px;
-}
-/* Windows：左侧没有红绿灯，占位区从 12px 开始（LOGO 就在这里） */
+/* Windows: no traffic lights on the left, so the logo zone starts at 12px
+   (this is where the logo lives — see .traffic-logo). The title deliberately
+   keeps the shared `sidebar-w + 12px` offset so it sits over the workspace,
+   never on top of the logo. A leftover `margin-left: 12px` override here used
+   to pull the title onto the logo on Windows; it was removed 2026-11-19. */
 .traffic-spacer--win .traffic-sidebar-zone {
   left: 12px;
   width: calc(var(--sidebar-w, 220px) - 12px);
-}
-.traffic-spacer--win .traffic-workspace-zone.collapsed {
-  margin-left: 12px;
 }
 
 .traffic-session-title {
