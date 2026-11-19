@@ -148,28 +148,59 @@ const serperProvider: SearchProvider = {
   },
 }
 
-/** 3) SearXNG：自建开源元搜索（聚合 70+ 引擎；美国 VPS 部署最佳） */
-const searxngProvider: SearchProvider = {
-  name: 'searxng',
-  async enabled() { return !!readSetting('searxngUrl') },
-  async search(ctx) {
-    const base = readSetting('searxngUrl').replace(/\/+$/, '')
-    if (!base) return []
-    const p = new URLSearchParams({ q: ctx.query, format: 'json', language: 'zh-CN', safesearch: '0' })
-    if (ctx.source === 'news') p.set('categories', 'news')
-    if (ctx.timeRange) p.set('time_range', ctx.timeRange)
+
+/**
+ * Query one SearXNG instance. Returns [] on any failure so the caller can
+ * fall back to the other instance.
+ */
+async function querySearxng(base: string, ctx: SearchContext): Promise<SearchResultItem[]> {
+  const p = new URLSearchParams({ q: ctx.query, format: 'json', safesearch: '0' })
+  if (ctx.source === 'news') p.set('categories', 'news')
+  // time_range is a native SearXNG parameter: the upstream engines do the
+  // filtering. Do NOT re-filter locally by maxAgeDays afterwards - these
+  // engines return no publishedDate, so a local filter would drop every row.
+  if (ctx.timeRange) p.set('time_range', ctx.timeRange)
+  p.set('language', /[\u4e00-\u9fff]/.test(ctx.query) ? 'zh-CN' : 'en')
+  try {
     const resp = await fetch(`${base}/search?${p.toString()}`, {
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; SUPERCRZY-BOT/1.0)', 'Accept': 'application/json' },
-      signal: AbortSignal.timeout(12000),
+      signal: AbortSignal.timeout(30000),
     })
     if (!resp.ok) return []
-    const sd = await resp.json()
+    const sd: any = await resp.json()
     return (sd.results || []).map((r: any) => ({
       title: r.title || '', url: r.url || '',
       description: (r.content || r.snippet || '').slice(0, 300),
       date: r.publishedDate || '',
       engine: r.engine ? (Array.isArray(r.engine) ? r.engine.join(',') : String(r.engine)) : '',
-    }))
+    })) as SearchResultItem[]
+  } catch { return [] }
+}
+
+/** 3) SearXNG：自建开源元搜索（聚合 70+ 引擎；美国 VPS 部署最佳） */
+const searxngProvider: SearchProvider = {
+  name: 'searxng',
+  async enabled() { return !!readSetting('searxngUrl') },
+  async search(ctx) {
+    // Two self-hosted instances (2026-11-19):
+    //   CN  (116.181.17.27)  - upstreams reachable in mainland China (360search).
+    //                          Chinese queries are much faster and better here.
+    //   GLOBAL (107.174.107.199) - Google/Brave/DDG; required for English and
+    //                          technical queries, where the CN instance only
+    //                          returns Chinese blogspam.
+    // Pick by query language, then fall back to the other instance on failure.
+    // `searxngUrlGlobal` is optional: when unset only the CN instance is used.
+    const cn = readSetting('searxngUrl').replace(/\/+$/, '')
+    const global = readSetting('searxngUrlGlobal').replace(/\/+$/, '')
+    const hasCJK = /[\u4e00-\u9fff]/.test(ctx.query)
+    const ordered = hasCJK ? [cn, global] : [global, cn]
+    const bases = ordered.filter((b, i) => b && ordered.indexOf(b) === i)
+    if (!bases.length) return []
+    for (const base of bases) {
+      const rows = await querySearxng(base, ctx)
+      if (rows.length) return rows
+    }
+    return []
   },
 }
 
@@ -252,7 +283,11 @@ const bingProvider: SearchProvider = {
  * SearXNG(自建,聚合Google,免费)紧跟，Bing 纯兜底。Tavily/Serper 需付费 key 缺失即 disabled。
  */
 export const SEARCH_PROVIDERS: SearchProvider[] = [
-  deepseekProvider, searxngProvider, bingProvider, tavilyProvider, serperProvider,
+  // deepseek is intentionally NOT in the chain: it bills per search call
+  // (CNY 5 / 1000) and the self-hosted SearXNG instances outperform it on
+  // every measured axis (latency 0.2-1.2s vs 5.3s, 20 rows vs 8, better
+  // sources). It stays defined below so it can be re-enabled explicitly.
+  searxngProvider, bingProvider, tavilyProvider, serperProvider,
 ]
 
 /**
@@ -268,8 +303,12 @@ export async function runSearchChain(
     if (!(await provider.enabled(ctx))) continue
     const raw = await safeSearch(provider, ctx)
     if (raw.length > 0) {
-      // 不同引擎返回的字段略有差异；raw 已是标准化 SearchResultItem
-      return { engine: provider.name, results: postProcessSearchResults(raw as any, count, maxAge) }
+      // SearXNG rows carry no publishedDate (its engines do not expose one),
+      // but `time_range` was already applied server-side, so re-filtering by
+      // age here would drop the entire result set. Skip the local age filter
+      // for it and rely on the upstream filter.
+      const effectiveMaxAge = provider.name === 'searxng' ? 0 : maxAge
+      return { engine: provider.name, results: postProcessSearchResults(raw as any, count, effectiveMaxAge) }
     }
   }
   return { engine: 'none', results: [] }
