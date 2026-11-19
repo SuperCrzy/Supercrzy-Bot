@@ -762,7 +762,9 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-left: calc(var(--sidebar-w, 220px) + 12px - 80px); /* 贴分隔线但留间距（标题左移 80px） */
+  /* 2026-11-19: 原先是 +12px - 80px，标题落在侧边栏正上方（Windows 上尤其明显）。
+     改回贴侧边栏右缘 + 12px —— 标题必须在工作区上边，不压侧边栏。 */
+  margin-left: calc(var(--sidebar-w, 220px) + 12px);
   min-width: 0;
   flex: 1;
   -webkit-app-region: no-drag;
@@ -770,7 +772,7 @@ onMounted(() => {
 }
 /* 收起态：侧边栏窄栏(48px)后标题右移 40px，避开红绿灯/窗口按钮 */
 .traffic-workspace-zone.collapsed {
-  margin-left: calc(var(--sidebar-w, 220px) + 12px - 80px + 40px);
+  margin-left: calc(var(--sidebar-w, 220px) + 12px + 40px);
 }
 .traffic-session-title {
   font-size: 13px;
@@ -931,6 +933,7 @@ onMounted(() => {
 .sidebar-header {
   display: flex;
   align-items: center;
+  justify-content: center; /* LOGO 组居中（2026-11-19） */
   gap: 10px;
   height: 56px;
   min-height: 56px;
@@ -946,8 +949,9 @@ onMounted(() => {
 }
 
 .logo-icon {
-  width: 28px;
-  height: 28px;
+  /* 2026-11-19 老板要求：LOGO 放大 + 居中（原 28px） */
+  width: 34px;
+  height: 34px;
   border-radius: var(--radius-md);
   display: flex;
   align-items: center;
@@ -960,7 +964,7 @@ onMounted(() => {
 }
 
 .logo-text {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
   white-space: nowrap;
   font-family: 'Saira Stencil One', sans-serif;
