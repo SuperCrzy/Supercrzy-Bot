@@ -185,10 +185,19 @@ done
 # instead and let dirname see the whole name.
 MAC_DIR=$(dirname "$(find /root/artifacts/mac -name '*.dmg' -print -quit)")
 WIN_DIR=$(dirname "$(find /root/artifacts/win -name '*.exe' -print -quit)")
-cp -v "$MAC_DIR/SUPERCRZY BOT-$PUB_VER-arm64.dmg"         "$REL_DIR/"
-cp -v "$MAC_DIR/SUPERCRZY BOT-$PUB_VER-arm64.dmg.blockmap"     "$REL_DIR/"
-cp -v "$MAC_DIR/SUPERCRZY BOT-$PUB_VER-arm64-mac.zip"         "$REL_DIR/"
-cp -v "$MAC_DIR/SUPERCRZY BOT-$PUB_VER-arm64-mac.zip.blockmap" "$REL_DIR/"
+# 2026-11-19: productName changed from "SUPERCRZY BOT" to "SUPERCRZY", so macOS
+# artifacts are now named SUPERCRZY-$VER-arm64.dmg. Accept both spellings rather
+# than pinning one — the name is electron-builder's, not ours.
+MAC_STEM=""
+for cand in "SUPERCRZY BOT-$PUB_VER-arm64" "SUPERCRZY-$PUB_VER-arm64"; do
+  [ -f "$MAC_DIR/$cand.dmg" ] && { MAC_STEM="$cand"; break; }
+done
+[ -n "$MAC_STEM" ] || { echo "no macOS dmg for $PUB_VER in $MAC_DIR" >&2; exit 1; }
+echo "macOS artifact stem: $MAC_STEM"
+cp -v "$MAC_DIR/$MAC_STEM.dmg" "$REL_DIR/"
+cp -v "$MAC_DIR/$MAC_STEM.dmg.blockmap"     "$REL_DIR/"
+cp -v "$MAC_DIR/$MAC_STEM-mac.zip"         "$REL_DIR/"
+cp -v "$MAC_DIR/$MAC_STEM-mac.zip.blockmap" "$REL_DIR/"
 cp -v "$MAC_DIR/latest-mac.yml"                              "$REL_DIR/"
 cp -v "$WIN_DIR/SUPERCRZY BOT Setup $PUB_VER.exe"            "$REL_DIR/"
 cp -v "$WIN_DIR/SUPERCRZY BOT Setup $PUB_VER.exe.blockmap"   "$REL_DIR/"
@@ -224,7 +233,7 @@ vssh "REL_ID='$REL_ID' PUB_VER='$VER' GH_TOKEN='$TOKEN' bash -s" <<'EOS'
 set -euo pipefail
 cd /root/artifacts
 # mac + win dirs still hold the artifacts; re-locate the binaries
-DMG=$(find mac -name "SUPERCRZY BOT-$PUB_VER-arm64.dmg" | head -1)
+DMG=$(find mac -name "SUPERCRZY*-$PUB_VER-arm64.dmg" | head -1)
 ZIP=$(find mac -name "SUPERCRZY BOT-$PUB_VER-arm64-mac.zip" | head -1)
 EXE=$(find win -name "SUPERCRZY BOT Setup $PUB_VER.exe" | head -1)
 for f in "$DMG" "$ZIP" "$EXE"; do
@@ -348,10 +357,21 @@ check_yml() {
         fail=1
     fi
 }
-check "$PUBLIC/SUPERCRZY%20BOT-$VER-arm64.dmg"                 "dmg"           206
-check "$PUBLIC/SUPERCRZY%20BOT-$VER-arm64.dmg.blockmap"        "dmg.blockmap"  206
-check "$PUBLIC/SUPERCRZY%20BOT-$VER-arm64-mac.zip"             "zip"           206
-check "$PUBLIC/SUPERCRZY%20BOT-$VER-arm64-mac.zip.blockmap"    "zip.blockmap"  206
+# 2026-11-19: read the actual macOS artifact names out of latest-mac.yml instead of
+# hard-coding them. productName changed to SUPERCRZY, so the files are no longer
+# "SUPERCRZY BOT-$VER-..." and the old hard-coded names returned 404 here while the
+# real files served 200 — a false failure that blocked an otherwise good release.
+# NOTE: BSD sed (macOS) has no \s — use [[:space:]] so this works locally AND on
+# the VPS (GNU sed). Tested both.
+MAC_DMG=$(curl -s -L --max-time 20 "$PUBLIC/latest-mac.yml" | grep -E '[[:space:]]+- url: .*\.dmg$' | head -1 | sed 's/^[[:space:]]*- url: //' | tr -d '\r')
+MAC_ZIP=$(curl -s -L --max-time 20 "$PUBLIC/latest-mac.yml" | grep -E '[[:space:]]+- url: .*-mac\.zip$' | head -1 | sed 's/^[[:space:]]*- url: //' | tr -d '\r')
+[ -n "$MAC_DMG" ] || { echo "cannot read dmg name from latest-mac.yml" >&2; exit 1; }
+[ -n "$MAC_ZIP" ] || { echo "cannot read zip name from latest-mac.yml" >&2; exit 1; }
+urlenc() { printf '%s' "$1" | sed 's/ /%20/g'; }
+check "$PUBLIC/$(urlenc "$MAC_DMG")"          "dmg ($MAC_DMG)"   206
+check "$PUBLIC/$(urlenc "$MAC_DMG").blockmap" "dmg.blockmap"     206
+check "$PUBLIC/$(urlenc "$MAC_ZIP")"          "zip ($MAC_ZIP)"   206
+check "$PUBLIC/$(urlenc "$MAC_ZIP").blockmap" "zip.blockmap"     206
 check "$PUBLIC/SUPERCRZY%20BOT%20Setup%20$VER.exe"             "exe"           206
 check "$PUBLIC/SUPERCRZY%20BOT%20Setup%20$VER.exe.blockmap"    "exe.blockmap"  206
 check_yml "$PUBLIC/latest-mac.yml" "latest-mac.yml"
