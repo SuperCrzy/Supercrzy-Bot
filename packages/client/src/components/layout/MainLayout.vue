@@ -774,6 +774,23 @@ onMounted(() => {
 .traffic-workspace-zone.collapsed {
   margin-left: calc(var(--sidebar-w, 220px) + 12px + 40px);
 }
+/* Windows：左侧没有红绿灯要让位（系统按钮在右侧 overlay 里），
+   标题若仍从"侧边栏右缘"开始，LOGO 上方 12~232px 会整段空着。
+   这里让标题从最左开始 —— 既没有空挡，也不存在"标题压在侧边栏上"的问题
+   （它本来就该是这一行的第一个内容）。macOS 保持工作区对齐：那边的 87px
+   是红绿灯，视觉上不空。 */
+.traffic-spacer--win .traffic-workspace-zone {
+  margin-left: 12px;
+}
+/* Mac 的侧边栏上方占位在 Windows 上没有意义（no-drag 反而让那一整块
+   拖不动窗口），直接收掉 —— 标题已经从那片区域开始了。 */
+.traffic-spacer--win .traffic-sidebar-zone {
+  display: none;
+}
+.traffic-spacer--win .traffic-workspace-zone.collapsed {
+  margin-left: 12px;
+}
+
 .traffic-session-title {
   font-size: 13px;
   font-weight: 600;
