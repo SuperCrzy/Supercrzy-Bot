@@ -80,6 +80,7 @@
            Mac 上它在红绿灯右侧，Windows 上从最左开始。 -->
       <div class="traffic-sidebar-zone">
         <div
+          v-if="isWin"
           class="traffic-logo"
           @click="onLogoClick"
           :title="sidebarCollapsed ? $t('nav.expand') : $t('nav.collapse')"
@@ -142,7 +143,7 @@
     <aside v-if="!(isMobile && isMediaSpace)" class="sidebar" :class="{ collapsed: sidebarCollapsed, 'mobile-open': mobileMenuOpen }">
       <!-- Logo：点击伸缩侧边栏（展开顺时针 360° / 收起逆时针 360°），旋转与伸缩进度同步 -->
       <div
-        v-if="!isDesktop"
+        v-if="!isDesktop || !isWin"
         class="sidebar-header"
         @click="onLogoClick"
         :title="sidebarCollapsed ? $t('nav.expand') : $t('nav.collapse')"
