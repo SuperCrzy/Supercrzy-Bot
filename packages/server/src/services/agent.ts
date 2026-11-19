@@ -611,8 +611,21 @@ const TURN_CONFIG = {
  * 防死循环：模型卡在"同一条命令反复试"时主动干预，而不是烧 token 到轮次上限。
  */
 const TOOL_CALL_HISTORY: Array<{ name: string; hash: number }> = []
-const LOOP_THRESHOLD = 4
+// 2026-11-19: 4 was too eager for stateful/interactive tools. A real loop (same
+// call, same outcome) shows up by 6 just as well; false positives on legitimate
+// multi-step work are the costly failure mode.
+const LOOP_THRESHOLD = 6
 const LOOP_HISTORY_MAX = 12
+// Tools whose identical arguments do NOT imply repeated useless work: each call
+// observes or mutates a changing page, and they carry their own timeouts. The
+// AI browser workflow (snapshot -> click -> snapshot, screenshot) calls the same
+// no-arg action repeatedly by design.
+const LOOP_EXEMPT_TOOLS = new Set(['browser'])
+
+/** Test hook: module-level history is shared across calls by design. */
+export function resetToolLoopHistory(): void {
+  TOOL_CALL_HISTORY.length = 0
+}
 
 /** 简单字符串 hash（参数归一化用，不追求密码学强度） */
 function simpleHash(s: string): number {
@@ -621,9 +634,10 @@ function simpleHash(s: string): number {
   return h
 }
 
-function detectToolLoop(calls: Array<{ function?: { name?: string; arguments?: string } }>): { name: string; count: number } | null {
+export function detectToolLoop(calls: Array<{ function?: { name?: string; arguments?: string } }>): { name: string; count: number } | null {
   for (const tc of calls) {
     const name = tc.function?.name || 'unknown'
+    if (LOOP_EXEMPT_TOOLS.has(name)) continue
     const args = (tc.function?.arguments || '').trim()
     const hash = simpleHash(args)
     TOOL_CALL_HISTORY.push({ name, hash })
