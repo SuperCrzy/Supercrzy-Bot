@@ -7,6 +7,7 @@
  * - web_search 按优先级遍历 SEARCH_PROVIDERS，取第一个返回非空结果的引擎（探测→降级）
  * - 新增引擎：实现接口 + push 进 SEARCH_PROVIDERS，web_search 无需改动
  */
+import { getDB } from './database'
 
 // ===================== 类型 & 工具（从 tools.ts 迁出，保证无循环依赖） =====================
 
@@ -49,13 +50,25 @@ export function postProcessSearchResults<T extends { title: string; url: string;
   return out.slice(0, limit)
 }
 
-/** 读取 settings 表配置（provider 内自查，避免与 tools.ts 循环依赖） */
+/**
+ * 读取 settings 表配置。
+ *
+ * 2026-11-19 修（实测 P0）：原来是 `require('./database')`。这个包是
+ * "type": "module"，ESM 下没有 require —— 它抛 ERR_UNSUPPORTED_DIR_IMPORT
+ * （目录导入 + 缺扩展名），被下面的 catch 吞成 ''，于是**所有需要 key 的
+ * 引擎恒判"未配置"**（实测 deepseek/searxng/tavily/serper 全 false，只剩不需要
+ * key 的 bing）。库里明明有 apiKey 和 searxngUrl，用户却只能拿到 bing 的结果。
+ *
+ * 现在改用静态 import。这里不存在循环依赖：database.ts 不 import 本文件。
+ * catch 仍然保留（DB 未初始化时 enabled() 不该炸启动），但会打日志 ——
+ * 静默吞异常正是这个 bug 藏了这么久的原因。
+ */
 function readSetting(key: string): string {
   try {
-    const { getDB } = require('./database')
     const row = getDB().prepare('SELECT value FROM settings WHERE key = ?').get(key) as any
     return row?.value ? String(row.value).trim() : ''
-  } catch {
+  } catch (error) {
+    console.warn('[search] readSetting failed (is the DB initialized?):', key, error instanceof Error ? error.message : error)
     return ''
   }
 }
