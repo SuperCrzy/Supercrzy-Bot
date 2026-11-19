@@ -75,7 +75,19 @@
          sidebar 收缩不影响它；整行可拖拽；交互元素 no-drag。
          展开/收起：横栏收缩按钮、单击分隔条、Cmd+B（按钮式，无拖拽） -->
     <div v-if="isDesktop" class="traffic-spacer" :class="{ 'traffic-spacer--win': isWin }">
-      <div class="traffic-sidebar-zone"></div>
+      <!-- 2026-11-19：LOGO 移到顶栏左侧（原在 sidebar-header）。
+           作用：填充侧边栏上方的横栏区，避免"标题在工作区、左侧全空"的割裂感。
+           Mac 上它在红绿灯右侧，Windows 上从最左开始。 -->
+      <div class="traffic-sidebar-zone">
+        <div
+          class="traffic-logo"
+          @click="onLogoClick"
+          :title="sidebarCollapsed ? $t('nav.expand') : $t('nav.collapse')"
+        >
+          <img src="/logo.png" alt="SUPERCRZY" class="logo-icon" :style="{ transform: `rotate(${logoAngle}deg)` }" />
+          <span class="logo-text" v-show="!sidebarCollapsed"><span class="logo-brand"><span class="brand-name">SUPERCRZY</span></span></span>
+        </div>
+      </div>
       <!-- 工作区段：当前会话标题 + 模型 + 工作区 + 上下文用量 -->
       <div class="traffic-workspace-zone" :class="{ collapsed: sidebarCollapsed }">
         <!-- 可编辑标题：hover 显示笔，点笔进入编辑态重命名会话 -->
@@ -130,7 +142,7 @@
     <aside v-if="!(isMobile && isMediaSpace)" class="sidebar" :class="{ collapsed: sidebarCollapsed, 'mobile-open': mobileMenuOpen }">
       <!-- Logo：点击伸缩侧边栏（展开顺时针 360° / 收起逆时针 360°），旋转与伸缩进度同步 -->
       <div
-        v-if="!isMobile"
+        v-if="!isDesktop"
         class="sidebar-header"
         @click="onLogoClick"
         :title="sidebarCollapsed ? $t('nav.expand') : $t('nav.collapse')"
@@ -748,6 +760,17 @@ onMounted(() => {
 
 
 /* 侧边栏上方区：红绿灯右侧到 sidebar 右缘之间留白（宽度随侧边栏；收起态宽度为负被裁，不影响按钮） */
+.traffic-logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 100%;
+  padding: 0 14px;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  pointer-events: auto;
+}
+
 .traffic-sidebar-zone {
   position: absolute;
   left: 87px;
@@ -782,10 +805,10 @@ onMounted(() => {
 .traffic-spacer--win .traffic-workspace-zone {
   margin-left: 12px;
 }
-/* Mac 的侧边栏上方占位在 Windows 上没有意义（no-drag 反而让那一整块
-   拖不动窗口），直接收掉 —— 标题已经从那片区域开始了。 */
+/* Windows：左侧没有红绿灯，占位区从 12px 开始（LOGO 就在这里） */
 .traffic-spacer--win .traffic-sidebar-zone {
-  display: none;
+  left: 12px;
+  width: calc(var(--sidebar-w, 220px) - 12px);
 }
 .traffic-spacer--win .traffic-workspace-zone.collapsed {
   margin-left: 12px;
