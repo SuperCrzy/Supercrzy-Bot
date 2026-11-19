@@ -2191,6 +2191,10 @@ function ensureApiKey(): boolean {
 async function handleSend() {
   // 未配置模型 → 引导去模型页（不继续发送）
   if (!ensureApiKey()) return
+  // 2026-11-19: sending a message interrupts the reading of the previous reply —
+  // otherwise the old utterance keeps playing while the new reply starts reading,
+  // and the user hears two voices at once.
+  stopSpeech()
   // 新消息发送 → 重置全局执行状态条（任务胶囊由 doSend 统一重置）
   aiStatus.value = 'chat.statusThinking'
   // 编辑态：回车提交编辑（替换原消息重发）
