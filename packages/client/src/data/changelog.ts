@@ -37,6 +37,32 @@ export const APP_VERSION: string = typeof __APP_VERSION__ === 'string' ? __APP_V
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.3.4',
+    date: '2026-11-20',
+    title: '横栏变矮，左侧多了菜单栏',
+    titleEn: 'Shorter top bar with an app menu',
+    features: [
+      '顶栏降到 36px，左侧新增文件 / 视图 / 帮助菜单：可新建对话、显示隐藏侧边栏和右栏、缩放界面、全屏、检查更新、打开日志和数据目录',
+    ],
+    featuresEn: [
+      'The top bar is 36px now, with File / View / Help on the left: new chat, show or hide the sidebar and right panel, zoom, full screen, check for updates, and open the log and data folders',
+    ],
+    fixes: [
+      'Windows 上会话标题压在 LOGO 上',
+      'Windows 深色模式下最小化、最大化、关闭按钮看不见',
+      '搜索会为挂掉的实例空等一整个超时',
+      'macOS 构建被镜像限流卡住',
+      '发版脚本误报文件 404',
+    ],
+    fixesEn: [
+      'Windows: the session title sat on top of the logo',
+      'Windows: minimize, maximize and close were invisible in dark mode',
+      'Search waited out the full timeout on a backend that was down',
+      'The macOS build was blocked by a mirror rate limit',
+      'The release script reported files as missing when they were fine',
+    ],
+  },
+  {
     version: '1.3.3',
     date: '2026-11-19',
     title: '搜索恢复可用，Windows 白屏根治',
