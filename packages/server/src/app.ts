@@ -15,6 +15,7 @@ import { createServer } from 'http'
 import { config } from './config'
 import { startRelayClient } from './services/relay-client'
 import { initDatabase } from './services/database'
+import { startSearxngTunnel } from './services/searxng-tunnel'
 import { startEventLoopMonitor, getEventLoopStats } from './services/event-loop-lag'
 import { getSseStats } from './services/sse-health'
 import { createTerminalServer } from './services/terminal'
@@ -108,6 +109,9 @@ function getLocalIP(): string {
 
 async function bootstrap() {
   initDatabase()
+  // Keeps an optional SearXNG relay alive when the direct cross-border link is
+  // unusable; a no-op unless the searxngTunnel setting is present.
+  startSearxngTunnel()
   // 事件循环延迟采样：/api/health 与 /api/system/diagnostics 的客观判据来源（见 services/event-loop-lag.ts）
   startEventLoopMonitor()
   initChannelsTable()

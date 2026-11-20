@@ -897,7 +897,8 @@ onMounted(() => {
   width: max(0px, calc(var(--sidebar-w, 220px) - 87px));
   display: flex;
   align-items: center;
-  gap: 2px;
+  /* 8px between toggle and labels: at 2px the icon ran into the first word. */
+  gap: 8px;
   padding-left: 2px;
   /* Hard boundary: the menu must never reach past the sidebar's right edge,
      otherwise it overlaps the session title (measured 323px vs 220px at first).
@@ -926,11 +927,17 @@ onMounted(() => {
 }
 
 .menu-item-btn {
+  /* Same 24px box as .menu-toggle-btn so the label and the icon share a
+     baseline instead of sitting a pixel or two apart. */
+  display: flex;
+  align-items: center;
+  height: 24px;
   border: none;
   background: transparent;
   color: var(--text-secondary);
-  font-size: 12px;
-  padding: 3px 4px;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 7px;
   border-radius: 5px;
   cursor: pointer;
   white-space: nowrap;
@@ -1179,12 +1186,16 @@ onMounted(() => {
 .sidebar-header {
   display: flex;
   align-items: center;
-  justify-content: center; /* centre the logo group (2026-11-19) */
-  gap: 10px;
+  /* Left-aligned: the logo shares its left edge with the menu row below it
+     (the toggle sits at the same 14px), so the two rows read as one column. */
+  justify-content: flex-start;
+  gap: 8px;
   height: 36px;
   min-height: 36px;
   box-sizing: border-box;
-  padding: 0 14px;
+  /* 18px = .nav-item's 8px container offset + its 10px inner padding, so the
+     logo mark lines up with the nav icons directly below it. */
+  padding: 0 14px 0 18px;
   cursor: pointer;
 }
 /* 收起态：LOGO 圆标居中 */
@@ -1195,9 +1206,10 @@ onMounted(() => {
 }
 
 .logo-icon {
-  /* 2026-11-19: logo enlarged and centred per product review (was 28px). */
-  width: 34px;
-  height: 34px;
+  /* 28px was oversized for a 36px row once the logo moved back into the
+     sidebar; 22px leaves the same breathing room as the 16px menu icons. */
+  width: 22px;
+  height: 22px;
   border-radius: var(--radius-md);
   display: flex;
   align-items: center;
