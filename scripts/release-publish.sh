@@ -34,8 +34,15 @@ PUBLIC="https://updates.supercrzy.com/releases"
 SITE_BOT_HTML="${SITE_BOT_HTML:-$(cd "$(dirname "$0")/../.." && pwd)/SUPERCRZY-v2/bot.html}"
 
 here=$(cd "$(dirname "$0")/.." && pwd)
+# .env supplies the defaults, but an explicitly exported VPS_TARGET must win —
+# otherwise there is no way to route through a jump host for one run without
+# editing a tracked-ignored file. Same for the token and repo overrides.
+_env_vps_target="${VPS_TARGET:-}"
+_env_vps_jump="${VPS_SSH_JUMP:-}"
 # shellcheck disable=SC1091
 [ -f "$here/.env" ] && . "$here/.env"
+[ -n "$_env_vps_target" ] && VPS_TARGET="$_env_vps_target"
+[ -n "$_env_vps_jump" ] && VPS_SSH_JUMP="$_env_vps_jump"
 : "${VPS_TARGET:?set VPS_TARGET=root@host in .env}"
 
 VER=""
@@ -61,8 +68,11 @@ die()  { printf 'ERROR: %s\n' "$1" >&2; exit 1; }
 # 2026-10-24: banner exchange timeouts on a dead VPN node).
 vssh() {
     local attempt=1 rc=0
+    # VPS_SSH_JUMP lets a run route through a jump host (e.g. "-J root@1.2.3.4")
+    # without touching ~/.ssh/config — the sandboxed shell used by automation
+    # does not always resolve Host aliases from there.
     while [ $attempt -le 2 ]; do
-        if ssh -o BatchMode=yes -o ConnectTimeout=15 "$VPS_TARGET" "$@"; then
+        if ssh ${VPS_SSH_JUMP:-} -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=no "$VPS_TARGET" "$@"; then
             return 0
         fi
         rc=$?
@@ -86,10 +96,6 @@ if [ "$pkg_ver" != "$VER" ] && [ "$FORCE" -ne 1 ]; then
 fi
 
 if [ "$BOT_ONLY" -eq 0 ]; then
-    if ! git -C "$here" ls-remote --tags origin "refs/tags/v${VER}" | grep -q .; then
-        die "tag v${VER} not found on origin — push the tag and wait for CI first"
-    fi
-
     notes_file="$here/docs/release-notes/v${VER}.md"
     [ -f "$notes_file" ] || die "release notes missing: docs/release-notes/v${VER}.md"
 fi
@@ -99,6 +105,20 @@ log "2/8 token (in-memory only, never written to disk)"
 TOKEN=$(printf 'protocol=https\nhost=github.com\n\n' \
     | git credential fill 2>/dev/null | grep '^password=' | cut -d= -f2-)
 [ -n "$TOKEN" ] || die "could not read a GitHub token via git credential fill"
+
+# The tag must exist on origin before publishing. `ls-remote` needs github.com
+# reachable from THIS host, which it is not behind the mainland network, so fall
+# back to the GitHub API via the VPS. A local tag is never accepted on its own —
+# that would let a release ship from a tag that was never pushed.
+if [ "$BOT_ONLY" -eq 0 ]; then
+    if git ls-remote --tags origin "refs/tags/v${VER}" 2>/dev/null | grep -q .; then
+        :
+    elif vssh "curl -s --max-time 20 -H 'Authorization: Bearer $TOKEN' -H 'Accept: application/vnd.github+json' 'https://api.github.com/repos/$REPO/git/ref/tags/v${VER}'" | grep -q '"ref"'; then
+        echo "  (tag v${VER} verified through the GitHub API from the VPS — this host cannot reach github.com)"
+    else
+        die "tag v${VER} not found on origin — push the tag and wait for CI first"
+    fi
+fi
 
 api() { # api <method> <path> [jq-filter]
     local method="$1" path="$2" filter="${3:-.}"
@@ -315,7 +335,7 @@ else
     diff -u "$SITE_BOT_HTML" "$tmp_html" || true
     if [ "$PUBLISH_BOT_HTML" -eq 1 ]; then
         cp "$tmp_html" "$SITE_BOT_HTML"
-        scp -o BatchMode=yes "$SITE_BOT_HTML" "$VPS_TARGET:/opt/supercrzy-v2/bot.html"
+        scp ${VPS_SSH_JUMP:-} -o BatchMode=yes -o StrictHostKeyChecking=no "$SITE_BOT_HTML" "$VPS_TARGET:/opt/supercrzy-v2/bot.html"
         echo "bot.html uploaded"
     else
         echo "(temp copy kept at $tmp_html — review the diff, then run:"
