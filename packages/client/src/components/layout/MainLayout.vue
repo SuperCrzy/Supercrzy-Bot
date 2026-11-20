@@ -75,20 +75,26 @@
          sidebar 收缩不影响它；整行可拖拽；交互元素 no-drag。
          展开/收起：横栏收缩按钮、单击分隔条、Cmd+B（按钮式，无拖拽） -->
     <div v-if="isDesktop" class="traffic-spacer" :class="{ 'traffic-spacer--win': isWin }">
-      <!-- 2026-11-19: the logo moved into the top bar's left zone (was in
-           sidebar-header). It fills the band above the sidebar so the left side
-           is not empty while the title sits over the workspace. On macOS it
-           starts right of the traffic lights; on Windows it starts at 12px. -->
-      <div class="traffic-sidebar-zone">
-        <div
-          v-if="isWin"
-          class="traffic-logo"
+      <!-- Left zone: sidebar toggle + app menu, confined to the sidebar column
+           so the session title can start exactly at the workspace edge.
+           Collapsed, the menu is hidden entirely (only the toggle remains) —
+           at 48px there is no room for File/View/Help and they would overlap
+           the title. On macOS this zone starts right of the traffic lights. -->
+      <div class="traffic-sidebar-zone" :data-collapsed="sidebarCollapsed ? 'true' : 'false'">
+        <button
+          class="menu-toggle-btn"
           @click="onLogoClick"
           :title="sidebarCollapsed ? $t('nav.expand') : $t('nav.collapse')"
         >
-          <img src="/logo.png" alt="SUPERCRZY" class="logo-icon" :style="{ transform: `rotate(${logoAngle}deg)` }" />
-          <span class="logo-text" v-show="!sidebarCollapsed"><span class="logo-brand"><span class="brand-name">SUPERCRZY</span></span></span>
-        </div>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/>
+          </svg>
+        </button>
+        <template v-if="!sidebarCollapsed">
+          <button class="menu-item-btn" @click="openAppMenu('file', $event)">{{ $t('nav.menu.file') }}</button>
+          <button class="menu-item-btn" @click="openAppMenu('view', $event)">{{ $t('nav.menu.view') }}</button>
+          <button class="menu-item-btn" @click="openAppMenu('help', $event)">{{ $t('nav.menu.help') }}</button>
+        </template>
       </div>
       <!-- 工作区段：当前会话标题 + 模型 + 工作区 + 上下文用量 -->
       <div class="traffic-workspace-zone" :class="{ collapsed: sidebarCollapsed }">
@@ -133,6 +139,23 @@
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
         </button>
       </div>
+
+      <!-- App menu panel. Anchored under the clicked menu button (coordinates
+           captured in openAppMenu); closed by an outside pointerdown. -->
+      <div
+        v-if="activeMenu"
+        class="app-menu-panel"
+        :style="{ left: menuAnchor.x + 'px', top: menuAnchor.y + 'px' }"
+        @click.stop
+      >
+        <template v-for="item in currentMenu" :key="item.key">
+          <div v-if="item.divider" class="app-menu-divider"></div>
+          <button v-else class="app-menu-row" @click="runMenu(item.action)">
+            <span class="app-menu-label">{{ item.label }}</span>
+            <span v-if="item.shortcut" class="app-menu-shortcut">{{ item.shortcut }}</span>
+          </button>
+        </template>
+      </div>
     </div>
 
     <!-- App 自身更新横幅（2026-10-12）：状态由主进程 electron-updater 经 IPC 推送。
@@ -144,7 +167,7 @@
     <aside v-if="!(isMobile && isMediaSpace)" class="sidebar" :class="{ collapsed: sidebarCollapsed, 'mobile-open': mobileMenuOpen }">
       <!-- Logo：点击伸缩侧边栏（展开顺时针 360° / 收起逆时针 360°），旋转与伸缩进度同步 -->
       <div
-        v-if="!isDesktop || !isWin"
+        v-if="!isMobile"
         class="sidebar-header"
         @click="onLogoClick"
         :title="sidebarCollapsed ? $t('nav.expand') : $t('nav.collapse')"
@@ -382,7 +405,7 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { reactive, ref, computed, watch, onMounted, onUnmounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useMessage } from 'naive-ui'
 import { useAppStore } from '@/stores/app'
@@ -508,6 +531,7 @@ const backendReady = ref('')
  */
 const platform = ref<'darwin' | 'win32' | 'linux'>('darwin')
 const isWin = computed(() => platform.value === 'win32')
+const isMac = computed(() => platform.value === 'darwin')
 ;(() => {
   try {
     const d = (window as any).supercrzyDesktop
@@ -558,6 +582,108 @@ function onLogoClick() {
   logoAngle.value += sidebarCollapsed.value ? 360 : -360
   toggleSidebar()
 }
+
+// ---- App menu (File / View / Help in the top bar) ----
+// Rendered as an absolutely-positioned panel anchored under the clicked button.
+const activeMenu = ref<'' | 'file' | 'view' | 'help'>('')
+const menuAnchor = ref({ x: 0, y: 0 })
+
+interface MenuItem {
+  key: string
+  label: string
+  shortcut?: string
+  action?: () => void
+  divider?: boolean
+}
+
+const desktopBridge = () => (window as any).supercrzyDesktop
+
+function openAppMenu(which: 'file' | 'view' | 'help', ev: MouseEvent) {
+  if (activeMenu.value === which) { activeMenu.value = ''; return }
+  const rect = (ev.currentTarget as HTMLElement).getBoundingClientRect()
+  menuAnchor.value = { x: rect.left, y: rect.bottom + 4 }
+  activeMenu.value = which
+}
+
+function closeAppMenu() { activeMenu.value = '' }
+
+function runMenu(fn?: () => void) {
+  closeAppMenu()
+  fn?.()
+}
+
+const fileMenu = computed<MenuItem[]>(() => [
+  { key: 'newChat', label: t('nav.menu.newChat'), shortcut: mod('N'), action: () => handleNewChat() },
+  { key: 'newCollab', label: t('nav.menu.newCollab'), action: () => router.push({ name: 'Collab' }) },
+  { key: 'd1', label: '', divider: true },
+  { key: 'openSettings', label: t('nav.menu.openSettings'), shortcut: mod(','), action: () => router.push({ name: 'Settings' }) },
+  { key: 'd2', label: '', divider: true },
+  { key: 'quit', label: t('nav.menu.quit'), shortcut: isWin.value ? 'Alt+F4' : '⌘Q', action: () => desktopBridge()?.app?.quit?.() },
+])
+
+const viewMenu = computed<MenuItem[]>(() => [
+  { key: 'toggleSidebar', label: t('nav.menu.toggleSidebar'), shortcut: mod('B'), action: () => toggleSidebar() },
+  { key: 'toggleDetail', label: t('nav.menu.toggleDetail'), shortcut: mod('J'), action: () => appStore.toggleDetailPanel() },
+  { key: 'd1', label: '', divider: true },
+  { key: 'zoomIn', label: t('nav.menu.zoomIn'), shortcut: mod('+'), action: () => desktopBridge()?.app?.zoom?.('in') },
+  { key: 'zoomOut', label: t('nav.menu.zoomOut'), shortcut: mod('-'), action: () => desktopBridge()?.app?.zoom?.('out') },
+  { key: 'zoomReset', label: t('nav.menu.zoomReset'), shortcut: mod('0'), action: () => desktopBridge()?.app?.zoom?.('reset') },
+  { key: 'd2', label: '', divider: true },
+  { key: 'toggleDark', label: t('nav.menu.toggleDark'), action: () => appStore.toggleDarkMode() },
+  { key: 'fullscreen', label: t('nav.menu.fullscreen'), shortcut: isWin.value ? 'F11' : '⌃⌘F', action: () => desktopBridge()?.app?.toggleFullscreen?.() },
+])
+
+const helpMenu = computed<MenuItem[]>(() => [
+  { key: 'checkUpdate', label: t('nav.menu.checkUpdate'), action: () => window.dispatchEvent(new CustomEvent('supercrzy:check-update')) },
+  { key: 'about', label: t('nav.menu.about'), action: () => router.push({ name: 'AppAbout' }) },
+  { key: 'd1', label: '', divider: true },
+  { key: 'openLogs', label: t('nav.menu.openLogs'), action: () => desktopBridge()?.app?.openDir?.('logs') },
+  { key: 'openData', label: t('nav.menu.openData'), action: () => desktopBridge()?.app?.openDir?.('data') },
+])
+
+const currentMenu = computed(() => {
+  if (activeMenu.value === 'file') return fileMenu.value
+  if (activeMenu.value === 'view') return viewMenu.value
+  if (activeMenu.value === 'help') return helpMenu.value
+  return []
+})
+
+/** ⌘ on macOS, Ctrl elsewhere. */
+function mod(key: string) { return isMac.value ? `⌘${key}` : `Ctrl+${key}` }
+
+function onGlobalPointerDown(e: PointerEvent) {
+  if (!activeMenu.value) return
+  const el = e.target as HTMLElement
+  if (el.closest('.app-menu-panel') || el.closest('.menu-item-btn')) return
+  closeAppMenu()
+}
+
+// Keyboard shortcuts for the menu items. Skipped while typing so ⌘B / ⌘N
+// never fight with the composer.
+function onMenuKeydown(e: KeyboardEvent) {
+  const el = e.target as HTMLElement | null
+  const typing = !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
+  const meta = isMac.value ? e.metaKey : e.ctrlKey
+  if (e.key === 'Escape' && activeMenu.value) { closeAppMenu(); return }
+  if (!meta) return
+  const k = e.key.toLowerCase()
+  if (k === 'b' && !typing) { e.preventDefault(); toggleSidebar() }
+  else if (k === 'j' && !typing) { e.preventDefault(); appStore.toggleDetailPanel() }
+  else if (k === 'n' && !typing) { e.preventDefault(); handleNewChat() }
+  else if (k === ',' && !typing) { e.preventDefault(); router.push({ name: 'Settings' }) }
+  else if (k === '0') { e.preventDefault(); desktopBridge()?.app?.zoom?.('reset') }
+  else if (k === '=' || k === '+') { e.preventDefault(); desktopBridge()?.app?.zoom?.('in') }
+  else if (k === '-') { e.preventDefault(); desktopBridge()?.app?.zoom?.('out') }
+}
+
+onMounted(() => {
+  document.addEventListener('pointerdown', onGlobalPointerDown)
+  window.addEventListener('keydown', onMenuKeydown)
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', onGlobalPointerDown)
+  window.removeEventListener('keydown', onMenuKeydown)
+})
 
 /** 桌面端横栏功能按钮 → 通知 ChatView 打开产物弹层/搜索弹窗/分享菜单（App 端 header 隐藏后的入口）。
     非聊天页时先跳回聊天页，等组件挂载完成（懒加载 chunk）再发事件 */
@@ -705,7 +831,7 @@ onMounted(() => {
      `.detail-panel.visible.maximized` is `position:absolute; top:0; bottom:0`, but nothing
      above it on the chain (.app-layout / .app-body / App.vue) was positioned, so the
      containing block fell back to the initial containing block — the viewport. The panel
-     then spread from window y=0, covering the whole 56px title strip: no title bar (so the
+     then spread from window y=0, covering the whole 36px title strip: no title bar (so the
      window cannot be dragged), and the panel's own close button ended up stacked under the
      Windows `titleBarOverlay` controls (minimise/maximise/close), i.e. unclickable.
      This one line makes app-body the containing block, which is exactly "everything below
@@ -739,8 +865,8 @@ onMounted(() => {
   position: relative;
   display: flex;
   align-items: center;
-  height: 56px;
-  min-height: 56px;
+  height: 36px;
+  min-height: 36px;
   padding: 0 12px 0 87px; /* 左侧 87px 红绿灯让位（对齐主流实现） */
   flex-shrink: 0;
   -webkit-app-region: drag; /* 整行可拖拽窗口 */
@@ -752,7 +878,7 @@ onMounted(() => {
 /* Windows：窗口控制按钮画在**右**侧（main.cjs 的 titleBarOverlay），
    所以左侧不该再给红绿灯留白 —— 那 87px 正是「LOGO 上方空一档」的成因；
    右侧要给系统按钮让位，否则三个按钮会压在横栏的操作图标上。
-   ⚠️ 高度 56px 与 main.cjs 的 titleBarOverlay.height 必须一致。
+   NOTE: this height must match TOP_BAR_HEIGHT in main.cjs (36px).
    2026-10-26 修 */
 .traffic-spacer--win {
   padding: 0 140px 0 12px; /* 右侧 140px = 系统按钮宽度 + 安全间距 */
@@ -761,26 +887,103 @@ onMounted(() => {
 /* 横栏收缩侧边栏按钮：驻留在红绿灯右侧（始终可见，不随 sidebar 宽度变化） */
 
 
-/* 侧边栏上方区：红绿灯右侧到 sidebar 右缘之间留白（宽度随侧边栏；收起态宽度为负被裁，不影响按钮） */
-.traffic-logo {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  height: 100%;
-  padding: 0 14px;
-  cursor: pointer;
-  -webkit-app-region: no-drag;
-  pointer-events: auto;
-}
-
 .traffic-sidebar-zone {
   position: absolute;
   left: 87px;
   top: 0;
   bottom: 0;
-  width: calc(var(--sidebar-w, 220px) - 87px);
+  /* max(0px, ...) so the collapsed sidebar (48px) never produces a negative
+     width that would squash the toggle to nothing on macOS. */
+  width: max(0px, calc(var(--sidebar-w, 220px) - 87px));
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-left: 2px;
+  /* Hard boundary: the menu must never reach past the sidebar's right edge,
+     otherwise it overlaps the session title (measured 323px vs 220px at first).
+     With the menu hidden while collapsed, the content always fits. */
+  overflow: hidden;
   -webkit-app-region: no-drag;
   cursor: default;
+}
+
+.menu-toggle-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.menu-toggle-btn:hover {
+  background: var(--bg-hover, rgba(0, 0, 0, 0.06));
+  color: var(--text-primary);
+}
+
+.menu-item-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  padding: 3px 4px;
+  border-radius: 5px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.menu-item-btn:hover {
+  background: var(--bg-hover, rgba(0, 0, 0, 0.06));
+  color: var(--text-primary);
+}
+
+.app-menu-panel {
+  position: fixed;
+  z-index: 3000;
+  min-width: 200px;
+  padding: 4px;
+  border-radius: 8px;
+  background: var(--bg-elevated, var(--bg-primary));
+  border: 1px solid var(--border-color);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+  -webkit-app-region: no-drag;
+}
+
+.app-menu-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.app-menu-row:hover {
+  background: var(--bg-hover, rgba(0, 0, 0, 0.06));
+}
+
+.app-menu-label { flex: 1; }
+
+.app-menu-shortcut {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+.app-menu-divider {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border-color);
 }
 /* 工作区段：会话标题 + 模型徽标（从侧边栏右缘 + 12px 间距开始，随侧边栏宽度联动） */
 .traffic-workspace-zone {
@@ -800,14 +1003,21 @@ onMounted(() => {
 .traffic-workspace-zone.collapsed {
   margin-left: calc(var(--sidebar-w, 220px) + 12px + 40px);
 }
-/* Windows: no traffic lights on the left, so the logo zone starts at 12px
-   (this is where the logo lives — see .traffic-logo). The title deliberately
+/* Windows: no traffic lights on the left, so the menu zone starts at 12px.
+   The title deliberately
    keeps the shared `sidebar-w + 12px` offset so it sits over the workspace,
    never on top of the logo. A leftover `margin-left: 12px` override here used
    to pull the title onto the logo on Windows; it was removed 2026-11-19. */
 .traffic-spacer--win .traffic-sidebar-zone {
   left: 12px;
   width: calc(var(--sidebar-w, 220px) - 12px);
+}
+/* macOS collapsed: calc(48px - 87px) is negative, so the zone would be 0-wide
+   and the toggle would vanish. Pin it just right of the traffic lights instead —
+   the toggle is the only thing left, so it needs no sidebar alignment. */
+.traffic-spacer:not(.traffic-spacer--win) .traffic-sidebar-zone[data-collapsed="true"] {
+  left: 87px;
+  width: 48px;
 }
 
 .traffic-session-title {
@@ -971,8 +1181,8 @@ onMounted(() => {
   align-items: center;
   justify-content: center; /* centre the logo group (2026-11-19) */
   gap: 10px;
-  height: 56px;
-  min-height: 56px;
+  height: 36px;
+  min-height: 36px;
   box-sizing: border-box;
   padding: 0 14px;
   cursor: pointer;
@@ -1519,7 +1729,7 @@ onMounted(() => {
     flex: 1;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
-    /* Reserve the space dock's strip (56px + 10px offset + 6px breathing room) once,
+    /* Reserve the space dock's strip (36px + 10px offset + 6px breathing room) once,
        here, instead of padding every view: views use height:100%, so they shrink to the
        content box automatically and nothing gets covered by the fixed dock. */
     padding-bottom: 72px;

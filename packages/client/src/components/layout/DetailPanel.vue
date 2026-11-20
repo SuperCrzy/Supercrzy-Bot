@@ -706,7 +706,7 @@ const tabs = [
 
 /* 预览最大化：展开覆盖聊天区，大屏查看（L1）
    🔴 2026-10-28：`top:0` 的基准是 `.app-body`（MainLayout 已补 position:relative）；
-   基准缺失会退回视口 ⇒ 连 56px 顶栏一起盖掉。
+   If the anchor is missing it falls back to the viewport, which would cover the top bar too.
    🔴 2026-10-29：左边界止于侧边栏右缘 —— 原先 width:92% 从右侧铺开把会话列表也盖住，
    点对话时命中面板 ⇒「点侧边栏缩回」不可能发生。现在侧边栏始终可点，点它即还原。 */
 .detail-panel.visible.maximized {

@@ -34,6 +34,14 @@ contextBridge.exposeInMainWorld('supercrzyDesktop', {
    */
   app: {
     getInfo: () => ipcRenderer.invoke('app:info'),
+    /** Quit the app (File > Quit). */
+    quit: () => ipcRenderer.invoke('app:quit'),
+    /** action: 'in' | 'out' | 'reset'. Returns the resulting zoom level. */
+    zoom: (action) => ipcRenderer.invoke('app:zoom', action),
+    /** Toggles full screen. Returns the new state. */
+    toggleFullscreen: () => ipcRenderer.invoke('app:fullscreen'),
+    /** which: 'logs' | 'data'. Returns '' on success, else the OS error. */
+    openDir: (which) => ipcRenderer.invoke('shell:open-dir', which),
   },
   /**
    * App 自身自动更新（2026-10-12）：主进程把 electron-updater 状态推给窗口内横幅。

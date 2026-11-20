@@ -20,6 +20,10 @@ const fs = require('fs')
 const os = require('os')
 const { fileURLToPath } = require('url')
 const { autoUpdater } = require('electron-updater')
+
+// Height of the custom top bar. Must match .traffic-spacer { height } in
+// packages/client/src/components/layout/MainLayout.vue.
+const TOP_BAR_HEIGHT = 36
 const cdp = require('./cdp-endpoint.cjs')
 const { wireBrowserView } = require('./browser-view-wiring.cjs')
 
@@ -264,17 +268,20 @@ function createWindow() {
     minHeight: 640,
     title: 'SUPERCRZY BOT',
     backgroundColor: '#ffffff',
-    // 沉浸式顶栏：三个平台都隐藏原生标题栏，窗口控制按钮画进前端那条 56px 横栏。
+    // Immersive top bar: all three platforms hide the native title bar and draw the
+    // window controls into the frontend bar (36px, TOP_BAR_HEIGHT).
     //
     // 🔴 2026-10-26 修 Windows「LOGO 上方空一档」。
     // 原实现只在 darwin 下隐藏标题栏，Windows 走默认 ⇒ 顶部多一条原生标题栏；
-    // 而前端 `traffic-spacer` 只判断 isDesktop（不看平台），照样渲染 56px 横栏并在左侧
+    // while the frontend `traffic-spacer` only checks isDesktop (not the platform), so it
+    // still renders the 36px bar and, on the left,
     // 留 87px 给 macOS 红绿灯。Windows 上这 87px 是纯空白，系统按钮又在原生标题栏里，
     // 于是视觉上"LOGO 上方空一档"，而且多占一条标题栏高度。
     //
     // 现在 Windows 用 titleBarStyle:'hidden' + titleBarOverlay：系统的最小化/最大化/关闭
     // 直接画进前端横栏右上角，与 macOS 红绿灯在左、Windows 控制在右的各自习惯一致。
-    // overlay 的 height 必须与前端横栏 56px 对齐，否则按钮会压到内容。
+    // overlay height must match the frontend bar via TOP_BAR_HEIGHT, or the buttons
+    // overlap the content.
     ...(process.platform === 'darwin'
       ? {
           titleBarStyle: 'hiddenInset',
@@ -284,12 +291,14 @@ function createWindow() {
       : process.platform === 'win32'
         ? {
             titleBarStyle: 'hidden',
-            // ⚠️ 与 MainLayout.vue 的 .traffic-spacer { height: 56px } 是同一个数，
-            // 改一处必须同时改另一处，否则控制按钮会与横栏错位。
+            // Must match .traffic-spacer { height } in MainLayout.vue via
+            // TOP_BAR_HEIGHT; changing one without the other misaligns the buttons.
             titleBarOverlay: {
-              color: '#00000000', // 透明：让横栏自己的背景透出来
+              color: '#00000000', // transparent so the bar's own background shows
+              // The initial colour; theme:set re-applies it for dark mode, where a
+              // dark-grey glyph set would be invisible against a dark bar.
               symbolColor: '#1f2328',
-              height: 56,
+              height: TOP_BAR_HEIGHT,
             },
           }
         : {}),
@@ -387,8 +396,21 @@ ipcMain.on('theme:set', (_e, theme) => {
     electron.nativeTheme.themeSource = dark ? 'dark' : 'light'
   } catch { /* older electron */ }
   if (mainWindow && !mainWindow.isDestroyed()) {
-    // 与前端 tokens 深色内容区 --bg-primary: #141414 保持一致（避免窗口边缘露黑/露白）
+    // Keep the window edge in step with the frontend tokens (--bg-primary #141414
+    // in dark) so no white or black sliver shows at the border.
     mainWindow.setBackgroundColor(dark ? '#141414' : '#ffffff')
+    // Windows caption buttons: titleBarOverlay.symbolColor is fixed at creation,
+    // so switching to a dark theme used to leave the - [] x glyphs dark grey on a
+    // dark bar — effectively invisible. Re-apply on every theme change.
+    if (process.platform === 'win32' && typeof mainWindow.setTitleBarOverlay === 'function') {
+      try {
+        mainWindow.setTitleBarOverlay({
+          color: '#00000000',
+          symbolColor: dark ? '#e5e7eb' : '#1f2328',
+          height: TOP_BAR_HEIGHT,
+        })
+      } catch { /* older electron */ }
+    }
   }
 })
 
@@ -543,6 +565,42 @@ ipcMain.handle('update:dismiss', () => {
 // 历史问题：设置「关于」面板把前端硬编码的 APP_VERSION('0.3.0'，那其实是**引擎/代码仓库**版本)
 // 当成 App 版本渲染，于是出现「关于说 v0.3.0 已是最新」与「横幅说发现新版本 v1.0.6」并排打架。
 // packaged 一并回传，供界面判断是否还有「源码」语境（打包形态无 .git，源码检查恒为误报）。
+// ---- App menu actions (File / View / Help in the top bar) ----
+// The window-control strip is 36px now; keep this in sync with
+// .traffic-spacer { height } in MainLayout.vue.
+ipcMain.handle('app:quit', () => { app.quit() })
+
+ipcMain.handle('app:zoom', (_e, action) => {
+  if (!mainWindow || mainWindow.isDestroyed()) return 0
+  const wc = mainWindow.webContents
+  const current = wc.getZoomLevel()
+  let next = current
+  if (action === 'in') next = Math.min(current + 0.5, 5)
+  else if (action === 'out') next = Math.max(current - 0.5, -3)
+  else next = 0
+  wc.setZoomLevel(next)
+  return next
+})
+
+ipcMain.handle('app:fullscreen', () => {
+  if (!mainWindow || mainWindow.isDestroyed()) return false
+  const next = !mainWindow.isFullScreen()
+  mainWindow.setFullScreen(next)
+  return next
+})
+
+ipcMain.handle('shell:open-dir', async (_e, which) => {
+  const os = require('os')
+  const target = which === 'data'
+    ? path.join(os.homedir(), '.supercrzy')
+    : app.getPath('logs')
+  try {
+    require('fs').mkdirSync(target, { recursive: true })
+  } catch { /* best effort */ }
+  const err = await electron.shell.openPath(target)
+  return err || ''
+})
+
 ipcMain.handle('app:info', () => ({
   version: app.getVersion(),
   packaged: app.isPackaged,

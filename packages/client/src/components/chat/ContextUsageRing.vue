@@ -198,7 +198,7 @@ watch(() => appStore.ctxCompressedAt, (v, old) => {
 
 .ctx-tip {
   /* Drops below the session bar. position: fixed because .traffic-spacer is a
-     56px-tall row with overflow:hidden, which used to clip the whole popover
+     row with overflow:hidden, which used to clip the whole popover
      (measured 2026-11-19). Coordinates come from the ring's
      getBoundingClientRect in JS. */
   position: fixed; transform: translateX(-50%);
