@@ -275,10 +275,24 @@ const bingProvider: SearchProvider = {
   async enabled() { return true },
   async search(ctx) {
     const encoded = encodeURIComponent(ctx.query)
-    const resp = await fetch(`https://www.bing.com/search?format=rss&q=${encoded}&count=${ctx.count}`, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; SUPERCRZY-BOT/1.0)', 'Accept': 'application/rss+xml, application/xml, text/xml' },
-      redirect: 'follow',
-    })
+    // www.bing.com answers with a 302 to its regional host. Letting fetch follow
+    // automatically can bounce several times and end in a redirect loop, which
+    // surfaced as "Bing silently returns nothing" while it was the only
+    // fallback left. Follow exactly one hop by hand instead.
+    const headers: Record<string, string> = {
+      'User-Agent': 'Mozilla/5.0 (compatible; SUPERCRZY-BOT/1.0)',
+      'Accept': 'application/rss+xml, application/xml, text/xml',
+    }
+    const url = `https://www.bing.com/search?format=rss&q=${encoded}&count=${ctx.count}`
+    let resp = await fetch(url, { headers, redirect: 'manual' })
+    if (resp.status >= 300 && resp.status < 400) {
+      const location = resp.headers.get('location')
+      if (!location) return []
+      const next = location.startsWith('http') ? location : `https://www.bing.com${location}`
+      if (next === url) return []
+      resp = await fetch(next, { headers, redirect: 'manual' })
+      if (resp.status >= 300) return []
+    }
     if (!resp.ok) return []
     const xml = await resp.text()
     if (!xml.includes('<item>')) return []

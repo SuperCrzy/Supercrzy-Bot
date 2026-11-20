@@ -15,6 +15,7 @@ import { createServer } from 'http'
 import { config } from './config'
 import { startRelayClient } from './services/relay-client'
 import { initDatabase } from './services/database'
+import { migrateSearchSettings } from './services/search-settings-migration'
 import { startSearxngTunnel } from './services/searxng-tunnel'
 import { startEventLoopMonitor, getEventLoopStats } from './services/event-loop-lag'
 import { getSseStats } from './services/sse-health'
@@ -109,6 +110,9 @@ function getLocalIP(): string {
 
 async function bootstrap() {
   initDatabase()
+  // Corrects search settings that shipped pointing at an unreachable instance.
+  // Runs once per install; see services/search-settings-migration.ts.
+  migrateSearchSettings()
   // Keeps an optional SearXNG relay alive when the direct cross-border link is
   // unusable; a no-op unless the searxngTunnel setting is present.
   startSearxngTunnel()

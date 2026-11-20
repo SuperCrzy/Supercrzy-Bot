@@ -129,6 +129,16 @@ const tool: ToolDef = {
         }
         done({ text, ok: !spawnErr && code === 0, stderr: stderrBuf, sandboxBlocked })
       }
+      // A Windows shell writes the console code page (GBK on a zh-CN system),
+      // not UTF-8, so a plain toString() turned every Chinese line into
+      // mojibake. Try UTF-8 first and fall back to GBK only when the bytes are
+      // not valid UTF-8, which keeps UTF-8 tools (git, node) intact.
+      const decodeOutput = (buf: Buffer): string => {
+        if (process.platform !== 'win32') return buf.toString('utf8')
+        const asUtf8 = buf.toString('utf8')
+        if (!asUtf8.includes('\uFFFD')) return asUtf8
+        try { return new TextDecoder('gbk').decode(buf) } catch { return asUtf8 }
+      }
       const opts = { cwd, env: { ...process.env } as NodeJS.ProcessEnv, detached: process.platform !== 'win32' }
       const child = (useSandbox && sb.args)
         ? spawn(sb.exec, sb.args, opts)
@@ -145,8 +155,8 @@ const tool: ToolDef = {
       const killTimer = setTimeout(() => stop('timeout'), timeout)
       const stopTimer = setInterval(() => { if (ctx?.shouldStop?.()) stop('cancelled') }, 200)
       stopTimer.unref()
-      child.stdout?.on('data', (d: Buffer) => { const s = d.toString(); stdoutBuf = (stdoutBuf + s).slice(-1_000_000); stream(s) })
-      child.stderr?.on('data', (d: Buffer) => { const s = d.toString(); stderrBuf = (stderrBuf + s).slice(-1_000_000); stream(s) })
+      child.stdout?.on('data', (d: Buffer) => { const s = decodeOutput(d); stdoutBuf = (stdoutBuf + s).slice(-1_000_000); stream(s) })
+      child.stderr?.on('data', (d: Buffer) => { const s = decodeOutput(d); stderrBuf = (stderrBuf + s).slice(-1_000_000); stream(s) })
       child.on('error', (err) => finish(-1, null, err))
       child.on('close', (code, signal) => finish(code, signal))
       if (ctx?.shouldStop?.()) stop('cancelled')

@@ -29,6 +29,12 @@ const tool: ToolDef = {
         ctx?.onOutput?.('', line)
       }
       const result = await runDeepResearch({ query, breadth, depth, onProgress: progress })
+      // Without a single source the model still writes a well-formatted "report"
+      // from memory, which reads like a real result and is worse than an error.
+      // An empty source list is the tell, so refuse to return one.
+      if (!result.visitedUrls || result.visitedUrls.length === 0) {
+        return '深度研究未取得任何来源（搜索链路返回 0 条），已中止以免输出无来源的报告。请确认搜索服务可用后重试；若只是想了解概念，改用普通提问即可。'
+      }
       return JSON.stringify({
         engine: 'deep-research',
         learnings: result.learnings,
