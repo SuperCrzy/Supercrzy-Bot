@@ -119,25 +119,62 @@ function feedUrl(): string {
 }
 
 const CACHE_TTL = 5 * 60 * 1000 // 5 分钟缓存，避免每次对话都打源站
+// A memory-only cache is empty on every cold start, so a user whose route to
+// supercrzy.com is down on launch gets "no news" even though the feed answered
+// ten minutes ago. Persist it and treat a week-old copy as usable offline.
+const PERSIST_KEY = 'newsFeedCache'
+const STALE_MAX_MS = 7 * 24 * 60 * 60 * 1000
 let cache: { at: number; items: SupercrzyNewsItem[] } | null = null
+/** True when the items returned by the last call came from the persisted copy. */
+let lastWasStale = false
+
+export function lastFeedWasStale(): boolean { return lastWasStale }
+
+function readPersisted(): { at: number; items: SupercrzyNewsItem[] } | null {
+  try {
+    const row = getDB().prepare('SELECT value FROM settings WHERE key = ?').get(PERSIST_KEY) as any
+    if (!row?.value) return null
+    const parsed = JSON.parse(String(row.value))
+    if (!parsed?.at || !Array.isArray(parsed.items)) return null
+    if (Date.now() - parsed.at > STALE_MAX_MS) return null
+    return { at: parsed.at, items: parsed.items }
+  } catch { return null }
+}
+
+function writePersisted(at: number, items: SupercrzyNewsItem[]): void {
+  try {
+    getDB().prepare(
+      'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+    ).run(PERSIST_KEY, JSON.stringify({ at, items }))
+  } catch { /* a cache write must never break the tool */ }
+}
 
 /**
  * 拉取 supercrzy.com 新闻（带 5 分钟缓存）。
  * 失败返回空数组（调用方自行降级，不抛异常阻塞主流程）。
  */
 export async function fetchSupercrzyNews(): Promise<SupercrzyNewsItem[]> {
-  if (cache && Date.now() - cache.at < CACHE_TTL) return cache.items
+  if (cache && Date.now() - cache.at < CACHE_TTL) { lastWasStale = false; return cache.items }
+  const fallback = (): SupercrzyNewsItem[] => {
+    const persisted = cache || readPersisted()
+    lastWasStale = !!persisted
+    return persisted?.items || []
+  }
   try {
     const resp = await fetch(feedUrl(), {
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; SUPERCRZY-BOT/1.0)', 'Accept': 'application/rss+xml, application/xml' },
       signal: AbortSignal.timeout(10000),
     })
-    if (!resp.ok) return cache?.items || []
+    if (!resp.ok) return fallback()
     const xml = await resp.text()
-    cache = { at: Date.now(), items: parseFeedXml(xml) }
-    return cache.items
+    const items = parseFeedXml(xml)
+    if (!items.length) return fallback()
+    cache = { at: Date.now(), items }
+    writePersisted(cache.at, items)
+    lastWasStale = false
+    return items
   } catch {
-    return cache?.items || []
+    return fallback()
   }
 }
 

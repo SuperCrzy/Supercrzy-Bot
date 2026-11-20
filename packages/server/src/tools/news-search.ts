@@ -10,7 +10,7 @@
  * - 返回后，若某条值得深挖 → 可进一步 deep_research（交叉全网深挖）
  */
 import type { ToolDef } from './types'
-import { searchSupercrzyNews, type SupercrzyNewsItem } from '../services/supercrzy-feed'
+import { searchSupercrzyNews, lastFeedWasStale, type SupercrzyNewsItem } from '../services/supercrzy-feed'
 import { getDB } from '../services/database'
 
 /** 查询用户长期关注方向（category='topic' 记忆内容） */
@@ -64,8 +64,13 @@ const newsSearchTool: ToolDef = {
     if (items.length === 0) {
       return query
         ? `未在 SUPERCRZY 新闻库中找到与 "${query}" 相关的最新内容。可用 web_search 做全网搜索兜底。`
-        : 'SUPERCRZY 新闻库当前无条目（源站可能暂时不可达）。可稍后重试或转 web_search。'
+        : `SUPERCRZY 新闻库当前无法获取（${lastFeedWasStale() ? '源站不可达，且没有可用的本地副本' : '源站暂时不可达'}）。可稍后重试或转 web_search。`
     }
+    // Say so when the rows came off the disk cache: a week-old headline list
+    // must not read as today's news.
+    const staleNote = lastFeedWasStale()
+      ? '（注意：以下是上次成功获取的本地缓存，源站当前不可达，可能不是最新。）\n'
+      : ''
     // ==== 联动：标注命中用户关注方向（category='topic' 记忆），实现"消费→记忆"闭环（2026-08-28 加）====
     const topics = readTopicMemories()
     const head = query
@@ -82,7 +87,7 @@ const newsSearchTool: ToolDef = {
     }
     // 导流引导（2026-08-28 加：BOT 为 supercrzy.com 引流）：提醒用户完整深度报道在官网原文
     body += `\n\n🔗 ${query ? `与"${query}"相关的完整深度报道` : '全部完整深度报道'}详见 SUPERCRZY（supercrzy.com），点击上方链接阅读原文。`
-    return head + body
+    return head + staleNote + body
   },
 }
 
