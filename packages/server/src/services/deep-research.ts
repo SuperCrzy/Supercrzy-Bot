@@ -207,7 +207,19 @@ export async function deepResearch(opts: {
   }
   const report = (u: Partial<DeepResearchProgress>) => onProgress?.(Object.assign({}, progress, u))
 
-  const serpQueries = await generateSerpQueries(query, learnings, breadth)
+  const generatedQueries = await generateSerpQueries(query, learnings, breadth)
+  // The first round must search the user's own wording. With a small breadth the
+  // model drifts to generic pages: on "Anthropic IPO 估值" it produced queries
+  // that surfaced the company homepage and a Baidu entry, and the report then
+  // announced the topic "was not covered by any retrieved material" — while
+  // eight relevant results were one search away. Later rounds use the generated
+  // follow-ups, which is where the widening is actually wanted.
+  const serpQueries = learnings.length === 0
+    ? [
+        { query, researchGoal: `Research: ${query}` },
+        ...generatedQueries.filter(g => g.query.trim() !== query.trim()),
+      ].slice(0, Math.max(breadth, 1))
+    : generatedQueries
   report({ totalQueries: serpQueries.length, currentQuery: serpQueries[0]?.query })
 
   // 2026-08-28：优先用已收集的 learnings 直接收尾，避免任务爆炸。
