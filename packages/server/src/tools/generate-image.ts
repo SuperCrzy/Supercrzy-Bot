@@ -7,6 +7,7 @@ import { join } from 'path'
 import { writeFile } from 'fs/promises'
 import { WORKSPACE_ROOT, assertSafeFilePath } from '../services/sandbox'
 import { readSetting } from './shared'
+import { writeArtifact } from './write-artifact'
 
 const tool: ToolDef = {
   name: 'generate_image',
@@ -127,23 +128,19 @@ const tool: ToolDef = {
       // 落盘 & 上报（pollinations 下载 / doubao下载 / gemini已有dataURL）
       // 用 fs/promises 写：图片动辄几 MB，writeFileSync 会按大小同步占住事件循环，
       // 而生图过程本身一直在等网络，没有任何理由在最后一步同步写（2026-09-18）。
-      let writtenSize = 0
       try {
         if (isUrl) {
           const resp = await fetch(imageData)
           if (resp.ok) {
             const buf = Buffer.from(await resp.arrayBuffer())
-            await writeFile(outPath, buf)
-            writtenSize = buf.length
+            await writeArtifact(ctx, outPath, buf, { size: buf.length })
           }
         } else {
           const base64 = imageData.slice(imageData.indexOf(',') + 1)
           const buf = Buffer.from(base64, 'base64')
-          await writeFile(outPath, buf)
-          writtenSize = buf.length
+          await writeArtifact(ctx, outPath, buf, { size: buf.length })
         }
-      } catch {}
-      if (ctx?.onArtifacts) { try { ctx.onArtifacts([{ name: fileName, path: outPath, action: 'created', size: writtenSize }]) } catch {} }
+      } catch { /* 落盘失败不阻塞返回：图仍在内存里，pushImage 照常 */ }
       pushImage(imageData, isUrl)
       return `✅ 图片已生成（${provider}）: ${fileName}${isUrl ? `\nURL: ${imageData.slice(0,150)}` : ''}`
     } catch (e: any) {

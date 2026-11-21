@@ -3,9 +3,10 @@
  * 定义与执行器一体：加工具 = 加一个文件，不再双写。
  */
 import type { ToolDef } from './types'
-import { readFile, writeFile } from 'fs/promises'
+import { readFile } from 'fs/promises'
 import { assertSafeFilePath } from '../services/sandbox'
 import { resolvePath, diffLines } from './shared'
+import { writeArtifact } from './write-artifact'
 
 const tool: ToolDef = {
   name: 'multi_edit',
@@ -77,7 +78,7 @@ const tool: ToolDef = {
         })
       }
       if (applied === 0) return '❌ 所有修改片段均未找到（内容可能已变化），文件未改动'
-      await writeFile(path, content, 'utf-8')
+      await writeArtifact(ctx, path, content, { previous: oldContent })
       // 推送 diff 数据（前端 FileDiffViewer 展示改前/改后）
       ctx?.onFileChange?.(path, oldContent, content)
       return `✅ 已应用 ${applied}/${edits.length} 处修改：${path}（${oldContent.length} → ${content.length} 字符，${results.filter((r) => r.status === 'applied').length} 处成功）`

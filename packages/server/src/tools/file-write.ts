@@ -6,6 +6,7 @@ import type { ToolDef } from './types'
 import { readFile, writeFile, appendFile } from 'fs/promises'
 import { assertSafeFilePath } from '../services/sandbox'
 import { resolvePath, diffLines } from './shared'
+import { registerArtifact } from './write-artifact'
 
 const tool: ToolDef = {
   name: 'file_write',
@@ -107,6 +108,13 @@ const tool: ToolDef = {
       if (ctx?.onFileChange) {
         ctx.onFileChange(path, oldContent, String(args.content || ''))
       }
+      // Registered through the shared helper so "wrote a file" and "reported it"
+      // cannot drift apart. Streaming is why this is registerArtifact rather
+      // than writeArtifact: the chunks above already wrote the bytes.
+      registerArtifact(ctx, path, {
+        action: oldContent ? 'updated' : 'created',
+        size: Buffer.byteLength(toWriteStr, 'utf8'),
+      })
       // 行数统计（主流实现 addedLines/deletedLines 同款）：diff 新增/删除行
       // ⚠️ addedFinal/deleted 已在流式推送前算好，此处直接复用，不重复计算；
       //    过程里 countAdded 累出来的 addedSoFar 末尾恒等于 addedFinal

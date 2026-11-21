@@ -96,22 +96,12 @@
 
       <!-- 文件 Tab — 工作区文件树（含「本次会话产物」分组，产物并入文件，去重复） -->
       <div v-if="activeTab === 'files'" class="tab-content">
-        <!-- 本次会话产物（AI 生成/修改的文件，高亮标记） -->
-        <div v-if="artifactFiles.length > 0" class="artifact-group">
-          <div class="group-title">{{ $t('detail.sessionArtifacts') }}</div>
-          <div class="file-list">
-            <div
-              v-for="f in artifactFiles"
-              :key="f.path"
-              class="file-row is-artifact"
-              @click="loadAndPreviewFile(f.path)"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-              <span class="file-name">{{ f.name }}</span>
-              <span class="file-size" v-if="f.size">{{ formatSize(f.size) }}</span>
-            </div>
-          </div>
-        </div>
+        <ArtifactGroup
+          :visible="visible"
+          :active-tab="activeTab"
+          @open="loadAndPreviewFile"
+          @open-dir="openArtifactDir"
+        />
         <!-- 工作区文件树 -->
         <div class="tab-hint">{{ $t('detail.currentDir') }}: {{ currentDir || '/' }}</div>
         <button class="refresh-btn" @click="() => loadFiles()" :disabled="loadingFiles">{{ $t('common.refresh') }}</button>
@@ -221,11 +211,12 @@
       <!-- 后台任务预览：命令 + 实时输出（由输入区小浮条点任务行打开） -->
       <div v-if="activeTab === 'bgtask'" class="tab-content"><BgTaskPreview /></div>
     </div>
+
   </aside>
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed, nextTick } from 'vue'
+import { ref, watch, computed, nextTick, reactive, onMounted, onBeforeUnmount } from 'vue'
 import { NEmpty } from 'naive-ui'
 import { useAppStore } from '@/stores/app'
 import { useChatStore } from '@/stores/chat'
@@ -235,11 +226,12 @@ import type { ChatFlowNode } from '@/types'
 import TimelinePanel from '@/components/chat/TimelinePanel.vue'
 import PreviewPane from '@/components/layout/PreviewPane.vue'
 import AiBrowserPanel from '@/components/layout/AiBrowserPanel.vue'
+import ArtifactGroup from '@/components/layout/ArtifactGroup.vue'
 import BgTaskPreview from '@/components/chat/BgTaskPreview.vue'
 import { usePanelMaximize } from '@/composables/usePanelMaximize'
 import { sanitizeSvg } from '@/utils/sanitize-svg'
 import { openFilePreview } from '@/utils/file-preview'
-import type { FileBlock } from '@/types'
+import { formatSize } from '@/utils/format-size'
 import * as monaco from 'monaco-editor'
 
 interface FileEntry {
@@ -510,18 +502,11 @@ function onDeliverableClick(item: DeliverableItem) {
 }
 
 // ----- Artifacts -----
-const artifactFiles = computed<FileBlock[]>(() => {
-  const msgs = chatStore.currentMessages
-  const files: FileBlock[] = []
-  for (const m of msgs) {
-    if (m.role === 'assistant') {
-      for (const b of Array.isArray(m.content) ? m.content : []) {
-        if (b.type === 'file') files.push(b as FileBlock)
-      }
-    }
-  }
-  return files
-})
+/** Reveal fallback: jump the file tree to the artifact's folder. */
+function openArtifactDir(path: string) {
+  emit('update:tab', 'files')
+  void loadFiles(path.replace(/[\\/][^\\/]*$/, '') || undefined)
+}
 
 // ----- File Tree -----
 const fileTree = ref<FileEntry[]>([])
@@ -635,6 +620,7 @@ async function loadAndPreviewFile(filePath: string) {
   await openFilePreview(filePath)
 }
 
+
 // Load files when panel becomes visible
 watch(() => ({ visible: true }), () => {
   // no-op for now
@@ -660,12 +646,6 @@ const rowTabs = computed<TabDef[]>(() => (tabs as TabDef[]).filter((x) => (MAIN_
 const moreTabs = computed<TabDef[]>(() => (tabs as TabDef[]).filter((x) => (MORE_KEYS as readonly string[]).includes(x.key)))
 const inMoreTab = computed(() => (MORE_KEYS as readonly string[]).includes(props.activeTab))
 function switchMainOrMore(k: string) { emit('update:tab', k as any); tabMoreOpen.value = false }
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
 
 const tabs = [
   { key: 'deliverables' as const, label: t('detail.tabArtifacts'), icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>' },
@@ -872,17 +852,7 @@ const tabs = [
 .deliverable-more:hover { color: var(--accent, #4f7cff); border-color: var(--accent, #4f7cff); }
 
 /* 本次会话产物分组（并入文件 tab） */
-.artifact-group {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-bottom: 8px;
-  padding-bottom: 8px;
-  border-bottom: 1px dashed var(--border-color);
-}
 .group-title { font-size: 11px; font-weight: 500; color: var(--accent, #4f7cff); }
-.file-row.is-artifact { color: var(--accent, #4f7cff); }
-.file-row.is-artifact .file-name { font-weight: 500; }
 .preview-toolbar {
   display: flex;
   align-items: center;

@@ -9,6 +9,7 @@ import { existsSync, statSync, writeFileSync, unlinkSync } from 'fs'
 import { scanDangerousPath, WORKSPACE_ROOT, assertSafeFilePath } from '../services/sandbox'
 import { readSetting, escapeFfPath } from './shared'
 import { resolveFfmpeg, ffmpegInstallHint } from '../services/ffmpeg'
+import { registerArtifact } from './write-artifact'
 
 const tool: ToolDef = {
   name: 'video_edit',
@@ -111,7 +112,7 @@ const tool: ToolDef = {
           concatListPath = listPath
           // 2026-09-20：原来是 require('fs')，在 ESM（"type":"module"）下 require 未定义 → ReferenceError；
           // concat 分支抛错、其余分支的 onArtifacts 被 try{} 静默吞掉（产物永远上报不出来）。改为顶层 import。
-          writeFileSync(listPath, (Array.isArray(args.inputs) ? args.inputs : []).map((p: any) => `file '${String(p).replace(/'/g, "\\'")}'`).join('\n'), 'utf-8')
+          // artifact-reporting-exempt: ffmpeg concat list, a temp file removed in cleanupList\n          writeFileSync(listPath, (Array.isArray(args.inputs) ? args.inputs : []).map((p: any) => `file '${String(p).replace(/'/g, "\\'")}'`).join('\n'), 'utf-8')
           a.push('-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', output)
           break
         }
@@ -148,12 +149,12 @@ const tool: ToolDef = {
         clearTimeout(killTimer)
         cleanupList()
         if (ctx?.onFileChange && op !== 'extract') { try { ctx.onFileChange(output, '', output) } catch {} }
-        if (ctx?.onArtifacts) {
-          try { ctx.onArtifacts([{ name: basename(output), path: output, action: 'created', size: existsSync(output) ? statSync(output).size : 0 }]) } catch {}
-        }
         // 退出码 0 不等于成功：ffmpeg 完全可能生成一个没有任何流的空壳文件（trim 参数顺序错时就是这样）。
         // 产物不存在或为 0 字节一律判失败，避免「模型以为剪辑成功了」。
         const outSize = existsSync(output) ? statSync(output).size : 0
+        // Report only a real output. Registering before this check put a 0-byte
+        // stub into the artifact list, where it looked like a finished clip.
+        if (outSize > 0) registerArtifact(ctx, output, { action: 'created', size: outSize })
         if (code === 0 && outSize === 0) {
           resolve(`❌ ffmpeg 退出 0 但产物为空（0 字节）: ${output}\n${errBuf.slice(0, 800)}`)
           return

@@ -15,8 +15,9 @@
 import type { ToolDef } from './types'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
-import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, unlinkSync } from 'fs'
 import { join } from 'path'
+import { writeArtifact } from './write-artifact'
 
 const execFileP = promisify(execFile)
 const SCREENCAP = '/system/bin/screencap'
@@ -82,7 +83,7 @@ const tool: ToolDef = {
       max_elements: { type: 'number', description: '最多返回多少个界面元素，默认 60' },
     },
   },
-  async execute(args) {
+  async execute(args, ctx) {
     if (!androidAvailable()) {
       return '❌ 当前不是手机端环境（找不到 /system/bin/screencap）。android_screen 只在 SUPERCRZY BOT 手机版（Alpine chroot + Android bind mount）里可用。'
     }
@@ -106,10 +107,16 @@ const tool: ToolDef = {
     let fpath = join(shotDir, fname)
     try {
       if (!existsSync(shotDir)) mkdirSync(shotDir, { recursive: true })
-      writeFileSync(fpath, png)
+      // Shared helper: the screenshot is a user-visible artifact, so writing it
+      // and registering it are the same call.
+      await writeArtifact(ctx, fpath, png, { size: png.length })
     } catch (err: any) {
+      // Fallback: the workspace write failed, so keep the file somewhere and
+      // still register it — it is the same screenshot either way.
       fpath = `/tmp/${fname}`
-      try { writeFileSync(fpath, png) } catch { /* 内存里用完即弃 */ }
+      try {
+        await writeArtifact(ctx, fpath, png, { size: png.length })
+      } catch { /* 内存里用完即弃 */ }
       return `📱 截图已生成（落盘失败: ${err?.message}）\n屏幕尺寸: ${width}x${height}`
     }
 
