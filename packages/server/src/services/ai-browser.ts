@@ -6,6 +6,11 @@
  */
 import { chromium, type Browser, type Page } from 'playwright-core'
 import { existsSync } from 'fs'
+import net from 'node:net'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+
+const execFileP = promisify(execFile)
 import { BROWSER_START_PAGE_PATH } from './ai-browser-start-page'
 
 /** 自动探测可用的浏览器内核（mac/win/linux + env/pw自带 优先级看 detectBrowserPath 注释由下同） */
@@ -91,6 +96,27 @@ export interface BrowserSnapshot {
    * 只能问页面自己 `window.innerWidth/innerHeight`。
    */
   viewport?: { width: number; height: number }
+  /**
+   * What kind of page this is, so the panel can size the frame to match.
+   *
+   * Why it exists: the panel used to render every page at whatever width it
+   * happened to have, so a 700px-wide side panel made desktop sites serve their
+   * tablet/mobile layout — a phone page stretched across a wide frame, which
+   * reads as broken. A phone-only site has the opposite problem: stretched to a
+   * desktop width it looks like a blown-up phone screenshot.
+   *
+   * Detection is a score, not a single test: an "m." host or an
+   * apple-mobile-web-app meta is strong evidence for mobile, `width=device-width`
+   * alone is weak (plenty of responsive desktop sites use it), and a fixed
+   * `width=1200` viewport is strong evidence for desktop.
+   */
+  layout?: {
+    kind: 'desktop' | 'mobile'
+    /** Which signals fired, for the panel to show and for debugging misjudgements. */
+    reasons: string[]
+    /** Frame width the panel should use for this kind. */
+    suggestedWidth: number
+  }
 }
 
 /**
@@ -412,6 +438,81 @@ function notify(s: Session, f: BrowserSnapshot) {
   const ws = s.waiters; s.waiters = []
   ws.forEach((w) => { if ((f.ts || 0) > (w.afterTs || 0)) w.resolve(f); else s.waiters.push(w) })
 }
+/**
+ * Parse `scutil --proxy` output into a host/port pair.
+ *
+ * Pure and exported so the parsing can be tested against real output rather
+ * than assumed. Returns null unless an HTTP or HTTPS proxy is both enabled and
+ * carries a port.
+ */
+export function parseMacSystemProxy(text: string): { host: string; port: number } | null {
+  const host = /HTTPProxy\s*:\s*(\S+)/.exec(text)?.[1]
+  const port = /HTTPPort\s*:\s*(\d+)/.exec(text)?.[1]
+  const enabled = /HTTPEnable\s*:\s*1/.test(text) || /HTTPSEnable\s*:\s*1/.test(text)
+  if (!enabled || !host || !port) return null
+  const n = Number(port)
+  if (!Number.isFinite(n) || n <= 0 || n > 65535) return null
+  return { host, port: n }
+}
+
+/** True when something is listening there. Short timeout: this runs at launch. */
+function isPortOpen(host: string, port: number, timeoutMs = 800): Promise<boolean> {
+  return new Promise((resolve) => {
+    const sock = net.connect({ host, port })
+    const done = (ok: boolean) => { sock.removeAllListeners(); sock.destroy(); resolve(ok) }
+    sock.setTimeout(timeoutMs)
+    sock.once('connect', () => done(true))
+    sock.once('error', () => done(false))
+    sock.once('timeout', () => done(false))
+  })
+}
+
+/** Read the OS proxy setting. Null means "no proxy configured". */
+async function readSystemProxy(): Promise<{ host: string; port: number } | null> {
+  if (process.platform !== 'darwin') return null
+  try {
+    const { stdout } = await execFileP('scutil', ['--proxy'], { timeout: 3000 })
+    return parseMacSystemProxy(stdout)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Environment handed to Chrome.
+ *
+ * A browser should follow the OS proxy settings, not whatever HTTP_PROXY the
+ * parent process happened to inherit — and this process often inherits one from
+ * a terminal or an agent sandbox that only allows an allow-list of hosts, which
+ * turned every page into a 25s timeout while curl worked fine. Stripping the
+ * proxy variables restores Chrome's normal behaviour.
+ */
+function chromeEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env }
+  for (const k of ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY',
+                   'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy']) {
+    delete env[k]
+  }
+  return env
+}
+
+/**
+ * Launch args for the AI browser.
+ *
+ * When the OS has a proxy configured but nothing is listening on it — which is
+ * what a crashed or force-quit VPN client leaves behind — Chrome would send
+ * every request into a closed port and the user would just see a blank page.
+ * Probing first costs one 800ms TCP connect per launch and turns that into a
+ * working direct connection.
+ */
+async function proxyLaunchArgs(): Promise<string[]> {
+  const proxy = await readSystemProxy()
+  if (!proxy) return []
+  if (await isPortOpen(proxy.host, proxy.port)) return []
+  console.warn('[ai-browser] system proxy', `${proxy.host}:${proxy.port}`, 'is set but not listening — launching Chrome with --no-proxy-server')
+  return ['--no-proxy-server']
+}
+
 async function getPage(s: Session): Promise<Page> {
   s.idle = Date.now()
   // attach 模式下连接可能在任何时刻断掉（手机端 Chrome 被系统冻结 / 回收），
@@ -427,9 +528,21 @@ async function getPage(s: Session): Promise<Page> {
     if (!s.b || !s.b.isConnected()) {
       const exe = detectBrowserPath()
       if (!exe) throw new Error('未找到可用 Chrome/Chromium 内核。安装或用 SUPERCRZY_CHROME 指定。')
-      s.b = await chromium.launch({ executablePath: exe, headless: process.env.BROWSER_HEADFUL !== '1', args: ['--no-sandbox'] })
+      const extraArgs = await proxyLaunchArgs()
+      s.b = await chromium.launch({
+        executablePath: exe,
+        headless: process.env.BROWSER_HEADFUL !== '1',
+        args: ['--no-sandbox', ...extraArgs],
+        env: chromeEnv(),
+      })
     }
-    const ctx = await s.b.newContext({ viewport: { width: 1000, height: 700 } })
+    // 1280, not 1000: the panel is a side column that is often 700-800px wide,
+    // and sites switch to their tablet or mobile layout below 768/1024. At 1000
+    // the page still matched `max-width: 1024`, so a desktop site rendered its
+    // tablet layout — which is what made the browser look like it was showing a
+    // phone page. Verified on www.baidu.com: 700px -> mobile MQ, 1000 -> tablet
+    // MQ, 1280 -> neither.
+    const ctx = await s.b.newContext({ viewport: { ...DESKTOP_FRAME } })
     s.p = await ctx.newPage()
   }
   return s.p
@@ -451,6 +564,73 @@ function isAndroid(): boolean {
 //     CDP 侧无解，此时连接会 ECONNRESET，`connectAttachEndpoint` 重试一次后如实报错。
 // 不要再往这里加 am 调用。
 
+/** Frame widths the panel uses for each page kind. */
+const MOBILE_FRAME = { width: 390, height: 844 }
+const DESKTOP_FRAME = { width: 1280, height: 800 }
+
+/**
+ * Decide whether this page is a phone page or a desktop page.
+ *
+ * Scored rather than boolean: a single weak signal (`width=device-width`, used
+ * by most responsive desktop sites) must not flip the frame, so it takes two
+ * points to be called mobile and a fixed wide viewport actively subtracts.
+ * Failure returns desktop — a wrong desktop frame looks normal, a wrong phone
+ * frame looks broken.
+ */
+/**
+ * The scoring half of layout detection, as a pure function so it can be tested
+ * against real viewport metas without a browser.
+ *
+ * Threshold is 2 points. A lone `width=device-width` (0.5) is how most
+ * responsive desktop sites declare themselves and must not flip the frame;
+ * a mobile subdomain (3) or apple-mobile-web-app meta (3) is decisive on its
+ * own; a fixed `width=1200` (-3) is decisive the other way.
+ */
+export function scoreLayoutKind(info: {
+  host: string
+  meta: string
+  apple: boolean
+}): NonNullable<BrowserSnapshot['layout']> {
+  const meta = (info.meta || '').toLowerCase()
+  const reasons: string[] = []
+  let score = 0
+
+  if (/^(m|mobile|wap|h5)\./.test(info.host)) { reasons.push('mobile-subdomain'); score += 3 }
+  if (info.apple) { reasons.push('apple-mobile-meta'); score += 3 }
+  if (/device-width/.test(meta)) {
+    reasons.push('device-width')
+    // Locked zoom is what actually separates a phone page from a responsive
+    // desktop one; without it device-width alone stays weak evidence.
+    if (/user-scalable\s*=\s*no/.test(meta) || /maximum-scale\s*=\s*1(\.0)?\b/.test(meta)) {
+      reasons.push('zoom-locked'); score += 1
+    } else score += 0.5
+  }
+  const fixed = /width\s*=\s*(\d{3,4})/.exec(meta)
+  if (fixed && Number(fixed[1]) >= 900) { reasons.push(`fixed-width-${fixed[1]}`); score -= 3 }
+  if (!meta) reasons.push('no-viewport-meta')
+
+  const kind = score >= 2 ? 'mobile' : 'desktop'
+  return { kind, reasons, suggestedWidth: kind === 'mobile' ? MOBILE_FRAME.width : DESKTOP_FRAME.width }
+}
+
+/**
+ * Read the page's own declarations and score them. Any failure is treated as
+ * desktop: a wrong desktop frame still looks normal, a wrong phone frame looks
+ * broken.
+ */
+async function detectLayout(p: Page): Promise<NonNullable<BrowserSnapshot['layout']>> {
+  try {
+    const info = await p.evaluate(() => ({
+      host: location.hostname || '',
+      meta: document.querySelector('meta[name="viewport"]')?.getAttribute('content') || '',
+      apple: !!document.querySelector('meta[name="apple-mobile-web-app-capable"]'),
+    }))
+    return scoreLayoutKind(info)
+  } catch {
+    return { kind: 'desktop', reasons: ['no-dom'], suggestedWidth: DESKTOP_FRAME.width }
+  }
+}
+
 async function snap(s: Session, p: Page): Promise<BrowserSnapshot> {
   // 🔴 截图前必须先把这一页变成活动 tab：非活动 tab 的 `captureScreenshot` 不是返回空，
   // 而是**超时 30 秒**（2026-10-20 手机端实测），等它失败再补救的代价不可接受。
@@ -469,12 +649,14 @@ async function snap(s: Session, p: Page): Promise<BrowserSnapshot> {
   // 视口尺寸向页面本身要，别用 shot 的像素尺寸反推（retina 下会被放大 2 倍 → 点击坐标全偏）
   const vp = await p.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }))
     .catch(() => null) as { width: number; height: number } | null
+  const layout = await detectLayout(p)
   const n: BrowserSnapshot = {
     url: p.url() || 'about:blank',
     title: (await p.title().catch(() => '')) || '',
     screenshot: shot.length ? shot.toString('base64') : '',
     ts: Date.now(),
     ...(vp && vp.width > 0 ? { viewport: vp } : {}),
+    layout,
   }
   s.last = n; notify(s, n)
   return n
@@ -500,6 +682,24 @@ async function navigate(k: string, url: string) {
   const chromeErr = n.url.startsWith('chrome-error://')
   if (!err && chromeErr) err = '无法访问该地址（域名解析失败或连接被拒）'
   if (stuck || chromeErr) n.error = err || '导航失败'
+
+  // A phone page squashed into a wide frame is unreadable: mobile sites lay out
+  // for ~390 CSS px and stretch their body rather than reflow. Re-render it at
+  // phone width so what the panel shows matches what the site intends. Desktop
+  // pages are left alone — their width already follows the panel, and forcing it
+  // would change the layout the user navigated to.
+  if (!n.error && n.layout?.kind === 'mobile') {
+    const current = n.viewport?.width || 0
+    if (current > MOBILE_FRAME.width + 40) {
+      try {
+        await p.setViewportSize(MOBILE_FRAME)
+        await new Promise((r) => setTimeout(r, 250))
+        const again = await snap(s, p)
+        again.layout = n.layout
+        return again
+      } catch { /* attach mode sizes the view from Electron; keep the wide shot */ }
+    }
+  }
   return n
 }
 async function shot(k: string) { const s = sess(k); return snap(s, await getPage(s)) }

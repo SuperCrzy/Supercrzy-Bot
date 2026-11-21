@@ -44,7 +44,7 @@ const emit = defineEmits<{
 const {
   browserStatus, browserFailHint, browserUrl, browserUrlInput,
   browserScreenshotBase64, browserLoading, browserLog,
-  browserTypeText, browserClickText, browserNative, browserNativeReady,
+  browserTypeText, browserClickText, browserNative, browserNativeReady, browserLayout,
   browserCanvasEl, browserDom, browserDomMode, domFocusIndex,
   goToUrl, refreshPage, browserGoBack, clickPage, onCanvasWheel,
   doType, doKey, doClickText, keyButtons, clickElem, focusElem, isEditable,
@@ -89,7 +89,7 @@ const {
         <span class="bc-dot" style="background:#ef4444" /><span class="bc-dot" style="background:#f59e0b" /><span class="bc-dot" style="background:#22c55e" />
         <span class="bc-url">{{ browserUrl || 'about:blank' }}</span>
       </div>
-      <div class="browser-canvas" :class="{ native: browserNative, dom: browserDomMode }" ref="browserCanvasEl">
+      <div class="browser-canvas" :class="{ native: browserNative, dom: browserDomMode, 'is-mobile': browserLayout === 'mobile' }" ref="browserCanvasEl">
         <!-- 原生视图模式（桌面形态 + 后端 attach）：真正的网页是主进程的一层原生视图
              （WebContentsView），盖在这个 div 的位置上。所以这里**不放 img、不接点击** ——
              人直接在真网页里打字点击，AI 那边天生看得到（同一份 DOM）。
@@ -235,6 +235,19 @@ const {
 /* 原生视图模式：没有 <img> 撑着，得给个高度来源，否则视图只有 min-height 一条缝。
    aspect-ratio 让它随面板宽度自己长高（只影响观感；对不对齐由量出来的矩形决定，见 syncNativeBounds）。 */
 .browser-canvas.native { width: 100%; aspect-ratio: 16 / 10; min-height: 240px; }
+/* A phone page gets a phone-sized frame. Left at panel width it does not reflow —
+   it stretches its 390px layout to whatever the panel is, which reads as a
+   zoomed screenshot. Centred and capped so it looks like a handset preview. */
+.browser-canvas.is-mobile {
+  width: 390px;
+  max-width: 100%;
+  margin: 0 auto;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.18);
+}
+.browser-canvas.is-mobile.native { aspect-ratio: 390 / 844; min-height: 0; }
+.browser-canvas.is-mobile .browser-shot-wrap { overflow-x: hidden; }
 .browser-native-slot { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
 .browser-native-note {
   font-size: 11px; line-height: 1.6; color: var(--text-tertiary);

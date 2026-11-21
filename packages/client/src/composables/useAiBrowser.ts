@@ -85,7 +85,23 @@ export function useAiBrowser(opts: AiBrowserOptions) {
   // 旧代码硬编码 1000×700 —— 那是 launch 模式写死的 viewport；attach 后视图尺寸随窗口变，
   // 且 retina 下截图会被放大 2 倍，用图片尺寸反推坐标必然点偏。
   const browserViewport = ref({ width: 1000, height: 700 })
+
+  /**
+   * Phone page or desktop page, as decided by the backend per navigation.
+   * The panel sizes its frame from this: a mobile page squeezed into a wide
+   * frame stretches instead of reflowing, which is what made the browser look
+   * like it was showing a phone screenshot at desktop width.
+   */
+  const browserLayout = ref<'desktop' | 'mobile'>('desktop')
+
   function applyViewport(v?: { width?: number; height?: number } | null) {
+
+  /**
+   * Phone page or desktop page, as decided by the backend per navigation.
+   * The panel sizes its frame from this: a mobile page squeezed into a wide
+   * frame stretches instead of reflowing, which is what made the browser look
+   * like it was showing a phone screenshot at desktop width.
+   */
     if (v && v.width && v.height) browserViewport.value = { width: v.width, height: v.height }
   }
 
@@ -108,6 +124,9 @@ export function useAiBrowser(opts: AiBrowserOptions) {
       }
     }
     applyViewport(d.viewport)
+    if (d.layout?.kind === 'mobile' || d.layout?.kind === 'desktop') {
+      browserLayout.value = d.layout.kind
+    }
   }
 
   // 人工操作用的输入
@@ -498,7 +517,7 @@ export function useAiBrowser(opts: AiBrowserOptions) {
     browserStatus, browserFailHint, browserUrl, browserUrlInput,
     browserScreenshotBase64, browserLoading, browserLog, browserViewport,
     browserTypeText, browserClickText, browserClickMode,
-    browserNative, browserNativeReady, browserCanvasEl,
+    browserNative, browserNativeReady, browserLayout, browserCanvasEl,
     // DOM 模式（手机）
     browserDom, browserDomMode, domFocusIndex,
     // 动作
