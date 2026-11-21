@@ -663,6 +663,30 @@ async function snap(s: Session, p: Page): Promise<BrowserSnapshot> {
 }
 
 // ---------- 每种动作默认走 'default'（兼容旧调用点，AI/browser单实例仍工作）----------
+/**
+ * Which viewport this page should be rendered at, given what it is and where
+ * the page currently is. `null` means leave it alone.
+ *
+ * Exported because the two mistakes here are symmetric and easy to make: only
+ * widening for mobile pages leaves a desktop site stuck at 390 after the user
+ * came back from a phone site (measured on m.baidu.com -> www.baidu.com), and
+ * resizing unconditionally would thrash the viewport on every navigation.
+ */
+export function viewportForLayout(
+  kind: 'desktop' | 'mobile' | undefined,
+  currentWidth: number,
+): { width: number; height: number } | null {
+  if (!kind) return null
+  const tolerance = 40
+  if (kind === 'mobile') {
+    return currentWidth > MOBILE_FRAME.width + tolerance ? { ...MOBILE_FRAME } : null
+  }
+  // currentWidth 0 means the probe failed; do not guess from a missing value.
+  return currentWidth > 0 && currentWidth < DESKTOP_FRAME.width - tolerance
+    ? { ...DESKTOP_FRAME }
+    : null
+}
+
 async function navigate(k: string, url: string) {
   const s = sess(k); const p = await getPage(s)
   const target = normalizeUrl(url)
@@ -688,17 +712,15 @@ async function navigate(k: string, url: string) {
   // phone width so what the panel shows matches what the site intends. Desktop
   // pages are left alone — their width already follows the panel, and forcing it
   // would change the layout the user navigated to.
-  if (!n.error && n.layout?.kind === 'mobile') {
-    const current = n.viewport?.width || 0
-    if (current > MOBILE_FRAME.width + 40) {
-      try {
-        await p.setViewportSize(MOBILE_FRAME)
-        await new Promise((r) => setTimeout(r, 250))
-        const again = await snap(s, p)
-        again.layout = n.layout
-        return again
-      } catch { /* attach mode sizes the view from Electron; keep the wide shot */ }
-    }
+  const fitViewport = n.error ? null : viewportForLayout(n.layout?.kind, n.viewport?.width || 0)
+  if (fitViewport) {
+    try {
+      await p.setViewportSize(fitViewport)
+      await new Promise((r) => setTimeout(r, 250))
+      const again = await snap(s, p)
+      again.layout = n.layout
+      return again
+    } catch { /* attach mode sizes the view from Electron; keep what we have */ }
   }
   return n
 }
