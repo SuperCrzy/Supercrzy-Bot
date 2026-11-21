@@ -17,6 +17,23 @@ interface ShellRun {
   sandboxBlocked: boolean
 }
 
+/**
+ * A Windows shell writes the console code page (GBK on a zh-CN system), not
+ * UTF-8, so a plain toString() turned every Chinese line into mojibake
+ * ("中文测试" reads back as "���Ĳ���"). UTF-8 is tried first and GBK is used
+ * only when the bytes are not valid UTF-8, which keeps UTF-8 tools (git, node)
+ * intact on the same machine.
+ *
+ * Platform is a parameter rather than a read of process.platform so the Windows
+ * branch can be tested from macOS.
+ */
+export function decodeConsoleOutput(buf: Buffer, platform: string = process.platform): string {
+  if (platform !== 'win32') return buf.toString('utf8')
+  const asUtf8 = buf.toString('utf8')
+  if (!asUtf8.includes('\uFFFD')) return asUtf8
+  try { return new TextDecoder('gbk').decode(buf) } catch { return asUtf8 }
+}
+
 const tool: ToolDef = {
   name: 'shell_exec',
   description: '执行 Shell 命令并获取输出。仅限只读/查询类命令（查看、搜索、测试、构建）。**严禁用 echo/cat/heredoc 等命令写文件或改文件**——写文件请用 file_write 工具。输出限制 8000 字符。**必须提供 description 参数**：用一句话说明本命令要做什么（如"运行查看 deeplink.ts 实际位置"），前端用它作为命令卡片标题。**长命令（安装依赖、构建、打包）请加 run_in_background: true**：立即返回任务 id，不阻塞对话；之后用 bg_task 读输出或取消。',
@@ -129,16 +146,7 @@ const tool: ToolDef = {
         }
         done({ text, ok: !spawnErr && code === 0, stderr: stderrBuf, sandboxBlocked })
       }
-      // A Windows shell writes the console code page (GBK on a zh-CN system),
-      // not UTF-8, so a plain toString() turned every Chinese line into
-      // mojibake. Try UTF-8 first and fall back to GBK only when the bytes are
-      // not valid UTF-8, which keeps UTF-8 tools (git, node) intact.
-      const decodeOutput = (buf: Buffer): string => {
-        if (process.platform !== 'win32') return buf.toString('utf8')
-        const asUtf8 = buf.toString('utf8')
-        if (!asUtf8.includes('\uFFFD')) return asUtf8
-        try { return new TextDecoder('gbk').decode(buf) } catch { return asUtf8 }
-      }
+      const decodeOutput = (buf: Buffer): string => decodeConsoleOutput(buf, process.platform)
       const opts = { cwd, env: { ...process.env } as NodeJS.ProcessEnv, detached: process.platform !== 'win32' }
       const child = (useSandbox && sb.args)
         ? spawn(sb.exec, sb.args, opts)
