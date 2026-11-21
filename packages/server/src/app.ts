@@ -390,7 +390,22 @@ async function bootstrap() {
   // Signed-in gate for every API route. Runs after the network-exposure check
   // above: that one keeps strangers out of a LAN-bound instance, this one keeps
   // the app unusable until an account exists.
-  app.use(requireAccount)
+  //
+  // Local-only bypass, for developing against a source checkout. It needs all
+  // three: the operator set the flag, this is not a packaged build, and the
+  // request came in over loopback. Sign-in needs a code delivered to an inbox,
+  // so without this a machine with no access to that inbox cannot run the app
+  // at all — which blocks UI testing of everything behind the gate.
+  const devNoAuth = process.env.SUPERCRZY_DEV_NO_AUTH === '1'
+    && process.env.SUPERCRZY_PACKAGED !== '1'
+  app.use(async (ctx, next) => {
+    if (!devNoAuth) return requireAccount(ctx, next)
+    const host = String(ctx.hostname || '')
+    if (host !== '127.0.0.1' && host !== 'localhost' && host !== '::1') {
+      return requireAccount(ctx, next)
+    }
+    return next()
+  })
 
   // AI 浏览器起始页：desktop 的原生视图（WebContentsView）必须先 loadURL 一个**真实 http 页面**
   // 才可能被 attach 模式接管（about:blank / data: 都会被 judgeUrl 挡掉）。
@@ -414,7 +429,7 @@ async function bootstrap() {
   }
 
   // API Routes
-  const routers = [accountRouter, uploadRouter, chatRouter, fsRouter, settingsRouter, sessionRouter, historyRouter, statsRouter, memoryRouter, gatewayRouter, skillsRouter, tasksRouter, automationsRouter, modelsRouter, workspaceRouter, ocrRouter, checkpointsRouter, playbookRouter, rolesRouter, systemRouter, collabRouter, newsRouter, siteRouter, ttsRouter, mcpRouter, routineRouter, terminalRouter, taskStateRouter, bgTasksRouter, capabilitiesRouter]
+  const routers = [accountRouter, uploadRouter, chatRouter, fsRouter, settingsRouter, sessionRouter, historyRouter, statsRouter, memoryRouter, gatewayRouter, skillsRouter, tasksRouter, automationsRouter, modelsRouter, workspaceRouter, ocrRouter, checkpointsRouter, playbookRouter, rolesRouter, systemRouter, collabRouter, newsRouter, siteRouter, ttsRouter, mcpRouter, routineRouter, terminalRouter, taskStateRouter, bgTasksRouter, capabilitiesRouter, relayRoutes]
   // 统一任务状态机：回填历史任务（进程重启后仍可查询上次状态，幽灵任务自动收敛为 cancelled）
   try { const n = restoreFromDB(); if (n > 0) console.log(`[task-state] 已回填 ${n} 条历史任务`) } catch { /* 不影响启动 */ }
   for (const r of routers) {

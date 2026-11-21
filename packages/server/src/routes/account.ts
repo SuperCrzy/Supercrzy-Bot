@@ -184,12 +184,23 @@ accountRouter.get('/auth/callback', async (ctx: Context) => {
 
 accountRouter.get('/api/account/status', (ctx: Context) => {
   const s = readSession()
-  const signedIn = isSignedIn()
+  let signedIn = isSignedIn()
+  // Report the local dev bypass as signed in, otherwise the client's route guard
+  // bounces every page to the login screen and the bypass only helps API calls.
+  // Same three conditions as the gate in app.ts: flag set, no packaged build,
+  // loopback request. Never true for a packaged app or a remote client.
+  const host = String(ctx.hostname || '')
+  if (!signedIn
+    && process.env.SUPERCRZY_DEV_NO_AUTH === '1'
+    && process.env.SUPERCRZY_PACKAGED !== '1'
+    && (host === '127.0.0.1' || host === 'localhost' || host === '::1')) {
+    signedIn = true
+  }
   ctx.body = {
     signedIn,
-    email: signedIn ? s!.email : '',
-    accountId: signedIn ? s!.accountId : '',
-    expiresAt: signedIn ? s!.expiresAt : 0,
+    email: signedIn ? (s?.email || 'dev@localhost') : '',
+    accountId: signedIn ? (s?.accountId || 'local-dev') : '',
+    expiresAt: signedIn ? (s?.expiresAt || Date.now() + 3600_000) : 0,
   }
 })
 
