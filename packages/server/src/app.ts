@@ -16,7 +16,7 @@ import { config } from './config'
 import { startRelayClient } from './services/relay-client'
 import { initDatabase } from './services/database'
 import { migrateSearchSettings } from './services/search-settings-migration'
-import { startSearxngTunnel } from './services/searxng-tunnel'
+import { startSearxngTunnel, stopSearxngTunnel } from './services/searxng-tunnel'
 import { startEventLoopMonitor, getEventLoopStats } from './services/event-loop-lag'
 import { getSseStats } from './services/sse-health'
 import { createTerminalServer } from './services/terminal'
@@ -637,6 +637,7 @@ async function bootstrap() {
   process.on('SIGINT', async () => {
     console.log('\n[Shutdown] SIGINT received')
     await stopTunnel()
+    stopSearxngTunnel()
     stopComputerUse()
     stopAllMcp()
     process.exit(0)
@@ -644,6 +645,7 @@ async function bootstrap() {
   process.on('SIGTERM', async () => {
     console.log('\n[Shutdown] SIGTERM received')
     await stopTunnel()
+    stopSearxngTunnel()
     stopComputerUse()
     stopAllMcp()
     process.exit(0)

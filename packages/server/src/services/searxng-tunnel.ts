@@ -105,8 +105,21 @@ async function tick(): Promise<void> {
         return
     }
     const [localHost, localPort, remoteHost, remotePort] = parts
+    // The target goes straight into an ssh argv. Without a shape check, a value
+    // like "-oProxyCommand=..." would be read as an option and could run an
+    // arbitrary local command, so only user@host / user@host:port is accepted.
+    const cleanTarget = target.trim()
+    if (!/^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+(:[0-9]{1,5})?$/.test(cleanTarget)) {
+        console.warn('[searxng-tunnel] searxngTunnel target must look like user@host[:port]:', cleanTarget)
+        return
+    }
+    const portOk = [localPort, remotePort].every(p => /^[0-9]{1,5}$/.test(p) && Number(p) > 0 && Number(p) < 65536)
+    if (!portOk) {
+        console.warn('[searxng-tunnel] searxngTunnel ports must be 1-65535:', forward)
+        return
+    }
     if (await portOpen(localHost, Number(localPort))) return
-    spawnTunnel(localHost, localPort, remoteHost, remotePort, target.trim())
+    spawnTunnel(localHost, localPort, remoteHost, remotePort, cleanTarget)
 }
 
 /** Starts the keep-alive loop. Safe to call once from server boot. */

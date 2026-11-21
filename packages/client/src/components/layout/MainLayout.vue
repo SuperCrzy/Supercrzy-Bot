@@ -1027,6 +1027,20 @@ onMounted(() => {
   width: 48px;
 }
 
+/* Collapsed, the zone is 48px wide and fits only the toggle. The labels are
+   flex-shrink: 0, so without this they overflowed the 48px box and stayed
+   visible on top of the session title. */
+.traffic-sidebar-zone[data-collapsed="true"] .menu-item-btn {
+  display: none;
+}
+
+/* Collapsed, the zone is 48px wide and fits only the toggle. The labels are
+   flex-shrink: 0, so without this they overflowed the 48px box and stayed
+   visible on top of the session title. */
+.traffic-sidebar-zone[data-collapsed="true"] .menu-item-btn {
+  display: none;
+}
+
 .traffic-session-title {
   font-size: 13px;
   font-weight: 600;
