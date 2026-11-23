@@ -61,10 +61,18 @@ export function postProcessSearchResults<T extends { title: string; url: string;
   let list = results.filter((r) => r.title && r.url && r.title !== 'Object moved')
   if (maxAgeDays > 0) {
     const cutoff = Date.now() - maxAgeDays * 86400000
+    // Drop what is provably too old. Keep what cannot be dated.
+    //
+    // This used to drop undated results too, on the reasoning that a missing date
+    // cannot prove freshness. The effect was worse than the risk: asking for "today"
+    // returned only the sources that happen to publish dates, and a query whose
+    // engines all omit them came back empty — the user is told there is no news when
+    // there is news without timestamps. Undated rows are now kept and sorted last
+    // (see the comparator), and the tool description tells the model to label them
+    // "date unknown" instead of presenting them as current.
     list = list.filter((r) => {
-      if (!r.date) return false
       const t = parseResultDate(r.date)
-      return !isNaN(t) && t >= cutoff
+      return isNaN(t) || t >= cutoff
     })
   }
   const byUrl = new Map<string, T>()
@@ -73,6 +81,10 @@ export function postProcessSearchResults<T extends { title: string; url: string;
     const key = `${u}:${(r.title || '').slice(0, 30)}`
     if (!byUrl.has(key)) byUrl.set(key, r)
   }
+  // Same story syndicated under near-identical headlines on different hosts.
+  // Normalizing to letters/digits and comparing a prefix catches "AI 日报 | …" across
+  // domains without needing similarity scoring.
+  const titleSeen = new Set<string>()
   const seen = new Map<string, number>()
   const out: T[] = []
   // 按有日期优先 + 原序
@@ -92,6 +104,11 @@ export function postProcessSearchResults<T extends { title: string; url: string;
     return tb - ta
   })
   for (const r of sorted) {
+    const titleKey = (r.title || '').toLowerCase().replace(/[^\u4e00-\u9fa5a-z0-9]/g, '').slice(0, 12)
+    if (titleKey) {
+      if (titleSeen.has(titleKey)) continue
+      titleSeen.add(titleKey)
+    }
     const host = r.url.replace(/^https?:\/\/(www\.)?/, '').split('/')[0]
     const hc = (seen.get(host) ?? 0) + 1
     seen.set(host, hc)

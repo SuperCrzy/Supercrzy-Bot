@@ -65,10 +65,17 @@ describe('postProcessSearchResults with maxAgeDays', () => {
     expect(postProcessSearchResults(rows, 10, 1).length).toBe(1)
   })
 
-  it('still drops undated results under a freshness filter', () => {
-    // Undated cannot be shown to be fresh, so it stays excluded — unchanged behaviour.
-    const rows = [{ title: 'no date', url: 'https://a.com/1' }]
-    expect(postProcessSearchResults(rows, 10, 1).length).toBe(0)
+  it('keeps undated results under a freshness filter, sorted last', () => {
+    // Reversed deliberately. Dropping undated rows meant a query whose engines omit
+    // dates came back empty — "no news today" when the news simply had no timestamp.
+    // Expired results are still dropped; only the undatable ones survive.
+    const rows = [
+      { title: 'undated', url: 'https://a.com/1' },
+      { title: 'today', url: 'https://b.com/2', date: new Date().toISOString() },
+      { title: 'expired', url: 'https://c.com/3', date: new Date(Date.now() - 40 * 86400000).toISOString() },
+    ]
+    const out = postProcessSearchResults(rows, 10, 1)
+    expect(out.map((r) => r.title)).toEqual(['today', 'undated'])
   })
 
   it('orders dated results newest first, undated last', () => {

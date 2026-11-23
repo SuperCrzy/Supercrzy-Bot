@@ -1128,11 +1128,36 @@ ${contentFactoryLine}`
     // request and name-list the rest, so the model still knows they exist and can
     // ask skill_list for detail — without paying for prose it will not read.
     {
+      // Every skill gets a short line, capped by total length.
+      //
+      // Name-only listing was measured to be useless: asked a Chinese question, the
+      // model ran shell_exec and never opened the index, because "[brainstorming]
+      // You MUST use this before any creative work…" gives a Chinese reader no clue
+      // whether it applies. A one-line gist per skill is what makes the index worth
+      // consulting; the cap keeps it from undoing the 78% saving that made this
+      // section cheap in the first place.
+      //
+      // Matched skills keep their full description — they are the likely picks, so
+      // the extra words are the ones most likely to be read.
       const matchedNames = new Set(relevantSkills.map((sk: any) => sk.name))
-      const detailed = allSkills.filter((sk: any) => matchedNames.has(sk.name))
-      const restNames = allSkills.filter((sk: any) => !matchedNames.has(sk.name)).map((sk: any) => sk.name)
-      const skillLines: string[] = detailed.map((sk: any) => `- [${sk.name}] ${sk.description}`)
-      if (restNames.length > 0) skillLines.push(`- 其余 ${restNames.length} 个技能（仅列名）：${restNames.join('、')}`)
+      const INDEX_BUDGET = 12_000
+      const gist = (sk: any): string => {
+        const d = String(sk.description || '').trim()
+        if (matchedNames.has(sk.name)) return d
+        // First sentence, then a hard cut: descriptions here are often a paragraph.
+        const first = d.split(/(?<=[.。!?！？])\s/)[0] || d
+        return first.length > 72 ? first.slice(0, 72).trimEnd() + '…' : first
+      }
+      const skillLines: string[] = []
+      let used = 0
+      let dropped = 0
+      for (const sk of allSkills) {
+        const line = `- [${sk.name}] ${gist(sk)}`
+        if (used + line.length > INDEX_BUDGET && !matchedNames.has(sk.name)) { dropped++; continue }
+        skillLines.push(line)
+        used += line.length
+      }
+      if (dropped > 0) skillLines.push(`- （另有 ${dropped} 个技能未列出，可用 skill_list 查看全部）`)
       skillIndexSection = '\n\n## Installed Skills\n' + skillLines.join('\n') +
         '\n\nFor an installed skill, first discover skill_view with tool_search("skill_view"), then call skill_view(name="exact skill name") for its instructions. Use skill_list() to list installed skills, skill_search() to find new ones, and skill_install() to install.'
     }

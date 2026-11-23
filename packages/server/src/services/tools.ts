@@ -113,56 +113,16 @@ export const toolExecutors: Record<string, ToolExecutor> = {
 }
 
 // ============================
-// 搜索结果后处理（web_search / news_search / deep_research 复用）
+// 搜索结果后处理: moved to search-providers.ts
 // ============================
-
-/** 搜索结果后处理：过滤空条目 + 同域名最多 2 条 + 标题相似去重 + 有日期的排前；maxAgeDays>0 时剔除超期结果（防抓老信息） */
-export function postProcessSearchResults<T extends { title: string; url: string; description?: string; date?: string }>(results: T[], limit: number, maxAgeDays = 0): T[] {
-  let list = results.filter((r) => r.title && r.url && r.title !== 'Object moved')
-  // 时间过滤：有明确日期且超期的剔除；2026-08-25 修复——无日期/日期无效的从"豁免保留"改为"降权排尾"，
-  // 避免 21 号这类无日期旧闻混在时效结果前列（有合格日期的前置，模型优先看到日期干净的）；
-  // 当天确实无合格结果时回退全量（保底不空手，date 缺失由工具描述约束模型"标日期未知，勿逐个核实"）
-  if (maxAgeDays > 0) {
-    const cutoff = Date.now() - maxAgeDays * 24 * 3600 * 1000
-    const dated = list.filter((r) => {
-      if (!r.date) return false
-      const t = new Date(r.date).getTime()
-      return !isNaN(t) && t >= cutoff
-    })
-    const undated = list.filter((r) => {
-      if (!r.date) return true
-      return isNaN(new Date(r.date).getTime())
-    })
-    // 有合格日期的前置；无合格日期时只留无日期的（超期的一律剔除——宁可空手，不让昨天/更早的旧闻混入"今天"）
-    list = dated.length > 0 ? [...dated, ...undated] : undated
-  }
-  // 同域名去重（最多 2 条）
-  const seenHost = new Map<string, number>()
-  list = list.filter((r) => {
-    try {
-      const host = new URL(r.url).hostname.replace(/^www\./, '')
-      const n = seenHost.get(host) || 0
-      if (n >= 2) return false
-      seenHost.set(host, n + 1)
-      return true
-    } catch { return true }
-  })
-  // 标题相似去重（归一化后前 12 字符相同视为重复）
-  const titleSeen = new Set<string>()
-  list = list.filter((r) => {
-    const key = r.title.toLowerCase().replace(/[^\u4e00-\u9fa5a-z0-9]/g, '').slice(0, 12)
-    if (!key || titleSeen.has(key)) return false
-    titleSeen.add(key)
-    return true
-  })
-  // 有日期的优先（新鲜度排序；日期无效的按 0 处理排最后——配合上方"无日期降权"）
-  list.sort((a, b) => {
-    const da = a.date && !isNaN(new Date(a.date).getTime()) ? new Date(a.date).getTime() : 0
-    const db = b.date && !isNaN(new Date(b.date).getTime()) ? new Date(b.date).getTime() : 0
-    return db - da
-  })
-  return list.slice(0, limit)
-}
+//
+// This file held a second copy of postProcessSearchResults. Nothing in production
+// called it — the live path is runSearchChain -> search-providers.postProcessSearchResults
+// — but search-postprocess.test.ts imported from here, so the tests were green
+// against a function the product never ran. The two copies also disagreed: this one
+// kept undated results (but parsed dates with new Date(), which returns NaN for the
+// localized form search engines return). Removed rather than kept in sync: one
+// implementation, one set of tests, no way for them to drift again.
 
 // ============================
 // 工具定义（OpenAI Function Calling Schema）

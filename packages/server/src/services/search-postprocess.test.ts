@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { postProcessSearchResults } from './tools'
+// Was importing from ./tools, a copy nothing in production called.
+import { postProcessSearchResults } from './search-providers'
 
 describe('postProcessSearchResults 时效过滤（2026-08-25 修复）', () => {
   // 注意：一律基于真实 Date.now() 相对计算（函数内部用 Date.now()，不能用假时钟）
