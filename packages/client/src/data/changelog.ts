@@ -37,6 +37,40 @@ export const APP_VERSION: string = typeof __APP_VERSION__ === 'string' ? __APP_V
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.3.5',
+    date: '2026-11-23',
+    title: '网页抓取与回答保存的稳定性',
+    titleEn: 'More reliable fetching and saving',
+    features: [
+      '搜索与新闻在受限网络下可用：中继让海外搜索端点从中国大陆连接可达，查询约一秒返回',
+    ],
+    featuresEn: [
+      'Search and news work from a mainland China connection: a relay keeps the overseas endpoint reachable, and queries return in about a second',
+    ],
+    fixes: [
+      '压缩传输的网页正确解码，中文站点不再是乱码',
+      '不再把样式表模板当正文返回，文章内容完整',
+      '握手阶段被断开的站点现在能打开',
+      '长回答收尾时不会存到下一条消息上',
+      '已删除的消息不会再回来',
+      '流式中途出错时保留已收到的内容，并显示真实原因',
+      '停止可靠生效，落在你停的那条回复上',
+      '中文输入法选词时回车不再误发送消息',
+      '草稿与排队消息跟随各自的会话',
+    ],
+    fixesEn: [
+      'Compressed pages decode correctly, so Chinese sites no longer show as garbled text',
+      'Stylesheet templates are no longer returned as the article body',
+      'Sites that dropped the connection during the handshake now load',
+      'A long answer is saved against its own message, not the next one',
+      'Deleted messages no longer come back',
+      'A partial answer survives an error mid-stream, with the real reason shown',
+      'Stop interrupts reliably and lands on the reply you stopped',
+      'Chinese input no longer sends a half-typed message on Enter',
+      'Drafts and queued messages stay with their own conversation',
+    ],
+  },
+  {
     version: '1.3.4',
     date: '2026-11-20',
     title: '横栏变矮，左侧多了菜单栏',
