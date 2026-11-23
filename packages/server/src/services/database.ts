@@ -63,6 +63,31 @@ export function initDatabase() {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS persistent_goals (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      objective TEXT NOT NULL,
+      acceptance TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL CHECK(status IN ('paused','active','pausing','waiting_user','interrupted','completed','cancelled')),
+      elapsed_ms INTEGER NOT NULL DEFAULT 0 CHECK(elapsed_ms >= 0),
+      current_run_id TEXT,
+      last_result TEXT NOT NULL DEFAULT '',
+      version INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_persistent_goals_open_session ON persistent_goals(session_id)
+      WHERE status NOT IN ('completed', 'cancelled');
+    CREATE TABLE IF NOT EXISTS persistent_goal_runs (
+      id TEXT PRIMARY KEY,
+      goal_id TEXT NOT NULL REFERENCES persistent_goals(id) ON DELETE CASCADE,
+      status TEXT NOT NULL CHECK(status IN ('running', 'finished', 'interrupted')),
+      started_at INTEGER NOT NULL,
+      ended_at INTEGER,
+      result TEXT NOT NULL DEFAULT ''
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_persistent_goal_one_run ON persistent_goal_runs(goal_id) WHERE status = 'running';
+
     -- 工作区索引：最近打开的工作区（参考主流实现的 workspaces 表）
     CREATE TABLE IF NOT EXISTS workspaces (
       path TEXT PRIMARY KEY,
