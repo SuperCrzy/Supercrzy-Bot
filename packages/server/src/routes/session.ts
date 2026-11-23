@@ -7,6 +7,8 @@ import { readSession, isSignedIn } from '../services/account-store'
 import { importCloudSession } from '../services/session-import'
 
 export const sessionRouter = new Router({ prefix: '/api/sessions' })
+/** Cross-session artifact listing, mounted at /api/artifacts. */
+export const artifactsRouter = new Router({ prefix: '/api/artifacts' })
 
 sessionRouter.post('/import', (ctx: Context) => {
   const account = isSignedIn() ? readSession() : null
@@ -65,6 +67,31 @@ sessionRouter.get('/:id', (ctx: Context) => {
 })
 
 // 会话产物列表：AI 在该会话生成/修改的文件（按时间倒序）
+/**
+ * Every artifact, across sessions.
+ *
+ * The per-session list above is what the chat panel needs; this is what a centre
+ * view needs — the entry point is the file, not the conversation it came from. A
+ * separate prefix keeps it out of the /:id route, where "all" would have been parsed
+ * as a session id.
+ */
+artifactsRouter.get('/', (ctx: Context) => {
+  const db = getDB()
+  try {
+    const rows = db.prepare(`
+      SELECT a.*, s.title AS session_title
+      FROM artifacts a
+      LEFT JOIN sessions s ON s.id = a.session_id
+      ORDER BY a.created_at DESC
+      LIMIT 500
+    `).all() as any[]
+    ctx.body = rows
+  } catch (e: any) {
+    ctx.status = 500
+    ctx.body = { error: e?.message || 'query failed' }
+  }
+})
+
 sessionRouter.get('/:id/artifacts', (ctx: Context) => {
   const db = getDB()
   const artifacts = db

@@ -12,6 +12,9 @@
             <n-button type="primary" ghost @click="loadLogs">{{ $t('common.refresh') }}</n-button>
           </n-input-group>
           <n-checkbox v-model:checked="autoRefresh" size="small">{{ $t('logs.autoRefresh') }}</n-checkbox>
+          <!-- Bug reports are a screenshot plus a description today, which means the
+               person on the other end has to reopen the app to check anything. -->
+          <n-button size="small" :loading="exporting" @click="exportBundle">{{ $t('logs.exportBundle') }}</n-button>
         </div>
       </div>
       <div class="filter-bar">
@@ -72,6 +75,32 @@ const logs = ref<LogEntry[]>([])
 const loading = ref(false)
 const searchQuery = ref('')
 const levelFilter = ref<string>('all')
+const exporting = ref(false)
+/**
+ * Download a diagnostic bundle: version, environment, capability counts and the log
+ * tail. Secrets are masked server-side, so this is safe to attach to a report.
+ */
+async function exportBundle() {
+  exporting.value = true
+  try {
+    const r = await fetch('/api/diagnose/bundle')
+    if (!r.ok) throw new Error(`HTTP ${r.status}`)
+    const data = await r.json()
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `supercrzy-diagnose-${new Date().toISOString().replace(/[:.]/g, '-')}.json`
+    a.click()
+    // Revoke on the next tick: revoking immediately can cancel the download in some
+    // browsers because the click has not been handled yet.
+    setTimeout(() => URL.revokeObjectURL(url), 4000)
+  } catch (e: any) {
+    console.warn('[diagnose] export failed:', e?.message || e)
+  } finally {
+    exporting.value = false
+  }
+}
 const autoRefresh = ref(false)
 const page = ref(1)
 const pageSize = 20

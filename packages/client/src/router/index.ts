@@ -40,6 +40,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'news', name: 'News', component: () => import('@/views/NewsView.vue'), meta: { title: 'nav.news' } },
       { path: 'memory', name: 'Memory', component: () => import('@/views/MemoryView.vue'), meta: { title: 'nav.memory' } },
       { path: 'models', name: 'Models', component: () => import('@/views/ModelsView.vue'), meta: { title: 'nav.models' } },
+      { path: 'artifacts', name: 'Artifacts', component: () => import('@/views/ArtifactsView.vue'), meta: { title: 'nav.artifacts' } },
       { path: 'logs', name: 'Logs', component: () => import('@/views/LogsView.vue'), meta: { title: 'nav.logs' } },
       { path: 'usage', name: 'Usage', component: () => import('@/views/UsageView.vue'), meta: { title: 'nav.usage' } },
       { path: 'images', name: 'ImagesSettings', component: () => import('@/views/ImagesSettingsView.vue'), meta: { title: 'nav.imagesSettings' } },

@@ -564,6 +564,8 @@ import { shouldCompress, compressContext, pruneOldToolResults } from './context-
 import { matchPlaybooks } from './playbook-match'
 import { maybeCreateSkill, maybeRepairSkill } from './skill-evolve'
 import { createContentCoalescer } from './content-coalescer'
+import { buildPersonalitySection, seedPersonalityIfMissing } from './personality'
+import { appendSnapshotIndex, captureSnapshot, readSnapshotIndex } from './checkpoint-snapshot'
 import { takeRoutineSuggestion, clearRoutineSuggestion } from '../tools/suggest-routine'
 
 interface AgentMessage {
@@ -960,6 +962,8 @@ function buildSystemPrompt(basePrompt: string, userMessage: string, model?: stri
 3. **反向同样成立**：不要承诺查不到的能力。只有工具列表、技能列表、MCP 名单里切实存在的才可答应；
    承诺做不到的事，比承认做不到伤害大得多。`
 
+  // Files the user maintains (SOUL/USER/IDENTITY). Empty when none exist yet.
+  const personalitySection = buildPersonalitySection()
   const toolChoiceSection = `\n\n## 检索手段优先级（判断代码库事实时）
 1. **grep 源码**（\`packages/*/src\`）—— 首选，直接命中定义与用法
 2. **读具体文件**：命中后用 Read 看实现，确认是真功能还是仅引用
@@ -1176,7 +1180,7 @@ ${contentFactoryLine}`
   const baseTools = toolDefinitions.map((t) => t.name)
   const allowedTools = [...new Set([...baseTools, ...skillTools])]
 
-  const prompt = `${basePrompt}${todaySection}${searchTriggerSection}${absenceSection}${evidenceSection}${selfCapabilitySection}${toolChoiceSection}${outputStyleSection}
+  const prompt = `${basePrompt}${personalitySection}${todaySection}${searchTriggerSection}${absenceSection}${evidenceSection}${selfCapabilitySection}${toolChoiceSection}${outputStyleSection}
 
 ## Response Language (MUST FOLLOW)
 - Always reply in the SAME LANGUAGE the user writes in. If the user writes English, reply in English. If Chinese, reply in Chinese.
@@ -2187,6 +2191,21 @@ export async function runAgentLoop(
               const pth = String(path || '')
               if (pth) changedFiles.set(pth, { name: pth.split(/[\\/]/).pop() || pth, path: pth })
             } catch { /* 非关键 */ }
+            // Snapshot the pair right here: at this point both versions are in hand,
+            // and by the time the tool returns the old bytes are already overwritten.
+            // Doing it from the tool's return value was not possible — file_write
+            // returns a string, so there was nowhere to attach the snapshot.
+            try {
+              const ckptDir = join(config.workspaceDir, 'data', 'checkpoints')
+              // oldContent is what the tool read before writing; passing it explicitly is
+              // what keeps the two sides distinct (reading the file here returns the new
+              // bytes, since the write has already landed by the time this fires).
+              const entry = captureSnapshot(
+                ckptDir, checkpointId, String(path || ''), String(newContent ?? ''),
+                oldContent ? String(oldContent) : null,
+              )
+              if (entry) appendSnapshotIndex(ckptDir, checkpointId, [entry])
+            } catch { /* snapshot bookkeeping must never break the write */ }
             emitSSE(ctx, 'file_changed', { path, oldContent, newContent })
           },
           // shell 命令产生的文件 → 补录产物（持久化 + 实时推送）
@@ -2652,6 +2671,30 @@ export async function runAgentLoop(
       turns: turn,
       model: activeModel,
     }).catch((e) => console.log(`[TaskLog] 异常: ${e?.message || e}`))
+  }
+
+  // ---- 收尾补存检查点（仅当本轮留下文件快照）----
+  // Checkpoints are periodic (every 5 turns) plus on interrupt, so a short task that
+  // modified files produced snapshots with no checkpoint to hang them on — the diff
+  // and restore endpoints then had nothing to look up. Persist one at the end when
+  // there is snapshot state, and only then: a turn that touched no files does not
+  // need another row in the timeline.
+  if (finished) {
+    try {
+      const index = readSnapshotIndex(join(config.workspaceDir, 'data', 'checkpoints'), checkpointId)
+      if (index.entries.length > 0) {
+        const closing: AgentCheckpoint = {
+          id: checkpointId,
+          turn,
+          messages: [...messages],
+          createdFiles: [...createdFiles],
+          totalToolCalls: [...totalToolCalls],
+          timestamp: new Date().toISOString(),
+        }
+        const p = await saveCheckpoint(closing)
+        emitSSE(ctx, 'checkpoint', { turn, path: p, files: createdFiles.length, toolCalls: totalToolCalls.length })
+      }
+    } catch { /* 补存失败不影响主流程 */ }
   }
 
   // ---- Routine 推荐（"演示一次就学会"）----

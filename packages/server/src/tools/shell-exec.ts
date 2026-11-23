@@ -78,7 +78,7 @@ const tool: ToolDef = {
     //    因此危险命令库与路径扫描在这里是唯一防线，不可绕过顺序。
     if (args.run_in_background === true) {
       try {
-        const id = startBgTask({
+        const id = await startBgTask({
           sessionId: ctx?.sessionId || '',
           title: String(args.description || cmd).slice(0, 120),
           command: cmd,

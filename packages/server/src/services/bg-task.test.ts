@@ -38,7 +38,7 @@ afterEach(() => __resetBgTasksForTest())
 describe('bg-task 状态机', () => {
   it('启动立即返回（不阻塞），命令在后台跑完 → done + exitCode 0', async () => {
     const t0 = Date.now()
-    const id = startBgTask({
+    const id = await startBgTask({
       sessionId: 's1',
       title: '慢命令',
       command: 'sleep 0.4; echo BG_DONE_MARK',
@@ -58,7 +58,7 @@ describe('bg-task 状态机', () => {
   })
 
   it('非零退出 → failed 且保留 exitCode', async () => {
-    const id = startBgTask({
+    const id = await startBgTask({
       sessionId: 's1', title: '失败命令', command: 'echo boom; exit 3', cwd: process.cwd(),
     })
     expect(await waitFor(() => getBgTask(id)?.status === 'failed')).toBe(true)
@@ -68,7 +68,7 @@ describe('bg-task 状态机', () => {
   })
 
   it('取消后状态保持 cancelled —— 迟到的 exit 事件不得把它改写成 failed', async () => {
-    const id = startBgTask({
+    const id = await startBgTask({
       sessionId: 's1', title: '长任务', command: 'sleep 5', cwd: process.cwd(),
     })
     expect(getBgTask(id)?.status).toBe('running')
@@ -81,7 +81,7 @@ describe('bg-task 状态机', () => {
   })
 
   it('增量读不重复：cursor 之后的字节才返回', async () => {
-    const id = startBgTask({
+    const id = await startBgTask({
       sessionId: 's1', title: '分段输出', command: 'echo ONE; sleep 0.25; echo TWO', cwd: process.cwd(),
     })
     expect(await waitFor(() => (getBgTask(id)?.buffer || '').includes('ONE'))).toBe(true)
@@ -106,7 +106,7 @@ describe('bg-task 状态机', () => {
   })
 
   it('lastOutputAt 随输出推进（"在跑 vs 卡住"的唯一信号；没输出就一直等于启动时刻）', async () => {
-    const id = startBgTask({
+    const id = await startBgTask({
       sessionId: 's1', title: 't', command: 'sleep 0.3; echo X; sleep 0.3; echo Y', cwd: process.cwd(),
     })
     const created = getBgTask(id)!.lastOutputAt
@@ -117,18 +117,18 @@ describe('bg-task 状态机', () => {
   it('并发上限：超过上限抛错，且不静默排队', async () => {
     const ids: string[] = []
     for (let i = 0; i < BG_MAX_LIVE_TASKS; i++) {
-      ids.push(startBgTask({ sessionId: 's1', title: `t${i}`, command: 'sleep 5', cwd: process.cwd() }))
+      ids.push(await startBgTask({ sessionId: 's1', title: `t${i}`, command: 'sleep 5', cwd: process.cwd() }))
     }
-    expect(() =>
+    await expect(
       startBgTask({ sessionId: 's1', title: 'over', command: 'sleep 5', cwd: process.cwd() }),
-    ).toThrow(/上限/)
+    ).rejects.toThrow(/上限/)
 
     for (const id of ids) cancelBgTask(id)
   })
 
   it('输出缓冲有上限：超长输出只保留尾部', async () => {
     // 写 150KB（> 100KB 上限），末尾带标记
-    const id = startBgTask({
+    const id = await startBgTask({
       sessionId: 's1',
       title: '大输出',
       command: `yes 0123456789 | head -c 150000; echo TAIL_MARK`,
@@ -145,15 +145,15 @@ describe('bg-task 状态机', () => {
   it('完成事件带上任务视图（P2 续跑的信号源）', async () => {
     const seen: string[] = []
     const off = onBgTaskDone((v) => seen.push(`${v.id}:${v.status}`))
-    const id = startBgTask({ sessionId: 's1', title: 'x', command: 'true', cwd: process.cwd() })
+    const id = await startBgTask({ sessionId: 's1', title: 'x', command: 'true', cwd: process.cwd() })
     expect(await waitFor(() => seen.length > 0)).toBe(true)
     off()
     expect(seen[0]).toBe(`${id}:done`)
   })
 
-  it('列表按会话过滤，且新任务在前', () => {
-    const a = startBgTask({ sessionId: 'sa', title: 'A', command: 'sleep 5', cwd: process.cwd() })
-    const b = startBgTask({ sessionId: 'sb', title: 'B', command: 'sleep 5', cwd: process.cwd() })
+  it('列表按会话过滤，且新任务在前', async () => {
+    const a = await startBgTask({ sessionId: 'sa', title: 'A', command: 'sleep 5', cwd: process.cwd() })
+    const b = await startBgTask({ sessionId: 'sb', title: 'B', command: 'sleep 5', cwd: process.cwd() })
     const onlyA = listBgTasks('sa')
     expect(onlyA.map((t) => t.id)).toEqual([a])
     expect(listBgTasks().map((t) => t.id)).toEqual([b, a])
@@ -162,7 +162,7 @@ describe('bg-task 状态机', () => {
   })
 
   it('prevents an agent from reading or cancelling another session task', async () => {
-    const id = startBgTask({ sessionId: 'owner', title: 'private', command: 'sleep 5', cwd: process.cwd() })
+    const id = await startBgTask({ sessionId: 'owner', title: 'private', command: 'sleep 5', cwd: process.cwd() })
     expect(await bgTool.execute({ action: 'output', id }, { sessionId: 'other' })).toContain('不属于当前会话')
     expect(await bgTool.execute({ action: 'cancel', id }, { sessionId: 'other' })).toContain('不属于当前会话')
     expect(getBgTask(id)?.cancelRequested).toBe(false)
@@ -171,11 +171,14 @@ describe('bg-task 状态机', () => {
   })
 
   it('bounds finished records while preserving running tasks', async () => {
-    const live = startBgTask({ sessionId: 'owner', title: 'live', command: 'sleep 600', cwd: process.cwd() }) // not sleep 10: on slow CI runners the 21 batches can outlive 10s and the live task expires before the assertion
+    const live = await startBgTask({ sessionId: 'owner', title: 'live', command: 'sleep 600', cwd: process.cwd() }) // not sleep 10: on slow CI runners the 21 batches can outlive 10s and the live task expires before the assertion
     let firstBatch: string[] = []
     for (let batch = 0; batch < Math.ceil((BG_MAX_FINISHED_TASKS + 1) / 10); batch++) {
       const count = Math.min(10, BG_MAX_FINISHED_TASKS + 1 - batch * 10)
-      const ids = Array.from({ length: count }, () => startBgTask({ sessionId: 'owner', title: 'done', command: 'true', cwd: process.cwd() }))
+      const ids: string[] = []
+      for (let i = 0; i < count; i++) {
+        ids.push(await startBgTask({ sessionId: 'owner', title: 'done', command: 'true', cwd: process.cwd() }))
+      }
       if (!firstBatch.length) firstBatch = ids
       expect(await waitFor(() => ids.every((id) => !getBgTask(id) || getBgTask(id)?.status === 'done'), 5000)).toBe(true)
     }
@@ -186,7 +189,7 @@ describe('bg-task 状态机', () => {
   }, 60000) // CI runners are slower than local — 20s was flaky on this bounds test
 
   it('删除运行中的任务 → 进程真的被杀，记录消失（不能留孤儿进程）', async () => {
-    const id = startBgTask({ sessionId: 's1', title: 'x', command: 'sleep 5', cwd: process.cwd() })
+    const id = await startBgTask({ sessionId: 's1', title: 'x', command: 'sleep 5', cwd: process.cwd() })
     const proc = getBgTask(id)!.proc!
     expect(deleteBgTask(id).ok).toBe(true)
     expect(await waitFor(() => getBgTask(id) === undefined)).toBe(true)
@@ -200,7 +203,7 @@ describe('bg-task 状态机', () => {
     const { join } = await import('node:path')
     const dir = mkdtempSync(join(tmpdir(), 'bg-cancel-'))
     try {
-      const id = startBgTask({ sessionId: 's1', title: 'child', command: `node -e 'process.stdout.write("ready"); setTimeout(() => require("fs").writeFileSync("marker", "late"), 1000)'`, cwd: dir })
+      const id = await startBgTask({ sessionId: 's1', title: 'child', command: `node -e 'process.stdout.write("ready"); setTimeout(() => require("fs").writeFileSync("marker", "late"), 1000)'`, cwd: dir })
       expect(await waitFor(() => (getBgTask(id)?.buffer || '').includes('ready'))).toBe(true)
       expect(cancelBgTask(id).ok).toBe(true)
       expect(await waitFor(() => getBgTask(id)?.status === 'cancelled')).toBe(true)
@@ -210,7 +213,7 @@ describe('bg-task 状态机', () => {
   })
 
   it('uses absolute output cursors when the buffer drops old content', async () => {
-    const id = startBgTask({ sessionId: 's1', title: 'output', command: `printf FIRST; sleep 0.15; yes x | head -c 150000; sleep 0.15; printf FINAL`, cwd: process.cwd() })
+    const id = await startBgTask({ sessionId: 's1', title: 'output', command: `printf FIRST; sleep 0.15; yes x | head -c 150000; sleep 0.15; printf FINAL`, cwd: process.cwd() })
     expect(await waitFor(() => (getBgTask(id)?.buffer || '').includes('FIRST'))).toBe(true)
     const first = readBgTaskOutput(id, 0)
     expect(first.ok).toBe(true)
@@ -226,7 +229,7 @@ describe('bg-task 状态机', () => {
   })
 
   it('删除已结束任务 → 只删记录；删不存在的任务 → 报错而不是静默成功', async () => {
-    const id = startBgTask({ sessionId: 's1', title: 'x', command: 'true', cwd: process.cwd() })
+    const id = await startBgTask({ sessionId: 's1', title: 'x', command: 'true', cwd: process.cwd() })
     expect(await waitFor(() => getBgTask(id)?.status === 'done')).toBe(true)
     expect(deleteBgTask(id).ok).toBe(true)
     expect(getBgTask(id)).toBeUndefined()
@@ -234,8 +237,8 @@ describe('bg-task 状态机', () => {
   })
 
   it('清理只删已结束的任务', async () => {
-    const running = startBgTask({ sessionId: 's1', title: 'r', command: 'sleep 5', cwd: process.cwd() })
-    const done = startBgTask({ sessionId: 's1', title: 'd', command: 'true', cwd: process.cwd() })
+    const running = await startBgTask({ sessionId: 's1', title: 'r', command: 'sleep 5', cwd: process.cwd() })
+    const done = await startBgTask({ sessionId: 's1', title: 'd', command: 'true', cwd: process.cwd() })
     expect(await waitFor(() => getBgTask(done)?.status === 'done')).toBe(true)
     expect(clearFinishedBgTasks()).toBe(1)
     expect(getBgTask(done)).toBeUndefined()

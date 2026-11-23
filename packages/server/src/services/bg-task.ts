@@ -15,6 +15,7 @@
  * Concurrency and memory are capped per process: 16 live tasks, 100KB of output each (ring, keeps
  * the tail). Both caps exist because an unbounded registry is a leak, not a feature.
  */
+import { sandboxify } from './sandbox'
 import { execFile, spawn, type ChildProcess } from 'child_process'
 import { EventEmitter } from 'events'
 import { randomUUID } from 'crypto'
@@ -117,19 +118,38 @@ function liveCount(): number {
  * Throws when the concurrency cap is hit — the caller (a tool) turns that into a readable
  * message; silently queuing would look like the command is running when it is not.
  */
-export function startBgTask(opts: {
+export async function startBgTask(opts: {
   sessionId: string
   title: string
   command: string
   cwd: string
-}): string {
+}): Promise<string> {
   if (liveCount() >= BG_MAX_LIVE_TASKS) {
     throw new Error(`后台任务已达上限（${BG_MAX_LIVE_TASKS} 个），请先取消不用的任务`)
   }
   const id = randomUUID().slice(0, 8)
   const win = process.platform === 'win32'
-  const shell = win ? 'powershell.exe' : '/bin/bash'
-  const args = win ? ['-NoProfile', '-Command', opts.command] : ['-lc', opts.command]
+  let shell = win ? 'powershell.exe' : '/bin/bash'
+  let args = win ? ['-NoProfile', '-Command', opts.command] : ['-lc', opts.command]
+
+  // L3 kernel sandbox, same as the foreground path.
+  //
+  // This used to be skipped with the note that sandbox-exec wraps a single
+  // foreground execution. That left background tasks with only the command
+  // blacklist and path scan — the same command was kernel-isolated when run in the
+  // foreground and unisolated when sent to the background, which is a happy accident
+  // for anyone trying to get around the sandbox. sandboxify returns the command
+  // unchanged when the tool is unavailable (CI, nested sandbox), so the fallback is
+  // the previous behaviour rather than a failure.
+  if (!win) {
+    try {
+      const sb = await sandboxify(opts.command)
+      if (sb.sandboxed && sb.args) {
+        shell = sb.exec
+        args = sb.args
+      }
+    } catch { /* keep the unboxed invocation; L1/L2 still apply */ }
+  }
 
   const t: BgTask = {
     id,

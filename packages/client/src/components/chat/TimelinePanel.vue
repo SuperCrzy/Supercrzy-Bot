@@ -93,14 +93,20 @@
         <div class="tl-history-meta">{{ $t('chatui.toolFileCount', { tools: c.toolCallCount, files: c.fileCount }) }}</div>
         <div v-if="expandedId === c.id" class="tl-history-detail">
           <button class="tl-resume" @click.stop="resumeFrom(c.id)">{{ $t('chatui.resume') }}</button>
+          <!-- The checkpoint alone could not answer "what changed inside those files";
+               this opens the per-file diff with its own rollback. -->
+          <button v-if="c.fileCount > 0" class="tl-resume" @click.stop="openDiff(c.id)">{{ $t('checkpointDiff.viewDiff') }}</button>
         </div>
       </div>
     </div>
     <div v-else class="tl-empty">{{ $t('chatui.noHistory') }}</div>
+
+    <CheckpointDiffPanel :visible="diffVisible" :checkpoint-id="diffCheckpointId" @close="diffVisible = false" />
   </div>
 </template>
 
 <script setup lang="ts">
+import CheckpointDiffPanel from './CheckpointDiffPanel.vue'
 import { ref, computed, onMounted } from 'vue'
 import { useChatStore } from '@/stores/chat'
 import { useI18n } from 'vue-i18n'
@@ -209,6 +215,12 @@ const allTurns = computed<TrajTurn[]>(() => {
 const latestTurn = computed(() => (allTurns.value.length ? allTurns.value[allTurns.value.length - 1].turn : 0))
 
 /** 搜索过滤：工具名/文件名/思考/正文摘要关键词 */
+const diffVisible = ref(false)
+const diffCheckpointId = ref<string | null>(null)
+function openDiff(id: string) {
+  diffCheckpointId.value = id
+  diffVisible.value = true
+}
 const filteredTurns = computed(() => {
   const q = query.value.trim().toLowerCase()
   if (!q) return allTurns.value

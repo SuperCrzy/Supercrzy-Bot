@@ -7,6 +7,7 @@ import type { Context } from 'koa'
 import { readdir, readFile, rm } from 'fs/promises'
 import { join } from 'path'
 import { config } from '../config'
+import { readSnapshotIndex, readSnapshotText, diffLines, restoreSnapshotFile } from '../services/checkpoint-snapshot'
 
 export const checkpointsRouter = new Router({ prefix: '/api/checkpoints' })
 
@@ -97,4 +98,78 @@ checkpointsRouter.delete('/:id', async (ctx: Context) => {
   }
 })
 
+/**
+ * Per-file diff for a checkpoint.
+ *
+ * A checkpoint used to be a conversation snapshot only: the UI could list the files
+ * a turn touched but not show what changed inside them, and there was no way to undo
+ * a single file. Both need the before/after captured at write time, which is what
+ * the snapshot index holds.
+ */
+checkpointsRouter.get('/:id/diff', async (ctx: Context) => {
+  const id = ctx.params.id as string
+  if (!UUID_RE.test(id)) { ctx.status = 400; ctx.body = { error: 'Invalid checkpoint id' }; return }
+
+  const index = readSnapshotIndex(CKPT_DIR, id)
+  const files = index.entries.map((entry) => {
+    if (entry.metadataOnly) {
+      return { path: entry.path, metadataOnly: true, existed: entry.existed, sizeBefore: entry.sizeBefore, sizeAfter: entry.sizeAfter, hunks: [] }
+    }
+    const before = entry.beforeHash ? readSnapshotText(CKPT_DIR, id, entry.beforeHash, 'before') : ''
+    const after = entry.afterHash ? readSnapshotText(CKPT_DIR, id, entry.afterHash, 'after') : ''
+    const lines = diffLines(before ?? '', after ?? '')
+    return {
+      path: entry.path,
+      metadataOnly: false,
+      existed: entry.existed,
+      sizeBefore: entry.sizeBefore,
+      sizeAfter: entry.sizeAfter,
+      added: lines.filter((l) => l.type === 'add').length,
+      deleted: lines.filter((l) => l.type === 'del').length,
+      lines: lines.slice(0, 2000),
+      truncated: lines.length > 2000,
+    }
+  })
+  ctx.body = { checkpointId: id, files }
+})
+
+/**
+ * Restore files from a checkpoint.
+ *
+ * Body: { paths?: string[], all?: boolean } — explicit paths for a single-file
+ * rollback, or all to restore the whole set. Returns per-file outcomes rather than
+ * a blanket success, because a partial restore (binary skipped, snapshot missing)
+ * is a normal result the caller has to report.
+ */
+checkpointsRouter.post('/:id/restore', async (ctx: Context) => {
+  const id = ctx.params.id as string
+  if (!UUID_RE.test(id)) { ctx.status = 400; ctx.body = { error: 'Invalid checkpoint id' }; return }
+
+  const body = (ctx.request.body || {}) as { paths?: string[]; all?: boolean }
+  const index = readSnapshotIndex(CKPT_DIR, id)
+  if (index.entries.length === 0) {
+    ctx.status = 404
+    ctx.body = { error: '该检查点没有文件快照（可能是升级前创建的）' }
+    return
+  }
+
+  const wanted = body.all
+    ? index.entries
+    : index.entries.filter((e) => (body.paths || []).includes(e.path))
+  if (wanted.length === 0) {
+    ctx.status = 400
+    ctx.body = { error: 'paths 为空或与快照不匹配' }
+    return
+  }
+
+  const results = wanted.map((entry) => ({ path: entry.path, ...restoreSnapshotFile(CKPT_DIR, id, entry) }))
+  ctx.body = {
+    checkpointId: id,
+    restored: results.filter((r) => r.ok).length,
+    failed: results.filter((r) => !r.ok).length,
+    results,
+  }
+})
+
 export default checkpointsRouter
+
