@@ -14,7 +14,7 @@
           <n-checkbox v-model:checked="autoRefresh" size="small">{{ $t('logs.autoRefresh') }}</n-checkbox>
           <!-- Bug reports are a screenshot plus a description today, which means the
                person on the other end has to reopen the app to check anything. -->
-          <n-button size="small" :loading="exporting" @click="exportBundle">{{ $t('logs.exportBundle') }}</n-button>
+          <n-button size="small" :title="$t('logs.exportPrivacyHint')" :loading="exporting" @click="exportBundle">{{ $t('logs.exportBundle') }}</n-button>
         </div>
       </div>
       <div class="filter-bar">

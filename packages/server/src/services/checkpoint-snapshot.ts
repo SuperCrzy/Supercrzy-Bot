@@ -15,7 +15,7 @@
  * through a text diff panel is not useful, and storing megabytes per checkpoint is
  * not affordable.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, statSync } from 'node:fs'
+import { chmodSync, closeSync, constants, existsSync, fchmodSync, ftruncateSync, lstatSync, mkdirSync, openSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { createHash } from 'node:crypto'
 
@@ -39,7 +39,7 @@ export interface SnapshotIndex {
   entries: SnapshotEntry[]
 }
 
-function hashOf(text: string): string {
+function hashOf(text: string | Buffer): string {
   return createHash('sha1').update(text).digest('hex').slice(0, 16)
 }
 
@@ -52,6 +52,28 @@ function looksBinary(buf: Buffer): boolean {
 
 export function snapshotDir(checkpointDir: string, checkpointId: string): string {
   return join(checkpointDir, 'snapshots', checkpointId)
+}
+
+/** Snapshots can contain private source data even when the workspace is shared. */
+function ensurePrivateSnapshotDir(checkpointDir: string, checkpointId: string): string {
+  const root = join(checkpointDir, 'snapshots')
+  const dir = snapshotDir(checkpointDir, checkpointId)
+  for (const path of [root, dir]) {
+    mkdirSync(path, { recursive: true, mode: 0o700 })
+    const stat = lstatSync(path)
+    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('invalid_snapshot_directory')
+    chmodSync(path, 0o700)
+  }
+  return dir
+}
+
+function writePrivateSnapshot(path: string, contents: string): void {
+  const fd = openSync(path, constants.O_WRONLY | constants.O_CREAT | (constants.O_NOFOLLOW || 0), 0o600)
+  try {
+    fchmodSync(fd, 0o600)
+    ftruncateSync(fd, 0)
+    writeFileSync(fd, contents, 'utf8')
+  } finally { closeSync(fd) }
 }
 
 /**
@@ -73,8 +95,7 @@ export function captureSnapshot(
   oldContent: string | null,
 ): SnapshotEntry | null {
   try {
-    const dir = snapshotDir(checkpointDir, checkpointId)
-    mkdirSync(dir, { recursive: true })
+    const dir = ensurePrivateSnapshotDir(checkpointDir, checkpointId)
 
     const existed = oldContent !== null
     const beforeText: string | null = oldContent
@@ -92,8 +113,8 @@ export function captureSnapshot(
     const afterHash = metadataOnly ? null : hashOf(newContent)
 
     if (!metadataOnly) {
-      if (beforeText !== null && beforeHash) writeFileSync(join(dir, `${beforeHash}.before`), beforeText, 'utf8')
-      if (afterHash) writeFileSync(join(dir, `${afterHash}.after`), newContent, 'utf8')
+      if (beforeText !== null && beforeHash) writePrivateSnapshot(join(dir, `${beforeHash}.before`), beforeText)
+      if (afterHash) writePrivateSnapshot(join(dir, `${afterHash}.after`), newContent)
     }
 
     return {
@@ -114,8 +135,7 @@ export function captureSnapshot(
 export function appendSnapshotIndex(checkpointDir: string, checkpointId: string, entries: SnapshotEntry[]): void {
   if (entries.length === 0) return
   try {
-    const dir = snapshotDir(checkpointDir, checkpointId)
-    mkdirSync(dir, { recursive: true })
+    const dir = ensurePrivateSnapshotDir(checkpointDir, checkpointId)
     const indexPath = join(dir, 'index.json')
     let index: SnapshotIndex = { entries: [] }
     if (existsSync(indexPath)) {
@@ -134,7 +154,7 @@ export function appendSnapshotIndex(checkpointDir: string, checkpointId: string,
       })
     }
     index.entries = [...byPath.values()]
-    writeFileSync(indexPath, JSON.stringify(index, null, 2), 'utf8')
+    writePrivateSnapshot(indexPath, JSON.stringify(index, null, 2))
   } catch { /* snapshots are best effort; a failure must not break the task */ }
 }
 
@@ -165,6 +185,9 @@ export function diffLines(before: string, after: string): Array<{ type: 'keep' |
   // LCS on lines. Files here are source/text; O(n*m) is fine under the size cap,
   // and a full Myers implementation would be more code than the value it adds.
   const m = a.length, n = b.length
+  // A byte limit alone does not bound the number of short lines: without this
+  // guard a small text file can allocate a quadratic matrix and exhaust memory.
+  if ((m + 1) * (n + 1) > 1_000_000) throw new Error('diff_too_complex')
   const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0))
   for (let i = m - 1; i >= 0; i--) {
     for (let j = n - 1; j >= 0; j--) {
@@ -197,6 +220,18 @@ export function restoreSnapshotFile(
   try {
     if (entry.metadataOnly) {
       return { ok: false, action: 'skipped', message: '非文本或过大文件只记录大小，无法逐字节还原' }
+    }
+    if (!entry.afterHash) return { ok: false, action: 'skipped', message: '缺少任务写入后的快照，无法安全回滚' }
+    let current
+    try { current = lstatSync(entry.path) }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      if (!entry.existed) return { ok: true, action: 'deleted' }
+      return { ok: false, action: 'skipped', message: '文件已不存在，请检查后再回滚' }
+    }
+    // A symlink or post-task edit is not the version captured in this snapshot.
+    if (!current.isFile() || current.isSymbolicLink() || current.size > MAX_SNAPSHOT_BYTES || hashOf(readFileSync(entry.path)) !== entry.afterHash) {
+      return { ok: false, action: 'skipped', message: '文件在任务后已更改或不是普通文件，未覆盖；请先检查当前内容' }
     }
     if (!entry.existed) {
       // The file did not exist before this checkpoint, so restoring means removing it.

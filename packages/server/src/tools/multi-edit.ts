@@ -80,7 +80,7 @@ const tool: ToolDef = {
       if (applied === 0) return '❌ 所有修改片段均未找到（内容可能已变化），文件未改动'
       await writeArtifact(ctx, path, content, { previous: oldContent })
       // 推送 diff 数据（前端 FileDiffViewer 展示改前/改后）
-      ctx?.onFileChange?.(path, oldContent, content)
+      ctx?.onFileChange?.(path, oldContent, content, true)
       return `✅ 已应用 ${applied}/${edits.length} 处修改：${path}（${oldContent.length} → ${content.length} 字符，${results.filter((r) => r.status === 'applied').length} 处成功）`
     } catch (err: any) {
       return `❌ 编辑文件失败：${err.message}`

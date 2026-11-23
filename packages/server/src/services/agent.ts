@@ -563,6 +563,7 @@ import { ToolGuardrailController } from './tool-guardrails'
 import { shouldCompress, compressContext, pruneOldToolResults } from './context-compressor'
 import { matchPlaybooks } from './playbook-match'
 import { maybeCreateSkill, maybeRepairSkill } from './skill-evolve'
+import { matchesSkillKeywords } from './skill-trigger'
 import { createContentCoalescer } from './content-coalescer'
 import { buildPersonalitySection, seedPersonalityIfMissing } from './personality'
 import { appendSnapshotIndex, captureSnapshot, readSnapshotIndex } from './checkpoint-snapshot'
@@ -1114,8 +1115,7 @@ ${contentFactoryLine}`
       }
       // 1) 关键词触发（trigger_keywords，含安装时自动生成的开源技能关键词）
       if (s.trigger_keywords) {
-        const keywords = s.trigger_keywords.split(',').map((k: string) => k.trim().toLowerCase()).filter(Boolean)
-        if (keywords.some((kw: string) => q.includes(kw) || kw.includes(q))) return true
+        if (matchesSkillKeywords(q, s.trigger_keywords)) return true
       }
       // 1.5) globs 文件匹配：技能声明了文件模式，且当前工作区有对应文件 → 激活
       if (s.globs && workspaceFileNames.length > 0) {
@@ -1144,7 +1144,7 @@ ${contentFactoryLine}`
       const skillLines: string[] = detailed.map((sk: any) => `- [${sk.name}] ${sk.description}`)
       if (restNames.length > 0) skillLines.push(`- 其余 ${restNames.length} 个技能（仅列名）：${restNames.join('、')}`)
       skillIndexSection = '\n\n## Installed Skills\n' + skillLines.join('\n') +
-        '\n\nUse skill_list() for details, skill_search() to find new skills, skill_install() to install.'
+        '\n\nFor an installed skill, first discover skill_view with tool_search("skill_view"), then call skill_view(name="exact skill name") for its instructions. Use skill_list() to list installed skills, skill_search() to find new ones, and skill_install() to install.'
     }
 
     if (relevantSkills.length > 0) {
@@ -2185,7 +2185,7 @@ export async function runAgentLoop(
             emitSSE(ctx, 'image_generated', { data, isUrl, title })
           },
           // 文件变更：写入文件 → 推送变更 tab（改前/改后对比）
-          onFileChange: (path, oldContent, newContent) => {
+          onFileChange: (path, oldContent, newContent, existedBefore) => {
             // P1-05：记入交付页的"改动清单"
             try {
               const pth = String(path || '')
@@ -2200,11 +2200,13 @@ export async function runAgentLoop(
               // oldContent is what the tool read before writing; passing it explicitly is
               // what keeps the two sides distinct (reading the file here returns the new
               // bytes, since the write has already landed by the time this fires).
-              const entry = captureSnapshot(
-                ckptDir, checkpointId, String(path || ''), String(newContent ?? ''),
-                oldContent ? String(oldContent) : null,
-              )
-              if (entry) appendSnapshotIndex(ckptDir, checkpointId, [entry])
+              if (typeof existedBefore === 'boolean') {
+                const entry = captureSnapshot(
+                  ckptDir, checkpointId, String(path || ''), String(newContent ?? ''),
+                  existedBefore ? String(oldContent) : null,
+                )
+                if (entry) appendSnapshotIndex(ckptDir, checkpointId, [entry])
+              }
             } catch { /* snapshot bookkeeping must never break the write */ }
             emitSSE(ctx, 'file_changed', { path, oldContent, newContent })
           },

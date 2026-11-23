@@ -16,8 +16,8 @@
  * 参考：deepseek-harness 的 Landlock 沙箱思路（Linux LSM），macOS 对应实现为 sandbox-exec (SBPL)。
  */
 import { exec } from 'child_process'
-import { writeFileSync, existsSync, realpathSync, lstatSync } from 'fs'
-import { homedir, tmpdir } from 'os'
+import { existsSync, realpathSync, lstatSync } from 'fs'
+import { homedir } from 'os'
 import { join, resolve, dirname, basename } from 'path'
 import { config } from '../config'
 
@@ -192,13 +192,6 @@ export function buildSandboxProfile(): string {
   return lines.join('\n')
 }
 
-/** 写 profile 到临时目录（每次执行前重写，避免 stale） */
-function writeProfile(): string {
-  const profilePath = join(tmpdir(), `supercrzy-sb-${process.pid}.sb`)
-  writeFileSync(profilePath, buildSandboxProfile(), 'utf-8')
-  return profilePath
-}
-
 export interface SandboxifyResult {
   /** sandbox 可用时的可执行文件名（'sandbox-exec'），不可用时为原命令 */
   exec: string
@@ -210,15 +203,16 @@ export interface SandboxifyResult {
 
 /**
  * 把 shell 命令包装进沙箱。
- * 返回 { exec:'sandbox-exec', args:['-f',profile,'/bin/sh','-c',cmd] } 或降级 { exec:cmd, args:null }
+ * 返回 { exec:'sandbox-exec', args:['-p',profile,'/bin/sh','-c',cmd] } 或降级 { exec:cmd, args:null }
  */
 export async function sandboxify(command: string): Promise<SandboxifyResult> {
   const ok = await detectSandboxExec()
   if (!ok) {
     return { exec: command, args: null, sandboxed: false, reason: 'sandbox-exec 不可用，已降级软沙箱' }
   }
-  const profilePath = writeProfile()
-  return { exec: 'sandbox-exec', args: ['-f', profilePath, '/bin/sh', '-c', command], sandboxed: true }
+  // Pass the profile as an argument: rewriting one shared file lets a parallel
+  // sandbox-exec read it between truncate and write and fail with exit code 65.
+  return { exec: 'sandbox-exec', args: ['-p', buildSandboxProfile(), '/bin/sh', '-c', command], sandboxed: true }
 }
 
 // ============================

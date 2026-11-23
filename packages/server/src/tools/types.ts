@@ -68,7 +68,7 @@ export interface ToolContext {
   /** 生图回调：生成图片后推送 */
   onImage?: (data: string, isUrl: boolean, title: string) => void
   /** 文件变更回调：写入文件时触发（前端变更 tab 显示改前/改后 diff） */
-  onFileChange?: (path: string, oldContent: string, newContent: string) => void
+  onFileChange?: (path: string, oldContent: string, newContent: string, existedBefore?: boolean) => void
   /** 向用户提问（挂起等待答复，由 agent 注入） */
   askQuestion?: (id: string, question: string, options?: string[]) => Promise<string>
   /** 提问结果发送回调：把提问/选项推给前端展示 */

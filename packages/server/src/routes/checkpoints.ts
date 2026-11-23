@@ -117,7 +117,13 @@ checkpointsRouter.get('/:id/diff', async (ctx: Context) => {
     }
     const before = entry.beforeHash ? readSnapshotText(CKPT_DIR, id, entry.beforeHash, 'before') : ''
     const after = entry.afterHash ? readSnapshotText(CKPT_DIR, id, entry.afterHash, 'after') : ''
-    const lines = diffLines(before ?? '', after ?? '')
+    let lines: ReturnType<typeof diffLines>
+    try {
+      if ((entry.existed && !entry.beforeHash) || !entry.afterHash || before === null || after === null) throw new Error('snapshot_missing')
+      lines = diffLines(before, after)
+    } catch {
+      return { path: entry.path, metadataOnly: false, diffUnavailable: true, existed: entry.existed, sizeBefore: entry.sizeBefore, sizeAfter: entry.sizeAfter, lines: [] }
+    }
     return {
       path: entry.path,
       metadataOnly: false,

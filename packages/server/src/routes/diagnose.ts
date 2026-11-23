@@ -4,11 +4,11 @@
  * Today a bug report is a screenshot and a description, which is why an audit can
  * conclude "there is no MCP UI" and nobody can check it without reopening the app.
  * This gathers, in one request: what version is running, what the environment
- * looks like, which capabilities are actually wired, and the tail of the log —
+ * looks like, which capabilities are actually wired, and log metadata —
  * enough for someone else to reproduce without asking a follow-up question.
  *
- * Deliberately no file paths from the user's machine beyond the app data dir, and
- * no message contents: a diagnostic package gets pasted into issues and chats.
+ * Free-form settings and log contents are excluded: they can contain credentials,
+ * conversations, paths, and other private data that regex redaction cannot guarantee.
  */
 import Router from 'koa-router'
 import type { Context } from 'koa'
@@ -21,21 +21,17 @@ import { config } from '../config'
 export const diagnoseRouter = new Router({ prefix: '/api/diagnose' })
 
 const LOG_DIR = join(homedir(), '.supercrzy', 'logs')
-const MAX_LOG_CHARS = 120_000
-
-function tailOfNewestLog(): { file: string; content: string; truncated: boolean } | null {
+export function summarizeLogs(logDir = LOG_DIR): { available: boolean; latestSizeBytes?: number } {
   try {
-    if (!existsSync(LOG_DIR)) return null
-    const files = readdirSync(LOG_DIR)
+    if (!existsSync(logDir)) return { available: false }
+    const files = readdirSync(logDir)
       .filter((f) => f.endsWith('.log') || f.endsWith('.md'))
-      .map((f) => ({ f, m: statSync(join(LOG_DIR, f)).mtimeMs }))
-      .sort((a, b) => b.m - a.m)
-    if (files.length === 0) return null
-    const raw = readFileSync(join(LOG_DIR, files[0].f), 'utf8')
-    const truncated = raw.length > MAX_LOG_CHARS
-    return { file: files[0].f, content: truncated ? raw.slice(-MAX_LOG_CHARS) : raw, truncated }
+      .map((f) => statSync(join(logDir, f)))
+      .filter((s) => s.isFile())
+      .sort((a, b) => b.mtimeMs - a.mtimeMs)
+    return files.length ? { available: true, latestSizeBytes: files[0].size } : { available: false }
   } catch {
-    return null
+    return { available: false }
   }
 }
 
@@ -56,19 +52,26 @@ function tableCounts(): Record<string, number> {
   return out
 }
 
-function settingsSnapshot(): Record<string, string | boolean> {
+export function summarizeSettings(rows: Array<{ key: unknown; value: unknown }>): Record<string, string | number | boolean> {
+  const numeric = new Set(['temperature', 'maxTokens', 'maxTurns', 'gatewayTimeout', 'memoryCharLimit', 'toolAutoApproveSeconds', 'ttsRate', 'completionSoundVolume'])
+  const flags = new Set(['streamingEnabled', 'compactMode', 'showReasoning', 'showCost', 'busyInputMode', 'memoryEnabled', 'memoryAutoConsolidate', 'piiMaskingEnabled', 'streamRead'])
+  const presence = new Set(['apiKey', 'tavilyApiKey', 'serperApiKey', 'jinaApiKey', 'embeddingApiKey', 'imageApiKey', 'accessToken', 'systemPrompt', 'model'])
+  const safe: Record<string, string | number | boolean> = {}
+  for (const row of rows) {
+    const key = String(row.key)
+    const value = typeof row.value === 'string' ? row.value.trim() : String(row.value ?? '').trim()
+    if (numeric.has(key) && /^-?\d+(?:\.\d+)?$/.test(value) && Number.isFinite(Number(value))) safe[key] = Number(value)
+    else if (flags.has(key) && /^(true|false|1|0)$/i.test(value)) safe[key] = /^(true|1)$/i.test(value)
+    else if (presence.has(key)) safe[`${key}Configured`] = value.length > 0
+  }
+  return safe
+}
+
+function settingsSnapshot(): Record<string, string | number | boolean> {
   try {
     const db = getDB()
     const rows = db.prepare('SELECT key, value FROM settings').all() as any[]
-    const safe: Record<string, string | boolean> = {}
-    for (const r of rows) {
-      const k = String(r.key)
-      // Secrets never leave the machine; only their presence is reported.
-      // maxTokens/tokenLimit are counts, not credentials: only mask real secrets.
-      if (/api_?key|apikey|secret|password|_token$|token$/i.test(k) && !/maxtokens|tokenlimit|tokens/i.test(k)) safe[k] = r.value ? '(set)' : '(empty)'
-      else safe[k] = String(r.value ?? '')
-    }
-    return safe
+    return summarizeSettings(rows)
   } catch {
     return {}
   }
@@ -90,13 +93,13 @@ diagnoseRouter.get('/bundle', async (ctx: Context) => {
       uptimeSeconds: Math.round(process.uptime()),
     },
     os: { platform: platform(), release: release(), arch: arch(), totalMemMB: Math.round(totalmem() / 1048576), freeMemMB: Math.round(freemem() / 1048576) },
-    workspace: { configured: Boolean(config.workspaceDir), dataDir: join(homedir(), '.supercrzy') },
+    workspace: { configured: Boolean(config.workspaceDir) },
     capabilities: {
       // What the prompt actually tells the model, so a "it said it could not" report
       // can be checked against what was really available.
       tables: tableCounts(),
       settings: settingsSnapshot(),
     },
-    log: tailOfNewestLog(),
+    log: summarizeLogs(),
   }
 })

@@ -21,6 +21,7 @@ interface DiffLine { type: 'keep' | 'add' | 'del'; line: string }
 interface DiffFile {
   path: string
   metadataOnly: boolean
+  diffUnavailable?: boolean
   existed: boolean
   sizeBefore: number
   sizeAfter: number
@@ -117,6 +118,7 @@ watch(() => [props.visible, props.checkpointId], ([v, id]) => {
         <button class="dp-file-head" type="button" @click="toggle(f.path)">
           <span class="dp-file-name" :title="f.path">{{ basename(f.path) }}</span>
           <span v-if="f.metadataOnly" class="dp-badge">{{ t('checkpointDiff.metadataOnly') }}</span>
+          <span v-else-if="f.diffUnavailable" class="dp-badge">{{ t('checkpointDiff.diffUnavailable') }}</span>
           <span v-else class="dp-stat"><b class="add">+{{ f.added || 0 }}</b> <b class="del">-{{ f.deleted || 0 }}</b></span>
           <n-button
             size="tiny"

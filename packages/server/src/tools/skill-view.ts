@@ -12,20 +12,33 @@ const tool: ToolDef = {
     parameters: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: '技能名称（模糊匹配）' },
+        name: { type: 'string', description: '技能名称（优先精确匹配，支持模糊查找）' },
         id: { type: 'string', description: '技能 UUID' },
       },
     },
   async execute(args) {
     const db = getDB()
-    const name = args.name || args.id || ''
-    if (!name) return 'Usage: skill_view(name="skill-name") or skill_view(id="uuid")'
+    const name = typeof args.name === 'string' ? args.name.trim() : ''
+    const id = typeof args.id === 'string' ? args.id.trim() : ''
+    if (!name && !id) return 'Usage: skill_view(name="skill-name") or skill_view(id="uuid")'
 
-    const skill = name.length > 20
-      ? db.prepare('SELECT * FROM skills WHERE id = ?').get(name) as any
-      : db.prepare('SELECT * FROM skills WHERE name LIKE ?').get(`%${name}%`) as any
+    let skill: any
+    if (id) skill = db.prepare('SELECT * FROM skills WHERE id = ?').get(id)
+    else {
+      skill = db.prepare('SELECT * FROM skills WHERE name = ? COLLATE NOCASE').get(name)
+      // Preserve older calls that passed a UUID in the name field.
+      if (!skill && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(name)) {
+        skill = db.prepare('SELECT * FROM skills WHERE id = ?').get(name)
+      }
+      if (!skill) {
+        const escaped = name.replace(/[\\%_]/g, '\\$&')
+        const matches = db.prepare("SELECT * FROM skills WHERE name LIKE ? ESCAPE '\\' ORDER BY name LIMIT 6").all(`%${escaped}%`) as any[]
+        if (matches.length > 1) return `Multiple skills match: ${matches.map((row) => row.name).join(', ')}. Use an exact name or id.`
+        skill = matches[0]
+      }
+    }
 
-    if (!skill) return `Skill not found: ${name}. Use skill_list() to see available skills.`
+    if (!skill) return `Skill not found: ${name || id}. Use skill_list() to see available skills.`
 
     let tools = ''
     try { tools = JSON.parse(skill.tools || '[]').join(', ') || 'none' } catch { tools = skill.tools || 'none' }

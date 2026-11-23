@@ -28,7 +28,9 @@ const tool: ToolDef = {
     try {
       // 变更对比：写入前读旧内容（存在则 diff 显示"修改"，不存在则是"新增"）
       let oldContent = ''
-      try { oldContent = await readFile(path, 'utf-8') } catch { /* 新文件 */ }
+      let existedBefore: boolean | undefined
+      try { oldContent = await readFile(path, 'utf-8'); existedBefore = true }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') existedBefore = false }
       // 写文件格式化（P2-3，主流实现 formatters 同款）：JSON 自动规范化缩进（无依赖安全；JS/TS 等需 prettier 暂缓）
       let toWrite = String(args.content ?? '')
       if (/\.json$/i.test(path)) {
@@ -76,7 +78,7 @@ const tool: ToolDef = {
           total: totalLines,
           // 动词机器标识（不是文案）：新建 → 前端本地化成"创建"，改已有文件 → "编辑"。
           // 对齐主流实现 tool.writeFile.{creating,create} / {editing,edit} 的动态动词推导
-          phase: oldContent ? 'edit' : 'create',
+          phase: existedBefore ? 'edit' : 'create',
         })
         if (!ctx?.onOutput) return
         ctx.onOutput('', `\`\`\`\n${chunkLines.join('\n')}\n\`\`\`\n`)
@@ -102,23 +104,23 @@ const tool: ToolDef = {
       }
       // 实时预览：写入 html/css/js → 推送给前端（前端收集文件集后内联渲染，支持配套 CSS/JS）
       if (ctx?.onPreview && /\.(html?|css|js)$/i.test(path)) {
-        ctx.onPreview(path, String(args.content || '').slice(0, 200000))
+        ctx.onPreview(path, toWriteStr.slice(0, 200000))
       }
       // 变更数据：带 old_str 供前端 diff 对比（变更 tab 显示"改前/改后"）
       if (ctx?.onFileChange) {
-        ctx.onFileChange(path, oldContent, String(args.content || ''))
+        ctx.onFileChange(path, oldContent, toWriteStr, existedBefore)
       }
       // Registered through the shared helper so "wrote a file" and "reported it"
       // cannot drift apart. Streaming is why this is registerArtifact rather
       // than writeArtifact: the chunks above already wrote the bytes.
       registerArtifact(ctx, path, {
-        action: oldContent ? 'updated' : 'created',
+        action: existedBefore ? 'updated' : 'created',
         size: Buffer.byteLength(toWriteStr, 'utf8'),
       })
       // 行数统计（主流实现 addedLines/deletedLines 同款）：diff 新增/删除行
       // ⚠️ addedFinal/deleted 已在流式推送前算好，此处直接复用，不重复计算；
       //    过程里 countAdded 累出来的 addedSoFar 末尾恒等于 addedFinal
-      return oldContent
+      return existedBefore
         ? `✅ 文件已更新：${path} (${args.content.length} 字符, +${addedFinal}/-${deleted} 行)`
         : `✅ 文件已创建：${path} (${args.content.length} 字符, ${addedFinal} 行)`
     } catch (err: any) {
