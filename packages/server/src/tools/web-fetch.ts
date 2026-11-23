@@ -4,10 +4,12 @@
  */
 import type { ToolDef } from './types'
 import { readSetting } from './shared'
-import { fetchPublicWeb, resolvePublicTarget } from '../services/public-web-fetch'
+import { fetchPublicWeb, resolveWithSignal } from '../services/public-web-fetch'
 import { extractHtmlText } from '../services/html-text'
 
 const MAX_READER_BYTES = 5 * 1024 * 1024
+const DEFAULT_CONTENT_LENGTH = 8000
+const MAX_CONTENT_LENGTH = 100_000
 
 /** Fetch bodies are already decompressed; limit bytes as they arrive. */
 async function readReaderText(response: Response): Promise<string> {
@@ -42,7 +44,7 @@ const tool: ToolDef = {
     type: 'object',
     properties: {
       url: { type: 'string', description: '网页完整URL（含https://）' },
-      maxLength: { type: 'number', description: '最大返回字符数，默认5000' },
+      maxLength: { type: 'number', description: '最大返回字符数，默认 8000，范围 1–100000' },
     },
     required: ['url'],
   },
@@ -55,11 +57,15 @@ const tool: ToolDef = {
 
     const rawUrl = String(args.url || '').trim()
     if (!rawUrl) return '❌ 缺少 URL 参数'
-    try { await resolvePublicTarget(rawUrl) } catch (err) {
+    try { await resolveWithSignal(rawUrl, AbortSignal.timeout(10000)) } catch (err) {
       if (err instanceof Error && err.message === 'fake_ip_dns_unavailable') return '❌ 检测到代理的 fake-IP，但无法通过独立 DNS 验证目标。请检查代理或 DNS 设置后重试。'
+      if (err instanceof Error && err.name === 'TimeoutError') return '❌ 验证网页地址超时，请检查 DNS 或网络后重试。'
       return '❌ URL 无法访问或被安全策略拒绝'
     }
-    const maxLen = args.maxLength || 8000
+    const requestedLength = args.maxLength
+    const maxLen = typeof requestedLength === 'number' && Number.isFinite(requestedLength) && requestedLength >= 1
+      ? Math.min(Math.floor(requestedLength), MAX_CONTENT_LENGTH)
+      : DEFAULT_CONTENT_LENGTH
     const jinaKey = readSetting('jinaApiKey')
     try {
       // ---- 1) Jina Reader 官方端点（带 key）----
@@ -96,18 +102,19 @@ const tool: ToolDef = {
 
       // ---- 3) 原生 fetch ----
       const response = await fetchPublicWeb(rawUrl, AbortSignal.timeout(15000))
-      const contentType = response.contentType
+      const contentType = response.contentType.toLowerCase()
+      const sourceUrl = response.finalUrl || rawUrl
 
       if (response.status < 200 || response.status >= 300) return `❌ 获取网页失败：HTTP ${response.status}`
 
       if (contentType.includes('text/html')) {
-        return buildWebFetchResult(extractHtmlText(response.text), rawUrl, maxLen)
+        return buildWebFetchResult(extractHtmlText(response.text), sourceUrl, maxLen)
       } else if (contentType.includes('text/plain')) {
-        return buildWebFetchResult({ content: response.text.trim() }, rawUrl, maxLen)
+        return buildWebFetchResult({ content: response.text.trim() }, sourceUrl, maxLen)
       } else if (contentType.includes('application/json')) {
         const json = JSON.parse(response.text)
         const content = JSON.stringify(json, null, 2)
-        return buildWebFetchResult({ content }, rawUrl, maxLen)
+        return buildWebFetchResult({ content }, sourceUrl, maxLen)
       } else {
         return `无法解析的内容类型: ${contentType}，状态码: ${response.status}`
       }

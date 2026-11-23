@@ -31,6 +31,26 @@ describe('public web target validation', () => {
     expect(resolver).toHaveBeenCalledTimes(2)
   })
 
+  it('reports the validated final URL after a public redirect', async () => {
+    const resolver = vi.fn(async () => [{ address: '8.8.8.8', family: 4 }])
+    const transport = vi.fn()
+      .mockResolvedValueOnce({ status: 302, location: '/article?id=1', contentType: '', text: '' })
+      .mockResolvedValueOnce({ status: 200, contentType: 'text/plain', text: 'article' })
+    const response = await fetchPublicWeb('https://example.com/old', new AbortController().signal, resolver, transport)
+    expect(response.finalUrl).toBe('https://example.com/article?id=1')
+    expect(resolver).toHaveBeenCalledTimes(2)
+  })
+
+  it('stops waiting for DNS on cancellation without opening a connection', async () => {
+    const resolver = vi.fn(() => new Promise<Array<{ address: string; family: number }>>(() => {}))
+    const transport = vi.fn()
+    const controller = new AbortController()
+    const pending = fetchPublicWeb('https://example.com/', controller.signal, resolver, transport)
+    controller.abort(new Error('cancelled during DNS'))
+    await expect(pending).rejects.toThrow('cancelled during DNS')
+    expect(transport).not.toHaveBeenCalled()
+  })
+
   it('uses independently resolved public addresses for a fake-IP domain and pins the connection', async () => {
     const system = vi.fn(async () => [{ address: '198.18.0.5', family: 4 }])
     const independent = vi.fn(async () => [{ address: '8.8.8.8', family: 4 }])

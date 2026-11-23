@@ -5,6 +5,7 @@
  * 既贵又给模型制造选择过载（选错工具/绕远路的直接原因）。
  */
 import { describe, it, expect } from 'vitest'
+import { resolveToolSearchHits } from '../tools/tool-search'
 import {
   toolDefinitions,
   toolExecutors,
@@ -42,11 +43,8 @@ describe('动态工具集契约', () => {
   })
 
   it('每个按需工具都能被 tool_search 搜到（按名字精确查询）', () => {
-    // tool_search 的实现是对 DEFERRED_TOOLS 做 name.includes(query)——
-    // 这里校验"用完整工具名去搜一定能命中自己"，保证按需工具可达。
     for (const name of DEFERRED_TOOLS) {
-      const matched = [...DEFERRED_TOOLS].filter((n) => n.includes(name))
-      expect(matched).toContain(name)
+      expect(resolveToolSearchHits(name), `搜索 ${name} 应命中自身`).toContain(name)
     }
   })
 

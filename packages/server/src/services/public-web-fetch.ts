@@ -70,6 +70,21 @@ type Transport = (url: URL, address: Address, signal: AbortSignal) => Promise<We
 const MAX_RESPONSE_BYTES = 5 * 1024 * 1024
 const decompressors = { gzip: promisify(gunzip), deflate: promisify(inflate), br: promisify(brotliDecompress) }
 
+/** DNS promises do not accept AbortSignal; stop waiting when the caller cancels. */
+export async function resolveWithSignal(rawUrl: string, signal: AbortSignal, resolver?: Resolver, independentResolver?: Resolver) {
+  signal.throwIfAborted()
+  let onAbort: (() => void) | undefined
+  const aborted = new Promise<never>((_, reject) => {
+    onAbort = () => reject(signal.reason)
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
+  try {
+    return await Promise.race([resolvePublicTarget(rawUrl, resolver, independentResolver), aborted])
+  } finally {
+    if (onAbort) signal.removeEventListener('abort', onAbort)
+  }
+}
+
 async function decodeContentEncoding(bytes: Buffer, contentEncoding: string, contentType: string): Promise<Buffer> {
   const encodings = contentEncoding.split(',').map(value => value.trim().toLowerCase()).filter(value => value && value !== 'identity')
   if (encodings.length > 3) throw new Error('unsupported_content_encoding')
@@ -138,12 +153,12 @@ const sendPinned: Transport = async (url, address, signal) => {
 }
 
 /** GET with a DNS-pinned socket, independently validating every redirect. */
-export async function fetchPublicWeb(rawUrl: string, signal: AbortSignal, resolver?: Resolver, transport: Transport = sendPinned, independentResolver?: Resolver): Promise<{ status: number; contentType: string; text: string }> {
+export async function fetchPublicWeb(rawUrl: string, signal: AbortSignal, resolver?: Resolver, transport: Transport = sendPinned, independentResolver?: Resolver): Promise<{ status: number; contentType: string; text: string; finalUrl: string }> {
   let next = rawUrl
   for (let hop = 0; hop <= 5; hop++) {
-    const { url, address } = await resolvePublicTarget(next, resolver, independentResolver)
+    const { url, address } = await resolveWithSignal(next, signal, resolver, independentResolver)
     const response = await transport(url, address, signal)
-    if (response.status < 300 || response.status >= 400) return response
+    if (response.status < 300 || response.status >= 400) return { ...response, finalUrl: url.toString() }
     if (!response.location || hop === 5) throw new Error('invalid_redirect')
     next = new URL(response.location, url).toString()
   }

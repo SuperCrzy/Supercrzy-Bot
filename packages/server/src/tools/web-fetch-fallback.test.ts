@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const web = vi.hoisted(() => ({ resolvePublicTarget: vi.fn(), fetchPublicWeb: vi.fn() }))
+const web = vi.hoisted(() => ({ resolveWithSignal: vi.fn(), fetchPublicWeb: vi.fn() }))
 vi.mock('../services/public-web-fetch', () => web)
 vi.mock('./shared', () => ({ readSetting: () => '' }))
 import tool from './web-fetch'
 
 beforeEach(() => {
   vi.clearAllMocks()
-  web.resolvePublicTarget.mockResolvedValue({})
+  web.resolveWithSignal.mockResolvedValue({})
   vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 503 })))
 })
 afterEach(() => vi.unstubAllGlobals())
@@ -27,6 +27,28 @@ describe('web_fetch native fallback', () => {
     web.fetchPublicWeb.mockResolvedValue({ status: 200, contentType: 'text/plain', text: content })
     const result = JSON.parse(await tool.execute({ url: 'https://example.com/' }))
     expect(result.content).toBe(content)
+  })
+
+  it('reports the final URL and accepts case-insensitive content types', async () => {
+    web.fetchPublicWeb.mockResolvedValue({ status: 200, contentType: 'Text/Plain; Charset=UTF-8', text: '重定向后的内容', finalUrl: 'https://example.com/article' })
+    const result = JSON.parse(await tool.execute({ url: 'https://example.com/old' }))
+    expect(result.url).toBe('https://example.com/article')
+    expect(result.content).toBe('重定向后的内容')
+  })
+
+  it('bounds output length and uses the default for invalid requests', async () => {
+    const content = 'a'.repeat(120_000)
+    web.fetchPublicWeb.mockResolvedValue({ status: 200, contentType: 'text/plain', text: content })
+    for (const maxLength of [-10, 0, Number.NaN, Infinity, '100']) {
+      const result = JSON.parse(await tool.execute({ url: 'https://example.com/', maxLength }))
+      expect(result.content).toHaveLength(8000)
+      expect(result.truncated).toBe(true)
+      expect(result.totalLength).toBe(content.length)
+    }
+    const limited = JSON.parse(await tool.execute({ url: 'https://example.com/', maxLength: 200_000 }))
+    expect(limited.content).toHaveLength(100_000)
+    const short = JSON.parse(await tool.execute({ url: 'https://example.com/', maxLength: 5.9 }))
+    expect(short.content).toHaveLength(5)
   })
 
   it('cancels an oversized reader response and uses the bounded native fallback', async () => {

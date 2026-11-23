@@ -7,7 +7,7 @@ import { runSearchChain, runExhaustiveSearch } from '../services/search-provider
 
 const tool: ToolDef = {
     name: 'web_search',
-    description: '网络搜索。返回搜索结果列表（标题/链接/摘要/日期）。**用户问"最新/今天/本周"等时效性问题时必须调用并传 timeRange，不要凭训练数据回答过时信息。** 新闻/时效类问题用 source=news（新闻流，结果带精确发布日期）→ 直接按日期筛选即可，**不要逐个打开网页核实发布日期**；结果中 date 为空的条目标注"日期未知"即可。',
+    description: '网络搜索。返回搜索结果列表（标题/链接/摘要/日期）。用户问最新、今天或本周等时效性问题时应传 timeRange。新闻可用 source=news，但搜索结果的日期和摘要可能缺失或不准确；关键事实和日期应打开可靠来源核实，并区分发布时间与事件发生时间。无法确认的日期标注未知。',
     category: 'network',
     parameters: {
       type: 'object',
@@ -15,7 +15,7 @@ const tool: ToolDef = {
         query: { type: 'string', description: '搜索关键词' },
         count: { type: 'number', description: '返回结果数量，默认8，最大10' },
         timeRange: { type: 'string', enum: ['day', 'week', 'month', 'year'], description: '时间范围过滤：day=近24小时 / week=近1周 / month=近1月 / year=近1年。要"今天的消息"必须用 day，时效性问题至少 week。' },
-        source: { type: 'string', enum: ['news'], description: '新闻流模式：只搜新闻媒体，结果带精确发布日期（时效性问题推荐使用，省去逐条核实）。' },
+        source: { type: 'string', enum: ['news'], description: '新闻搜索模式；结果的来源和日期仍需核实。' },
       },
       required: ['query'],
     },
@@ -25,7 +25,9 @@ const tool: ToolDef = {
     try {
       const query = String(args.query || '').trim()
       if (!query) return '❌ 缺少查询参数 query'
-      const count = Math.min(args.count || 8, 10)
+      const count = typeof args.count === 'number' && Number.isFinite(args.count) && args.count >= 1
+        ? Math.min(Math.floor(args.count), 10)
+        : 8
       const timeRange = ['day', 'week', 'month', 'year'].includes(args.timeRange) ? args.timeRange : ''
       const NEWS_HINTS = /新闻|今日|今天|最新|快讯|报道|发布|速递|资讯|简报|News|Breaking|Today|Latest|Headline/i
       const effectiveSource = args.source === 'news' || (NEWS_HINTS.test(query) && timeRange) ? 'news' : (args.source || '')
