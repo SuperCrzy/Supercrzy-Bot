@@ -83,6 +83,7 @@ import readMe from './read-me'
 import toolSearch from './tool-search'
 import memoryStore from './memory-store'
 import suggestRoutine from './suggest-routine'
+import verifyClaim from './verify-claim'
 import fileRead from './file-read'
 import lintFile from './lint-file'
 import fileWrite from './file-write'
@@ -116,6 +117,7 @@ export const directoryTools: ToolDef[] = [
   toolSearch,
   memoryStore,
   suggestRoutine,
+  verifyClaim,
   fileRead,
   lintFile,
   fileWrite,

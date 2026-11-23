@@ -923,6 +923,33 @@ function buildSystemPrompt(basePrompt: string, userMessage: string, model?: stri
   // 模型通常服从这条（更靠前、措辞更强）⇒ 过程里一片沉默，只剩开头一句 + 结尾总结。
   // 现在按「不回顾、可预告」划界：允许执行前预告下一步（用户靠它知道在干什么），
   // 禁止执行后回顾（"我先搜了…结果显示…"会与工具卡片重复）。
+  // 判断「某功能存不存在」时，单一维度的 0 命中不构成结论。实测踩过的坑：查编译产物分片里搜不到 "mcp"
+  // ⇒ 断言「前端没有 MCP 管理界面」，而 SettingsView.vue 里是完整的增删改查。检索维度错了，结论就反了。
+  const ABSENCE_CLAIM_RE = /有没有|是否存在|有没有实现|是否支持|缺失|没有实现|不支持|未实现|不存在/
+  const absenceCheck = ABSENCE_CLAIM_RE.test(userMessage)
+  const absenceSection = absenceCheck
+    ? `\n\n## 判断「有没有」时的取证纪律（必须遵守）
+用户正在问某项能力是否存在。**否定结论（"没有/缺失/未实现"）的举证责任在你**，必须满足以下全部条件才可下：
+1. **搜源码，不是搜产物**：用 grep 在源码目录检索（如 \`packages/client/src\`、\`packages/server/src\`），而不是在编译产物/分片文件名里搜。编译后代码会并入通用 chunk，按功能名搜产物必然 0 命中而功能其实存在。
+2. **搜索词要覆盖同义词**：界面叫"管理"不叫"mcp"时，按 mcp 搜不到不等于没有。至少换 2 个词再搜一次（中文名、英文名、可能的缩写）。
+3. **区分「没有」和「没接」**：数据库里 0 行只说明没数据，不说明没功能；\`count(*) = 0\` 不能作为"功能不存在"的证据。
+4. 满足以上仍找不到时，结论写成"未找到证据"而非"不存在"，并列出你搜过哪些位置。
+\n**任一条不满足就下否定结论 = 结论不可信。**`
+    : ''
+  const evidenceSection = absenceCheck
+    ? `\n\n## 结论标注证据等级（本问必须遵守）
+对"是否存在/是否支持"这类事实判断，在结论后标明证据级别：
+- \`[已核实]\` —— 读过实现、跑过、或看到实际界面，能指到具体文件与行
+- \`[推断]\` —— 只凭间接线索（文件名、数据库行数、搜索 0 命中）得出，**未经实现确认**
+\n标 \`[推断]\` 时必须写明"还需验证什么"。不要把推断写成"因此不存在"——那是把猜测当结论。`
+    : ''
+  const toolChoiceSection = `\n\n## 检索手段优先级（判断代码库事实时）
+1. **grep 源码**（\`packages/*/src\`）—— 首选，直接命中定义与用法
+2. **读具体文件**：命中后用 Read 看实现，确认是真功能还是仅引用
+3. **查数据库行数**：只用来判断"有没有数据"，**不能**判断"有没有功能"
+4. **看编译产物/分包文件**：最后手段，仅用于确认是否被打包，不能用于判断功能存在性
+\n顺序颠倒会得出相反的结论。`
+
   const outputStyleSection = `\n\n## 输出风格（必须遵守）
 - **执行前可以预告，执行后不要回顾**：准备调工具时，先用**一句话（≤20 字）**说明要做什么（如"先看一下项目结构"、"改完跑一遍测试"）；工具返回后**不要复述过程**（"我搜索了…""结果显示…""我排除了…"这类一律禁止）——工具卡片已经展示细节，正文只给结论。
 - 同一阶段的连续多个工具，只在**阶段开始时**说一次，不要每个工具都说一句。
@@ -1117,7 +1144,7 @@ ${contentFactoryLine}`
   const baseTools = toolDefinitions.map((t) => t.name)
   const allowedTools = [...new Set([...baseTools, ...skillTools])]
 
-  const prompt = `${basePrompt}${todaySection}${searchTriggerSection}${outputStyleSection}
+  const prompt = `${basePrompt}${todaySection}${searchTriggerSection}${absenceSection}${evidenceSection}${toolChoiceSection}${outputStyleSection}
 
 ## Response Language (MUST FOLLOW)
 - Always reply in the SAME LANGUAGE the user writes in. If the user writes English, reply in English. If Chinese, reply in Chinese.

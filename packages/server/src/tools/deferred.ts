@@ -32,6 +32,8 @@ export const DEFERRED_TOOLS = new Set<string>([
   'memory_store', 'memory_recall', 'memory_list', 'memory_consolidate',
   // Called once at the end of a turn, never mid-task: no reason to hold a resident slot.
   'suggest_routine',
+  // Only needed before an absence claim, which is rare compared with ordinary work.
+  'verify_claim',
   // ---- 仓库操作：git 三件套（带风险/低频） ----
   'git_status', 'git_diff', 'git_commit',
   // ---- 补充调查类：不作为主干（web_search 已常驻） ----
