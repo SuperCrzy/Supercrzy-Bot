@@ -15,6 +15,44 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('chat session loading', () => {
+  it('reuses the same ID after an uncertain creation and verifies the existing session', async () => {
+    const ids: string[] = []
+    let checks = 0
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/sessions') {
+        ids.push(JSON.parse(String(init?.body)).id)
+        if (ids.length === 1) throw new Error('connection lost')
+        return new Response('', { status: 409 })
+      }
+      if (String(input).startsWith('/api/sessions/')) {
+        checks++
+        if (checks === 1) throw new Error('offline')
+        return Response.json({ id: ids[0], messages: [] })
+      }
+      return Response.json({})
+    }))
+    const chat = useChatStore()
+    await expect(chat.createSession('test')).rejects.toThrow('connection lost')
+    const session = await chat.createSession('test')
+    expect(ids).toEqual([session.id, session.id])
+    expect(chat.sessions).toHaveLength(1)
+  })
+  it('recovers when creation succeeded but its response was lost', async () => {
+    let createdId = ''
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/sessions') {
+        createdId = JSON.parse(String(init?.body)).id
+        throw new Error('connection lost')
+      }
+      if (String(input) === `/api/sessions/${createdId}`) return Response.json({ id: createdId, messages: [] })
+      return Response.json({})
+    }))
+    const chat = useChatStore()
+    const session = await chat.createSession('test')
+    expect(session.id).toBe(createdId)
+    expect(chat.currentSessionId).toBe(createdId)
+    expect(chat.sessions).toHaveLength(1)
+  })
   it('does not create or select a local session when the server rejects creation', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 503 })))
     const chat = useChatStore()

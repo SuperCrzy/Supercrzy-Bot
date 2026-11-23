@@ -5,6 +5,7 @@ import type { ChatSession, ChatMessage, ContentBlock, TextBlock, ChatFlowNode } 
 import { reconcileAnswerText } from '@/utils/flow-reconcile'
 import { extractSvgs, SVG_CODE_BLOCK_RE, SVG_BARE_RE } from '@/utils/svg-extract'
 import { useAppStore } from './app'
+import { useAccountStore } from './account'
 
 /** 加载端对账补建的正文节点 id 序号（避免同毫秒内重复） */
 let restoreSeq = 0
@@ -361,9 +362,11 @@ export const useChatStore = defineStore('chat', () => {
    * 创建新会话（持久化到后端）
    * @param collabMode 2026-08-29 超级协作平台：传 'semi'/'senate' 则创建协作任务会话（侧边栏显示"超级"标）
    */
+  let uncertainCreation: { key: string; session: ChatSession } | null = null
   async function createSession(title?: string, workspaceDir?: string, collabMode?: 'semi' | 'senate'): Promise<ChatSession> {
     const selectedBefore = currentSessionId.value
-    const session: ChatSession = {
+    const key = JSON.stringify([useAccountStore().accountId, selectedBefore, title || '', workspaceDir || '', collabMode || ''])
+    const session: ChatSession = uncertainCreation?.key === key ? uncertainCreation.session : {
       id: crypto.randomUUID(),
       title: title || defaultSessionTitle(),
       createdAt: new Date().toISOString(),
@@ -373,12 +376,30 @@ export const useChatStore = defineStore('chat', () => {
       collabMode,
     }
     // 持久化到后端
-    const response = await fetch('/api/sessions', {
+    try {
+      const response = await fetch('/api/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: session.title, model: session.model, id: session.id, workspace_dir: session.workspaceDir, collab_mode: collabMode || null }),
       })
-    if (!response.ok) throw new Error(`session_create_failed:${response.status}`)
+      if (!response.ok) throw new Error(`session_create_failed:${response.status}`)
+    } catch (error) {
+      // The server may have committed the row before the response was lost.
+      // Verify this specific generated ID before reporting a failure.
+      let found = false
+      try {
+        const check = await fetch(`/api/sessions/${encodeURIComponent(session.id)}`)
+        if (check.ok) {
+          const stored = await check.json()
+          found = stored?.id === session.id
+        }
+      } catch { /* still unknown; do not pretend creation succeeded */ }
+      if (!found) {
+        uncertainCreation = { key, session }
+        throw error
+      }
+    }
+    if (uncertainCreation?.key === key) uncertainCreation = null
     sessions.value.unshift(session)
     messages.value.set(session.id, [])
     if (currentSessionId.value === selectedBefore) {
