@@ -412,6 +412,7 @@ import { useMessage } from 'naive-ui'
 import { useAppStore } from '@/stores/app'
 import { useI18n } from 'vue-i18n'
 import { useChatStore, formatRelativeTime } from '@/stores/chat'
+import { hideNativeBrowserNow } from '@/composables/useAiBrowser'
 import SvgIcon from '@/components/ui/SvgIcon.vue'
 import ProfileAvatar from '@/components/ui/ProfileAvatar.vue'
 import DetailPanel from '@/components/layout/DetailPanel.vue'
@@ -822,8 +823,20 @@ watch(
   () => route.path,
   (path) => {
     const isFullPage = FULL_PAGE_ROUTE_PREFIXES.some((p) => path === p || path.startsWith(p + '/'))
-    if (isFullPage) appStore.closeDetailPanelForPage()
-    else appStore.restoreDetailPanel()
+    if (isFullPage) {
+      appStore.closeDetailPanelForPage()
+      // Hide the native browser view explicitly.
+      //
+      // It is a WebContentsView drawn above the page by the main process, so no
+      // z-index or modal layer can cover it — a changelog dialog opened here shows up
+      // underneath it. Closing the panel should propagate DetailPanel -> AiBrowserPanel
+      // -> active watcher -> stopNativeSync, but the view stayed on screen; going
+      // through the registered hider does not depend on that chain, and unlike calling
+      // bridge.hide() straight, it resets the shown flag so the view can return.
+      hideNativeBrowserNow()
+    } else {
+      appStore.restoreDetailPanel()
+    }
   },
   { immediate: true },
 )

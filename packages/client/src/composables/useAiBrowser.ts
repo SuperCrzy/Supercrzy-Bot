@@ -59,6 +59,25 @@ export interface BrowserDomView {
   blocks?: BrowserDomBlock[]
 }
 
+/**
+ * One native browser view exists per window, so a single registered hider is enough.
+ *
+ * Exists because the view is drawn above the page by the main process: when a
+ * full-page route opens, something must hide it, and the router does not know about
+ * the composable's closure. Routing through stopNativeSync (not bridge.hide) also
+ * keeps nativeShown consistent so the view can come back.
+ */
+let nativeHider: (() => void) | null = null
+
+export function registerNativeHider(fn: () => void): void {
+  nativeHider = fn
+}
+
+/** Hide the native browser view, if any is live. Safe to call when none exists. */
+export function hideNativeBrowserNow(): void {
+  try { nativeHider?.() } catch { /* view already torn down */ }
+}
+
 export function useAiBrowser(opts: AiBrowserOptions) {
   const browserStatus = ref('待机')
   const browserFailHint = ref('')
@@ -157,6 +176,13 @@ export function useAiBrowser(opts: AiBrowserOptions) {
   const desktopBridge = () => (window as { supercrzyDesktop?: { browserView?: any } }).supercrzyDesktop?.browserView
   let nativeRaf = 0
   let nativeShown = false
+  /**
+   * Registered for callers outside this composable (MainLayout hiding the view before
+   * a full-page route). Going through stopNativeSync matters: it resets nativeShown,
+   * so the next show() actually re-shows. Calling bridge.hide() directly would leave
+   * nativeShown true and the view would never come back.
+   */
+  registerNativeHider(() => stopNativeSync())
   let nativeUrlTimer: ReturnType<typeof setInterval> | null = null
   let lastSentRect = ''
 
