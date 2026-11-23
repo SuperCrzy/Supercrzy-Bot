@@ -870,6 +870,9 @@ export function setupCapabilityLines(input: {
   channels: Array<{ platform?: string; name?: string }>
   automationsCount: number
   mcpServersCount: number
+  /** Enabled server names. A bare count says "you have something" without saying
+   *  what, so the model can neither use it nor admit not knowing. */
+  mcpServerNames?: string[]
 }): string[] {
   const lines: string[] = [
     `- Model: **${input.model || 'deepseek-v4-pro'}** | Platform: SUPERCRZY BOT`,
@@ -897,7 +900,12 @@ export function setupCapabilityLines(input: {
     lines.push(`- 自动化任务：已配置 ${input.automationsCount} 条`)
   }
   if (input.mcpServersCount > 0) {
-    lines.push(`- MCP 服务：已接入 ${input.mcpServersCount} 个`)
+    const names = (input.mcpServerNames || []).filter(Boolean)
+    // Names come from the table, never a literal list: each name is a promise the
+    // model can call that server, so it may only promise what actually exists.
+    lines.push(names.length > 0
+      ? `- MCP 服务：已接入 ${input.mcpServersCount} 个（${names.slice(0, 12).join('、')}${names.length > 12 ? ' 等' : ''}）`
+      : `- MCP 服务：已接入 ${input.mcpServersCount} 个`)
   }
 
   return lines
@@ -943,6 +951,15 @@ function buildSystemPrompt(basePrompt: string, userMessage: string, model?: stri
 - \`[推断]\` —— 只凭间接线索（文件名、数据库行数、搜索 0 命中）得出，**未经实现确认**
 \n标 \`[推断]\` 时必须写明"还需验证什么"。不要把推断写成"因此不存在"——那是把猜测当结论。`
     : ''
+  // 说"我做不到"和说"某功能不存在"是同一种断言，都要先查再答。凭印象自我设限的代价：
+  // 一次 tool_search 就能找到工具，用户却先得到了"不支持"。
+  const selfCapabilitySection = `\n\n## 能力自查（回答"你能不能…"之前）
+1. **先查再答**：被问及时不要凭印象说"没有这个能力"。按顺序确认：内置工具（已在你的工具列表里）→
+   按需工具（用 **tool_search** 搜，中英文各试一次）→ 技能（下方 Installed Skills，用 **skill_list / skill_search** 查详情）。
+2. **确认确实没有时**：写"我查了 X 和 Y，没有对应工具/技能"——说明查过什么，而不是笼统的"不支持"。
+3. **反向同样成立**：不要承诺查不到的能力。只有工具列表、技能列表、MCP 名单里切实存在的才可答应；
+   承诺做不到的事，比承认做不到伤害大得多。`
+
   const toolChoiceSection = `\n\n## 检索手段优先级（判断代码库事实时）
 1. **grep 源码**（\`packages/*/src\`）—— 首选，直接命中定义与用法
 2. **读具体文件**：命中后用 Read 看实现，确认是真功能还是仅引用
@@ -1059,6 +1076,11 @@ ${contentFactoryLine}`
   try {
     realMcpServersCount = Number((db.prepare('SELECT COUNT(*) AS c FROM mcp_servers WHERE enabled = 1').get() as any)?.c || 0)
   } catch { realMcpServersCount = 0 }
+  let realMcpServerNames: string[] = []
+  try {
+    realMcpServerNames = (db.prepare('SELECT name FROM mcp_servers WHERE enabled = 1 ORDER BY name').all() as any[])
+      .map((r) => String(r.name || '')).filter(Boolean)
+  } catch { realMcpServerNames = [] }
 
   let allSkills: any[] = []
   try {
@@ -1074,11 +1096,7 @@ ${contentFactoryLine}`
       } catch { /* 目录不可读则跳过 globs 匹配 */ }
     }
 
-    if (allSkills.length > 0) {
-      skillIndexSection = '\n\n## Installed Skills\n' +
-        allSkills.map((s: any) => `- [${s.name}] ${s.description}`).join('\n') +
-        '\n\nUse skill_list() for details, skill_search() to find new skills, skill_install() to install.'
-    }
+    // Index is built after matching, see below.
 
     const relevantSkills = allSkills.filter((s: any) => {
       const q = userMessage.toLowerCase()
@@ -1110,6 +1128,20 @@ ${contentFactoryLine}`
       }
       return false
     })
+
+    // Descriptions for every skill cost real tokens: 234 skills is ~18k characters,
+    // about 6k tokens paid on every turn. Describe the skills that matched this
+    // request and name-list the rest, so the model still knows they exist and can
+    // ask skill_list for detail — without paying for prose it will not read.
+    {
+      const matchedNames = new Set(relevantSkills.map((sk: any) => sk.name))
+      const detailed = allSkills.filter((sk: any) => matchedNames.has(sk.name))
+      const restNames = allSkills.filter((sk: any) => !matchedNames.has(sk.name)).map((sk: any) => sk.name)
+      const skillLines: string[] = detailed.map((sk: any) => `- [${sk.name}] ${sk.description}`)
+      if (restNames.length > 0) skillLines.push(`- 其余 ${restNames.length} 个技能（仅列名）：${restNames.join('、')}`)
+      skillIndexSection = '\n\n## Installed Skills\n' + skillLines.join('\n') +
+        '\n\nUse skill_list() for details, skill_search() to find new skills, skill_install() to install.'
+    }
 
     if (relevantSkills.length > 0) {
       matchedSkills = relevantSkills.map((s: any) => ({ name: s.name, name_en: s.name_en || '' }))
@@ -1144,7 +1176,7 @@ ${contentFactoryLine}`
   const baseTools = toolDefinitions.map((t) => t.name)
   const allowedTools = [...new Set([...baseTools, ...skillTools])]
 
-  const prompt = `${basePrompt}${todaySection}${searchTriggerSection}${absenceSection}${evidenceSection}${toolChoiceSection}${outputStyleSection}
+  const prompt = `${basePrompt}${todaySection}${searchTriggerSection}${absenceSection}${evidenceSection}${selfCapabilitySection}${toolChoiceSection}${outputStyleSection}
 
 ## Response Language (MUST FOLLOW)
 - Always reply in the SAME LANGUAGE the user writes in. If the user writes English, reply in English. If Chinese, reply in Chinese.
@@ -1183,6 +1215,7 @@ ${setupCapabilityLines({
   channels: realChannels,
   automationsCount: realAutomationsCount,
   mcpServersCount: realMcpServersCount,
+  mcpServerNames: realMcpServerNames,
 }).join('\n')}
 - 工具：文件读写、Shell 执行、网页搜索/抓取、记忆存取、技能管理
 - 交付能力：可真实执行任务并产出文件/数据/HTML 等可验证结果
