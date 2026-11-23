@@ -3,10 +3,36 @@
  * 定义与执行器一体：加工具 = 加一个文件，不再双写。
  */
 import type { ToolDef } from './types'
-import { execFile } from 'child_process'
-import { statSync } from 'fs'
-import { join, resolve } from 'path'
 import { readSetting } from './shared'
+import { fetchPublicWeb, resolvePublicTarget } from '../services/public-web-fetch'
+import { extractHtmlText } from '../services/html-text'
+
+const MAX_READER_BYTES = 5 * 1024 * 1024
+
+/** Fetch bodies are already decompressed; limit bytes as they arrive. */
+async function readReaderText(response: Response): Promise<string> {
+  if (!response.body) return ''
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  const chunks: string[] = []
+  let size = 0
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      size += value.byteLength
+      if (size > MAX_READER_BYTES) {
+        void reader.cancel().catch(() => {})
+        throw new Error('response_too_large')
+      }
+      chunks.push(decoder.decode(value, { stream: true }))
+    }
+    chunks.push(decoder.decode())
+    return chunks.join('')
+  } finally {
+    reader.releaseLock()
+  }
+}
 
 const tool: ToolDef = {
   name: 'web_fetch',
@@ -25,25 +51,14 @@ const tool: ToolDef = {
     // 1) Jina Reader 官方端点（配置 jinaApiKey → Authorization Bearer，更稳定，免费 100w token/月）
     // 2) Jina Reader 免费层（无 key 兜底，服务端渲染 JS → Markdown，解决 403/SPA 空白）
     // 3) 原生 fetch + 文本提取（轻量兜底）
-    // 4) 无头浏览器渲染（Chrome headless 兜底，JS 重页面/SPA 也能抓到 DOM）
-
-// Red-team fix (Gemini audit #6): only http/https, never loopback/private/
-// link-local/metadata targets (headless Chrome would fetch them from THIS host).
-function assertSafeFetchUrl(rawUrl: string): void {
-  let u: URL
-  try { u = new URL(rawUrl) } catch { throw new Error('invalid_url') }
-  if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error('protocol_not_allowed')
-  const host = u.hostname.toLowerCase()
-  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.internal') || host.endsWith('.local')) throw new Error('private_target')
-  if (/^(127\.|10\.|0\.|169\.254\.|192\.168\.)/.test(host)) throw new Error('private_target')
-  if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) throw new Error('private_target')
-  if (host === '[::1]' || host.startsWith('[') && /fe80|fc00|fd/i.test(host)) throw new Error('private_target')
-  if (host === '169.254.169.254') throw new Error('metadata_target')
-}
+    // Unrestricted browser fallback is disabled: subresources and redirects bypass URL checks.
 
     const rawUrl = String(args.url || '').trim()
-    try { assertSafeFetchUrl(rawUrl) } catch (e: any) { return `❌ URL 被安全策略拒绝：${e?.message || 'invalid'}` }
     if (!rawUrl) return '❌ 缺少 URL 参数'
+    try { await resolvePublicTarget(rawUrl) } catch (err) {
+      if (err instanceof Error && err.message === 'fake_ip_dns_unavailable') return '❌ 检测到代理的 fake-IP，但无法通过独立 DNS 验证目标。请检查代理或 DNS 设置后重试。'
+      return '❌ URL 无法访问或被安全策略拒绝'
+    }
     const maxLen = args.maxLength || 8000
     const jinaKey = readSetting('jinaApiKey')
     try {
@@ -52,11 +67,11 @@ function assertSafeFetchUrl(rawUrl: string): void {
         try {
           const jr = await fetch(`https://r.jina.ai/${encodeURIComponent(rawUrl)}`, {
             headers: { 'User-Agent': 'Mozilla/5.0 (compatible; SUPERCRZY-BOT/1.0)', 'Accept': 'text/markdown, text/plain', 'Authorization': `Bearer ${jinaKey}` },
-            redirect: 'follow',
+            redirect: 'error',
             signal: AbortSignal.timeout(20000),
           })
           if (jr.ok) {
-            const md = await jr.text()
+            const md = await readReaderText(jr)
             if (md && md.trim().length > 20) {
               return buildWebFetchResult(parseWebPageMeta(md.trim()), rawUrl, maxLen)
             }
@@ -68,11 +83,11 @@ function assertSafeFetchUrl(rawUrl: string): void {
       try {
         const jr = await fetch(`https://r.jina.ai/${encodeURIComponent(rawUrl)}`, {
           headers: { 'User-Agent': 'Mozilla/5.0 (compatible; SUPERCRZY-BOT/1.0)', 'Accept': 'text/markdown, text/plain' },
-          redirect: 'follow',
+          redirect: 'error',
           signal: AbortSignal.timeout(20000),
         })
         if (jr.ok) {
-          const md = await jr.text()
+          const md = await readReaderText(jr)
           if (md && md.trim().length > 20) {
             return buildWebFetchResult(parseWebPageMeta(md.trim()), rawUrl, maxLen)
           }
@@ -80,93 +95,55 @@ function assertSafeFetchUrl(rawUrl: string): void {
       } catch {}
 
       // ---- 3) 原生 fetch ----
-      const response = await fetch(rawUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36',
-        },
-        signal: AbortSignal.timeout(15000),
-      })
-      const contentType = response.headers.get('content-type') || ''
+      const response = await fetchPublicWeb(rawUrl, AbortSignal.timeout(15000))
+      const contentType = response.contentType
 
-      if (!response.ok) {
-        // 403/5xx → 交给无头浏览器（反爬/需要 JS）
-        return webFetchChromeFallback(rawUrl, maxLen)
-      }
+      if (response.status < 200 || response.status >= 300) return `❌ 获取网页失败：HTTP ${response.status}`
 
-      if (contentType.includes('text/html') || contentType.includes('text/plain')) {
-        const text = await response.text()
-        // 简单提取文本（去除HTML标签）
-        const plainText = text.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
-        if (plainText.length < 50) return webFetchChromeFallback(rawUrl, maxLen) // 内容太少 → 可能 JS 渲染
-        return buildWebFetchResult({ content: plainText }, rawUrl, maxLen)
+      if (contentType.includes('text/html')) {
+        return buildWebFetchResult(extractHtmlText(response.text), rawUrl, maxLen)
+      } else if (contentType.includes('text/plain')) {
+        return buildWebFetchResult({ content: response.text.trim() }, rawUrl, maxLen)
       } else if (contentType.includes('application/json')) {
-        const json = await response.json()
+        const json = JSON.parse(response.text)
         const content = JSON.stringify(json, null, 2)
         return buildWebFetchResult({ content }, rawUrl, maxLen)
       } else {
         return `无法解析的内容类型: ${contentType}，状态码: ${response.status}`
       }
     } catch (err: any) {
-      // fetch 异常（网络/超时）→ 最后尝试无头浏览器
-      try { return await webFetchChromeFallback(rawUrl, maxLen) } catch { return `❌ 获取网页失败：${err.message}` }
+      return `❌ 获取网页失败：${err.message}`
     }
   },
 }
 
 // ---- 本工具私有辅助（随工具一并从 services/tools.ts 迁出，供本文件内使用）----
-/** 无头浏览器兜底：系统 Chrome headless dump-dom 渲染 JS 页面（SPA/登录页/反爬）→ 提取正文 */
-async function webFetchChromeFallback(rawUrl: string, maxLen: number): Promise<string> {
-  // 🔴 2026-10-26 补 Windows：原列表只有 macOS（/Applications）与 Linux（/usr/bin）路径，
-  // Windows 上 `find` 永远返回空 ⇒ 需要 JS 渲染的页面一律报「无可用浏览器渲染」。
-  // Windows 的安装位置由环境变量给出（Program Files / Program Files (x86) / LocalAppData
-  // 三处都可能，按用户安装方式不同）。
-  const winBases = [
-    process.env.PROGRAMFILES,
-    process.env['PROGRAMFILES(X86)'],
-    process.env.LOCALAPPDATA,
-  ].filter((b): b is string => Boolean(b))
-  const candidates = [
-    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-    '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
-    '/usr/bin/google-chrome',
-    '/usr/bin/chromium',
-    ...winBases.flatMap((base) => [
-      join(base, 'Google', 'Chrome', 'Application', 'chrome.exe'),
-      join(base, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
-    ]),
-  ]
-  const chrome = candidates.find((p) => { try { return statSync(p).isFile() } catch { return false } })
-  if (!chrome) return `❌ 获取网页失败：所有抓取策略均失败（无可用浏览器渲染）`
-
-  const dom = await new Promise<string>((resolve, reject) => {
-    execFile(chrome, ['--headless', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--dump-dom', '--virtual-time-budget=10000', rawUrl], {
-      timeout: 30000,
-      maxBuffer: 20 * 1024 * 1024,
-    }, (err, stdout) => (err ? reject(err) : resolve(stdout)))
-  })
-  const plainText = dom.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
-  if (!plainText) throw new Error('浏览器渲染后无内容')
-  return buildWebFetchResult({ content: plainText }, rawUrl, maxLen)
-}
-
 /** 解析 Jina Reader 返回的 Markdown 头部元信息（Title / URL Source / Published Time / Markdown Content） */
 function parseWebPageMeta(md: string): { title?: string; sourceUrl?: string; publishedTime?: string; content: string } {
   const lines = md.split('\n')
   let title: string | undefined
   let sourceUrl: string | undefined
   let publishedTime: string | undefined
-  let i = 0
-  for (; i < Math.min(lines.length, 12); i++) {
+  let contentStart = -1
+  let inlineContent = ''
+  const firstNonEmpty = lines.find(line => line.trim())?.trim() || ''
+  const looksLikeEnvelope = /^(?:Title:|URL Source:|Markdown Content:)/.test(firstNonEmpty)
+  let scannedChars = 0
+  for (let i = 0; looksLikeEnvelope && i < Math.min(lines.length, 128) && scannedChars < 32768; i++) {
     const l = lines[i]
+    scannedChars += l.length + 1
     if (l.startsWith('Title:')) title = l.slice(6).trim() || undefined
     else if (l.startsWith('URL Source:')) sourceUrl = l.slice(11).trim() || undefined
     else if (l.startsWith('Published Time:')) publishedTime = l.slice(15).trim() || undefined
     else if (l.startsWith('Markdown Content:')) {
-      i++
+      contentStart = i + 1
+      inlineContent = l.slice('Markdown Content:'.length).trim()
       break
     }
   }
-  const content = lines.slice(i).join('\n').trim()
+  // A reader may return plain Markdown without the metadata envelope.
+  // In that case none of the first lines are metadata to discard.
+  const content = contentStart < 0 ? md.trim() : `${inlineContent ? `${inlineContent}\n` : ''}${lines.slice(contentStart).join('\n')}`.trim()
   return { title, sourceUrl, publishedTime, content }
 }
 

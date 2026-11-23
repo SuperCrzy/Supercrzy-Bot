@@ -14,6 +14,10 @@
  * 无法单测（只能真机等 402/断网），正是这类"等不到现场"的缺陷反复复发的土壤。
  */
 
+import type { ChatMessage } from '@/types'
+import type { ChatStream } from '@/stores/chat-stream'
+import { textOf } from '@/utils/message-text'
+
 export interface ErrorDisplayInput {
   /** 本轮是否已经产出正文（`lastAnswerText(flow)` 非空） */
   hadText: boolean
@@ -34,6 +38,11 @@ export interface ErrorDisplay {
   stopReason?: { reason: string; message: string }
 }
 
+/** Streamed content may already exist before the typewriter creates a flow node. */
+export function hasAgentAnswer(contentText: string, renderedText: string): boolean {
+  return !!(contentText.trim() || renderedText.trim())
+}
+
 const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '')
 
 export function resolveErrorDisplay(input: ErrorDisplayInput): ErrorDisplay {
@@ -51,4 +60,21 @@ export function resolveErrorDisplay(input: ErrorDisplayInput): ErrorDisplay {
     content: `❌ ${msg || banner || '请求失败'}`,
     ...(hint ? { stopReason: { reason, message: hint } } : {}),
   }
+}
+
+/** Finish buffered text before applying an error, so a partial answer survives. */
+export function applyAgentStreamError(msg: ChatMessage, stream: ChatStream | null, data: { hint?: unknown; message?: unknown; reason?: unknown }, fallback: string): void {
+  if (stream?.target === msg) {
+    stream.markThinkingDone()
+    stream.flushTextNow()
+  } else {
+    for (const node of msg.flow || []) if (node.kind === 'thinking') node.completed = true
+  }
+  const tail = [...(msg.flow || [])].reverse().find(node => node.kind === 'text')
+  const renderedText = tail?.kind === 'text' ? tail.text : ''
+  const hadText = hasAgentAnswer(textOf(msg.content), renderedText)
+  const display = resolveErrorDisplay({ hadText, hint: data.hint, message: data.message, reason: data.reason, fallback })
+  if (display.content) msg.content = display.content
+  if (display.stopReason) msg.stopReason = display.stopReason
+  if (hadText && renderedText.trim()) msg.content = renderedText
 }

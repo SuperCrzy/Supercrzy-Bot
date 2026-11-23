@@ -73,7 +73,12 @@ object BrowserHost {
             "browser_snapshot" -> {
                 val js = "(function(){" + SNAPSHOT_BODY + "})()"
                 view.evaluateJavascript(js) { raw ->
-                    respond(parsePayload(raw, "snapshot"))
+                    val snapshot = parsePayload(raw, "snapshot")
+                    // The device bridge transports page contents in `data`.
+                    // Forward parse failures unchanged so the server sees them.
+                    respond(if (snapshot.optBoolean("ok", false)) {
+                        JSONObject().put("ok", true).put("data", snapshot)
+                    } else snapshot)
                 }
             }
             "browser_click" -> {
@@ -95,11 +100,16 @@ object BrowserHost {
                     var idx = $idx;
                     var el = idx >= 0 ? document.querySelector('[data-sc-idx="' + idx + '"]') : document.activeElement;
                     if(!el || !el.tagName) return JSON.stringify({ok:false,error:'no element with index ' + idx + ' — snapshot again'});
+                    if(el.disabled || el.readOnly) return JSON.stringify({ok:false,error:'element is disabled or read-only'});
                     el.focus();
-                    var proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-                    var setter = Object.getOwnPropertyDescriptor(proto, 'value');
-                    if(setter && setter.set) setter.set.call(el, ${JSONObject.quote(text)});
-                    else el.value = ${JSONObject.quote(text)};
+                    if (el.isContentEditable) {
+                      el.textContent = ${JSONObject.quote(text)};
+                    } else if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+                      var proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+                      var setter = Object.getOwnPropertyDescriptor(proto, 'value');
+                      if(setter && setter.set) setter.set.call(el, ${JSONObject.quote(text)});
+                      else el.value = ${JSONObject.quote(text)};
+                    } else return JSON.stringify({ok:false,error:'element is not editable'});
                     el.dispatchEvent(new Event('input', {bubbles:true}));
                     el.dispatchEvent(new Event('change', {bubbles:true}));
                     return JSON.stringify({ok:true,data:'typed into index ' + idx});
@@ -149,26 +159,36 @@ object BrowserHost {
     private const val SNAPSHOT_BODY = """
       var norm = function(s){ return (s || '').replace(/[ \t\n\r]+/g, ' ').trim(); };
       var out = [];
-      var i = 0;
+      var count = 0;
+      // Keep an identity for each actual DOM node across snapshots. Starting
+      // from a random positive value also reduces reuse after navigation.
+      var ids = window.__supercrzyBrowserIds;
+      if (!ids) ids = window.__supercrzyBrowserIds = { nodes: new WeakMap(), next: Math.floor(Math.random() * 1000000000) + 1 };
+      // Remove old tags first: hidden or reordered elements must not retain an
+      // index that has since been assigned to another element.
+      var old = document.querySelectorAll('[data-sc-idx]');
+      for (var n = 0; n < old.length; n++) old[n].removeAttribute('data-sc-idx');
       var nodes = document.querySelectorAll('a,button,input,textarea,select,[role="button"],[onclick],[contenteditable]');
-      for (var j = 0; j < nodes.length && i < 300; j++) {
+      for (var j = 0; j < nodes.length && count < 300; j++) {
         var el = nodes[j];
         var r = el.getBoundingClientRect();
         if (r.width < 2 && r.height < 2) continue;
         var st = getComputedStyle(el);
         if (st.visibility === 'hidden' || st.display === 'none' || st.opacity === '0') continue;
+        var i = ids.nodes.get(el);
+        if (i === undefined) { i = ids.next++; ids.nodes.set(el, i); }
         el.setAttribute('data-sc-idx', String(i));
         var label = norm(el.innerText || el.value || el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('title') || el.getAttribute('alt') || '').slice(0, 80);
         out.push({
           i: i,
-          tag: el.tagName.toLowerCase(),
+          tag: el.isContentEditable ? 'contenteditable' : el.tagName.toLowerCase(),
           text: label,
           href: el.tagName === 'A' ? (el.href || null) : null,
           type: el.getAttribute('type') || null,
           rect: [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)],
           disabled: !!el.disabled
         });
-        i++;
+        count++;
       }
       var blocks = [];
       var bn = document.querySelectorAll('h1,h2,h3,h4,h5,p,li,pre,blockquote,td');

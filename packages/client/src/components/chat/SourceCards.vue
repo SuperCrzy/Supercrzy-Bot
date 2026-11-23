@@ -21,6 +21,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import MarkdownIt from 'markdown-it'
 
 const props = defineProps<{
   text: string
@@ -31,29 +32,23 @@ interface SourceLink {
   url: string
 }
 
-/** 提取来源链接（2026-08-25 增强）：①所有 [文字](url) markdown 链接（模型常用"[新浪财经1](url)"自由格式，
- *  原正则只认"来源/出处/参考"标注导致漏提取、链接裸在正文）②显式"来源/出处/参考/source"标注 ③裸 http 链接。
- *  统一按 url 去重（同 url 保留第一个文字标签） */
+const markdown = new MarkdownIt({ html: false, linkify: true })
+/** Links are extracted from rendered prose, never code blocks or inline code. */
 const links = computed<SourceLink[]>(() => {
-  const t = props.text || ''
   const out: SourceLink[] = []
   const seen = new Set<string>()
-
-  // 1) 所有 [文字](url) markdown 链接（text=链接文字；url 去重）
-  const mdLink = /\[([^\]]{1,60})\]\(\s*(https?:\/\/[^)\s]+)\s*\)/g
-  let m: RegExpExecArray | null
-  while ((m = mdLink.exec(t)) !== null) {
-    const url = m[2]
-    if (!seen.has(url)) { seen.add(url); out.push({ text: m[1] || url, url }) }
+  for (const block of markdown.parse(props.text || '', {})) {
+    if (block.type !== 'inline' || !block.children) continue
+    let url = ''
+    let label = ''
+    for (const token of block.children) {
+      if (token.type === 'link_open') { url = token.attrGet('href') || ''; label = '' }
+      else if (token.type === 'link_close') {
+        if (/^https?:\/\//i.test(url) && !seen.has(url)) { seen.add(url); out.push({ text: label || url, url }) }
+        url = ''
+      } else if (url && (token.type === 'text' || token.type === 'code_inline')) label += token.content
+    }
   }
-
-  // 2) 补充裸 http 链接（模型可能直接写 URL，无 markdown 链接包裹）
-  const bare = /https?:\/\/[^\s)\]>,，。！？;；]+/g
-  while ((m = bare.exec(t)) !== null) {
-    const url = m[0].replace(/[)）】]$/, '')
-    if (!seen.has(url)) { seen.add(url); out.push({ text: url, url }) }
-  }
-
   return out.slice(0, 12)
 })
 

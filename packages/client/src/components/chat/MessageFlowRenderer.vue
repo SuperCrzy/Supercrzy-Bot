@@ -30,7 +30,7 @@
         <div
           v-if="seg.kind === 'text' && shouldShowText(seg)"
           class="message-content"
-          v-html="renderMarkdown(stripSourceLinks(seg.node.text).replace(SVG_CODE_BLOCK_RE, '').replace(SVG_BARE_RE, ''))"
+          v-html="renderMarkdown(seg.node.text.replace(SVG_CODE_BLOCK_RE, block => extractSvgs(block).length ? '' : block).replace(SVG_BARE_RE, ''))"
         ></div>
         <!-- 引用来源卡片（对齐 GPT conversation-source：正文末尾来源链接渲染成可点卡片，2026-08-23） -->
         <SourceCards
@@ -134,7 +134,7 @@
     </template>
 
     <!-- 无时序流时（历史消息 / 简单模式）：直接渲染 content（多模型对比由 ChatView 外层处理） -->
-    <div v-else-if="msg.content" class="message-content" v-html="renderMarkdown(contentWithoutDiagrams(msg))"></div>
+    <div v-else-if="msg.content && !suppressContent" class="message-content" v-html="renderMarkdown(contentWithoutDiagrams(msg))"></div>
 
     <!-- 重试提示（UI 禁 emoji：改用 SVG 旋转箭头图标） -->
     <div v-if="msg.retrying" class="retry-hint">
@@ -170,6 +170,7 @@ import { stageOfTool, stageBreakdown, formatStageBreakdown, STAGE_I18N } from '@
 import { shouldFoldProcess } from '@/utils/process-fold'
 // I3：AI 产出的 SVG 走 v-html 前必须清洗（见 utils/sanitize-svg.ts 的威胁模型）
 import { sanitizeSvg } from '@/utils/sanitize-svg'
+import { extractSvgs } from '@/utils/svg-extract'
 import { openFilePreview } from '@/utils/file-preview'
 import { useAppStore } from '@/stores/app'
 import ThinkingGroup from './ThinkingGroup.vue'
@@ -182,6 +183,8 @@ import ActionTrail from './ActionTrail.vue'
 
 const props = defineProps<{
   msg: ChatMessage
+  /** The parent renders structured compare results separately. */
+  suppressContent?: boolean
   /** 是否正在流式接收（chatStore.isLoading） */
   isLoading: boolean
   /** 是否是最后一条消息（流式平铺判定用） */
@@ -352,12 +355,6 @@ function linkifyPaths(html: string): string {
 function renderMarkdown(content: string) {
   if (!content) return ''
   return linkifyPaths(md.render(content))
-}
-
-/** 剥离正文中"连续 ≥2 个 markdown 链接"的来源段（2026-08-25：模型常把 [新浪财经1](url) [新浪财经2](url)…
- *  挤在正文末尾一行；SourceCards 已增强提取成卡片，正文中移除链接串避免"集中一行"，单个链接保留（正文内嵌引用正常） */
-function stripSourceLinks(md: string): string {
-  return md.replace(/(?:\[[^\]]{1,60}\]\(\s*https?:\/\/[^)\s]+\s*\)[ \t\u3000]*){2,}/g, '')
 }
 
 /** 提取消息里的 SVG 图（与 ChatView 的 autoExtractDiagrams 对应，content 里保留图卡片） */

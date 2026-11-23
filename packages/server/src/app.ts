@@ -20,15 +20,14 @@ import { startSearxngTunnel, stopSearxngTunnel } from './services/searxng-tunnel
 import { startEventLoopMonitor, getEventLoopStats } from './services/event-loop-lag'
 import { getSseStats } from './services/sse-health'
 import { createTerminalServer } from './services/terminal'
-import { startTunnel, stopTunnel, renderPreviewPage, getTunnelUrl, createPreviewLink } from './services/tunnel'
-// 文件「能不能当文本预览」的唯一判定（2026-09-29：图片乱码的根因收敛在这里）
-import { mediaMimeOf, isNonPreviewableBinary, docxMimeOf } from './services/file-kind'
+import { startTunnel, stopTunnel, getTunnelUrl, createPreviewLink } from './services/tunnel'
 // TTS 启动预热：手机实测"进程刚起来的第一条朗读"要付冷 TLS 成本（见 warmUpTts 注释）
 import { warmUpTts } from './services/tts'
 import { pickTtsRoute } from './services/tts-route'
 import { accountRouter } from './routes/account'
 import { requireAccount, isSignedIn } from './services/account-auth'
-import { allowsNetworkApi } from './services/network-access'
+import { allowsDevNoAuth, allowsNetworkApi } from './services/network-access'
+import { servePreview } from './routes/preview'
 import { chatRouter } from './routes/chat'
 import { fsRouter } from './routes/filesystem'
 import { settingsRouter } from './routes/settings'
@@ -70,17 +69,11 @@ import { startBot, setMessageHandlerFull } from './services/wechat-bot-runner'
 import { QQBotRunner } from './services/qqbot-runner'
 import { getDB } from './services/database'
 import { randomUUID } from 'crypto'
-import { existsSync, createReadStream } from 'fs'
-import { readFile, stat } from 'fs/promises'
-import { join, relative, dirname, resolve, sep } from 'path'
+import { existsSync } from 'fs'
+import { readFile } from 'fs/promises'
+import { join, relative, dirname } from 'path'
 import { fileURLToPath } from 'url'
 
-/**
- * /api/preview/ 单文件预览上限（5 MB）。
- * 2026-09-18：原实现 readFileSync 整文件读入后交给渲染器 —— 阻塞时长与文件大小线性成正比，
- * 预览一个大文件会把事件循环占住到读完为止，同后端上所有并发 SSE 流一起停推。
- */
-const PREVIEW_MAX_BYTES = 5 * 1024 * 1024
 import os from 'os'
 import { stopComputerUse } from './services/computer-use'
 import { mcpRouter } from './routes/mcp'
@@ -390,7 +383,17 @@ async function bootstrap() {
   // Signed-in gate for every API route. Runs after the network-exposure check
   // above: that one keeps strangers out of a LAN-bound instance, this one keeps
   // the app unusable until an account exists.
-  app.use(requireAccount)
+  //
+  // Local-only bypass, for developing against a source checkout. It needs all
+  // three: the operator set the flag, this is not a packaged build, and the
+  // request came in over loopback. Sign-in needs a code delivered to an inbox,
+  // so without this a machine with no access to that inbox cannot run the app
+  // at all — which blocks UI testing of everything behind the gate.
+  app.use(async (ctx, next) => {
+    if (allowsDevNoAuth({ enabled: process.env.SUPERCRZY_DEV_NO_AUTH, packaged: process.env.SUPERCRZY_PACKAGED,
+      remoteAddress: ctx.req.socket.remoteAddress, requestIp: ctx.ip, hostname: ctx.hostname })) return next()
+    return requireAccount(ctx, next)
+  })
 
   // AI 浏览器起始页：desktop 的原生视图（WebContentsView）必须先 loadURL 一个**真实 http 页面**
   // 才可能被 attach 模式接管（about:blank / data: 都会被 judgeUrl 挡掉）。
@@ -414,7 +417,7 @@ async function bootstrap() {
   }
 
   // API Routes
-  const routers = [accountRouter, uploadRouter, chatRouter, fsRouter, settingsRouter, sessionRouter, historyRouter, statsRouter, memoryRouter, gatewayRouter, skillsRouter, tasksRouter, automationsRouter, modelsRouter, workspaceRouter, ocrRouter, checkpointsRouter, playbookRouter, rolesRouter, systemRouter, collabRouter, newsRouter, siteRouter, ttsRouter, mcpRouter, routineRouter, terminalRouter, taskStateRouter, bgTasksRouter, capabilitiesRouter]
+  const routers = [accountRouter, uploadRouter, chatRouter, fsRouter, settingsRouter, sessionRouter, historyRouter, statsRouter, memoryRouter, gatewayRouter, skillsRouter, tasksRouter, automationsRouter, modelsRouter, workspaceRouter, ocrRouter, checkpointsRouter, playbookRouter, rolesRouter, systemRouter, collabRouter, newsRouter, siteRouter, ttsRouter, mcpRouter, routineRouter, terminalRouter, taskStateRouter, bgTasksRouter, capabilitiesRouter, relayRoutes]
   // 统一任务状态机：回填历史任务（进程重启后仍可查询上次状态，幽灵任务自动收敛为 cancelled）
   try { const n = restoreFromDB(); if (n > 0) console.log(`[task-state] 已回填 ${n} 条历史任务`) } catch { /* 不影响启动 */ }
   for (const r of routers) {
@@ -438,59 +441,8 @@ async function bootstrap() {
       }
       return
     }
-    // 文件预览（安全加固：仅允许白名单目录内文件，防任意文件读取）
     if (ctx.path.startsWith('/api/preview/')) {
-      let filePath = decodeURIComponent(ctx.path.slice('/api/preview/'.length))
-      let absPath = filePath.startsWith('/') ? filePath : join(WORKSPACE_ROOT, filePath)
-      absPath = resolve(absPath)
-      // 白名单：必须在工作区或 uploads 内
-      const allowedRoots = [resolve(WORKSPACE_ROOT), resolve(join(WORKSPACE_ROOT, 'uploads'))]
-      const inside = allowedRoots.some((root) => absPath === root || absPath.startsWith(root + sep))
-      if (!inside) { ctx.status = 403; ctx.body = 'Forbidden: outside allowed workspace'; return }
-      // 拒绝敏感文件（凭据/数据库/密钥/日志/git 内部）
-      if (/(^|\/)\.[^/]+|\.(env|key|pem|db|db-wal|db-shm|log|tsbuildinfo)$/.test(absPath)) {
-        ctx.status = 403; ctx.body = 'Forbidden: sensitive file type'; return
-      }
-      if (!existsSync(absPath)) {
-        const fallback = join(WORKSPACE_ROOT, filePath.split('/').pop() || '')
-        if (resolve(fallback) !== absPath || !existsSync(fallback)) { ctx.status = 404; ctx.body = `File not found: ${filePath}`; return }
-        absPath = fallback
-      }
-      // 2026-09-18：改异步读 + 上限。原 readFileSync 会按文件大小同步占住事件循环，
-      // 用户预览一个大文件时，同后端上正在跑的对话 SSE 会整体停推。
-      let previewSize = 0
-      try { previewSize = (await stat(absPath)).size } catch { ctx.status = 404; ctx.body = `File not found: ${filePath}`; return }
-      if (previewSize > PREVIEW_MAX_BYTES) {
-        ctx.status = 413
-        ctx.body = `File too large to preview: ${(previewSize / 1024 / 1024).toFixed(1)} MB (limit ${PREVIEW_MAX_BYTES / 1024 / 1024} MB)`
-        return
-      }
-      // ⚠️ 媒体直出（2026-09-29）：原来这里一律 `readFile(...,'utf-8')` 再塞进 HTML 页面，
-      // 图片/PDF 到了这一层同样是满屏 \ufffd 替换字符（与 /api/filesystem/read 同一个根因）。
-      const previewMime = mediaMimeOf(absPath)
-      if (previewMime) {
-        ctx.type = previewMime
-        ctx.set('Content-Length', String(previewSize))
-        ctx.set('X-Content-Type-Options', 'nosniff')
-        if (previewMime.startsWith('image/')) ctx.set('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'")
-        ctx.body = createReadStream(absPath)
-        return
-      }
-      if (docxMimeOf(absPath)) {
-        // 这一层是"直链预览页"（手机扫码用），把 docx 当 HTML 渲染没有意义；
-        // 明确 415，别让它走下面的 utf-8 读完吐一屏乱码（2026-10-20）。
-        ctx.status = 415
-        ctx.body = `Word document is not previewable as a page: ${filePath}`
-        return
-      }
-      if (isNonPreviewableBinary(absPath)) {
-        ctx.status = 415
-        ctx.body = `Binary file (not text-previewable): ${filePath}`
-        return
-      }
-      const content = await readFile(absPath, 'utf-8')
-      ctx.type = 'html'
-      ctx.body = renderPreviewPage(filePath, content)
+      await servePreview(ctx, WORKSPACE_ROOT)
       return
     }
     // SPA fallback

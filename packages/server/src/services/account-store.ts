@@ -47,11 +47,22 @@ function loadKey(): Buffer {
   if (existsSync(file)) {
     const raw = readFileSync(file)
     if (raw.length === 32) return raw
+    throw new Error('account_key_invalid')
   }
+  // Never replace a missing key when an encrypted session already exists: a
+  // replacement key cannot decrypt it and would destroy a recovery clue.
+  if (existsSync(sessionPath())) throw new Error('account_key_missing')
   mkdirSync(dataDir(), { recursive: true })
   const key = randomBytes(32)
-  writeFileSync(file, key, { mode: 0o600 })
-  return key
+  try {
+    writeFileSync(file, key, { mode: 0o600, flag: 'wx' })
+    return key
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+    const existing = readFileSync(file)
+    if (existing.length !== 32) throw new Error('account_key_invalid')
+    return existing
+  }
 }
 
 function encrypt(plain: string, key: Buffer): string {
@@ -96,9 +107,13 @@ export function writeSession(session: StoredSession): void {
   mkdirSync(dataDir(), { recursive: true })
   const payload = encrypt(JSON.stringify(session), loadKey())
   // Write-then-rename so a crash mid-write cannot leave a truncated session.
-  const tmp = sessionPath() + '.tmp'
-  writeFileSync(tmp, payload, { mode: 0o600 })
-  renameSync(tmp, sessionPath())
+  const tmp = `${sessionPath()}.${randomBytes(16).toString('hex')}.tmp`
+  try {
+    writeFileSync(tmp, payload, { mode: 0o600, flag: 'wx' })
+    renameSync(tmp, sessionPath())
+  } finally {
+    rmSync(tmp, { force: true })
+  }
 }
 
 export function clearSession(): void {

@@ -16,6 +16,7 @@
  *   - `onNewChat` / `onSend` 是函数声明（有提升），可直接传引用。
  */
 import { computed, nextTick, ref, type Ref } from 'vue'
+import { isComposingKey } from '@/utils/keyboard'
 import { parseTrigger } from '@/utils/trigger'
 
 export interface TriggerCandidate {
@@ -178,6 +179,7 @@ export function useInputTrigger(opts: UseInputTriggerOptions) {
 
   /** 触发菜单：键盘导航 + 选择 */
   function onTriggerKeydown(e: KeyboardEvent) {
+    if (isComposingKey(e)) return
     if (!triggerState.value || displayedCandidates.value.length === 0) return
     if (e.key === 'ArrowDown') { e.preventDefault(); triggerSel.value = (triggerSel.value + 1) % displayedCandidates.value.length }
     else if (e.key === 'ArrowUp') { e.preventDefault(); triggerSel.value = (triggerSel.value - 1 + displayedCandidates.value.length) % displayedCandidates.value.length }
@@ -190,7 +192,9 @@ export function useInputTrigger(opts: UseInputTriggerOptions) {
   }
 
   /** 回车统一入口：触发菜单激活时选候选，否则正常发送 */
-  function onInputEnter() {
+  function onInputEnter(event?: KeyboardEvent) {
+    if (isComposingKey(event)) return
+    event?.preventDefault()
     if (triggerState.value && displayedCandidates.value.length > 0) {
       const c = displayedCandidates.value[triggerSel.value]
       if (c) applyTrigger(c)

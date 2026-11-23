@@ -78,6 +78,13 @@ describe('DOM mode — structure instead of pixels', () => {
     expect(r.ok).toBe(false)
     expect(mockCall).not.toHaveBeenCalled()
   })
+
+  it('reports unsupported keyboard and wheel actions instead of pretending they succeeded', async () => {
+    const s = mobileBrowserSession()
+    expect(await s.press('Enter')).toMatchObject({ ok: false, error: expect.stringContaining('Enter') })
+    expect(await s.wheel(300)).toMatchObject({ ok: false })
+    expect(mockCall).not.toHaveBeenCalled()
+  })
 })
 
 describe('DOM mode — navigation timing', () => {

@@ -153,9 +153,8 @@ async function pressKey(keyName: string): Promise<BrowserActionResult> {
   try {
     // 手机上能可靠做的只有「后退」：Enter/Tab 这些页面级按键在 WebView 里
     // 没有等价的原生注入，硬做只能伪造 DOM 事件 —— 那对 React 站点是假动作。
-    if (keyName === 'Escape') {
-      await callDevice('browser_back', {}, 10000)
-    }
+    if (keyName !== 'Escape') return { ok: false, error: `手机浏览器暂不支持按键 ${keyName}，请使用页面上的按钮` }
+    await callDevice('browser_back', {}, 10000)
     const snap = await deviceSnapshot()
     return { ok: true, url: snap.url, title: snap.title }
   } catch (e: any) {
@@ -240,7 +239,7 @@ export function mobileBrowserSession(): BrowserSessionHandle {
     },
     press: (k) => pressKey(k),
     goBack: () => goBack(),
-    wheel: async () => ({ ok: true }),
+    wheel: async () => ({ ok: false, error: '手机浏览器暂不支持通过滚轮滚动，请直接滑动页面内容' }),
     interactive: async () => {
       const snap = last || (await deviceSnapshot())
       return (snap.dom?.elements || []).map(

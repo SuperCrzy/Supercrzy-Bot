@@ -23,16 +23,20 @@ export const useAccountStore = defineStore('account', () => {
   const ready = ref(false)
   /** Last status request failed: signed-in state is stale, not absent. */
   const degraded = ref(false)
+  const storageError = ref(false)
 
   let bootPromise: Promise<void> | null = null
   let accountEpoch = 0
   let statusRequestId = 0
   let logoutPending = false
 
-  async function fetchStatus(): Promise<AccountStatus | null> {
+  async function fetchStatus(): Promise<AccountStatus | { storageError: true } | null> {
     try {
       const res = await fetch('/api/account/status')
-      if (!res.ok) return null
+      if (!res.ok) {
+        const body = await res.json().catch(() => null) as { error?: unknown } | null
+        return body?.error === 'account_storage_unavailable' ? { storageError: true } : null
+      }
       return (await res.json()) as AccountStatus
     } catch {
       return null
@@ -63,7 +67,8 @@ export const useAccountStore = defineStore('account', () => {
       const requestId = ++statusRequestId
       bootPromise = fetchStatus().then((status) => {
         if (requestId === statusRequestId && !logoutPending) {
-          if (status) apply(status)
+          if (status && 'storageError' in status) { storageError.value = true; degraded.value = true }
+          else if (status) { storageError.value = false; apply(status) }
           else degraded.value = true
         }
         ready.value = true
@@ -82,7 +87,8 @@ export const useAccountStore = defineStore('account', () => {
     // was unreachable (VPN / cross-border hiccup) while every API answered 401,
     // and the router guard then bounced chat ↔ login every poll: the reported
     // flicker. Keep the last known state; only a real answer may change it.
-    if (status) apply(status)
+    if (status && 'storageError' in status) { storageError.value = true; degraded.value = true; return }
+    if (status) { storageError.value = false; apply(status) }
     degraded.value = !status
   }
 
@@ -229,5 +235,5 @@ export const useAccountStore = defineStore('account', () => {
 
   return {
     e2eEnvelope, e2eStatus, unlockedDek, e2eUnlocked, lastSyncVersion, syncing,
-    refreshE2eEnvelope, setupE2e, unlockE2e, syncNow, restoreSessions, signedIn, email, accountId, expiresAt, ready, degraded, ensureReady, reload, startLogin, signOut }
+    refreshE2eEnvelope, setupE2e, unlockE2e, syncNow, restoreSessions, signedIn, email, accountId, expiresAt, ready, degraded, storageError, ensureReady, reload, startLogin, signOut }
 })

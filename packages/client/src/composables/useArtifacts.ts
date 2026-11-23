@@ -36,28 +36,45 @@ export function useArtifacts(opts: UseArtifactsOptions) {
   const artifactsPopoverOpen = ref(false)
   const previewArtifact = ref<(ArtifactItem & { content?: string }) | null>(null)
   const previewFail = ref(false)
+  const artifactsLoadError = ref(false)
+  let listRequest = 0
+  let previewRequest = 0
+  let listSession: string | null | undefined
 
   /** 拉取当前会话的产物列表 */
   async function loadArtifacts() {
     const sid = sessionId()
+    const request = ++listRequest
+    if (sid !== listSession) {
+      sessionArtifacts.value = []; listSession = sid; artifactsLoadError.value = false
+      previewRequest++; previewArtifact.value = null; previewFail.value = false; artifactsPopoverOpen.value = false
+    }
     if (!sid) {
       sessionArtifacts.value = []
       return
     }
     try {
-      const r = await fetch(`/api/sessions/${sid}/artifacts`)
-      sessionArtifacts.value = await r.json()
+      const r = await fetch(`/api/sessions/${encodeURIComponent(sid)}/artifacts`)
+      if (!r.ok) throw new Error('artifact list failed')
+      const rows = await r.json()
+      if (!Array.isArray(rows)) throw new Error('invalid artifact list')
+      if (request === listRequest && sessionId() === sid) { sessionArtifacts.value = rows; artifactsLoadError.value = false }
     } catch {
-      sessionArtifacts.value = []
+      // Keep the last good list for the same session during a transient error.
+      if (request === listRequest && sessionId() === sid) artifactsLoadError.value = true
     }
   }
 
   /** 文本文件预览 */
   async function previewArtifactFile(a: ArtifactItem) {
+    const request = ++previewRequest
+    const sid = sessionId()
     previewFail.value = false
     try {
-      const r = await fetch(`/api/sessions/${a.session_id}/artifacts/${a.id}/content`)
+      const r = await fetch(`/api/sessions/${encodeURIComponent(a.session_id)}/artifacts/${encodeURIComponent(a.id)}/content`)
+      if (!r.ok) throw new Error('artifact preview failed')
       const d = await r.json()
+      if (request !== previewRequest || sessionId() !== sid) return
       if (d.content !== undefined) {
         previewArtifact.value = { ...a, content: d.content }
       } else {
@@ -65,6 +82,7 @@ export function useArtifacts(opts: UseArtifactsOptions) {
         previewArtifact.value = a
       }
     } catch {
+      if (request !== previewRequest || sessionId() !== sid) return
       previewFail.value = true
       previewArtifact.value = a
     }
@@ -77,7 +95,7 @@ export function useArtifacts(opts: UseArtifactsOptions) {
     if (browserOpenable) {
       window.open(`/api/sessions/${encodeURIComponent(a.session_id)}/artifacts/${encodeURIComponent(a.id)}/file`, '_blank', 'noopener,noreferrer')
     } else {
-      fetch(`/api/sessions/${a.session_id}/artifacts/${a.id}/open`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+      fetch(`/api/sessions/${encodeURIComponent(a.session_id)}/artifacts/${encodeURIComponent(a.id)}/open`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
         .then((r) => r.json())
         .then((d) => {
           if (!d.success) onWarning(d.error || t('chat.artifactOpenFail'))
@@ -88,7 +106,7 @@ export function useArtifacts(opts: UseArtifactsOptions) {
 
   /** 在文件管理器中显示产物所在文件夹 */
   function openArtifactFolder(a: ArtifactItem) {
-    fetch(`/api/sessions/${a.session_id}/artifacts/${a.id}/open`, {
+    fetch(`/api/sessions/${encodeURIComponent(a.session_id)}/artifacts/${encodeURIComponent(a.id)}/open`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ reveal: true }),
@@ -101,7 +119,7 @@ export function useArtifacts(opts: UseArtifactsOptions) {
   }
 
   return {
-    sessionArtifacts, artifactsPopoverOpen, previewArtifact, previewFail,
+    sessionArtifacts, artifactsPopoverOpen, artifactsLoadError, previewArtifact, previewFail,
     loadArtifacts, previewArtifactFile, openArtifactFile, openArtifactFolder,
   }
 }

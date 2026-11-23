@@ -21,7 +21,7 @@ let db: Database.Database
 let baseUrl: string
 let remote: typeof import('./remote-task-bridge')
 let providerRequests: Array<{ messages?: Array<{ role: string; content: unknown }>; stream?: boolean }> = []
-let providerMode: 'answer' | 'file-read' | 'stall' | 'approval' | 'question' = 'answer'
+let providerMode: 'answer' | 'file-read' | 'stall' | 'approval' | 'question' | 'disconnect' = 'answer'
 let providerDisconnected = false
 const originalEnv = { ...process.env }
 const originalFetch = globalThis.fetch
@@ -42,6 +42,11 @@ beforeAll(async () => {
     req.on('end', () => {
       providerRequests.push(JSON.parse(body))
       res.writeHead(200, { 'content-type': 'text/event-stream' })
+      if (providerMode === 'disconnect') {
+        res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: 'Partial reply' } }] })}\n\n`)
+        setTimeout(() => res.destroy(), 30)
+        return
+      }
       if (providerMode === 'stall') {
         res.on('close', () => { providerDisconnected = true })
         res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: 'Partial answer' }, finish_reason: null }] })}\n\n`)
@@ -94,6 +99,28 @@ afterAll(async () => {
 })
 
 describe('real agent bridge', () => {
+  it('forwards a complete simple chat answer and its DONE marker', async () => {
+    providerMode = 'answer'
+    try {
+      const response = await fetch(`${baseUrl}/api/chat/stream`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: 'deepseek-chat', messages: [{ role: 'user', content: 'test' }] }), signal: AbortSignal.timeout(5000) })
+      expect(response.status).toBe(200)
+      const body = await response.text()
+      expect(body).toContain('Local model answer')
+      expect(body).toContain('data: [DONE]')
+    } finally { providerRequests = [] }
+  })
+
+  it('closes the simple chat response without DONE when the upstream disconnects', async () => {
+    providerMode = 'disconnect'
+    try {
+      const response = await fetch(`${baseUrl}/api/chat/stream`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: 'deepseek-chat', messages: [{ role: 'user', content: 'test' }] }), signal: AbortSignal.timeout(5000) })
+      expect(response.status).toBe(200)
+      const body = await response.text()
+      expect(body).toContain('Partial reply')
+      expect(body).not.toContain('[DONE]')
+    } finally { providerMode = 'answer'; providerRequests = [] }
+  })
+
   it('runs the real chat and agent loop, persists the answer, and does not repeat a duplicate', async () => {
     const events: string[] = []
     const input = { db, accountId: 'test-account', taskId: 'real-loop', prompt: 'Hello from the isolated test', baseUrl, onEvent: (event: { type: string }) => events.push(event.type) }
