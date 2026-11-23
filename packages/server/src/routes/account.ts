@@ -14,6 +14,7 @@ import type { Context } from 'koa'
 import { createHash, randomBytes } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { clearSession, readSession, writeSession, isSignedIn } from '../services/account-store'
+import { allowsDevNoAuth } from '../services/network-access'
 import { startRelayClient, stopRelayClient } from '../services/relay-client'
 import { revokeTerminalSessions } from '../services/terminal'
 
@@ -141,28 +142,36 @@ accountRouter.get('/auth/callback', async (ctx: Context) => {
   }
   if (!code) return htmlPage(ctx, 400, '登录链接不完整', '缺少授权码，请回到 SUPERCRZY BOT 重试。')
 
+  let res: Response
   try {
-    const res = await fetch(authOrigin() + '/auth/exchange', {
+    res = await fetch(authOrigin() + '/auth/exchange', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ code, codeVerifier: entry.verifier }),
+      signal: AbortSignal.timeout(15_000),
     })
-    if (!res.ok) {
-      const detail = await res.text().catch(() => '')
-      console.warn('[account] exchange failed', res.status, detail.slice(0, 200))
-      return htmlPage(ctx, 400, '登录未通过', '授权码校验失败，请回到 SUPERCRZY BOT 重新登录。')
-    }
-    const data = (await res.json()) as {
+  } catch {
+    console.warn('[account] exchange network request failed')
+    return htmlPage(ctx, 502, '无法连接登录服务', '请检查网络连接，然后回到 SUPERCRZY 重新发起登录。')
+  }
+  if (!res.ok) {
+    console.warn('[account] exchange failed with status', res.status)
+    if (res.status >= 500 || res.status === 429) return htmlPage(ctx, 502, '登录服务暂时不可用', '请稍后回到 SUPERCRZY 重新发起登录。')
+    return htmlPage(ctx, 400, '登录未通过', '授权码未通过校验，请回到 SUPERCRZY 重新发起登录。')
+  }
+  let data: {
       accessToken?: string
       refreshToken?: string
       expiresIn?: number
       account?: { id?: string; email?: string }
       device?: { id?: string }
-    }
-    if (!data.accessToken || !data.refreshToken || !data.account?.id) {
-      return htmlPage(ctx, 400, '登录未通过', '服务端返回的数据不完整，请稍后重试。')
-    }
-    revokeTerminalSessions()
+  }
+  try { data = await res.json() as typeof data }
+  catch { return htmlPage(ctx, 502, '登录服务返回异常', '请稍后回到 SUPERCRZY 重新发起登录。') }
+  if (!data?.accessToken || !data.refreshToken || !data.account?.id) {
+    return htmlPage(ctx, 502, '登录服务返回异常', '登录服务返回的数据不完整，请稍后重试。')
+  }
+  try {
     writeSession({
       accountId: data.account.id,
       email: data.account.email || '',
@@ -172,28 +181,32 @@ accountRouter.get('/auth/callback', async (ctx: Context) => {
       expiresAt: Date.now() + (data.expiresIn ?? 900) * 1000,
       savedAt: Date.now(),
     })
-    stopRelayClient()
-    startRelayClient()
-    console.log('[account] signed in as', data.account.email)
-    return htmlPage(ctx, 200, '登录成功', '可以关闭这个窗口，回到 SUPERCRZY BOT。')
-  } catch (err) {
-    console.warn('[account] exchange error', (err as Error).message)
-    return htmlPage(ctx, 400, '登录未通过', '网络异常，请回到 SUPERCRZY BOT 重试。')
+  } catch (error) {
+    console.warn('[account] failed to save session:', (error as NodeJS.ErrnoException).code || 'unknown')
+    return htmlPage(ctx, 500, '无法保存登录状态', '请检查本机存储空间和应用目录的写入权限，然后重新发起登录。')
   }
+  revokeTerminalSessions()
+  stopRelayClient()
+  startRelayClient()
+  console.log('[account] signed in')
+  return htmlPage(ctx, 200, '登录成功', '可以关闭这个窗口，回到 SUPERCRZY BOT。')
 })
 
 accountRouter.get('/api/account/status', (ctx: Context) => {
-  const s = readSession()
-  let signedIn = isSignedIn()
+  let s: ReturnType<typeof readSession>
+  let signedIn: boolean
+  try { s = readSession(); signedIn = isSignedIn() }
+  catch {
+    ctx.status = 503
+    ctx.body = { error: 'account_storage_unavailable' }
+    return
+  }
   // Report the local dev bypass as signed in, otherwise the client's route guard
   // bounces every page to the login screen and the bypass only helps API calls.
   // Same three conditions as the gate in app.ts: flag set, no packaged build,
   // loopback request. Never true for a packaged app or a remote client.
-  const host = String(ctx.hostname || '')
-  if (!signedIn
-    && process.env.SUPERCRZY_DEV_NO_AUTH === '1'
-    && process.env.SUPERCRZY_PACKAGED !== '1'
-    && (host === '127.0.0.1' || host === 'localhost' || host === '::1')) {
+  if (!signedIn && allowsDevNoAuth({ enabled: process.env.SUPERCRZY_DEV_NO_AUTH, packaged: process.env.SUPERCRZY_PACKAGED,
+    remoteAddress: ctx.req.socket.remoteAddress, requestIp: ctx.ip, hostname: ctx.hostname })) {
     signedIn = true
   }
   ctx.body = {

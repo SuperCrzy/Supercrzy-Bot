@@ -6,6 +6,20 @@ beforeEach(() => setActivePinia(createPinia()))
 afterEach(() => vi.unstubAllGlobals())
 
 describe('account encryption state', () => {
+  it('exposes local account storage failure and clears it after recovery', async () => {
+    let broken = true
+    vi.stubGlobal('fetch', vi.fn(async () => broken
+      ? new Response(JSON.stringify({ error: 'account_storage_unavailable' }), { status: 503 })
+      : new Response(JSON.stringify({ signedIn: false, accountId: '', email: '', expiresAt: 0 }))))
+    const store = useAccountStore()
+    await store.ensureReady()
+    expect(store.storageError).toBe(true)
+    expect(store.signedIn).toBe(false)
+    broken = false
+    await store.reload()
+    expect(store.storageError).toBe(false)
+    expect(store.degraded).toBe(false)
+  })
   it('distinguishes an unavailable envelope from an account without encryption', async () => {
     let fail = true
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {

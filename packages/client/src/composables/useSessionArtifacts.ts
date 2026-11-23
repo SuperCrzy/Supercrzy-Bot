@@ -24,21 +24,28 @@ export interface UseSessionArtifactsOptions {
 
 export function useSessionArtifacts(opts: UseSessionArtifactsOptions) {
     const sessionArtifacts = ref<ArtifactRow[]>([])
+    const loadError = ref(false)
+    let requestId = 0
+    let sessionGeneration = 0
 
     async function loadSessionArtifacts() {
         const sid = opts.sessionId()
-        if (!sid) { sessionArtifacts.value = []; return }
+        const currentRequest = ++requestId
+        if (!sid) { sessionArtifacts.value = []; loadError.value = false; return }
         try {
-            const r = await fetch(`/api/sessions/${sid}/artifacts`)
-            if (!r.ok) { sessionArtifacts.value = []; return }
+            const r = await fetch(`/api/sessions/${encodeURIComponent(sid)}/artifacts`)
+            if (!r.ok) throw new Error('artifact_list_failed')
             const rows = await r.json()
-            sessionArtifacts.value = Array.isArray(rows) ? rows : []
+            if (!Array.isArray(rows)) throw new Error('artifact_list_invalid')
+            if (currentRequest !== requestId || opts.sessionId() !== sid) return
+            sessionArtifacts.value = rows
+            loadError.value = false
         } catch {
-            sessionArtifacts.value = []
+            if (currentRequest === requestId && opts.sessionId() === sid) loadError.value = true
         }
     }
 
-    watch(() => opts.sessionId(), () => { void loadSessionArtifacts() }, { immediate: true })
+    watch(() => opts.sessionId(), (_sid, previous) => { sessionGeneration++; sessionArtifacts.value = []; loadError.value = false; if (previous !== undefined) closeArtifactMenu(); void loadSessionArtifacts() }, { immediate: true, flush: 'sync' })
     watch(() => opts.visible(), (v) => { if (v) void loadSessionArtifacts() })
     watch(() => opts.activeTab(), (tab) => { if (tab === 'files') void loadSessionArtifacts() })
     // A finished turn grows the message list; that is when new artifacts appear.
@@ -58,8 +65,11 @@ export function useSessionArtifacts(opts: UseSessionArtifactsOptions) {
     function openArtifactMenu(e: MouseEvent, item: ArtifactRow) {
         artifactMenu.item = item
         // Anchor at the pointer, then keep the menu inside the viewport.
-        artifactMenu.x = Math.min(e.clientX, window.innerWidth - 180)
-        artifactMenu.y = Math.min(e.clientY, window.innerHeight - 110)
+        const anchor = e.currentTarget instanceof HTMLElement ? e.currentTarget.getBoundingClientRect() : null
+        const x = e.clientX || anchor?.left || 0
+        const y = e.clientY || anchor?.bottom || 0
+        artifactMenu.x = Math.max(0, Math.min(x, window.innerWidth - 180))
+        artifactMenu.y = Math.max(0, Math.min(y, window.innerHeight - 110))
         artifactMenu.open = true
     }
     function closeArtifactMenu() { artifactMenu.open = false }
@@ -73,6 +83,8 @@ export function useSessionArtifacts(opts: UseSessionArtifactsOptions) {
         window.addEventListener('blur', closeArtifactMenu)
     })
     onBeforeUnmount(() => {
+        requestId++
+        sessionGeneration++
         document.removeEventListener('click', onDocClick)
         document.removeEventListener('keydown', onKey)
         window.removeEventListener('blur', closeArtifactMenu)
@@ -96,24 +108,30 @@ export function useSessionArtifacts(opts: UseSessionArtifactsOptions) {
         if (!target) return
         const sid = opts.sessionId()
         if (!sid) return
+        const generation = sessionGeneration
+        const isCurrent = () => generation === sessionGeneration && opts.sessionId() === sid
         let row = sessionArtifacts.value.find(x => x.path === target.path && x.id)
         if (!row) {
             await loadSessionArtifacts()
+            if (!isCurrent()) return
             row = sessionArtifacts.value.find(x => x.path === target.path && x.id)
         }
         if (!row?.id) { await opts.openDir(target.path); return }
         try {
-            const r = await fetch(`/api/sessions/${sid}/artifacts/${row.id}/open`, {
+            const r = await fetch(`/api/sessions/${encodeURIComponent(sid)}/artifacts/${encodeURIComponent(row.id)}/open`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ reveal: true }),
             })
+            if (!isCurrent()) return
             if (!r.ok) {
                 const d = await r.json().catch(() => ({}))
+                if (!isCurrent()) return
                 console.warn('[artifact] reveal failed:', (d as any)?.error || r.status)
                 await opts.openDir(target.path)
             }
         } catch (err) {
+            if (!isCurrent()) return
             console.warn('[artifact] reveal failed:', err)
             await opts.openDir(target.path)
         }
@@ -130,6 +148,7 @@ export function useSessionArtifacts(opts: UseSessionArtifactsOptions) {
         sessionArtifacts,
         artifactFiles,
         loadSessionArtifacts,
+        loadError,
         artifactMenu,
         openArtifactMenu,
         closeArtifactMenu,

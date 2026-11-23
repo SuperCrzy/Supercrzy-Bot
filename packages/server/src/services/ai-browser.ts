@@ -705,7 +705,7 @@ async function navigate(k: string, url: string) {
   const stuck = !n.url || n.url === 'about:blank'
   const chromeErr = n.url.startsWith('chrome-error://')
   if (!err && chromeErr) err = '无法访问该地址（域名解析失败或连接被拒）'
-  if (stuck || chromeErr) n.error = err || '导航失败'
+  if (err || stuck || chromeErr) n.error = err || '导航失败'
 
   // A phone page squashed into a wide frame is unreadable: mobile sites lay out
   // for ~390 CSS px and stretch their body rather than reflow. Re-render it at
@@ -725,7 +725,7 @@ async function navigate(k: string, url: string) {
   return n
 }
 async function shot(k: string) { const s = sess(k); return snap(s, await getPage(s)) }
-async function refresh(k: string) { const s = sess(k); const p = await getPage(s); await p.reload({ timeout: 20000, waitUntil: 'domcontentloaded' }).catch(() => {}); return snap(s, p) }
+async function refresh(k: string) { const s = sess(k); const p = await getPage(s); await p.reload({ timeout: 20000, waitUntil: 'domcontentloaded' }); return snap(s, p) }
 async function readText(k: string, maxChars = 20000) {
   const s = sess(k); const p = await getPage(s)
   const bodySrc = `var sels=['article','main','#content','.article-content','.post-content','.article','.content'];
@@ -762,7 +762,7 @@ async function typeText(k: string, text: string, into?: string) {
 }
 async function pressKey(k: string, keyName: string) { try { const s = sess(k); const pp = await getPage(s); await pp.keyboard.press(keyName); return { ok: true } } catch (e: any) { return { ok: false, error: e.message } } }
 async function scroll(k: string, dy: number) { try { const s = sess(k); const p = await getPage(s); await p.mouse.wheel(0, dy); return { ok: true } } catch (e: any) { return { ok: false, error: e.message } } }
-async function back(k: string) { try { const s = sess(k); const p = await getPage(s); if (p.url().startsWith('http')) await p.goBack({ timeout: 15000 }).catch(() => {}); return { ok: true, url: p.url() } } catch (e: any) { return { ok: false, error: e.message } } }
+async function back(k: string) { try { const s = sess(k); const p = await getPage(s); if (p.url().startsWith('http')) await p.goBack({ timeout: 15000 }); return { ok: true, url: p.url() } } catch (e: any) { return { ok: false, error: e.message } } }
 async function listInteractive(k: string): Promise<string[]> {
   try { const s = sess(k); const p = await getPage(s)
     const fn = new Function(`var se=[];var qs='button,a,input[type=text],input[type=search],input:not([type]),textarea,select,[role=button],[role=link]';var n=document.querySelectorAll(qs);for(var i=0;i<n.length&&se.length<40;i++){var el=n[i];if(!el.offsetParent)continue;var tag=el.tagName.toLowerCase();var t=(el.innerText||el.value||el.getAttribute('placeholder')||el.getAttribute('aria-label')||'').trim().slice(0,30);if(!t)continue;var r=el.getBoundingClientRect();se.push(tag+' | '+(el.tagName.toLowerCase()==='a'?el.href:el.value||'')+' | '+t+' | '+Math.round(r.x)+','+Math.round(r.y));}return se;`) // eslint-disable-line

@@ -4,6 +4,9 @@ import { extractSvgs, flowDiagramSet, autoExtractDiagrams, SVG_FALLBACK_HEAD } f
 const SVG = '<svg viewBox="0 0 10 10"><rect width="10" height="10"/></svg>'
 
 describe('extractSvgs', () => {
+  it('does not treat ordinary XML configuration as an SVG diagram', () => {
+    expect(extractSvgs('```xml\n<settings><theme>dark</theme></settings>\n```')).toEqual([])
+  })
   it('```svg 代码块：取块内完整 <svg>', () => {
     const text = '看图：\n\n```svg\n' + SVG + '\n```\n'
     expect(extractSvgs(text)).toEqual([SVG])

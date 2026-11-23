@@ -10,6 +10,7 @@
  *   · 每次落到历史项后要把光标推到末尾，否则 NaiveUI textarea 会停在旧位置，接着打字会插到中间
  */
 import { nextTick, ref, type Ref } from 'vue'
+import { isComposingKey } from '@/utils/keyboard'
 
 export interface UseInputHistoryOptions {
   /** 收发共用的输入文本 */
@@ -58,6 +59,7 @@ export function useInputHistory(opts: UseInputHistoryOptions) {
 
   /** ↑：找回上一条（输入为空或已在浏览历史时接管；有内容且未浏览 → 放行光标） */
   function historyPrev(e?: KeyboardEvent) {
+    if (isComposingKey(e)) return
     if (opts.isTriggerActive?.()) return
     if (opts.inputText.value && historyIdx.value < 0) return
     e?.preventDefault()
@@ -69,6 +71,7 @@ export function useInputHistory(opts: UseInputHistoryOptions) {
 
   /** ↓：回下一条（越过最旧一条 → 清空） */
   function historyNext(e?: KeyboardEvent) {
+    if (isComposingKey(e)) return
     if (opts.isTriggerActive?.()) return
     if (opts.inputText.value && historyIdx.value < 0) return
     e?.preventDefault()

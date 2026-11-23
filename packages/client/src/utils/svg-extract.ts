@@ -29,7 +29,7 @@ export function extractSvgs(text: string): string[] {
     const full = inner.match(/<svg[\s\S]*?<\/svg>/)
     if (full) svgs.push(full[0])
     // 缺 <svg> 起始标签（模型输出截断/不规范）→ 补头尝试渲染，避免裸露
-    else if (inner.startsWith('<') && inner.includes('</')) {
+    else if (block.startsWith('```svg') && inner.startsWith('<') && inner.includes('</')) {
       svgs.push(SVG_FALLBACK_HEAD + inner + '</svg>')
     }
   }

@@ -22,11 +22,14 @@
       <h1 class="login-title">{{ t('account.loginTitle') }}</h1>
       <p class="login-subtitle">{{ t('account.loginSubtitle') }}</p>
 
+      <p v-if="account.storageError" class="login-note warn" role="alert">{{ t('account.storageError') }}</p>
+      <button v-if="account.storageError" type="button" class="login-primary" @click="account.reload()">{{ t('account.retryStatus') }}</button>
+
       <button
         v-if="phase !== 'waiting'"
         type="button"
         class="login-primary"
-        :disabled="phase === 'starting'"
+        :disabled="phase === 'starting' || account.storageError"
         @click="beginLogin"
       >
         {{ phase === 'starting' ? t('account.opening') : t('account.loginButton') }}

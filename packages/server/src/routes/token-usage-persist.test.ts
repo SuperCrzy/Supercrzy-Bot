@@ -58,6 +58,16 @@ async function getMessages(): Promise<any[]> {
 }
 
 describe('messages.token_estimated 落库', () => {
+  it('round-trips interruption metadata and a partial answer through SQLite', async () => {
+    const id = randomUUID()
+    const stopReason = { reason: 'connection_interrupted', message: '连接中断，请检查任务状态' }
+    const attachments = { flow: [], stopReason }
+    expect((await postMessage({ id, role: 'assistant', content: '部分回答', attachments })).status).toBe(201)
+    const row = (await getMessages()).find((m) => m.id === id)
+    expect(row.content).toBe('部分回答')
+    expect(row.attachments).toEqual(attachments)
+  })
+
   it('refuses to overwrite another session when a message ID collides', async () => {
     const id = randomUUID()
     expect((await postMessage({ id, role: 'user', content: 'original' })).status).toBe(201)

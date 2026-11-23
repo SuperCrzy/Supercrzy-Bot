@@ -59,7 +59,7 @@ const {
        而不是原来"面板加宽到 92%"。桌面端 maximized 的语义保持不变。 -->
   <div v-show="active" class="tab-content browser-tab" :class="{ fullscreen: maximized }">
     <div class="browser-live">
-      <span class="browser-live-dot" :class="{ active: browserStatus === '导航中' }" />
+      <span class="browser-live-dot" :class="{ active: browserStatus === '实时' || browserStatus === '原生视图 · 人机共用', busy: browserStatus === '导航中' || browserStatus === '刷新中', error: browserStatus === '失败' || browserStatus === '断开' || browserStatus === '动作失败' }" />
       <span class="browser-live-text">{{ statusText(browserStatus) }}</span>
     </div>
     <div class="browser-url-row">
@@ -67,18 +67,19 @@ const {
         v-model="browserUrlInput"
         class="browser-url-input"
         :placeholder="t('aiBrowser.phUrl')"
+        :aria-label="t('aiBrowser.phUrl')"
         @keyup.enter="goToUrl"
       />
-      <button class="browser-ico" @click="goToUrl" :title="t('aiBrowser.open')">
+      <button class="browser-ico" @click="goToUrl" :disabled="browserLoading" :title="t('aiBrowser.open')" :aria-label="t('aiBrowser.open')">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
       </button>
-      <button class="browser-ico" @click="refreshPage" :title="t('aiBrowser.refresh')">
+      <button class="browser-ico" @click="refreshPage" :disabled="browserLoading" :title="t('aiBrowser.refresh')" :aria-label="t('aiBrowser.refresh')">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
       </button>
-      <button class="browser-ico" @click="browserGoBack" :title="t('aiBrowser.back')">
+      <button class="browser-ico" @click="browserGoBack" :title="t('aiBrowser.back')" :aria-label="t('aiBrowser.back')">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
       </button>
-      <button class="browser-maxbtn" @click="emit('update:maximized', !maximized)" :title="maximized ? t('aiBrowser.restorePanel') : t('aiBrowser.maximize')">
+      <button class="browser-maxbtn" @click="emit('update:maximized', !maximized)" :title="maximized ? t('aiBrowser.restorePanel') : t('aiBrowser.maximize')" :aria-label="maximized ? t('aiBrowser.restorePanel') : t('aiBrowser.maximize')">
         <svg v-if="!maximized" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
         <!-- Restore glyph when maximised: same "inward arrows" language as the preview tab button. -->
         <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/></svg>
@@ -217,15 +218,18 @@ const {
 /* ---- AI 浏览器 Tab（Playwright 实接）---- */
 .browser-live { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted); }
 .browser-live-dot { width: 6px; height: 6px; border-radius: 50%; background: #cbd5e1; }
-.browser-live-dot.active { background: #22c55e; animation: bdot 1s infinite; }
+.browser-live-dot.active { background: #22c55e; }
+.browser-live-dot.busy { background: #22c55e; animation: bdot 1s infinite; }
+.browser-live-dot.error { background: #ef4444; }
 @keyframes bdot { 0%,100%{opacity:1} 50%{opacity:.35} }
 .browser-url-row { display: flex; gap: 4px; align-items: center; }
-.browser-url-input { flex: 0 0 65%; width: 65%; max-width: 65%; min-width: 0; border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 6px 9px; font-size: 12.5px; background: var(--bg-tertiary); color: var(--text-primary); caret-color: var(--text-primary); }
+.browser-url-input { flex: 1 1 auto; min-width: 0; border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 6px 9px; font-size: 12.5px; background: var(--bg-tertiary); color: var(--text-primary); caret-color: var(--text-primary); }
 .browser-url-input::placeholder { color: var(--text-tertiary); }
 .browser-go, .browser-refresh { border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-primary); font-size: 11px; padding: 3px 8px; cursor: pointer; color: var(--text-secondary); }
-.browser-ico { border: none; background: transparent; cursor: pointer; color: var(--text-secondary); width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); flex-shrink: 0; }
+.browser-ico { border: none; background: transparent; cursor: pointer; color: var(--text-secondary); width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); flex-shrink: 0; }
 .browser-ico:hover { color: var(--text-primary); background: var(--bg-hover); }
-.browser-maxbtn { border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-primary); cursor: pointer; color: var(--text-secondary); display: inline-flex; align-items: center; justify-content: center; height: 20px; margin-left: 2px; padding: 0 5px; }
+.browser-ico:disabled { opacity: .45; cursor: not-allowed; }
+.browser-maxbtn { border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-primary); cursor: pointer; color: var(--text-secondary); display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; margin-left: 2px; flex-shrink: 0; }
 .browser-maxbtn:hover { border-color: var(--border-hover); color: var(--text-primary); }
 .browser-view { border: 1px solid var(--border-color); border-radius: var(--radius-sm); overflow: hidden; }
 .browser-chrome-bar { display: flex; align-items: center; gap: 4px; padding: 4px 8px; background: #0f172a; }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { allowsNetworkApi } from './network-access'
+import { allowsDevNoAuth, allowsNetworkApi } from './network-access'
 
 const local = { ip: '127.0.0.1', origin: '', authorization: '', apiToken: '' }
 
@@ -21,5 +21,19 @@ describe('network API access', () => {
     expect(allowsNetworkApi(remote)).toBe(false)
     expect(allowsNetworkApi({ ...remote, authorization: 'Bearer wrong' })).toBe(false)
     expect(allowsNetworkApi({ ...remote, authorization: 'Bearer secret' })).toBe(true)
+  })
+})
+
+describe('development login bypass', () => {
+  const local = { enabled: '1', packaged: '0', remoteAddress: '127.0.0.1', requestIp: '127.0.0.1', hostname: 'localhost' }
+  it('only accepts a real loopback connection in an unpackaged, explicitly enabled build', () => {
+    expect(allowsDevNoAuth(local)).toBe(true)
+    expect(allowsDevNoAuth({ ...local, remoteAddress: '::ffff:127.0.0.1', requestIp: '::ffff:127.0.0.1' })).toBe(true)
+    expect(allowsDevNoAuth({ ...local, enabled: '0' })).toBe(false)
+    expect(allowsDevNoAuth({ ...local, packaged: '1' })).toBe(false)
+    expect(allowsDevNoAuth({ ...local, remoteAddress: '192.168.1.4', requestIp: '192.168.1.4' })).toBe(false)
+    expect(allowsDevNoAuth({ ...local, remoteAddress: '192.168.1.4' })).toBe(false)
+    expect(allowsDevNoAuth({ ...local, requestIp: '192.168.1.4' })).toBe(false)
+    expect(allowsDevNoAuth({ ...local, hostname: 'localhost.attacker.example' })).toBe(false)
   })
 })

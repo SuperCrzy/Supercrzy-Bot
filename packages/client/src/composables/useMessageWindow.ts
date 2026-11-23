@@ -109,6 +109,7 @@ export function useMessageWindow(opts: UseMessageWindowOptions) {
     if (!force && !stickToBottom.value) return
     // rAF 双保险：DOM 高度（v-html/打字机）稳定后再滚，避免滚动位置被内容变化顶回
     requestAnimationFrame(() => {
+      if (!force && !stickToBottom.value) return
       const el = opts.messagesRef.value
       if (!el) return
       el.scrollTop = el.scrollHeight

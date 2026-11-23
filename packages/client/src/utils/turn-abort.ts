@@ -19,32 +19,35 @@ const IN_FLIGHT = ['running', 'stream_executing', 'pending', 'approved']
 /**
  * 同一次调用同时做两件事（顺序无关，但都不做的话 UI 会有残留）：
  *   1. 把**最后一条** assistant 消息标记 `isAborted`，并冻结已产生的耗时；
- *   2. 把该轮仍在跑的工具节点置 `cancelled`（对齐主流实现 ToolState.cancelled）。
- *
- * 注意 1 与 2 各自独立找位置：一条**纯文本**中断的消息没有 flow（或没有在跑的工具），
- * 但它同样要显示"已取消"；反过来，历史消息里可能存在没有 flow 的 assistant 行。
+ *   2. 只把该轮仍在跑的工具节点置 `cancelled`，不改写历史消息。
  */
-export function markTurnAborted(msgs: ChatMessage[], now: number = Date.now()): void {
-  // 1) 消息级取消事实
+export function markTurnAborted(msgs: ChatMessage[], now: number = Date.now(), notice?: string): void {
   for (let i = msgs.length - 1; i >= 0; i--) {
     if (msgs[i].role !== 'assistant') continue
     const m = msgs[i]
     // 有起点就冻结一个精确值：取消态不跑秒针，没有定格值会退化成"当前时刻 − 起点"
     if (m.startedAt && !m.elapsedMs) m.elapsedMs = Math.max(0, now - m.startedAt)
     m.isAborted = true
-    break
-  }
-  // 2) 在跑的工具置 cancelled（从末尾找第一条有在跑工具的 assistant 消息）
-  for (let i = msgs.length - 1; i >= 0; i--) {
-    const m = msgs[i]
-    if (m.role !== 'assistant' || !m.flow) continue
-    let touched = false
-    for (const n of m.flow) {
+    if (notice && !m.stopReason) m.stopReason = { reason: 'user_stopped', message: notice }
+    for (const n of m.flow || []) {
       if (n.kind === 'tool' && IN_FLIGHT.includes(n.tool.status)) {
         n.tool.status = 'cancelled'
-        touched = true
       }
     }
-    if (touched) break
+    break
+  }
+}
+
+/** 请求后端停止；HTTP 错误与网络错误都不能视为已成功提交。 */
+export async function requestAgentStop(sessionId: string): Promise<boolean> {
+  try {
+    const res = await fetch('/api/chat/stop', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId }),
+    })
+    return res.ok
+  } catch {
+    return false
   }
 }

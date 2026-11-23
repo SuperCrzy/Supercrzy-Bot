@@ -2,10 +2,19 @@
  * 任务交付页纯逻辑单测（P1-05 / P1-04 下沉）
  */
 import { describe, it, expect } from 'vitest'
-import { hasDelivery, deliveryHeadClass, fmtDeliveryDuration, fmtDeliveryCost } from './delivery'
+import { hasDelivery, deliveryHeadClass, fmtDeliveryDuration, fmtDeliveryCost, normalizeDeliverySummary } from './delivery'
 import type { ChatMessage } from '@/types'
 
 const msg = (ds: unknown): ChatMessage => ({ deliverySummary: ds } as unknown as ChatMessage)
+
+it('preserves the server outcome and recovery information for display', () => {
+  const event = { status: 'cancelled', summary: '已按你的要求停止', changedFiles: [{ name: 'a.ts', path: '/a.ts' }], checkpointId: 'checkpoint-1', canResume: true, durationMs: 2000 }
+  const delivery = normalizeDeliverySummary(event)
+  expect(delivery).toMatchObject(event)
+  expect(delivery.artifacts).toEqual([])
+  expect(hasDelivery(msg(delivery))).toBe(true)
+  expect(deliveryHeadClass(msg(delivery))).toBe('ds-head--cancelled')
+})
 
 describe('hasDelivery', () => {
   it('无 deliverySummary → false', () => {
@@ -51,13 +60,15 @@ describe('fmtDeliveryDuration', () => {
 })
 
 describe('fmtDeliveryCost', () => {
-  it('保留 4 位小数', () => {
-    expect(fmtDeliveryCost(0.0123)).toBe('$0.0123')
-    expect(fmtDeliveryCost(1)).toBe('$1.0000')
+  it('显示估算人民币并保留 4 位小数', () => {
+    expect(fmtDeliveryCost(0.0123)).toBe('≈ ¥0.0123')
+    expect(fmtDeliveryCost(1)).toBe('≈ ¥1.0000')
   })
 
   it('0 / 未定义返回空串，避免显示 $0.0000', () => {
     expect(fmtDeliveryCost(0)).toBe('')
     expect(fmtDeliveryCost(undefined)).toBe('')
+    expect(fmtDeliveryCost(NaN)).toBe('')
+    expect(fmtDeliveryCost(-1)).toBe('')
   })
 })

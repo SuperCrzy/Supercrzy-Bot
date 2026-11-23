@@ -5,6 +5,18 @@
  */
 import type { ChatMessage } from '@/types'
 
+/** Preserve the server's task outcome while supplying safe defaults for older events. */
+export function normalizeDeliverySummary(data: Partial<NonNullable<ChatMessage['deliverySummary']>>): NonNullable<ChatMessage['deliverySummary']> {
+  return {
+    ...data,
+    artifactCount: data.artifactCount ?? 0,
+    artifacts: Array.isArray(data.artifacts) ? data.artifacts : [],
+    changedFiles: Array.isArray(data.changedFiles) ? data.changedFiles : [],
+    toolCallCount: data.toolCallCount ?? 0,
+    turns: data.turns ?? 0,
+  }
+}
+
 /** 是否渲染交付页：有产物 / 有改动 / 有结论，三者任一即渲染（此前只看产物） */
 export function hasDelivery(msg: ChatMessage): boolean {
   const d = msg.deliverySummary
@@ -27,8 +39,8 @@ export function fmtDeliveryDuration(ms: number): string {
   return sec ? `${m}m${sec}s` : `${m}m`
 }
 
-/** 成本格式化（美元，保留 4 位小数；0/空值返回空串，避免显示 $0.0000） */
+/** 估算费用使用服务端人民币口径；保留 4 位小数，避免小额被抹成零。 */
 export function fmtDeliveryCost(cost?: number): string {
-  if (!cost) return ''
-  return `$${cost.toFixed(4)}`
+  if (!cost || !Number.isFinite(cost) || cost < 0) return ''
+  return `≈ ¥${cost.toFixed(4)}`
 }

@@ -3,6 +3,7 @@ import i18n from '@/i18n'
 import { ref, computed } from 'vue'
 import type { ChatSession, ChatMessage, ContentBlock, TextBlock, ChatFlowNode } from '@/types'
 import { reconcileAnswerText } from '@/utils/flow-reconcile'
+import { extractSvgs, SVG_CODE_BLOCK_RE, SVG_BARE_RE } from '@/utils/svg-extract'
 import { useAppStore } from './app'
 
 /** 加载端对账补建的正文节点 id 序号（避免同毫秒内重复） */
@@ -182,13 +183,24 @@ export const useChatStore = defineStore('chat', () => {
     workspaceVersion.value++
   }
 
+  // Both the layout and chat view mount together; share the initial request.
+  let sessionsLoading: Promise<void> | null = null
+  function loadSessions(force = false): Promise<void> {
+    if (sessionsLoading) return force ? sessionsLoading.then(() => loadSessions(true)) : sessionsLoading
+    const pending = loadSessionsOnce(force)
+    sessionsLoading = pending
+    void pending.finally(() => { if (sessionsLoading === pending) sessionsLoading = null })
+    return pending
+  }
+
   // ---- 从后端加载会话列表 ----
-  async function loadSessions(force = false) {
+  async function loadSessionsOnce(force = false) {
     if (loaded.value && !force) return
+    const initialSessionId = currentSessionId.value
     // 跨端同步：优先从后端 settings 恢复上次会话（App/网页共享），settings 无值才用 localStorage
     try {
       const st = await fetch('/api/settings').then((r) => r.json())
-      if (typeof st.currentSessionId === 'string' && st.currentSessionId) {
+      if (currentSessionId.value === initialSessionId && typeof st.currentSessionId === 'string' && st.currentSessionId) {
         currentSessionId.value = st.currentSessionId
         localStorage.setItem(SESSION_KEY, st.currentSessionId)
       }
@@ -231,13 +243,24 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  const messageLoadVersions = new Map<string, number>()
+  const messageLoadState = ref(new Map<string, 'loading' | 'error'>())
+  const unsavedMessages = ref(new Map<string, string[]>())
+  const messageSaves = new Map<string, Promise<void>>()
   // ---- 加载指定会话的消息 ----
   async function loadMessages(sessionId: string) {
+    const version = (messageLoadVersions.get(sessionId) || 0) + 1
+    messageLoadVersions.set(sessionId, version)
+    const initialList = messages.value.get(sessionId)
+    const initialLength = initialList?.length
+    messageLoadState.value.set(sessionId, 'loading')
     try {
       const res = await fetch(`/api/sessions/${sessionId}`)
-      if (res.ok) {
+      if (!res.ok) throw new Error(`history_load_failed:${res.status}`)
+      {
         const data = await res.json()
-        if (data.messages) {
+        if (!Array.isArray(data.messages)) throw new Error('history_load_invalid')
+        {
           // 兼容旧数据：将字符串 content 转为 ContentBlock[]；attachments.flow 还原执行过程（历史折叠条可展开）
           const normalized = data.messages.map((m: any) => {
             let flow = parseFlowFromAttachments(m.attachments)
@@ -253,8 +276,8 @@ export const useChatStore = defineStore('chat', () => {
                 .map((b: any) => String(b.text))
                 .join('\n')
               const contentText = rawText
-                .replace(/```(?:svg|xml)\s*[\s\S]*?```/g, '')
-                .replace(/<svg[\s\S]*?<\/svg>/g, '')
+                .replace(SVG_CODE_BLOCK_RE, block => extractSvgs(block).length ? '' : block)
+                .replace(SVG_BARE_RE, '')
               const reconciled = reconcileAnswerText(flow, contentText, () => `restored-${Date.now().toString(36)}-${restoreSeq++}`)
               flow = reconciled.flow
             }
@@ -276,9 +299,11 @@ export const useChatStore = defineStore('chat', () => {
             // 停止时前端会把在跑的工具节点置 cancelled，随 attachments.flow 落库；交付摘要也会
             // 带 cancelled 终态。刷新后若只按 elapsedMs 渲染，中断的那轮会被说成「已完成」。
             const deliverySummary = parseDeliveryFromAttachments(m.attachments)
+            const storedStopReason = parseStopReasonFromAttachments(m.attachments)
             const isAborted = (Array.isArray(flow)
               && flow.some((n: any) => n.kind === 'tool' && n.tool?.status === 'cancelled'))
               || deliverySummary?.status === 'cancelled'
+              || parseAbortedFromAttachments(m.attachments)
             return {
               ...m,
               createdAt: m.created_at || m.createdAt,
@@ -292,15 +317,25 @@ export const useChatStore = defineStore('chat', () => {
               // 2026-08-26：从 attachments 还原 deliverySummary，AI 回复底部"本会话产物"刷新后不丢
               deliverySummary,
               // 2026-09-29：空回复（被中断/失败且无任何产出）刷新后只剩空白气泡 ⇒ 补回"中断"横幅
-              ...(isBlankAssistantTurn(m, flow)
+              ...(storedStopReason ? { stopReason: storedStopReason } : isBlankAssistantTurn(m, flow)
                 ? { stopReason: { reason: 'interrupted' as const, message: '', checkpointId: '' } }
                 : {}),
             }
           })
-          messages.value.set(sessionId, normalized)
+          const currentList = messages.value.get(sessionId)
+          if (messageLoadVersions.get(sessionId) === version && currentList === initialList && currentList?.length === initialLength) {
+            messages.value.set(sessionId, normalized)
+          } else if (messageLoadVersions.get(sessionId) === version && !initialLength && currentList?.length) {
+            // History began loading into an empty session, then local messages
+            // arrived. Preserve both, preferring the live copy on ID overlap.
+            const localIds = new Set(currentList.map(m => m.id))
+            messages.value.set(sessionId, [...normalized.filter((m: ChatMessage) => !localIds.has(m.id)), ...currentList])
+          }
         }
       }
+      if (messageLoadVersions.get(sessionId) === version) messageLoadState.value.delete(sessionId)
     } catch (err) {
+      if (messageLoadVersions.get(sessionId) === version) messageLoadState.value.set(sessionId, 'error')
       console.error('Failed to load messages:', err)
     }
   }
@@ -351,14 +386,19 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   /** 把当前会话同步到后端 settings（跨端共享：App 与网页打开同一个会话，刷新/重启恢复一致） */
-  async function persistCurrentSession() {
-    try {
-      await fetch('/api/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ currentSessionId: currentSessionId.value || '' }),
-      })
-    } catch { /* 同步失败不影响主流程 */ }
+  let sessionSaveQueue: Promise<void> = Promise.resolve()
+  function persistCurrentSession() {
+    const selected = currentSessionId.value || ''
+    sessionSaveQueue = sessionSaveQueue.then(async () => {
+      try {
+        await fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ currentSessionId: selected }),
+        })
+      } catch { /* 同步失败不影响主流程 */ }
+    })
+    return sessionSaveQueue
   }
 
   // ---- 选择会话并加载消息 ----
@@ -419,6 +459,9 @@ export const useChatStore = defineStore('chat', () => {
     if (list) {
       messages.value.set(sessionId, list.filter((m) => m.id !== msgId))
     }
+    const remaining = (unsavedMessages.value.get(sessionId) || []).filter(id => id !== msgId)
+    if (remaining.length) unsavedMessages.value.set(sessionId, remaining)
+    else unsavedMessages.value.delete(sessionId)
   }
 
   // ---- 删除会话 ----
@@ -508,26 +551,7 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     // 持久化到后端（draw_diagram 的 SVG 合并进 content；flow 过程随 attachments 落库，刷新后可展开回看）
-    try {
-      const contentStr = serializeWithDiagrams(message)
-      await fetch(`/api/sessions/${sessionId}/messages`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: message.id,
-          role: message.role,
-          content: contentStr,
-          token_count: message.tokenCount,
-          token_estimated: message.tokenEstimated === true,
-          model: message.model,
-          cost: message.cost,
-          elapsed_ms: message.elapsedMs,
-          attachments: serializeWithFlow(message),
-        }),
-      })
-    } catch (err) {
-      console.error('Failed to persist message:', err)
-    }
+    await persistMessage(sessionId, message)
   }
 
   /**
@@ -536,9 +560,13 @@ export const useChatStore = defineStore('chat', () => {
    * tool 的 result 截断到 3000 字符、reasoning 截断到 2000，防 DB 膨胀。
    */
   function serializeWithFlow(message: ChatMessage): any {
-    const base = message.attachments || undefined
+    let base: any = message.attachments || undefined
+    if (typeof base === 'string') { try { base = JSON.parse(base) } catch { base = undefined } }
+    if (base && !Array.isArray(base) && typeof base === 'object') {
+      base = Array.isArray(base.attachments) ? base.attachments : Object.keys(base).filter(k => /^\d+$/.test(k)).map(k => base[k])
+      if (!base.length) base = undefined
+    }
     const flow = (message as any).flow || []
-    if (!flow.length) return base
     const trimmed = flow.map((n: any) => {
       if (n.kind === 'tool') {
         return {
@@ -566,10 +594,28 @@ export const useChatStore = defineStore('chat', () => {
       || (Array.isArray(ds.changedFiles) && ds.changedFiles.length > 0)
       || !!ds.summary
     )
-    const extra = hasDelivery ? { deliverySummary: ds } : undefined
+    if (!flow.length && !message.stopReason && !hasDelivery && !message.isAborted) return base
+    const extra = { ...(hasDelivery ? { deliverySummary: ds } : {}), ...(message.stopReason ? { stopReason: message.stopReason } : {}), ...(message.isAborted ? { isAborted: true } : {}) }
     if (base) return { attachments: base, flow: trimmed, ...extra }
-    if (extra) return { flow: trimmed, ...extra }
-    return { flow: trimmed }
+    return { flow: trimmed, ...extra }
+  }
+
+  function parseAbortedFromAttachments(attachments: any): boolean {
+    try {
+      const parsed = typeof attachments === 'string' ? JSON.parse(attachments) : attachments
+      return parsed?.isAborted === true
+    } catch { return false }
+  }
+
+  function parseStopReasonFromAttachments(attachments: any): ChatMessage['stopReason'] | undefined {
+    try {
+      const parsed = typeof attachments === 'string' ? JSON.parse(attachments) : attachments
+      const reason = parsed?.stopReason
+      if (reason && typeof reason.reason === 'string' && typeof reason.message === 'string') {
+        return { reason: reason.reason, message: reason.message, ...(typeof reason.checkpointId === 'string' ? { checkpointId: reason.checkpointId } : {}) }
+      }
+    } catch { /* legacy attachments */ }
+    return undefined
   }
 
   /** 从后端返回的 attachments（JSON 字符串）还原 flow 执行过程 */
@@ -630,30 +676,78 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   // ---- 持久化最后一条消息的最终内容（流式完成后调用） ----
+  function enqueueMessageOperation<T>(sessionId: string, operation: () => Promise<T>): Promise<T> {
+    const previous = messageSaves.get(sessionId) || Promise.resolve()
+    const result = previous.then(operation)
+    const barrier = result.then(() => undefined, () => undefined)
+    messageSaves.set(sessionId, barrier)
+    void barrier.then(() => { if (messageSaves.get(sessionId) === barrier) messageSaves.delete(sessionId) })
+    return result
+  }
+
+  function persistMessage(sessionId: string, message: ChatMessage): Promise<void> {
+    return enqueueMessageOperation(sessionId, async () => {
+      try {
+        const list = messages.value.get(sessionId) || []
+        const position = list.findIndex(m => m.id === message.id)
+        if (position < 0) return
+        const blocked = position >= 0 && (unsavedMessages.value.get(sessionId) || []).some(id => {
+          const earlier = list.findIndex(m => m.id === id)
+          return earlier >= 0 && earlier < position
+        })
+        if (blocked) throw new Error('earlier_message_not_saved')
+        const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: message.id, role: message.role, content: serializeWithDiagrams(message), token_count: message.tokenCount, token_estimated: message.tokenEstimated === true, model: message.model, cost: message.cost, elapsed_ms: message.elapsedMs, attachments: serializeWithFlow(message) }),
+        })
+        if (!res.ok) throw new Error(`message_save_failed:${res.status}`)
+        const remaining = (unsavedMessages.value.get(sessionId) || []).filter(id => id !== message.id)
+        if (remaining.length) unsavedMessages.value.set(sessionId, remaining)
+        else unsavedMessages.value.delete(sessionId)
+      } catch (err) {
+        const ids = unsavedMessages.value.get(sessionId) || []
+        if (!ids.includes(message.id)) unsavedMessages.value.set(sessionId, [...ids, message.id])
+        console.error('Failed to persist message:', err)
+      }
+    })
+  }
+
+  async function deleteStoredMessage(sessionId: string, messageId: string): Promise<void> {
+    await enqueueMessageOperation(sessionId, async () => {
+      const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      removeMessage(sessionId, messageId)
+    })
+  }
+
+  async function truncateStoredMessages(sessionId: string, fromMessageId: string): Promise<void> {
+    await enqueueMessageOperation(sessionId, async () => {
+      const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages?after=${encodeURIComponent(fromMessageId)}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const list = messages.value.get(sessionId) || []
+      const index = list.findIndex(m => m.id === fromMessageId)
+      if (index >= 0) for (const message of list.slice(index)) removeMessage(sessionId, message.id)
+    })
+  }
+
+  async function retryUnsavedMessages(sessionId: string) {
+    const ids = [...(unsavedMessages.value.get(sessionId) || [])]
+    for (const id of ids) {
+      const message = messages.value.get(sessionId)?.find(m => m.id === id)
+      if (message) await persistMessage(sessionId, message)
+    }
+  }
+
   async function persistLastMessage(sessionId: string) {
     const list = messages.value.get(sessionId)
     if (!list || list.length === 0) return
     const last = list[list.length - 1]
-    try {
-      const contentStr = serializeWithDiagrams(last)
-      await fetch(`/api/sessions/${sessionId}/messages`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: last.id,
-          role: last.role,
-          content: contentStr,
-          token_count: last.tokenCount,
-          token_estimated: last.tokenEstimated === true,
-          model: last.model,
-          cost: last.cost,
-          elapsed_ms: last.elapsedMs,
-          attachments: serializeWithFlow(last),
-        }),
-      })
-    } catch (err) {
-      console.error('Failed to persist last message:', err)
-    }
+    await persistMessage(sessionId, last)
+  }
+
+  async function persistMessageById(sessionId: string, messageId: string) {
+    const message = messages.value.get(sessionId)?.find(m => m.id === messageId)
+    if (message) await persistMessage(sessionId, message)
   }
 
   function setLoading(v: boolean) {
@@ -664,6 +758,9 @@ export const useChatStore = defineStore('chat', () => {
     sessions,
     currentSessionId,
     messages,
+    messageLoadState,
+    unsavedMessages,
+    retryUnsavedMessages,
     isLoading,
     loaded,
     pendingResume,
@@ -688,6 +785,9 @@ export const useChatStore = defineStore('chat', () => {
     addMessage,
     updateLastMessage,
     persistLastMessage,
+    persistMessageById,
+    deleteStoredMessage,
+    truncateStoredMessages,
     setLoading,
   }
 })

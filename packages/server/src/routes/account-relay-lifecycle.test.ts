@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import Koa from 'koa'
 import request from 'supertest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -29,11 +29,59 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  vi.unstubAllEnvs()
   delete process.env.SC_AUTH_DIR
   rmSync(dir, { recursive: true, force: true })
 })
 
 describe('account relay lifecycle', () => {
+  it('reports unreadable local account storage without replacing the key', async () => {
+    writeFileSync(join(dir, 'auth.json'), 'fixture')
+    const response = await request(app.callback()).get('/api/account/status')
+    expect(response.status).toBe(503)
+    expect(response.body).toEqual({ error: 'account_storage_unavailable' })
+  })
+
+  it('distinguishes network, service and local storage failures without reusing login state', async () => {
+    const startLogin = async () => (await request(app.callback()).post('/api/account/login/start')).body.state as string
+    let state = await startLogin()
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('network failure with private detail') }))
+    let response = await request(app.callback()).get('/auth/callback').query({ state, code: 'test-code' })
+    expect(response.status).toBe(502)
+    expect(response.text).toContain('无法连接登录服务')
+    expect(response.text).not.toContain('private detail')
+    expect((await request(app.callback()).get('/auth/callback').query({ state, code: 'test-code' })).status).toBe(400)
+
+    state = await startLogin()
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('unavailable', { status: 503 })))
+    response = await request(app.callback()).get('/auth/callback').query({ state, code: 'test-code' })
+    expect(response.status).toBe(502)
+    expect(response.text).toContain('登录服务暂时不可用')
+
+    state = await startLogin()
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ accessToken: 'a', refreshToken: 'r', account: { id: 'id' } }))))
+    const invalidDir = join(dir, 'not-a-directory')
+    writeFileSync(invalidDir, 'fixture')
+    process.env.SC_AUTH_DIR = invalidDir
+    response = await request(app.callback()).get('/auth/callback').query({ state, code: 'test-code' })
+    expect(response.status).toBe(500)
+    expect(response.text).toContain('无法保存登录状态')
+    expect(response.text).not.toContain(invalidDir)
+    expect(relay.start).not.toHaveBeenCalled()
+  })
+
+  it('does not report a remote request as development-signed-in because its Host is localhost', async () => {
+    vi.stubEnv('SUPERCRZY_DEV_NO_AUTH', '1')
+    vi.stubEnv('SUPERCRZY_PACKAGED', '0')
+    const proxiedApp = new Koa()
+    proxiedApp.proxy = true
+    proxiedApp.use(accountRouter.routes())
+    const local = await request(proxiedApp.callback()).get('/api/account/status').set('Host', 'localhost:3000')
+    expect(local.body.signedIn).toBe(true)
+    const remote = await request(proxiedApp.callback()).get('/api/account/status').set('Host', 'localhost:3000').set('X-Forwarded-For', '192.0.2.1')
+    expect(remote.body.signedIn).toBe(false)
+  })
+
   it('starts after successful login and stops before local logout', async () => {
     const start = await request(app.callback()).post('/api/account/login/start')
     const callback = await request(app.callback()).get('/auth/callback').query({ state: start.body.state, code: 'test-code' })

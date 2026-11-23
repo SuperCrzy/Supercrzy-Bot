@@ -73,25 +73,7 @@
 
 
 
-    <!-- 分享菜单（fixed 定位右上角，Web header / App 横栏共用；Teleport 避免被滚动容器裁剪） -->
-    <Teleport to="body">
-      <div v-if="shareMenuOpen" class="share-overlay" @click.self="shareMenuOpen = false">
-        <div class="share-menu">
-          <button class="share-item" @click="copyConversationMarkdown">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-            {{ $t('chat.shareCopyMd') }}
-          </button>
-          <button class="share-item" @click="downloadConversationMarkdown">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            {{ $t('chat.shareDownloadMd') }}
-          </button>
-          <button class="share-item" @click="generateShareImage">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-            {{ $t('chat.shareImage') }}
-          </button>
-        </div>
-      </div>
-    </Teleport>
+    <ConversationShareMenu :open="shareMenuOpen" @close="shareMenuOpen = false" @copy="copyConversationMarkdown" @download="downloadConversationMarkdown" @image="generateShareImage" />
 
     <!-- 产物弹层（右上角文件夹按钮展开） -->
     <div v-if="artifactsPopoverOpen" class="artifacts-overlay" @click.self="artifactsPopoverOpen = false">
@@ -101,6 +83,7 @@
           {{ $t('chat.artifactsTitle') }} ({{ sessionArtifacts.length }})
         </div>
         <div class="sa-list ap-pop-list">
+          <div v-if="artifactsLoadError" class="ap-pop-empty" role="status">{{ $t('detail.artifactLoadError') }} <button type="button" @click="loadArtifacts">{{ $t('common.refresh') }}</button></div>
           <div v-for="a in sessionArtifacts" :key="a.id" class="sa-item" :title="a.path">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="sa-file-icon"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
             <span class="sa-name" @click="previewArtifactFile(a)">{{ a.name }}</span>
@@ -114,11 +97,12 @@
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
             </button>
           </div>
-          <div v-if="sessionArtifacts.length === 0" class="ap-pop-empty">{{ $t('chat.artifactsEmpty') }}</div>
+          <div v-if="sessionArtifacts.length === 0 && !artifactsLoadError" class="ap-pop-empty">{{ $t('chat.artifactsEmpty') }}</div>
         </div>
       </div>
     </div>
 
+    <ChatStatusNotices :sending="sendPreparing" :unsaved="!!(chatStore.currentSessionId && chatStore.unsavedMessages.get(chatStore.currentSessionId)?.length)" :history-state="chatStore.currentSessionId ? chatStore.messageLoadState.get(chatStore.currentSessionId) : undefined" @retry-save="chatStore.currentSessionId && chatStore.retryUnsavedMessages(chatStore.currentSessionId)" @retry-history="chatStore.currentSessionId && chatStore.loadMessages(chatStore.currentSessionId)" />
     <!-- Messages -->
     <div class="messages-area" ref="messagesRef" @scroll="onScroll" @click="closeMsgMenu">
       <!-- 错误横幅（对齐主流实现 ErrorBanner：任务出错浮顶部，可复制错误报告/重试，替代一闪而过的小弹条） -->
@@ -185,7 +169,7 @@
                 v-model="inputText"
                 class="wc-input"
                 :placeholder="$t('chat.wcPlaceholder')"
-                @keydown.enter.exact.prevent="handleSend"
+                @keydown.enter.exact="onWelcomeEnter"
                                 ref="welcomeInputRef"
               ></textarea>
               <!-- 右侧：模型 / 语音 / 发送 -->
@@ -200,7 +184,7 @@
                 <button class="wc-icon-btn" :class="{ listening: isListening }" :title="isListening ? $t('chat.wcVoiceStop') : $t('chat.wcVoice')" @click="toggleVoice">
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><line x1="12" y1="18" x2="12" y2="22"/></svg>
                 </button>
-                <button class="wc-send" :disabled="!canSend" :title="appStore.hasApiKey ? $t('chat.send') : $t('chat.sendConfigFirst')" @click="handleSend">
+                <button class="wc-send" :disabled="!canSend || sendPreparing" :title="sendPreparing ? $t('chat.sendingMessage') : (appStore.hasApiKey ? $t('chat.send') : $t('chat.sendConfigFirst'))" @click="handleSend">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
                 </button>
               </div>
@@ -367,7 +351,8 @@
             <!-- 消息核心：思考状态 + 时序流（折叠条/块渲染）+ 无流正文 + 重试 + 停止横幅（主流实现 块架构，MessageFlowRenderer） -->
             <MessageFlowRenderer
               :msg="msg"
-              :is-loading="chatStore.isLoading"
+              :suppress-content="msg.role === 'assistant' && isCompareContent(msg.content)"
+              :is-loading="chatStore.isLoading && activeRunSessionId === chatStore.currentSessionId && messages[messages.length - 1] === msg"
               :is-last-message="messages[messages.length - 1] === msg"
               :show-reasoning="appStore.showReasoning"
               :permission="chatStore.currentSession?.permissionLevel || 'sandbox'"
@@ -386,67 +371,10 @@
               :live-finished="compareLiveFinished"
             />
             <CompareResult
-              v-else-if="isCompareContent(msg.content)"
+              v-else-if="msg.role === 'assistant' && isCompareContent(msg.content)"
               :data="parseCompareContent(msg.content)"
             />
-            <!-- 交付摘要：本消息产物卡片行（默认折叠只显示前 3 个 + 展开全部；多个产物不铺开） -->
-            <!-- 任务交付页（P1-05）：状态 + 结论 + 产物 + 改动 + 统计 + 下一步。
-                 此前只有"产物卡片行"，且仅当产生了文件才出现；现在凡有实际动作的任务都有交付叙事。 -->
-            <div v-if="hasDelivery(msg)" class="delivery-summary">
-              <!-- ① 状态 + 一句话结论 -->
-              <div v-if="msg.deliverySummary?.summary" class="ds-head" :class="deliveryHeadClass(msg)">
-                <span class="ds-dot"></span>
-                <span class="ds-status">{{ deliveryStatusText(msg) }}</span>
-                <span class="ds-summary-text">{{ msg.deliverySummary?.summary }}</span>
-              </div>
-              <!-- ② 产物卡片 -->
-              <template v-if="msg.deliverySummary?.artifacts.length">
-              <div class="ds-title" :class="{ 'ds-title-toggle': deliverySummaryArtifacts(msg).length > 3 }" @click="toggleDeliverySummary(msg)">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-                {{ $t('chat.deliveryTitle') }} ({{ msg.deliverySummary.artifactCount }})
-                <svg v-if="deliverySummaryArtifacts(msg).length > 3" class="ds-toggle-arrow" :class="{ open: deliverySummaryExpanded(msg) }" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
-              </div>
-              <div class="ds-cards">
-                <div v-for="(a, i) in deliverySummaryArtifacts(msg)" :key="i" class="ds-card" :title="a.path">
-                  <span class="ds-card-icon">
-                    <svg v-if="isArtifactImage(a)" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-                    <svg v-else-if="isArtifactSheet(a)" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
-                    <svg v-else-if="isArtifactDoc(a)" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-                    <svg v-else width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
-                  </span>
-                  <span class="ds-card-info">
-                    <span class="ds-card-name">{{ a.name }}</span>
-                    <span class="ds-card-path">{{ a.path }}</span>
-                  </span>
-                  <button class="ds-card-open" :title="$t('chat.artifactOpen')" @click="openDeliveryArtifact(a)">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                  </button>
-                </div>
-                <div v-if="deliverySummaryArtifacts(msg).length > 3" class="ds-more" @click="toggleDeliverySummary(msg)">
-                  {{ deliverySummaryExpanded(msg) ? $t('chatui.webFetchCollapse') : $t('chat.deliveryMore', { n: msg.deliverySummary.artifactCount - 3 }) }}
-                </div>
-              </div>
-              </template>
-              <!-- ③ 改动清单（最多列 5 个 + 余量计数） -->
-              <div v-if="msg.deliverySummary?.changedFiles?.length" class="ds-changes">
-                <span class="ds-changes-label">{{ $t('chat.deliveryChanges', { n: msg.deliverySummary?.changedCount || msg.deliverySummary?.changedFiles?.length }) }}</span>
-                <span v-for="(c, i) in (msg.deliverySummary?.changedFiles || []).slice(0, 5)" :key="i" class="ds-change" :title="c.path">{{ c.name }}</span>
-                <span v-if="(msg.deliverySummary?.changedFiles?.length || 0) > 5" class="ds-change-more">+{{ (msg.deliverySummary?.changedFiles?.length || 0) - 5 }}</span>
-              </div>
-              <!-- ④ 统计（轮次 / 工具 / 耗时 / token / 成本） -->
-              <div class="ds-stats">
-                <span>{{ $t('chat.deliveryTurns', { n: msg.deliverySummary?.turns }) }}</span>
-                <span>{{ $t('chat.deliveryTools', { n: msg.deliverySummary?.toolCallCount }) }}</span>
-                <span v-if="msg.deliverySummary?.durationMs">{{ fmtDeliveryDuration(msg.deliverySummary?.durationMs || 0) }}</span>
-                <span v-if="msg.deliverySummary?.totalTokens">{{ $t('chat.deliveryTokens', { n: msg.deliverySummary?.totalTokens }) }}</span>
-                <span v-if="msg.deliverySummary?.cost">{{ fmtDeliveryCost(msg.deliverySummary?.cost) }}</span>
-              </div>
-              <!-- ⑤ 下一步：未完成时给出可继续的检查点 -->
-              <div v-if="msg.deliverySummary?.canResume && msg.deliverySummary?.checkpointId" class="ds-next">
-                {{ $t('chat.deliveryResume') }}
-                <code class="ds-ckpt">{{ msg.deliverySummary?.checkpointId }}</code>
-              </div>
-            </div>
+            <DeliverySummary :msg="msg" />
 
             <!-- AI 画图（P0）：draw_diagram 生成的矢量图，白底卡片内联渲染（flow 内联图除外——那部分在 MessageFlowRenderer 按位置渲染） -->
             <div v-if="msg.diagrams && msg.diagrams.length && msg.diagrams.some((d) => !flowDiagramSet(msg).has(d.svg))" class="diagram-list">
@@ -714,21 +642,7 @@
           </div>
         </div>
 
-        <!-- 待发送队列（AI 回复中发送的内容先排队，回复完成后自动发布） -->
-        <div v-if="pendingQueue.length > 0" class="pending-queue">          <div class="pending-queue-head">
-            <span class="pending-queue-title">{{ $t('chat.pendingQueueTitle') }} ({{ pendingQueue.length }})</span>
-            <span class="pending-queue-hint">{{ $t('chat.pendingQueueHint') }}</span>
-          </div>
-          <div v-for="q in pendingQueue" :key="q.id" class="pending-queue-item">
-            <span class="pending-queue-text">{{ q.text }}</span>
-            <button class="queue-action" @click="editQueued(q.id)" :title="$t('chat.editQueued')">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
-            </button>
-            <button class="queue-action queue-delete" @click="deleteQueued(q.id)" :title="$t('common.delete')">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-            </button>
-          </div>
-        </div>
+        <PendingMessageQueue :items="pendingQueue" :loading="chatStore.isLoading" @edit="editQueued" @remove="deleteQueued" @send="sendPendingQueue" />
 
         <div class="input-row">
           <!-- 上传/语音已移入底部控制行（v4 输入卡重构：textarea 独占宽度） -->
@@ -760,7 +674,7 @@
             :rows="inputHeight > 0 ? undefined : 1"
             :disabled="chatStore.isLoading && !appStore.busyInputMode"
             @input="onInputTrigger"
-            @keydown.enter.exact.prevent="onInputEnter"
+            @keydown.enter.exact="onInputEnter"
             @keydown.up="historyPrev"
             @keydown.down="historyNext"
             @keydown="onTriggerKeydown"
@@ -849,7 +763,8 @@
           <!-- 发送/停止一体（对齐主流实现：发送按钮在控制行最右，语音紧挨其左） -->
           <n-button
             :type="chatStore.isLoading ? 'error' : 'primary'"
-            :disabled="!canSend && !chatStore.isLoading"
+            :disabled="(!canSend || sendPreparing) && !chatStore.isLoading"
+            :loading="sendPreparing"
             @click="chatStore.isLoading ? stopGeneration() : handleSend()"
             class="send-button"
             :class="{ 'is-stop': chatStore.isLoading }"
@@ -930,12 +845,12 @@ import { getModelShortName } from '@/data/models'
 import type { ChatMessage, Attachment, ToolCallEvent, ChatFlowNode } from '@/types'
 import { applyToolArgsChunk, applyToolDuration, applyToolOutput, applyToolProgress, applyToolResult, toolStatusLabel, extractToolTarget, nextNodeId } from '@/utils/agent-flow'
 import { errMsg } from '@/utils/i18n-error'
-import { resolveErrorDisplay } from '@/utils/api-error-display'
+import { applyAgentStreamError } from '@/utils/api-error-display'
 import { l10n } from '@/utils/i18n-field'
 import { playCompletionTone } from '@/utils/sound'
 // P1-04：以下纯逻辑从本文件下沉到 utils（原先堆在 6500 行里且无测试）
 import { isImageType, isPdfType, isDocType, isSheetType, formatFileSize, formatArtifactSize } from '@/utils/attachment'
-import { hasDelivery, deliveryHeadClass, fmtDeliveryDuration, fmtDeliveryCost } from '@/utils/delivery'
+import { normalizeDeliverySummary } from '@/utils/delivery'
 import { textOf, searchContent } from '@/utils/message-text'
 import { estimateTokens, fillEstimatedTokens, fillMeasuredTokens, formatTokenCount } from '@/utils/token-usage'
 import { parseTrigger } from '@/utils/trigger'
@@ -945,15 +860,19 @@ import MarkdownIt from 'markdown-it'
 import { sanitizeSvg } from '@/utils/sanitize-svg'
 import { parseDeepLinkFromURL, registerDeepLinkListener } from '@/utils/deeplink'
 // P1-04 拆分（2026-09-18）：交付页判定与对话导出下沉为纯模块，组件只留副作用
-import {
-  isArtifactImage, isArtifactSheet, isArtifactDoc,
-  deliverySummaryArtifacts, deliverySummaryExpanded, toggleDeliverySummary,
-  deliveryStatusKey, formatArtifactTime as formatArtifactTimeRaw,
-} from '@/utils/artifact-kind'
+import { formatArtifactTime as formatArtifactTimeRaw } from '@/utils/artifact-kind'
 // 分享 / 导出：纯逻辑（布局、Markdown 序列化）在 utils/share-export，副作用收在 useShareExport
 // I10 低风险批（2026-09-24）：状态型逻辑下沉为 composable，组件只留接线
 import { useInputHistory } from '@/composables/useInputHistory'
+import { isComposingKey } from '@/utils/keyboard'
+import ChatStatusNotices from '@/components/chat/ChatStatusNotices.vue'
+import DeliverySummary from '@/components/chat/DeliverySummary.vue'
+import ConversationShareMenu from '@/components/chat/ConversationShareMenu.vue'
+import { isCompareContent, parseCompareContent } from '@/utils/compare-content'
 import { useInputHeight } from '@/composables/useInputHeight'
+import { useSessionDrafts } from '@/composables/useSessionDrafts'
+import { useSessionQueue, shouldAutoSendQueue } from '@/composables/useSessionQueue'
+import { isUnsuccessfulAgentEvent, nextAgentEventSequence } from '@/utils/agent-event-outcome'
 import { createChatText, actorMeta } from '@/utils/chat-text'
 import { useQuote } from '@/composables/useQuote'
 import { useMessageWindow } from '@/composables/useMessageWindow'
@@ -973,13 +892,14 @@ import { useBgTaskResume } from '@/composables/useBgTaskResume'
 import { useFooterResizeStick } from '@/composables/useFooterResizeStick'
 import BgTaskBar from '@/components/chat/BgTaskBar.vue'
 import ElapsedBadge from '@/components/chat/ElapsedBadge.vue'
-import { markTurnAborted } from '@/utils/turn-abort'
+import { markTurnAborted, requestAgentStop } from '@/utils/turn-abort'
 import PlanCapsule from '@/components/chat/PlanCapsule.vue'
 import MessageFlowRenderer from '@/components/chat/MessageFlowRenderer.vue'
 import ToolApprovalFloating from '@/components/chat/ToolApprovalFloating.vue'
 import QuestionFloating from '@/components/chat/QuestionFloating.vue'
 import QuestionNavRail from '@/components/chat/QuestionNavRail.vue'
 import ErrorBanner from '@/components/chat/ErrorBanner.vue'
+import PendingMessageQueue from '@/components/chat/PendingMessageQueue.vue'
 import InputBanner from '@/components/chat/InputBanner.vue'
 import { plusNavOptions, PLUS_NAV_TARGETS } from '@/components/chat/plus-nav'
 import WorkspacePickerModal from '@/components/workspace/WorkspacePickerModal.vue'
@@ -1127,6 +1047,7 @@ const inputRef = ref()
 const editingMessageId = ref<string | null>(null)
 const fileInputRef = ref<HTMLInputElement>()
 const abortController = ref<AbortController | null>(null)
+const activeRunSessionId = ref<string | null>(null)
 /** Agent 模式（默认开）：提升到全局 store，桌面端横栏按钮与 header 同步高亮/切换 */
 const agentMode = computed({
   get: () => appStore.agentMode,
@@ -1268,18 +1189,8 @@ function confirmCompare() {
   compareMode.value = true
   comparePickerOpen.value = false
 }
-/** 对比结果暂存（渲染检测用）：compare 消息的 content 是 JSON 字符串 */
-function isCompareContent(content: any): boolean {
-  if (typeof content !== 'string' || !content.startsWith('{')) return false
-  try {
-    const d = JSON.parse(content)
-    return Array.isArray(d?.results)
-  } catch { return false }
-}
-function parseCompareContent(content: any): any {
-  try { return JSON.parse(content) } catch { return { results: [] } }
-}
 const uploadedFiles = ref<Attachment[]>([])
+useSessionDrafts(() => chatStore.currentSessionId, inputText, uploadedFiles)
 /** 当前会话已绑定的工作目录（欢迎页"工作文件夹"显示与弹窗初始定位用） */
 const currentWorkspaceDir = computed(() => chatStore.currentSession?.workspaceDir || wsCurrent.value)
 
@@ -1288,7 +1199,6 @@ function syncSessionUI() {
   welcomePerm.value = chatStore.currentSession?.permissionLevel || 'sandbox'
   loadArtifacts()
   // 任务胶囊严格绑定当前会话：切会话清空（当前 plan 只由本会话的 plan_update 事件驱动）
-  // 任务胶囊严格绑定当前会话：切会话清空（当前 plan 只由本会话的 plan_update 事件驱动）
   planStore.clearPlan()
 }
 watch(() => chatStore.currentSessionId, syncSessionUI)
@@ -1296,31 +1206,13 @@ watch(() => chatStore.currentSessionId, syncSessionUI)
 // ============ 会话产物（AI 生成的文件）→ composables/useArtifacts.ts ============
 // sessionArtifacts 仍以同一 ref 暴露：handleAgentEvent 的 file_write 分支会 unshift 进去。
 const {
-  sessionArtifacts, artifactsPopoverOpen, previewArtifact, previewFail,
+  sessionArtifacts, artifactsPopoverOpen, artifactsLoadError, previewArtifact, previewFail,
   loadArtifacts, previewArtifactFile, openArtifactFile, openArtifactFolder,
 } = useArtifacts({
   sessionId: () => chatStore.currentSessionId,
   t: (k: string) => t(k),
   onWarning: (msg: string) => nMessage.warning(msg),
 })
-
-// ---- P1-05 任务交付页辅助 ----
-/** 是否渲染交付页：有产物 / 有改动 / 有结论，三者任一即渲染（此前只看产物） */
-/** 交付状态文案（走 i18n，避免后端中文标签串到英文界面）；状态→key 判定在 utils/artifact-kind */
-function deliveryStatusText(msg: ChatMessage): string {
-  return t(deliveryStatusKey(msg.deliverySummary?.status))
-}
-
-/** 在新标签打开/预览产物（工作区文件接口按 mime 返回；浏览器可显示的图片/MD/PDF 直接看） */
-function openDeliveryArtifact(a: { path?: string; name?: string }) {
-  const p = a.path || ''
-  if (!p) return
-  window.open(`/api/workspace/file?path=${encodeURIComponent(p)}`, '_blank')
-}
-
-// ===== 交付摘要折叠 / 产物类型判定 =====
-// isArtifactImage/Sheet/Doc、deliverySummaryArtifacts/Expanded、toggleDeliverySummary
-// 已下沉到 utils/artifact-kind（P1-04，2026-09-18），此处直接使用导入版本。
 
 /** 产物时间（SQLite UTC → 本地 HH:mm，跟随界面语言；en 自动 12 小时制） */
 function formatArtifactTime(s: string) {
@@ -1352,8 +1244,7 @@ const {
 })
 
 /** 待发送队列：AI 回复中发送的内容先排队，回复完成后自动发布 */
-interface PendingQueueItem { id: string; text: string }
-const pendingQueue = ref<PendingQueueItem[]>([])
+const pendingQueue = useSessionQueue(() => chatStore.currentSessionId)
 
 // ===== 输入触发管线（/ 与 @）→ composables/useInputTrigger.ts =====
 // currentSessionId 传 getter：currentSession 的声明在本块之后（L2047），直接传 ref 会撞 TDZ。
@@ -1383,6 +1274,7 @@ const {
 
 /** 编辑队列条目：内容回填输入框并出队（可修改后重新发送） */
 function editQueued(id: string) {
+  if (inputText.value.trim() || uploadedFiles.value.length) { nMessage.warning(t('chat.queueEditDraftFirst')); return }
   const item = pendingQueue.value.find((q) => q.id === id)
   if (!item) return
   inputText.value = item.text
@@ -1395,11 +1287,25 @@ function deleteQueued(id: string) {
   pendingQueue.value = pendingQueue.value.filter((q) => q.id !== id)
 }
 
-/** 停止当前 AI 回复（停止后若有队列会自动发布） */
+function historyReady(): boolean {
+  const sid = chatStore.currentSessionId
+  const state = sid ? chatStore.messageLoadState.get(sid) : undefined
+  if (!state) return true
+  nMessage.warning(t(state === 'loading' ? 'chat.historyLoading' : 'chat.historyLoadFailed'))
+  return false
+}
+
+function sendPendingQueue() {
+  if (branchChanging || sendPreparing.value || chatStore.isLoading || !historyReady()) return
+  void sendQueued(pendingQueue.value.splice(0).map(q => q.text))
+}
+
+/** 停止当前 AI 回复，保留队列待用户确认。 */
 function stopGeneration() {
-  const msgs = messages.value
+  const sid = activeRunSessionId.value
+  const msgs = sid ? (chatStore.messages.get(sid) || []) : []
   // A3：取消落成消息级事实（标记 isAborted + 在跑工具置 cancelled）；判据与边界在 utils/turn-abort.ts
-  markTurnAborted(msgs)
+  markTurnAborted(msgs, Date.now(), t('chat.stopRequestedNotice'))
   // 2026-08-27 修复：任务中止后清除挂起的提问（否则 ask_user/ask_question 的询问窗残留不消失）
   for (const m of msgs) {
     if (m.pendingQuestion) m.pendingQuestion = undefined
@@ -1409,13 +1315,10 @@ function stopGeneration() {
   //（复杂任务 200 轮），用户点了"停止"却看到任务仍在后台烧 token。
   // 注意：这里**不能**紧接着调 /api/chat/stop/clear —— 会在后端循环读到标记前就清掉，
   // 停止指令直接失效。停止标记的清除由后端 runAgentLoop 入口统一处理（clearStop）。
-  const sid = chatStore.currentSessionId
   if (sid) {
-    fetch('/api/chat/stop', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId: sid }),
-    }).catch(() => { /* 停止指令尽力而为，失败也不影响前端 UI 收尾 */ })
+    void requestAgentStop(sid).then((sent) => {
+      if (!sent) nMessage.warning(t('chat.stopRequestFailed'), { duration: 10000 })
+    })
   }
   abortController.value?.abort()
 }
@@ -1431,7 +1334,7 @@ function stopGeneration() {
 const isPausing = ref(false)
 async function pauseGeneration() {
   if (isPausing.value) return
-  const sid = chatStore.currentSessionId
+  const sid = activeRunSessionId.value
   if (!sid) return
   isPausing.value = true
   aiStatus.value = 'chat.statusPausing'
@@ -1510,16 +1413,6 @@ function flushAllPending(): Promise<void> {
   stream = null
   streamTarget = null
   return p
-}
-
-/** flow 中最后一段正文文本（= 答案所在节点；无则空串） */
-function lastAnswerText(flow?: ChatFlowNode[]): string {
-  if (!flow) return ''
-  for (let i = flow.length - 1; i >= 0; i--) {
-    const n = flow[i]
-    if (n.kind === 'text') return String((n as Extract<ChatFlowNode, { kind: 'text' }>).text || '')
-  }
-  return ''
 }
 
 // =================================================================
@@ -1649,6 +1542,7 @@ const pendingQuestion = computed(() => {
   return null
 })
 const canSend = computed(() => inputText.value.trim() || uploadedFiles.value.length > 0)
+const sendPreparing = ref(false)
 
 // ---- 错误横幅 / 输入横幅（对齐主流实现 ErrorBanner / InputBanner：顶部横幅替代一闪而过的小弹条） ----
 const errorBanner = ref<{ title: string; message?: string; details?: Record<string, string>; canRetry?: boolean } | null>(null)
@@ -1743,17 +1637,20 @@ async function copyRequestId(msg: ChatMessage) {
 }
 
 /** 更多菜单：删除消息 */
+const deletingMessageIds = new Set<string>()
 async function deleteMessage(msg: ChatMessage) {
   openMsgMenuId.value = null
   const session = chatStore.currentSession
   if (!session) return
+  const key = `${session.id}:${msg.id}`
+  if (deletingMessageIds.has(key)) return
+  deletingMessageIds.add(key)
+  const pending = nMessage.loading(t('chat.deletingMessage'), { duration: 0 })
   try {
-    const res = await fetch(`/api/sessions/${session.id}/messages/${msg.id}`, { method: 'DELETE' })
-    if (!res.ok) throw new Error('delete failed')
-    chatStore.removeMessage(session.id, msg.id)
+    await chatStore.deleteStoredMessage(session.id, msg.id)
   } catch (err: any) {
     nMessage.error(t('chat.deleteFail') + ': ' + err.message)
-  }
+  } finally { pending.destroy(); deletingMessageIds.delete(key) }
 }
 
 /** 点赞/点踩已删除（2026-09-26：messages.feedback 字段全后端零读取，dead data；
@@ -1803,6 +1700,7 @@ const { answerQuestionFromFloating, skipQuestion } = useAskQuestion({
 
 /** 编辑：回填输入框，替换原消息重发 */
 function startEditMessage(msg: ChatMessage) {
+  if (sendPreparing.value || branchChanging) return
   editingMessageId.value = msg.id
   inputText.value = textOf(msg.content)
   inputRef.value?.focus()
@@ -1810,26 +1708,25 @@ function startEditMessage(msg: ChatMessage) {
 
 /** 重发：原消息内容直接重发（复用 doSend 链路） */
 function resendMessage(msg: ChatMessage) {
+  if (!historyReady()) return
   const text = textOf(msg.content)
   if (!text.trim()) return
   void doSend(text.trim(), [])
 }
 
 /** 作废分支：删除指定消息及其之后所有消息（编辑/重生成时旧分支作废，对齐 GPT regenerate 分支语义） */
+let branchChanging = false
 async function truncateMessages(fromMsgId: string) {
+  if (branchChanging || sendPreparing.value || chatStore.isLoading) return false
   const session = chatStore.currentSession
-  if (!session) return
+  if (!session) return false
+  branchChanging = true
   try {
-    await fetch(`/api/sessions/${session.id}/messages?after=${encodeURIComponent(fromMsgId)}`, { method: 'DELETE' })
-  } catch { /* 忽略 */ }
-  // 前端同步：移除该消息及其后的全部消息
-  const msgs = chatStore.currentMessages
-  const idx = msgs.findIndex((m) => m.id === fromMsgId)
-  if (idx !== -1) {
-    for (const m of msgs.slice(idx)) {
-      chatStore.removeMessage(session.id, m.id)
-    }
-  }
+  try {
+    await chatStore.truncateStoredMessages(session.id, fromMsgId)
+  } catch (err: any) { nMessage.error(t('chat.deleteFail') + ': ' + (err?.message || '')); return false }
+  return chatStore.currentSessionId === session.id
+  } finally { branchChanging = false }
 }
 
 /** AI 消息重新生成：定位其前置用户消息 → 作废旧分支 → 重发该用户消息 */
@@ -1850,21 +1747,21 @@ async function regenerateMessage(aiMsg: ChatMessage) {
   if (!text.trim()) return
   // 附件重放（图片/文档）
   const atts = attachmentList(userMsg)
-  await truncateMessages(userMsg.id)
+  if (!await truncateMessages(userMsg.id)) return
   await doSend(text.trim(), atts)
 }
 
 /** 编辑完成后提交：作废旧分支（原消息及之后全部删除）+ 发新内容 */
 async function submitEdit() {
   const id = editingMessageId.value
-  editingMessageId.value = null
   if (!id) return
   const session = chatStore.currentSession
   if (!session) return
   const text = inputText.value.trim()
   if (!text) return
-  await truncateMessages(id)
-  inputText.value = ''
+  if (!await truncateMessages(id)) return
+  editingMessageId.value = null
+  if (inputText.value.trim() === text) inputText.value = ''
   await doSend(text, [])
 }
 
@@ -1947,14 +1844,15 @@ const {
 const { onBgTaskDone } = useBgTaskResume({
   isLoading: () => chatStore.isLoading,
   currentSessionId: () => chatStore.currentSessionId,
-  send: (assistantMsg, _msgs, bgResume) =>
-    sendAgentMessage(assistantMsg, messages.value
+  send: async (assistantMsg, _msgs, bgResume) => {
+    await sendAgentMessage(assistantMsg, messages.value
       .filter((m) => m.id !== assistantMsg.id)
       .slice(-HISTORY_WINDOW)
-      .map((m) => buildAPIMessage(m)), undefined, chatStore.currentSessionId || undefined, undefined, bgResume),
+      .map((m) => buildAPIMessage(m)), undefined, chatStore.currentSessionId || undefined, undefined, bgResume)
+  },
   addMessage: (sid, msg) => chatStore.addMessage(sid, msg),
   setLoading: (v) => chatStore.setLoading(v),
-  setAbort: (c) => { abortController.value = c },
+  setAbort: (c) => { abortController.value = c; activeRunSessionId.value = c ? chatStore.currentSessionId : null },
   newAbort: () => new AbortController(),
 })
 
@@ -1963,11 +1861,9 @@ const { onBgTaskDone } = useBgTaskResume({
 const footerRef = ref<HTMLElement | null>(null)
 useFooterResizeStick(footerRef, () => stickToBottom.value, scrollToBottom)
 
-// 消息数量变化（新消息 / 切换会话）→ 重置渲染窗口（尾部优先）+ 强制滚到底部
+// 新消息只在用户已贴底时跟随，阅读历史时保留当前位置与已展开窗口。
 watch(() => messages.value.length, () => {
-  stickToBottom.value = true
-  resetRenderWindow()
-  scrollToBottom(true)
+  if (stickToBottom.value) { resetRenderWindow(); scrollToBottom() }
   updateCanScroll()
 })
 
@@ -2013,6 +1909,7 @@ watch(() => appStore.focusMessageTs, (ts) => {
 // 切换会话 → 强制滚到底部 + 注入代码块复制按钮
 watch(() => chatStore.currentSessionId, () => {
   stickToBottom.value = true
+  resetRenderWindow()
   scrollToBottom(true)
   enhanceCodeBlocks()
 })
@@ -2056,6 +1953,7 @@ async function sendGhostMessage(suggestion: string) {
   }
   chatStore.addMessage(session.id, assistantMsg)
   chatStore.setLoading(true)
+  activeRunSessionId.value = session.id
   abortController.value = new AbortController()
   try {
     await sendAgentMessage(assistantMsg, [{ role: 'user', content: suggestion }], undefined, session?.id)
@@ -2067,9 +1965,10 @@ async function sendGhostMessage(suggestion: string) {
   } finally {
     chatStore.setLoading(false)
     abortController.value = null
+    activeRunSessionId.value = null
     if (session) {
       fillEstimatedTokens(assistantMsg, textOf(assistantMsg.content).length)
-      chatStore.persistLastMessage(session.id)
+      chatStore.persistMessageById(session.id, assistantMsg.id)
     }
   }
 }
@@ -2100,6 +1999,7 @@ async function resumeFromCheckpoint(ckptId: string) {
   }
   chatStore.addMessage(session.id, assistantMsg)
   chatStore.setLoading(true)
+  activeRunSessionId.value = session.id
   abortController.value = new AbortController()
   try {
     await sendAgentMessage(assistantMsg, [], ckptId, session?.id)
@@ -2111,9 +2011,10 @@ async function resumeFromCheckpoint(ckptId: string) {
   } finally {
     chatStore.setLoading(false)
     abortController.value = null
+    activeRunSessionId.value = null
     if (session) {
       fillEstimatedTokens(assistantMsg, textOf(assistantMsg.content).length)
-      chatStore.persistLastMessage(session.id)
+      chatStore.persistMessageById(session.id, assistantMsg.id)
     }
   }
 }
@@ -2188,7 +2089,15 @@ function ensureApiKey(): boolean {
   return false
 }
 
+function onWelcomeEnter(event: KeyboardEvent) {
+  if (isComposingKey(event)) return
+  event.preventDefault()
+  void handleSend()
+}
+
 async function handleSend() {
+  if (sendPreparing.value || branchChanging) return
+  if (!historyReady()) return
   // 未配置模型 → 引导去模型页（不继续发送）
   if (!ensureApiKey()) return
   // 2026-11-19: sending a message interrupts the reading of the previous reply —
@@ -2218,6 +2127,7 @@ async function handleSend() {
 
   // AI 正在回复 → 文本进入待发送队列（回复完成后自动发布）；附件暂不支持排队
   if (chatStore.isLoading) {
+    if (!chatStore.currentSessionId) { nMessage.warning(t('chat.queueChooseSession')); return }
     if (files.length > 0) {
       nMessage.warning(t('chat.queueFileBusy'))
       return
@@ -2230,8 +2140,13 @@ async function handleSend() {
   await doSend(text, files)
 }
 
+let sendInProgress = false
 /** 真正发起一次发送（单条用户消息） */
 async function doSend(text: string, files: Attachment[]) {
+  if (branchChanging || sendInProgress || chatStore.isLoading) return
+  sendInProgress = true
+  sendPreparing.value = true
+  try {
   // 新消息发送 → 重置横栏任务胶囊（旧计划"完成"态不再悬挂，等新 plan_update；history 保留在弹窗）
   planStore.resetProgress()
   let session = chatStore.currentSession
@@ -2280,35 +2195,46 @@ async function doSend(text: string, files: Attachment[]) {
   }
   chatStore.addMessage(session.id, assistantMsg)
   chatStore.setLoading(true)
-  inputText.value = ''
-  uploadedFiles.value = []
-  quoteRef.value = null
+  sendPreparing.value = false
+  if (chatStore.currentSessionId === session.id) {
+    if (inputText.value.trim() === text) inputText.value = ''
+    if (uploadedFiles.value.length === files.length && uploadedFiles.value.every((f, i) => f === files[i])) uploadedFiles.value = []
+    quoteRef.value = null
+  }
+  activeRunSessionId.value = session.id
   abortController.value = new AbortController()
 
   // 计时起点：也写入 store 里的响应式副本（flow 渲染基于它）
-  const reactiveAssistantMsg = messages.value.find((m) => m.id === assistantMsg.id)
+  const reactiveAssistantMsg = chatStore.messages.get(session.id)?.find((m) => m.id === assistantMsg.id)
   if (reactiveAssistantMsg) reactiveAssistantMsg.startedAt = Date.now()
 
+  let turnCompleted = false
   try {
     // 滑动窗口：只发最近 40 条历史（解决长会话 prompt 膨胀越聊越慢；后端 compressContext 超限兜底）
-    const apiMessages = messages.value
+    const apiMessages = (chatStore.messages.get(session.id) || [])
       .filter((m) => m.id !== assistantMsg.id)
       .slice(-HISTORY_WINDOW)
       .map((m) => buildAPIMessage(m))
 
     if (compareMode.value) {
       await sendCompare(assistantMsg, apiMessages, session?.id)
+      turnCompleted = true
     } else if (agentMode.value) {
       // 视觉多模态：图片附件 → 传给后端注入 vision 模型（2026-08-23）
       const imgList = files.filter((f) => f.type.startsWith('image/')).map((f) => ({ name: f.name, url: f.url }))
-      await sendAgentMessage(assistantMsg, apiMessages, undefined, session?.id, imgList)
+      turnCompleted = await sendAgentMessage(assistantMsg, apiMessages, undefined, session?.id, imgList)
     } else {
-      await sendSimpleStream(assistantMsg, apiMessages)
+      await sendSimpleStream(assistantMsg, apiMessages, session.id)
+      turnCompleted = true
     }
   } catch (err: any) {
     if (err.name !== 'AbortError') {
-      const cur = messages.value.find((m) => m.id === assistantMsg.id)
-      if (cur) cur.content = `❌ ${t('chat.requestFail', { msg: err.message || t('chat.apiKeyHint') })}`
+      const cur = chatStore.messages.get(session.id)?.find((m) => m.id === assistantMsg.id)
+      if (cur) {
+        const failure = t('chat.requestFail', { msg: err.message || t('chat.apiKeyHint') })
+        if (textOf(cur.content).trim()) cur.stopReason = { reason: 'request_failed', message: failure }
+        else cur.content = `❌ ${failure}`
+      }
       // 错误横幅（对齐主流实现 ErrorBanner）：可复制错误报告 + 重试（doSend 主路径）
       lastFailedText = text
       errorBanner.value = {
@@ -2322,22 +2248,25 @@ async function doSend(text: string, files: Attachment[]) {
     chatStore.setLoading(false)
     // 兜底保险：流完全结束后，最后一条有过程的助手消息确保默认折叠（对齐主流实现 turnFold）
     // 即使 done 事件异常未触发，也通过状态机 markEnd 强制折叠，避免过程平铺残留
-    const lastMsg = messages.value[messages.value.length - 1]
+    const runMessages = chatStore.messages.get(session.id) || []
+    const lastMsg = runMessages[runMessages.length - 1]
     if (lastMsg && lastMsg.role === 'assistant' && lastMsg.flow && lastMsg.flow.length > 0 && lastMsg.processCollapsed === undefined) {
       markEnd(lastMsg)
     }
     abortController.value = null
+    activeRunSessionId.value = null
     if (session) {
       // 估算 token 数兜底（usage 事件未提供真实值时）：中英混合粗略 0.6 token/字符
       fillEstimatedTokens(assistantMsg, textOf(assistantMsg.content).length)
-      chatStore.persistLastMessage(session.id)
+      chatStore.persistMessageById(session.id, assistantMsg.id)
     }
     // AI 回复完成 → 自动发布队列中的内容（一次请求，多条用户消息）
-    if (pendingQueue.value.length > 0) {
+    if (shouldAutoSendQueue(session?.id, chatStore.currentSessionId, pendingQueue.value.length, turnCompleted && !chatStore.messageLoadState.has(session.id))) {
       const queued = pendingQueue.value.splice(0)
       void sendQueued(queued.map((q) => q.text))
     }
   }
+  } finally { sendInProgress = false; sendPreparing.value = false }
 }
 
 /** 自动发布队列：多条用户消息一次请求发给 AI，回复完成后继续处理剩余队列 */
@@ -2369,34 +2298,42 @@ async function sendQueued(texts: string[]) {
   }
   chatStore.addMessage(session.id, assistantMsg)
   chatStore.setLoading(true)
+  activeRunSessionId.value = session.id
   abortController.value = new AbortController()
 
+  let turnCompleted = false
   try {
     // 滑动窗口：只发最近 40 条历史（解决长会话 prompt 膨胀越聊越慢；后端 compressContext 超限兜底）
-    const apiMessages = messages.value
+    const apiMessages = (chatStore.messages.get(session.id) || [])
       .filter((m) => m.id !== assistantMsg.id)
       .slice(-HISTORY_WINDOW)
       .map((m) => buildAPIMessage(m))
     if (agentMode.value) {
-      await sendAgentMessage(assistantMsg, apiMessages, undefined, session?.id)
+      turnCompleted = await sendAgentMessage(assistantMsg, apiMessages, undefined, session?.id)
     } else {
-      await sendSimpleStream(assistantMsg, apiMessages)
+      await sendSimpleStream(assistantMsg, apiMessages, session.id)
+      turnCompleted = true
     }
   } catch (err: any) {
     if (err.name !== 'AbortError') {
-      const cur = messages.value.find((m) => m.id === assistantMsg.id)
-      if (cur) cur.content = `❌ ${t('chat.requestFail', { msg: err.message || t('chat.apiKeyHint') })}`
+      const cur = chatStore.messages.get(session.id)?.find((m) => m.id === assistantMsg.id)
+      if (cur) {
+        const failure = t('chat.requestFail', { msg: err.message || t('chat.apiKeyHint') })
+        if (textOf(cur.content).trim()) cur.stopReason = { reason: 'request_failed', message: failure }
+        else cur.content = `❌ ${failure}`
+      }
     }
   } finally {
     chatStore.setLoading(false)
     abortController.value = null
+    activeRunSessionId.value = null
     if (session) {
       // 真实 usage 已由 usage 事件写入则不覆盖；否则用估算值兜底
       fillEstimatedTokens(assistantMsg, textOf(assistantMsg.content).length)
-      chatStore.persistLastMessage(session.id)
+      chatStore.persistMessageById(session.id, assistantMsg.id)
     }
     // 若用户在自动发布期间又排队了内容 → 继续自动发布，直到队列清空
-    if (pendingQueue.value.length > 0) {
+    if (shouldAutoSendQueue(session?.id, chatStore.currentSessionId, pendingQueue.value.length, turnCompleted && !chatStore.messageLoadState.has(session.id))) {
       const queued = pendingQueue.value.splice(0)
       void sendQueued(queued.map((q) => q.text))
     }
@@ -2484,7 +2421,7 @@ async function sendCompare(assistantMsg: ChatMessage, apiMessages: Array<{ role:
     const totalLen = data.results.reduce((s: number, r: any) => s + (r.content || '').length, 0)
     cur.tokenCount = estimateTokens(totalLen)
     cur.tokenEstimated = true
-    if (sessionId) chatStore.persistLastMessage(sessionId)
+    if (sessionId) chatStore.persistMessageById(sessionId, assistantMsg.id)
   }
   // 清理打字状态
   compareLive.value = []
@@ -2500,7 +2437,7 @@ async function sendAgentMessage(assistantMsg: ChatMessage, apiMessages: Array<{ 
   // 关键：用 store 里的响应式对象作为流式更新目标。
   // assistantMsg 是原始对象，直接改它的 flow/text 不会触发 Vue 渲染
   // （Vue3 reactive 只追踪 proxy），导致所有更新合并到一次渲染 → 一次性出结果。
-  const reactiveMsg = messages.value.find((m) => m.id === assistantMsg.id) || assistantMsg
+  const reactiveMsg = (sessionId ? chatStore.messages.get(sessionId) : messages.value)?.find((m) => m.id === assistantMsg.id) || assistantMsg
   // 绑定流实例：打字机 + flow 更新集中到 stores/chat-stream.ts（SSE 直写，可多实例）
   bindStream(reactiveMsg)
 
@@ -2509,6 +2446,8 @@ async function sendAgentMessage(assistantMsg: ChatMessage, apiMessages: Array<{ 
   // Do not replay a disconnected run until the server supports idempotent resume.
   const decoder = new TextDecoder()
   let receivedDone = false
+  let taskUnsuccessful = false
+  let receivedTerminalError = false
   let lastSeq = 0
 
   async function attemptStream(): Promise<boolean> {
@@ -2541,14 +2480,16 @@ async function sendAgentMessage(assistantMsg: ChatMessage, apiMessages: Array<{ 
             currentEvent = line.slice(7).trim()
           } else if (line.startsWith('data: ')) {
             // Only deduplicate events within this single response.
-            const seq = currentId ? parseInt(currentId, 10) : 0
-            if (seq > lastSeq) {
-              lastSeq = seq
+            const seq = nextAgentEventSequence(currentId, lastSeq)
+            if (seq !== null) {
               const dataStr = line.slice(6).trim()
               try {
                 const data = JSON.parse(dataStr)
+                lastSeq = seq
                 if (currentEvent === 'done') receivedDone = true
+                if (isUnsuccessfulAgentEvent(currentEvent, data)) taskUnsuccessful = true
                 handleAgentEvent(currentEvent, data, reactiveMsg, sessionId)
+                if (currentEvent === 'error' && !data.retrying && !data.paused) receivedTerminalError = true
               } catch {}
             }
             currentId = ''
@@ -2561,17 +2502,25 @@ async function sendAgentMessage(assistantMsg: ChatMessage, apiMessages: Array<{ 
     }
 
     if (receivedDone) return true
-    if (!abortController.value!.signal.aborted) {
+    if (!receivedTerminalError && !abortController.value!.signal.aborted) {
       nMessage.warning(t('chat.streamInterrupted'))
     }
     return false
   }
 
   const streamOk = await attemptStream()
-  // 注意：此处不强制 flushAllPending —— 让限速定时器自然播完剩余，
-  // 保证打字机效果完整（done/content 事件也不会打断）。
+  if (!streamOk) {
+    // Without a done event, preserve the partial answer and keep an explanation
+    // on the visible message instead of relying only on a transient toast.
+    await flushAllPending()
+    if (!receivedTerminalError && !abortController.value?.signal.aborted && !reactiveMsg.stopReason) {
+      reactiveMsg.stopReason = { reason: 'connection_interrupted', message: t('chat.streamInterrupted') }
+    }
+  }
   // 流自然结束（非用户手动停止）→ 提示音 + 自动朗读（见 finishTurn）
-  finishTurn(assistantMsg, streamOk)
+  const completed = streamOk && !taskUnsuccessful && !abortController.value?.signal.aborted && !reactiveMsg.stopReason
+  finishTurn(assistantMsg, completed)
+  return completed
 }
 
 /**
@@ -2593,6 +2542,8 @@ function syncTextToFlow(msg: ChatMessage) {
 function handleAgentEvent(event: string, data: any, msg: ChatMessage, sessionId?: string) {
   // 时序流：每个事件按到达顺序追加节点（思考/工具/文本交错）
   if (!msg.flow) msg.flow = []
+  if (msg.retrying && ['thinking_chunk', 'content_chunk', 'content', 'tool_call', 'done'].includes(event)) msg.retrying = undefined
+  const visibleSession = !sessionId || sessionId === chatStore.currentSessionId
 
   switch (event) {
     case 'thinking': {
@@ -2621,7 +2572,7 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage, sessionId?
       // 思考结束 → 开始调工具，收起 thinking
       markAllThinkingDone(msg)
       // 2026-09-04: AI 调需要观看画面的工具 → 自动拉起右栏对应 tab（不打断主动在看别 tab 的用户）
-      try { autoRevealPanelForTool(data.name) } catch {}
+      if (visibleSession) { try { autoRevealPanelForTool(data.name) } catch {} }
       // 新工具到达 → 取消延迟确认 + 回到流式平铺（状态机 markToolSignal，坑③）
       markToolSignal(msg)
       // 先刷完剩余正文（防止打字机限速导致正文被工具卡片从中间劈开：正文前半→工具→正文后半）
@@ -2776,8 +2727,8 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage, sessionId?
     }
     case 'file_created': {
       // AI 生成文件 → 实时插入会话产物列表（去重）
-      if (data && data.name) {
-        const sid = chatStore.currentSessionId
+      if (visibleSession && data && data.name) {
+        const sid = sessionId || chatStore.currentSessionId
         if (sid) {
           const exists = sessionArtifacts.value.some((a) => a.path === data.path)
           if (!exists) {
@@ -2797,12 +2748,7 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage, sessionId?
       break
     }
     case 'delivery_summary': {
-      msg.deliverySummary = {
-        artifactCount: data.artifactCount || 0,
-        artifacts: data.artifacts || [],
-        toolCallCount: data.toolCallCount || 0,
-        turns: data.turns || 0,
-      }
+      msg.deliverySummary = normalizeDeliverySummary(data || {})
       break
     }
     case 'routine_suggest': {
@@ -2818,6 +2764,7 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage, sessionId?
     }
     case 'plan_update': {
       // 横栏任务胶囊：步骤状态推进（每轮 completed → 下一步 in_progress → 收尾全 completed）
+      if (!visibleSession) break
       planStore.setPlanUpdate({
         planId: data.planId,
         title: data.title || '',
@@ -2836,14 +2783,14 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage, sessionId?
       // 不记这个值，用量页只能按 sessions.model 分组 → 换过模型就永久错配。
       if (typeof data.model === 'string' && data.model) msg.model = data.model
       // 上下文用量（顶部圆环数据源）：已用上下文 = prompt_tokens（会话累计上下文）
-      if (typeof data.promptTokens === 'number') {
+      if (visibleSession && typeof data.promptTokens === 'number') {
         appStore.setCtxUsage(data.promptTokens)
       }
       break
     }
     case 'config': {
       // 上下文窗口大小（后端按模型动态下发）→ 圆环分母
-      if (typeof data.contextWindow === 'number') {
+      if (visibleSession && typeof data.contextWindow === 'number') {
         appStore.setCtxWindow(data.contextWindow)
       }
       // 2026-08-29 超级协作平台：发言人标识，应用到当前 assistant 消息
@@ -2855,12 +2802,12 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage, sessionId?
     }
     case 'compressed': {
       // 上下文被压缩 → 圆环标记跳回
-      appStore.markCtxCompressed()
+      if (visibleSession) appStore.markCtxCompressed()
       break
     }
     case 'preview_update': {
       // 实时预览（L1）：AI 写入 html 文件 → 右侧边栏实时渲染
-      if (typeof data.path === 'string' && typeof data.content === 'string') {
+      if (visibleSession && typeof data.path === 'string' && typeof data.content === 'string') {
         appStore.setPreview(data.path, data.content)
         // 首次出现预览时自动打开右侧边栏的 preview tab
         if (!appStore.detailPanelVisible || appStore.detailPanelTab !== 'preview') {
@@ -2884,7 +2831,7 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage, sessionId?
       // 图作为 flow 节点按位置渲染（主流实现 image-block 同款）——diagram 事件在总结文字之前到达，
       // push 到 flow 末尾即"产生位置"，后续正文 text 节点追加在它后面 → 图固定在工具与总结之间，不再被文字推走
       if (typeof data.svg === 'string' && data.svg.startsWith('<svg')) {
-        const cur = streamTarget || [...messages.value].reverse().find((m) => m.role === 'assistant')
+        const cur = msg
         if (cur) {
           if (stream && stream.target === cur) stream.completeDiagram(data.svg, String(data.title || ''))
           else {
@@ -2901,21 +2848,21 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage, sessionId?
     case 'image_generated': {
       // AI 生成图片（generate_image 工具）：对话内 image 段 + 右侧 preview 展示
       if (typeof data.data === 'string') {
-        const cur = streamTarget || [...messages.value].reverse().find((m) => m.role === 'assistant')
+        const cur = msg
         if (cur) {
           if (!cur.flow) cur.flow = []
           cur.flow.push({ id: nextNodeId(), kind: 'image', data: data.data, isUrl: !!data.isUrl, title: String(data.title || '').slice(0, 60) })
           // 图节点是非正文块 ⇒ 封口当前正文段，图后的正文另起节点（顺序不乱）
           stream?.closeTextSegment()
         }
-        appStore.setPreviewImage(String(data.data), !!data.isUrl, String(data.title || '').slice(0, 60))
+        if (visibleSession) appStore.setPreviewImage(String(data.data), !!data.isUrl, String(data.title || '').slice(0, 60))
       }
       break
     }
     case 'file_changed': {
       // 文件变更（变更 tab）：写入文件时记录改前/改后内容
       if (typeof data.path === 'string') {
-        appStore.addFileChange(data.path, data.oldContent || '', data.newContent || '')
+        if (visibleSession) appStore.addFileChange(data.path, data.oldContent || '', data.newContent || '')
         // 工具卡片内嵌 diff（对齐主流实现 WriteFileRenderer）：挂到最近一个 file_write 工具节点
         if (msg.flow) {
           for (let i = msg.flow.length - 1; i >= 0; i--) {
@@ -2991,7 +2938,7 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage, sessionId?
       void finishing.then(() => {
         // 兜底对账（正常路径 finish 已让末段 == content，此处退化为 noop）+ received 态落盘
         syncTextToFlow(msg)
-        if (sessionId) void chatStore.persistLastMessage(sessionId)
+        if (sessionId) void chatStore.persistMessageById(sessionId, msg.id)
       })
       aiStatus.value = null
       aiStatusTarget.value = ''
@@ -3005,10 +2952,10 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage, sessionId?
       }
       // 任务完成：当前 plan 归档进历史（弹窗时间线可见），胶囊保留全完成态
       // （markPlanFinished：区分"步骤全 completed 但 AI 还在收尾"——只有 done 才算真完成）
-      if (planStore.planProgress && planStore.planProgress.steps.every((s) => s.status === 'completed')) {
+      if (visibleSession && planStore.planProgress && planStore.planProgress.steps.every((s) => s.status === 'completed')) {
         planStore.setPlanUpdate(planStore.planProgress)
       }
-      if (planStore.planProgress) {
+      if (visibleSession && planStore.planProgress) {
         planStore.markPlanFinished()
       }
       // 任务完成计时：发送时刻 → done 时刻
@@ -3026,7 +2973,6 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage, sessionId?
     case 'error': {
       // 出错：强制补全残留，避免内容缺失（状态机：取消延迟确认，保持当前折叠态不强制折叠）
       markToolSignal(msg)
-      const flushed = flushAllPending()
       // 2026-08-27 保险：出错也清未答提问，避免询问窗残留
       if (msg.pendingQuestion) msg.pendingQuestion = undefined
       if (data.paused) {
@@ -3040,21 +2986,12 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage, sessionId?
         msg.retrying = data.message || t('chat.retrying')
         aiStatus.value = 'chat.statusRetrying'
       } else {
-        // 2026-09-24 / 10-22（A1）：**绝不用错误文本覆盖 content**（答案的唯一真相）。判定见 utils/api-error-display.ts。
-        const hadText = !!lastAnswerText(msg.flow).trim()
-        markAllThinkingDone(msg)
+        // A retry or pause may be followed by more events; only a terminal error
+        // should close this stream. Flush text before saving the partial reply.
+        applyAgentStreamError(msg, stream, data, t('chat.stopReasonDefault'))
+        void flushAllPending()
         aiStatus.value = null
         aiStatusTarget.value = ''
-        const disp = resolveErrorDisplay({ hadText, hint: data.hint, message: data.message, fallback: t('chat.stopReasonDefault'), reason: data.reason })
-        if (disp.content) msg.content = disp.content
-        if (disp.stopReason) msg.stopReason = disp.stopReason
-        if (hadText) {
-          void flushed.then(() => {
-            // 等打字机刷完再取：保持 content == flow 末段（对账不变量）
-            const tail = lastAnswerText(msg.flow)
-            msg.content = tail.trim() ? tail : `❌ ${data.message}`
-          })
-        }
       }
       break
     }
@@ -3094,7 +3031,8 @@ function onToolAllowSession(tc: ToolCallEvent) {
 /**
  * 简单聊天模式 — 默认 /api/chat/stream 原始 SSE 流式；设置关闭"流式响应"时走非流式 /api/chat
  */
-async function sendSimpleStream(assistantMsg: ChatMessage, apiMessages: Array<{ role: string; content: string }>) {
+async function sendSimpleStream(assistantMsg: ChatMessage, apiMessages: Array<{ role: string; content: string }>, sessionId: string) {
+  const findMessage = () => chatStore.messages.get(sessionId)?.find((m) => m.id === assistantMsg.id)
   // 关闭流式：一次性拿完整回复（无打字机）
   if (!appStore.streamingEnabled) {
     const res = await fetch('/api/chat', {
@@ -3105,7 +3043,7 @@ async function sendSimpleStream(assistantMsg: ChatMessage, apiMessages: Array<{ 
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`)
     const data = await res.json()
-    const cur = messages.value.find((m) => m.id === assistantMsg.id)
+    const cur = findMessage()
     if (cur && data.content) cur.content = data.content
     // 非流式拿到完整回复 → 提示音 + 自动朗读（走到这里即 HTTP 2xx，视为成功）
     finishTurn(assistantMsg, true)
@@ -3126,6 +3064,7 @@ async function sendSimpleStream(assistantMsg: ChatMessage, apiMessages: Array<{ 
 
   const decoder = new TextDecoder()
   let buffer = ''
+  let receivedDone = false
   // 简单模式同样用统一打字机引擎（防一次性出结果；content 直拼不走 flow）
   let pendingSimple = ''
   let simpleTw = createTypewriterState()
@@ -3139,13 +3078,13 @@ async function sendSimpleStream(assistantMsg: ChatMessage, apiMessages: Array<{ 
     if (take > 0) {
       const text = pendingSimple.slice(0, take)
       pendingSimple = pendingSimple.slice(take)
-      const cur = messages.value.find((m) => m.id === assistantMsg.id)
+      const cur = findMessage()
       if (cur) cur.content += text
     }
     if (pendingSimple) simpleTimer = setTimeout(flushSimple, DEFAULT_TYPING_CONFIG.targetIntervalMs)
   }
 
-  while (true) {
+  try { while (true) {
     const { done, value } = await reader.read()
     if (done) break
     buffer += decoder.decode(value, { stream: true })
@@ -3155,7 +3094,7 @@ async function sendSimpleStream(assistantMsg: ChatMessage, apiMessages: Array<{ 
     for (const line of lines) {
       if (line.startsWith('data: ')) {
         const data = line.slice(6).trim()
-        if (data === '[DONE]') continue
+        if (data === '[DONE]') { receivedDone = true; continue }
         try {
           const chunk = JSON.parse(data)
           // 真实 token 用量（流式结束时的 usage 字段）
@@ -3174,14 +3113,16 @@ async function sendSimpleStream(assistantMsg: ChatMessage, apiMessages: Array<{ 
         } catch {}
       }
     }
+  } } finally {
+    if (simpleTimer) { clearTimeout(simpleTimer); simpleTimer = null }
+    // Flush received text even if the reader throws or the user stops.
+    if (pendingSimple) {
+      const cur = findMessage()
+      if (cur) cur.content += pendingSimple
+      pendingSimple = ''
+    }
   }
-  if (simpleTimer) { clearTimeout(simpleTimer); simpleTimer = null }
-  // 收尾：强制一次性清空（内容完整性优先）
-  if (pendingSimple) {
-    const cur = messages.value.find((m) => m.id === assistantMsg.id)
-    if (cur) cur.content += pendingSimple
-    pendingSimple = ''
-  }
+  if (!receivedDone) throw new Error(t('chat.streamInterrupted'))
   // 流读完（未抛异常即未中断）→ 提示音 + 自动朗读
   finishTurn(assistantMsg, true)
 }
@@ -3375,149 +3316,6 @@ onMounted(async () => {
   padding: 4px 0;
 }
 
-/* ---- P1-05 任务交付页 ---- */
-.ds-head {
-  display: flex; align-items: center; gap: 6px;
-  font-size: 12px; line-height: 1.5;
-  padding: 6px 8px; margin-bottom: 8px;
-  border-radius: 7px;
-  background: var(--bg-secondary, rgba(127,127,127,.07));
-}
-.ds-dot { width: 6px; height: 6px; border-radius: 50%; flex: 0 0 auto; background: #2fa36b; }
-.ds-head--cancelled .ds-dot { background: #9aa0ab; }
-.ds-head--failed .ds-dot { background: #d9534f; }
-.ds-status { font-weight: 600; color: var(--text-primary); flex: 0 0 auto; }
-.ds-summary-text { color: var(--text-secondary); min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.ds-changes {
-  display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
-  margin-top: 8px; font-size: 11px;
-}
-.ds-changes-label { color: var(--text-secondary); }
-.ds-change {
-  padding: 1px 6px; border-radius: 5px;
-  background: var(--bg-secondary, rgba(127,127,127,.1));
-  color: var(--text-primary);
-  font-family: var(--font-mono, ui-monospace, monospace);
-  max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.ds-change-more { color: var(--text-secondary); }
-.ds-stats {
-  display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
-  margin-top: 8px; font-size: 11px; color: var(--text-tertiary, var(--text-secondary));
-}
-.ds-next {
-  display: flex; align-items: center; gap: 6px;
-  margin-top: 8px; font-size: 11px; color: var(--text-secondary);
-}
-.ds-ckpt {
-  font-family: var(--font-mono, ui-monospace, monospace);
-  padding: 1px 5px; border-radius: 4px;
-  background: var(--bg-secondary, rgba(127,127,127,.1));
-  font-size: 10px;
-}
-.delivery-summary {
-  margin: 10px 0;
-  padding: 10px 12px;
-  border: 1px solid var(--border-color);
-  border-radius: 10px;
-  background: var(--bg-tertiary);
-}
-
-.ds-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  margin-bottom: 8px;
-  color: var(--text-primary);
-}
-.ds-title svg { color: var(--accent); }
-.ds-title-toggle { cursor: pointer; user-select: none; }
-.ds-title-toggle:hover { color: var(--accent); }
-.ds-toggle-arrow { transition: transform var(--duration-fast, 0.15s); }
-.ds-toggle-arrow.open { transform: rotate(180deg); }
-/* 折叠态"展开全部"入口 */
-.ds-more {
-  font-size: 11px;
-  color: var(--accent);
-  cursor: pointer;
-  padding: 4px 2px;
-  user-select: none;
-}
-.ds-more:hover { text-decoration: underline; }
-
-/* 产物卡片行（对标 主流实现 artifact-slot） */
-.ds-cards {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-.ds-card {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 6px 9px;
-  border: 0.5px solid var(--border-color);
-  border-radius: 8px;
-  background: var(--bg-primary);
-  transition: border-color var(--duration-fast);
-}
-.ds-card:hover {
-  border-color: var(--accent);
-}
-.ds-card-icon {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 7px;
-  background: var(--bg-secondary);
-  color: var(--accent);
-}
-.ds-card-info {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-.ds-card-name {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ds-card-path {
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ds-card-open {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-}
-.ds-card-open:hover {
-  background: var(--bg-hover);
-  color: var(--accent);
-}
-
 /* AI 画图卡片（P0）：白底内联 SVG，适配深浅主题 */
 .diagram-list { margin: 10px 0; display: flex; flex-direction: column; gap: 8px; }
 .diagram-card {
@@ -3640,47 +3438,6 @@ onMounted(async () => {
   z-index: 900;
 }
 
-/* ===== 对话分享菜单（fixed 右上角，Web header / App 横栏共用） ===== */
-.share-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 910;
-}
-.share-menu {
-  position: absolute;
-  top: 64px;
-  right: 16px;
-  width: 208px;
-  background: var(--bg-primary);
-  border: 0.5px solid var(--border-color);
-  border-radius: 12px;
-  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.14);
-  padding: 6px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.share-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 9px 12px;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--text-primary);
-  font-size: 13px;
-  cursor: pointer;
-  text-align: left;
-  transition: background var(--duration-fast);
-}
-.share-item:hover {
-  background: var(--bg-hover);
-}
-.share-item svg {
-  color: var(--text-secondary);
-  flex-shrink: 0;
-}
 .artifacts-pop {
   position: absolute;
   top: 64px;
@@ -5138,71 +4895,6 @@ onMounted(async () => {
 
 
 /* ===== 待发送队列 ===== */
-.pending-queue {
-  margin-bottom: 8px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 10px;
-  padding: 8px 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.pending-queue-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 11px;
-}
-.pending-queue-title {
-  font-weight: 600;
-  color: var(--accent);
-}
-.pending-queue-hint {
-  color: var(--text-muted);
-}
-.pending-queue-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  padding: 5px 8px;
-}
-.pending-queue-text {
-  flex: 1;
-  min-width: 0;
-  font-size: 12px;
-  color: var(--text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.queue-action {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border: none;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-  padding: 0;
-  flex-shrink: 0;
-  transition: color var(--duration-fast), background var(--duration-fast);
-}
-.queue-action:hover {
-  background: var(--bg-hover);
-  color: var(--accent);
-}
-.queue-action.queue-delete:hover {
-  color: var(--error);
-  background: var(--error-muted);
-}
-
 /* 停止/发送：上下垂直排列（停止在上、发送在下） */
 .send-stack {
   display: flex;

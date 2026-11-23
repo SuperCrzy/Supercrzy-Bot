@@ -57,6 +57,23 @@ const mkPage = (url: string) => ({
   evaluate: async () => ({ width: 1280, height: 720 }),
 })
 
+describe('browser action failures', () => {
+  it('reports navigation failure even when the previous page remains open', async () => {
+    process.env.BROWSER_MODE = 'attach'
+    mocks.setPages([{ ...mkPage('https://old.example/'), goto: async () => { throw new Error('navigation rejected') } }])
+    const result = await browserSession(browserKey('navigation-failure')).navigate('https://new.example/')
+    expect(result.url).toBe('https://old.example/')
+    expect(result.error).toContain('navigation rejected')
+  })
+
+  it('reports failures from the browser back action', async () => {
+    process.env.BROWSER_MODE = 'attach'
+    mocks.setPages([{ ...mkPage('https://old.example/'), goBack: async () => { throw new Error('back rejected') } }])
+    const result = await browserSession(browserKey('back-failure')).goBack()
+    expect(result).toMatchObject({ ok: false, error: 'back rejected' })
+  })
+})
+
 beforeEach(() => {
   saved = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]))
   for (const k of ENV_KEYS) delete process.env[k]

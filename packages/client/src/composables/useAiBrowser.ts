@@ -32,7 +32,7 @@
 import { ref, nextTick, watch, onMounted, onUnmounted } from 'vue'
 
 export interface AiBrowserOptions {
-  /** 当前会话 id。切会话要释放上一个会话的浏览器实例。无会话时可能为 null / undefined。 */
+  /** 当前会话 id。无会话时可能为 null / undefined。 */
   sessionId: () => string | null | undefined
   /** 是否"该跑"：面板可见 **且** 当前停在浏览器 tab。只在 true 时点火长轮询与原生视图同步。 */
   active: () => boolean
@@ -67,6 +67,9 @@ export function useAiBrowser(opts: AiBrowserOptions) {
   const browserScreenshotBase64 = ref('')
   const browserLoading = ref(false)
   const browserLog = ref<string[]>([])
+  // In-flight responses belong to the session that started them, even if the
+  // user switches away and then returns before the request finishes.
+  let sessionGeneration = 0
 
   /**
    * DOM 模式：手机上没有像素，只有结构。
@@ -114,12 +117,18 @@ export function useAiBrowser(opts: AiBrowserOptions) {
    */
   function applyFrame(d: any) {
     if (!d) return
+    const previousUrl = browserUrl.value
+    const previousElement = browserDom.value?.elements.find((e) => e.i === domFocusIndex.value)
     if (d.url) browserUrl.value = d.url
+    if (d.url && d.url !== previousUrl) domFocusIndex.value = -1
     if (typeof d.screenshot === 'string' && d.screenshot) browserScreenshotBase64.value = d.screenshot
     if (d.dom && Array.isArray(d.dom.elements)) {
       browserDom.value = d.dom as BrowserDomView
-      // 页面换了，之前选中的序号就失效了 —— 不清掉会让"填入"打进错的那个框。
-      if (domFocusIndex.value >= 0 && !browserDom.value.elements.some((e) => e.i === domFocusIndex.value)) {
+      const selected = browserDom.value.elements.find((e) => e.i === domFocusIndex.value)
+      // Indices can be reused after navigation or DOM changes.
+      if (domFocusIndex.value >= 0 && (!selected || !previousElement || (d.url && d.url !== previousUrl)
+        || selected.tag !== previousElement.tag || selected.type !== previousElement.type
+        || selected.text !== previousElement.text || selected.href !== previousElement.href)) {
         domFocusIndex.value = -1
       }
     }
@@ -241,8 +250,10 @@ export function useAiBrowser(opts: AiBrowserOptions) {
   }
 
   async function goToUrl() {
+    if (browserLoading.value) return
     const url = browserUrlInput.value.trim()
     if (!url) return
+    const generation = sessionGeneration
     browserLoading.value = true
     browserStatus.value = '导航中'
     browserLog.value.push('导航 ' + url)
@@ -250,8 +261,10 @@ export function useAiBrowser(opts: AiBrowserOptions) {
       const r = await fetch('/api/collab/browser/navigate', {
         method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, bkHdr()), body: JSON.stringify({ url }),
       })
+      if (generation !== sessionGeneration) return
       if (r.ok) {
         const d = await r.json()
+        if (generation !== sessionGeneration) return
         applyFrame(d)
         if (d.error) {
           // 后端把导航失败的原因带回来了 —— 旧实现是静默吞掉，用户只能看到白屏，
@@ -263,12 +276,13 @@ export function useAiBrowser(opts: AiBrowserOptions) {
           browserLog.value.push('失败 ' + d.error)
         } else {
           browserUrl.value = d.url || url
-          browserUrlInput.value = d.url || url
+          if (browserUrlInput.value.trim() === url) browserUrlInput.value = d.url || url
           browserStatus.value = '实时'
           browserFailHint.value = ''
         }
       } else { browserStatus.value = '失败'; browserFailHint.value = '后端返回错误 ' + r.status + '，无法打开网页' }
     } catch {
+      if (generation !== sessionGeneration) return
       browserStatus.value = '断开'
       browserFailHint.value = '未能连到浏览器服务(后端 3000)。请先启动后端再打开网页'
     }
@@ -278,42 +292,53 @@ export function useAiBrowser(opts: AiBrowserOptions) {
   }
 
   async function refreshPage() {
+    if (browserLoading.value) return
+    const generation = sessionGeneration
     browserLoading.value = true
     browserStatus.value = '刷新中'
     try {
       const r = await fetch('/api/collab/browser/refresh', { method: 'POST', headers: bkHdr() })
+      if (generation !== sessionGeneration) return
       if (r.ok) {
         const d = await r.json()
-        applyFrame(d)
-        browserStatus.value = '实时'
-      } else { browserStatus.value = '失败' }
-    } catch { browserStatus.value = '断开' }
+        if (generation !== sessionGeneration) return
+        if (d.error) { browserStatus.value = '失败'; browserFailHint.value = '刷新失败：' + String(d.error).slice(0, 200) }
+        else { applyFrame(d); browserStatus.value = '实时'; browserFailHint.value = '' }
+      } else { browserStatus.value = '失败'; browserFailHint.value = '刷新失败（' + r.status + '），请重试' }
+    } catch { if (generation !== sessionGeneration) return; browserStatus.value = '断开'; browserFailHint.value = '无法连接浏览器服务，请重试' }
     browserLoading.value = false
   }
 
   async function doAct(body: Record<string, unknown>) {
+    const generation = sessionGeneration
     browserLoading.value = true
     try {
       const r = await fetch('/api/collab/browser/act', { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, bkHdr()), body: JSON.stringify(body) })
+      if (generation !== sessionGeneration) return false
       if (r.ok) {
         const d = await r.json()
+        if (generation !== sessionGeneration) return false
         if (d?.snapshot) applyFrame(d.snapshot)
         // 返回成败：调用方要据此给用户反馈。
         // 旧实现不返回任何东西 → 调用方只能猜，很容易写出"恒真的失败提示"（那是假信号）。
-        if (d?.result?.error) {
+        if (d?.result?.error || d?.result?.ok === false) {
           browserStatus.value = '动作失败'
-          browserFailHint.value = String(d.result.error).slice(0, 200)
+          browserFailHint.value = String(d.result.error || '操作未完成，请重试').slice(0, 200)
           browserLoading.value = false
           return false
         }
         browserFailHint.value = ''
+        if (browserStatus.value === '动作失败' || browserStatus.value === '失败' || browserStatus.value === '断开') {
+          browserStatus.value = browserNative.value ? '原生视图 · 人机共用' : '实时'
+        }
         browserLoading.value = false
         return true
       }
       browserStatus.value = '失败'
+      browserFailHint.value = '操作失败（' + r.status + '），请重试'
       browserLoading.value = false
       return false
-    } catch { browserStatus.value = '断开'; browserLoading.value = false; return false }
+    } catch { if (generation !== sessionGeneration) return false; browserStatus.value = '断开'; browserFailHint.value = '无法连接浏览器服务，请重试'; browserLoading.value = false; return false }
   }
 
   // AI 浏览器 L2：点画面 = 替 AI 浏览器点击（真网页化后同一个人机操作面）
@@ -331,10 +356,15 @@ export function useAiBrowser(opts: AiBrowserOptions) {
     const vp = browserViewport.value
     const x = Math.round(((e.clientX - r.left) / r.width) * vp.width)
     const y = Math.round(((e.clientY - r.top) / r.height) * vp.height)
-    await doAct({ action: 'click_at', x, y })
-    browserLog.value.push(`点击 ${x},${y}`)
+    const generation = sessionGeneration
+    const ok = await doAct({ action: 'click_at', x, y })
+    if (generation === sessionGeneration) browserLog.value.push(ok ? `点击 ${x},${y}` : `点击 ${x},${y} 失败`)
   }
-  async function browserGoBack() { await doAct({ action: 'back' }); browserLog.value.push('后退') }
+  async function browserGoBack() {
+    const generation = sessionGeneration
+    const ok = await doAct({ action: 'back' })
+    if (generation === sessionGeneration) browserLog.value.push(ok ? '后退' : '后退失败')
+  }
 
   // ---- 人工操作：打字 / 按键 / 滚动 / 按文字点击（2026-09-23 补齐）----
   // 后端这 4 个动作早就实现了（routes/collab.ts 的 /browser/act），前端一直没接 →
@@ -342,26 +372,30 @@ export function useAiBrowser(opts: AiBrowserOptions) {
   async function doType(withEnter: boolean) {
     const text = browserTypeText.value
     if (!text) return
-    const label = text.length > 18 ? text.slice(0, 18) + '…' : text
+    const generation = sessionGeneration
     // DOM 模式：没有焦点概念可依赖，目标就是"上一次点中的那个元素"。
     // 顺序也正好是人的自然顺序 —— 先点输入框，再打字。
     if (browserDomMode.value) {
       const idx = domFocusIndex.value
       if (idx < 0) { browserFailHint.value = '先在下面的元素里点一下要填入的那一栏'; return }
       const ok = await doAct({ action: 'type', text, index: idx })
-      browserLog.value.push(ok ? `填入「${label}」` : `填入「${label}」失败`)
-      if (ok) { browserTypeText.value = ''; browserFailHint.value = '' }
+      if (generation !== sessionGeneration) return
+      browserLog.value.push(ok ? '已填入文字' : '填入文字失败')
+      if (ok && browserTypeText.value === text) browserTypeText.value = ''
       return
     }
     const ok = await doAct({ action: 'type', text })
-    const ok2 = withEnter ? await doAct({ action: 'key', key: 'Enter' }) : true
-    browserLog.value.push(ok && ok2 ? `输入「${label}」${withEnter ? ' + 回车' : ''}` : `输入「${label}」失败`)
-    // 只在成功时清空：失败时保留内容，让人能直接重试（清除等于让人重打一遍）
-    if (ok && ok2) browserTypeText.value = ''
+    if (generation !== sessionGeneration) return
+    const ok2 = ok && withEnter ? await doAct({ action: 'key', key: 'Enter' }) : ok
+    if (generation !== sessionGeneration) return
+    browserLog.value.push(ok && ok2 ? (withEnter ? '已输入文字并回车' : '已输入文字') : '输入或回车失败')
+    // Clear once typing succeeds, even if Enter fails: retrying the text would duplicate it.
+    if (ok && browserTypeText.value === text) browserTypeText.value = ''
   }
   async function doKey(key: string) {
-    await doAct({ action: 'key', key })
-    browserLog.value.push(`按键 ${key}`)
+    const generation = sessionGeneration
+    const ok = await doAct({ action: 'key', key })
+    if (generation === sessionGeneration) browserLog.value.push(ok ? `按键 ${key}` : `按键 ${key} 失败`)
   }
   // ---- DOM 模式（手机）：点一个元素 / 选中一个输入框 ----
   /**
@@ -371,9 +405,11 @@ export function useAiBrowser(opts: AiBrowserOptions) {
    * 点完顺手刷新一帧：点了链接页面就换了，不刷会把旧页面的元素继续挂在侧栏上。
    */
   async function clickElem(i: number) {
+    const generation = sessionGeneration
     domFocusIndex.value = i
     const el = browserDom.value?.elements.find((e) => e.i === i)
     const ok = await doAct({ action: 'click_idx', index: i })
+    if (generation !== sessionGeneration) return
     browserLog.value.push(ok ? `点击「${el?.text || '#' + i}」` : `点击「${el?.text || '#' + i}」失败`)
   }
 
@@ -406,9 +442,12 @@ export function useAiBrowser(opts: AiBrowserOptions) {
   async function doClickText() {
     const text = browserClickText.value.trim()
     if (!text) return
-    await doAct({ action: 'click_text', text })
-    browserLog.value.push(`按文字点击「${text}」`)
-    browserClickText.value = ''
+    const original = browserClickText.value
+    const generation = sessionGeneration
+    const ok = await doAct({ action: 'click_text', text })
+    if (generation !== sessionGeneration) return
+    browserLog.value.push(ok ? `按文字点击「${text}」` : `按文字点击「${text}」失败`)
+    if (ok && browserClickText.value === original) browserClickText.value = ''
   }
 
   // 画面上滚轮 → 页面滚动。节流 220ms：滚一下会连发几十个 wheel 事件，
@@ -438,6 +477,9 @@ export function useAiBrowser(opts: AiBrowserOptions) {
   let lastFrameTs = 0
   let liveStop = false
   let livePolling = false
+  let pollController: AbortController | null = null
+  let retryTimer: ReturnType<typeof setTimeout> | null = null
+  let retryDelay = 1000
   // 画面实时(2026-09-04 长轮询): 服务端在 /browser/latest?after= 上较帧缓存至有新帧或~12s，
   // 前端只在 AI/人手动作产生新帧时收到 → 立即同步贴画面；无变化不空转(无周期轮询)
   async function pollLiveFrame() {
@@ -447,10 +489,17 @@ export function useAiBrowser(opts: AiBrowserOptions) {
     // （这个 return 在 try 之外，所以不会经 finally 再点火 → 不会变成空转自旋）
     if (browserNative.value) return
     livePolling = true
+    const sid = opts.sessionId()
+    const controller = new AbortController()
+    pollController = controller
+    let failed = false
+    const startedAt = Date.now()
     try {
-      const r = await fetch(`/api/collab/browser/latest?after=${lastFrameTs}`, { headers: bkHdr() })
-      if (!r.ok) return
+      const r = await fetch(`/api/collab/browser/latest?after=${lastFrameTs}`, { headers: bkHdr(), signal: controller.signal })
+      if (!r.ok) { failed = true; return }
       const f = await r.json()
+      if (controller.signal.aborted || sid !== opts.sessionId() || !opts.active()) return
+      retryDelay = 1000
       if (f?.ts) {
         const changed = f.ts !== lastFrameTs
         lastFrameTs = f.ts
@@ -466,10 +515,23 @@ export function useAiBrowser(opts: AiBrowserOptions) {
         browserUrl.value = ''
         browserStatus.value = '已释放'
       }
-    } catch { /* 静默 */ }
+    } catch { failed = !controller.signal.aborted }
     finally {
+      if (pollController === controller) pollController = null
       livePolling = false
-      if (opts.active() && !liveStop) pollLiveFrame()
+      if (opts.active() && !liveStop) {
+        if (failed) {
+          const delay = retryDelay
+          retryDelay = Math.min(retryDelay * 2, 15_000)
+          retryTimer = setTimeout(() => { retryTimer = null; void pollLiveFrame() }, delay)
+        } else {
+          // A misconfigured proxy or immediate empty response must not turn a
+          // long poll into an unbounded request loop.
+          const delay = Math.max(0, 250 - (Date.now() - startedAt))
+          if (delay) retryTimer = setTimeout(() => { retryTimer = null; void pollLiveFrame() }, delay)
+          else void pollLiveFrame()
+        }
+      }
     }
   }
 
@@ -486,6 +548,9 @@ export function useAiBrowser(opts: AiBrowserOptions) {
         liveStop = false; lastFrameTs = 0; void pollLiveFrame()
       } else {
         liveStop = true
+        pollController?.abort()
+        if (retryTimer) clearTimeout(retryTimer)
+        retryTimer = null
         // 原生视图是**盖在 App 界面之上**的一层，离开浏览器 tab 必须收起，
         // 否则它会一直挡住下面的界面（而且挡的还是别人 tab 的位置）。
         stopNativeSync()
@@ -493,24 +558,23 @@ export function useAiBrowser(opts: AiBrowserOptions) {
     },
   )
 
-  // 切走会话时释放上一个会话的浏览器实例（服务端任务结束时也会清；这里兜住"任务早已结束但用户还停在浏览器 tab"）
+  // Switching views must not close a browser still used by the previous task.
+  // The server cleans it up when that task ends or its idle timeout expires.
   watch(
     () => { try { return opts.sessionId() } catch { return '' } },
-    async (sid, prev) => {
-      if (!prev || prev === sid) return
-      try {
-        await fetch('/api/collab/browser/close', {
-          method: 'POST',
-          headers: Object.assign({ 'Content-Type': 'application/json' }, { 'X-Browser-Key': String(prev) }),
-          body: '{}',
-        })
-      } catch { /* 静默：清理失败不影响使用 */ }
-      lastFrameTs = 0; browserScreenshotBase64.value = ''; browserUrl.value = ''; browserStatus.value = '待机'
-    },
+    (sid, prev) => {
+      if (prev === sid) return
+      sessionGeneration++
+      pollController?.abort()
+      if (retryTimer) clearTimeout(retryTimer)
+      retryTimer = null
+      lastFrameTs = 0; browserScreenshotBase64.value = ''; browserDom.value = null; domFocusIndex.value = -1; browserUrl.value = ''; browserUrlInput.value = ''; browserFailHint.value = ''; browserStatus.value = '待机'; browserLoading.value = false; browserLog.value = []
+      if (opts.active() && !livePolling) void pollLiveFrame()
+    }, { flush: 'sync' },
   )
 
   onMounted(() => { lastFrameTs = 0; liveStop = false; void detectBrowserMode(); void pollLiveFrame() })
-  onUnmounted(() => { liveStop = true; stopNativeSync() })
+  onUnmounted(() => { liveStop = true; pollController?.abort(); if (retryTimer) clearTimeout(retryTimer); stopNativeSync() })
 
   return {
     // 状态
