@@ -83,6 +83,7 @@ export function initDatabase() {
       goal_id TEXT NOT NULL REFERENCES persistent_goals(id) ON DELETE CASCADE,
       status TEXT NOT NULL CHECK(status IN ('running', 'finished', 'interrupted')),
       started_at INTEGER NOT NULL,
+      owner_pid INTEGER,
       ended_at INTEGER,
       result TEXT NOT NULL DEFAULT ''
     );
@@ -348,6 +349,12 @@ export function initDatabase() {
       ('preset-kimi', 'Kimi / Moonshot', 'kimi', 'https://api.moonshot.cn/v1', '', '[]', '["chat","tool-calling"]', 1, 11),
       ('preset-mimo', '小米 MiMo', 'mimo', 'https://api.xiaomimimo.com/v1', '', '[]', '["chat","reasoning","tool-calling"]', 1, 12);
   `)
+
+  // Add ownership to pre-existing goal runs; unknown owners are left untouched.
+  db.transaction(() => {
+    const goalRunColumns = db.pragma('table_info(persistent_goal_runs)') as Array<{ name: string }>
+    if (!goalRunColumns.some(column => column.name === 'owner_pid')) db.exec('ALTER TABLE persistent_goal_runs ADD COLUMN owner_pid INTEGER')
+  }).immediate()
 
   // Migration: add attachments column to messages
   try {

@@ -52,9 +52,30 @@ export function claimGoalRun(db: Database.Database, sessionId: string, goalId: s
       WHERE id = ? AND session_id = ? AND version = ? AND status IN ('paused', 'interrupted') AND current_run_id IS NULL`)
       .run(runId, now, goalId, sessionId, version)
     if (claim.changes !== 1) return undefined
-    db.prepare("INSERT INTO persistent_goal_runs (id, goal_id, status, started_at) VALUES (?, ?, 'running', ?)").run(runId, goalId, now)
+    db.prepare("INSERT INTO persistent_goal_runs (id, goal_id, status, started_at, owner_pid) VALUES (?, ?, 'running', ?, ?)").run(runId, goalId, now, process.pid)
     return runId
   })()
+}
+
+/** Reconcile only runs whose owning local process is definitely gone. */
+export function reconcileDeadGoalRuns(db: Database.Database, ownerIsAlive: (pid: number) => boolean, now = Date.now()): number {
+  const runs = db.prepare("SELECT id, goal_id, owner_pid FROM persistent_goal_runs WHERE status = 'running' AND owner_pid IS NOT NULL").all() as Array<{ id: string; goal_id: string; owner_pid: number }>
+  let count = 0
+  for (const run of runs) {
+    if (!Number.isSafeInteger(run.owner_pid) || run.owner_pid <= 0) continue
+    let alive = true
+    try { alive = ownerIsAlive(run.owner_pid) } catch { /* unknown is not proof of death */ }
+    if (alive) continue
+    db.transaction(() => {
+      const updated = db.prepare(`UPDATE persistent_goals SET status = 'interrupted', current_run_id = NULL,
+        last_result = '执行进程已结束，请检查进度后再恢复。', version = version + 1, updated_at = ?
+        WHERE id = ? AND current_run_id = ? AND status IN ('active', 'pausing')`).run(now, run.goal_id, run.id)
+      if (updated.changes !== 1) return
+      db.prepare("UPDATE persistent_goal_runs SET status = 'interrupted', ended_at = ? WHERE id = ? AND status = 'running'").run(now, run.id)
+      count++
+    })()
+  }
+  return count
 }
 
 /** Mark a running goal as pausing; the caller must also signal its executor. */

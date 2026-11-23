@@ -83,6 +83,7 @@ import { personalityRouter } from './routes/personality'
 import { diagnoseRouter } from './routes/diagnose'
 import { taskStateRouter } from './routes/task-state'
 import { persistentGoalsRouter } from './routes/persistent-goals'
+import { reconcileDeadGoalRuns } from './services/persistent-goals'
 import capabilitiesRouter from './routes/capabilities'
 import { restoreFromDB } from './services/task-state'
 import { stopAllMcp } from './services/mcp-manager'
@@ -107,6 +108,10 @@ function getLocalIP(): string {
 
 async function bootstrap() {
   initDatabase()
+  reconcileDeadGoalRuns(getDB(), (pid) => {
+    try { process.kill(pid, 0); return true }
+    catch (error) { return (error as NodeJS.ErrnoException).code !== 'ESRCH' }
+  })
   // Create starter personality files on first boot. Never overwrites: the user may
   // have edited them, and a boot-time rewrite would discard their changes silently.
   try { seedPersonalityIfMissing() } catch (e: any) { console.warn('[personality] seed skipped:', e?.message || e) }

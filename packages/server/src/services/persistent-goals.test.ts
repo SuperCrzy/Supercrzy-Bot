@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('../config', () => ({ config: { db: { path: ':memory:' } } }))
 import { getDB, initDatabase } from './database'
-import { claimGoalRun, createPersistentGoal, getOpenPersistentGoal, settleGoalRun } from './persistent-goals'
+import { claimGoalRun, createPersistentGoal, getOpenPersistentGoal, reconcileDeadGoalRuns, requestGoalPause, settleGoalRun } from './persistent-goals'
 import { persistentGoalsRouter } from '../routes/persistent-goals'
 import Koa from 'koa'
 import bodyParser from 'koa-bodyparser'
@@ -66,6 +66,31 @@ describe('persistent goals storage', () => {
     expect(settleGoalRun(db, goal.id, run, 'waiting_user', 'need input', 4000)).toBe(true)
     expect(settleGoalRun(db, goal.id, run, 'paused', 'duplicate', 5000)).toBe(false)
     expect(getOpenPersistentGoal(db, 'a')).toMatchObject({ status: 'waiting_user', elapsed_ms: 3000, last_result: 'need input', current_run_id: null })
+  })
+
+  it('keeps a pause request pending until the owner run settles', () => {
+    const db = getDB(), goal = createPersistentGoal(db, 'a', 'goal')
+    const run = claimGoalRun(db, 'a', goal.id, goal.version, 1000)!
+    const active = getOpenPersistentGoal(db, 'a')!
+    expect(requestGoalPause(db, 'b', goal.id, active.version)).toBeUndefined()
+    expect(requestGoalPause(db, 'a', goal.id, active.version)).toBe(run)
+    const pausing = getOpenPersistentGoal(db, 'a')!
+    expect(pausing).toMatchObject({ status: 'pausing', current_run_id: run })
+    expect(claimGoalRun(db, 'a', goal.id, pausing.version)).toBeUndefined()
+    expect(settleGoalRun(db, goal.id, run, 'waiting_user', 'stopped', 2000)).toBe(true)
+    expect(getOpenPersistentGoal(db, 'a')).toMatchObject({ status: 'paused', current_run_id: null, elapsed_ms: 1000 })
+  })
+
+  it('marks only definitely dead owners interrupted, without guessing elapsed time', () => {
+    const db = getDB(), a = createPersistentGoal(db, 'a', 'one'), b = createPersistentGoal(db, 'b', 'two')
+    const deadRun = claimGoalRun(db, 'a', a.id, a.version, 1000)!
+    const liveRun = claimGoalRun(db, 'b', b.id, b.version, 1000)!
+    db.prepare('UPDATE persistent_goal_runs SET owner_pid = ? WHERE id = ?').run(12345, deadRun)
+    db.prepare('UPDATE persistent_goal_runs SET owner_pid = ? WHERE id = ?').run(23456, liveRun)
+    expect(reconcileDeadGoalRuns(db, pid => pid === 23456, 5000)).toBe(1)
+    expect(getOpenPersistentGoal(db, 'a')).toMatchObject({ status: 'interrupted', elapsed_ms: 0, current_run_id: null })
+    expect(getOpenPersistentGoal(db, 'b')).toMatchObject({ status: 'active', current_run_id: liveRun })
+    expect(settleGoalRun(db, a.id, deadRun, 'paused', 'late', 6000)).toBe(false)
   })
 
   it('rolls back a claim if the run record cannot be inserted', () => {
