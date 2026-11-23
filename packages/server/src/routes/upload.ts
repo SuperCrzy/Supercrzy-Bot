@@ -43,7 +43,18 @@ const upload = multer({
 })
 
 // Upload endpoint
-uploadRouter.post('/', upload.array('files', 5), async (ctx: Context) => {
+uploadRouter.post('/', async (ctx, next) => {
+  try { await next() } catch (error) {
+    const code = (error as { code?: string })?.code
+    if (code === 'LIMIT_FILE_SIZE') {
+      ctx.status = 413
+      ctx.body = { code, error: '单个文件不能超过 20 MB' }
+    } else if (code === 'LIMIT_FILE_COUNT' || code === 'LIMIT_UNEXPECTED_FILE') {
+      ctx.status = 400
+      ctx.body = { code: 'LIMIT_FILE_COUNT', error: '每次最多上传 5 个文件' }
+    } else throw error
+  }
+}, upload.array('files', 5), async (ctx: Context) => {
   const files = ctx.files as Express.Multer.File[] | undefined
 
   if (!files || files.length === 0) {

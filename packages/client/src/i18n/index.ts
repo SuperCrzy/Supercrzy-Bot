@@ -143,6 +143,8 @@ export const messages = {
       iosDesc: '点 Safari 分享按钮 → 添加到主屏幕',
     },
     errors: {
+      LIMIT_FILE_SIZE: '单个文件不能超过 20 MB',
+      LIMIT_FILE_COUNT: '每次最多上传 5 个文件',
       NO_FILE: '没有文件上传',
       FILE_NOT_FOUND: '文件不存在',
       NEED_CREDENTIALS: '请填写 App ID 和 App Secret',
@@ -1903,6 +1905,8 @@ export const messages = {
       iosDesc: 'Tap Safari share → Add to Home Screen',
     },
     errors: {
+      LIMIT_FILE_SIZE: 'Each file must be no larger than 20 MB',
+      LIMIT_FILE_COUNT: 'Upload no more than 5 files at a time',
       NO_FILE: 'No file uploaded',
       FILE_NOT_FOUND: 'File not found',
       NEED_CREDENTIALS: 'Please fill in App ID and App Secret',

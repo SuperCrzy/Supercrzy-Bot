@@ -1223,7 +1223,7 @@ function confirmCompare() {
   comparePickerOpen.value = false
 }
 const uploadedFiles = ref<Attachment[]>([])
-useSessionDrafts(() => chatStore.currentSessionId, inputText, uploadedFiles)
+const { addAttachments: addDraftAttachments } = useSessionDrafts(() => chatStore.currentSessionId, inputText, uploadedFiles)
 /** 当前会话已绑定的工作目录（欢迎页"工作文件夹"显示与弹窗初始定位用） */
 const currentWorkspaceDir = computed(() => chatStore.currentSession?.workspaceDir || wsCurrent.value)
 
@@ -1597,6 +1597,7 @@ const showNoKeyBanner = computed(() => !appStore.hasApiKey && !noKeyBannerDismis
 // ---- 文件上传处理（抽到 composables/useAttachments；uploadedFiles 本体仍留组件内，发送管线要读它）----
 const { handleFileSelect, removeFile, openAttachment } = useAttachments({
   uploadedFiles,
+  addAttachments: addDraftAttachments,
   sessionId: () => chatStore.currentSession?.id,
   fileInputRef,
   t: (k: string, params?: Record<string, unknown>) => (params ? t(k, params) : t(k)),

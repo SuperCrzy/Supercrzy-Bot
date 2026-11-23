@@ -18,6 +18,7 @@ export interface UseAttachmentsOptions {
   uploadedFiles: Ref<Attachment[]>
   /** 当前会话 id（作为上传归属，后端按会话关联文件） */
   sessionId: () => string | undefined
+  addAttachments: (sessionId: string | null, files: Attachment[]) => void
   /** 隐藏的 file input（用于上传结束后重置 value） */
   fileInputRef: Ref<HTMLInputElement | undefined | null>
   t: (key: string, params?: Record<string, unknown>) => string
@@ -31,6 +32,7 @@ export interface UseAttachmentsOptions {
 
 export function useAttachments(opts: UseAttachmentsOptions) {
   const uploading = ref(false)
+  let pendingUploads = 0
   const uploadUrl = opts.uploadUrl ?? '/api/upload'
   const ocrUrl = opts.ocrUrl ?? '/api/ocr'
 
@@ -56,6 +58,7 @@ export function useAttachments(opts: UseAttachmentsOptions) {
     const rawFiles = input.files
     if (!rawFiles || rawFiles.length === 0) return
 
+    pendingUploads++
     uploading.value = true
     const formData = new FormData()
 
@@ -71,12 +74,12 @@ export function useAttachments(opts: UseAttachmentsOptions) {
       const res = await fetch(uploadUrl, { method: 'POST', body: formData })
 
       if (!res.ok) {
-        const err = await res.json()
+        const err = await res.json().catch(() => ({}))
         throw new Error(errMsg(err.code, err.error || opts.t('chat.uploadFailed')))
       }
 
       const data = await res.json()
-      opts.uploadedFiles.value.push(...data.files)
+      opts.addAttachments(sid || null, data.files)
       // 自动 OCR：图片上传后本地识别文字（RapidOCR，免费开源）→ 发消息时注入对话
       for (const f of data.files as Attachment[]) {
         if (f.type?.startsWith('image/') && f.url) runOcr(f)
@@ -84,9 +87,10 @@ export function useAttachments(opts: UseAttachmentsOptions) {
     } catch (err: any) {
       opts.onError(opts.t('chat.uploadFailMsg', { msg: err.message }))
     } finally {
-      uploading.value = false
+      pendingUploads--
+      uploading.value = pendingUploads > 0
       // Reset input so same file can be re-selected
-      if (opts.fileInputRef.value) opts.fileInputRef.value.value = ''
+      input.value = ''
     }
   }
 
