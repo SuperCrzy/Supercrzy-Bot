@@ -20,6 +20,42 @@ export interface SearchResultItem {
   score?: number
 }
 
+/**
+ * Parse a result date, tolerating the formats search engines actually return.
+ *
+ * Date.parse handles RFC 1123 ("Mon, 23 Nov 2026 05:46:00 GMT") but returns NaN for
+ * the localized form Bing emits in a Chinese locale ("周一, 23 11月 2026 05:46:00 GMT").
+ * That NaN made the maxAgeDays filter drop every result, so a timeRange query came
+ * back empty while the same query without one returned five rows. Not an empty date
+ * field — an unparseable one.
+ */
+const CN_MONTHS: Record<string, number> = {
+  '1月': 0, '2月': 1, '3月': 2, '4月': 3, '5月': 4, '6月': 5,
+  '7月': 6, '8月': 7, '9月': 8, '10月': 9, '11月': 10, '12月': 11,
+}
+
+export function parseResultDate(raw: string | undefined): number {
+  if (!raw) return NaN
+  const direct = Date.parse(raw)
+  if (!isNaN(direct)) return direct
+
+  // "周一, 23 11月 2026 05:46:00 GMT" — weekday is irrelevant, month is localized.
+  const m = raw.match(/(\d{1,2})\s*([^\s,]+月)\s*(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/)
+  if (m) {
+    const day = Number(m[1])
+    const month = CN_MONTHS[m[2]]
+    const year = Number(m[3])
+    if (month !== undefined) {
+      const t = Date.UTC(year, month, day, Number(m[4] || 0), Number(m[5] || 0), Number(m[6] || 0))
+      return isNaN(t) ? NaN : t
+    }
+  }
+  // "2026年11月23日" and "2026-11-23" both survive this.
+  const cn = raw.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/)
+  if (cn) return Date.UTC(Number(cn[1]), Number(cn[2]) - 1, Number(cn[3]))
+  return NaN
+}
+
 /** 搜索结果后处理：过滤空条目 + 同域名最多 2 条 + 标题相似去重 + 有日期的排前；maxAgeDays>0 时剔除超期结果 */
 export function postProcessSearchResults<T extends { title: string; url: string; description?: string; date?: string }>(results: T[], limit: number, maxAgeDays = 0): T[] {
   let list = results.filter((r) => r.title && r.url && r.title !== 'Object moved')
@@ -27,7 +63,7 @@ export function postProcessSearchResults<T extends { title: string; url: string;
     const cutoff = Date.now() - maxAgeDays * 86400000
     list = list.filter((r) => {
       if (!r.date) return false
-      const t = Date.parse(r.date)
+      const t = parseResultDate(r.date)
       return !isNaN(t) && t >= cutoff
     })
   }
