@@ -117,7 +117,7 @@ onMounted(load)
 .head-actions { display: flex; align-items: center; gap: 8px; }
 .search { width: 220px; }
 .hint { color: var(--text-tertiary); font-size: 12px; padding: 24px 0; }
-.hint.err { color: var(--danger, #e5484d); }
+.hint.err { color: var(--error); }
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));

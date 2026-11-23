@@ -43,9 +43,17 @@ export const CHANGELOG: ChangelogEntry[] = [
     titleEn: 'More reliable fetching and saving',
     features: [
       '搜索与新闻在受限网络下可用：中继让海外搜索端点从中国大陆连接可达，查询约一秒返回',
+      'AI 改过的文件可以逐文件看 diff，也可以只回滚其中一个',
+      '人格文件（SOUL/USER/IDENTITY）记住你的习惯，不用每次重新交代',
+      '日志页可导出诊断包，报障时直接附上',
+      '制品中心集中查看所有会话里生成过的文件',
     ],
     featuresEn: [
       'Search and news work from a mainland China connection: a relay keeps the overseas endpoint reachable, and queries return in about a second',
+      'See a per-file diff of what the assistant changed, and roll back a single file',
+      'Personality files (SOUL/USER/IDENTITY) remember your conventions across conversations',
+      'Export a diagnostic bundle from the Logs page when reporting a problem',
+      'An artifact centre listing every file the assistant has produced',
     ],
     fixes: [
       '压缩传输的网页正确解码，中文站点不再是乱码',

@@ -157,7 +157,7 @@ watch(() => [props.visible, props.checkpointId], ([v, id]) => {
   color: var(--text-tertiary); font-size: 16px; cursor: pointer; line-height: 1;
 }
 .dp-hint { padding: 16px 12px; color: var(--text-tertiary); font-size: 12px; }
-.dp-hint.err { color: var(--danger, #e5484d); }
+.dp-hint.err { color: var(--error); }
 .dp-list { overflow: auto; flex: 1; }
 .dp-file { border-bottom: 1px solid var(--border-color); }
 .dp-file-head {

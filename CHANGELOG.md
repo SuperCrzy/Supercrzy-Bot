@@ -39,6 +39,14 @@
 - 来源链接不再从流式正文消失；普通 XML 不再被误判为 SVG 图表；代码块与图片内的 URL 不再列为来源；「来源」改名「相关链接」。
 - 多模型对比结果不再重复显示原始 JSON；产物组恢复父组件样式；快速切换会话不再被旧请求覆盖。
 
+### 新功能
+
+- **逐文件 diff + 单文件回滚**：`file_write` 上报改前/改后内容，按检查点存快照；新增 `GET /api/checkpoints/:id/diff` 与 `POST /api/checkpoints/:id/restore`（指定 paths 或 all），按文件返回结果，部分成功也能如实报告。短任务此前只留快照没有检查点可挂，现在收尾时补存。
+- **人格文件层**：`~/.supercrzy/{SOUL,USER,IDENTITY}.md` 注入提示词，首次启动生成模板且永不覆盖用户编辑；每份限 2k 字符，超长从中间裁剪并标注。
+- **诊断包导出**：`GET /api/diagnose/bundle` 返回版本/环境/能力计数/设置快照（密钥仅报有无）/日志尾部，日志页可下载。
+- **制品中心**：`/api/artifacts` 跨会话聚合（带会话标题），新增独立视图。
+- **后台任务接入 L3 沙箱**：此前 `sandboxify` 只包前台执行，同一条命令前台隔离、后台不隔离；现统一，探测不可用时降级而非失败。
+
 ### 工程
 
 - 新增 `check-artifact-reporting` 门禁：碰文件系统的工具必须走统一 writer。
@@ -62,6 +70,14 @@
 - **macOS 构建被华为镜像 429 卡住**：`ELECTRON_MIRROR` 的覆盖逻辑原本只在 `PACK_TARGET` 分支内，CI 走 `pnpm dist` 时被忽略。已提到分支外（a26618f）
 - **发版验证误报 404**：`release-publish.sh` 有 5 处硬编码 `SUPERCRZY BOT-$VER`，但品牌统一后产物叫 `SUPERCRZY-$VER`，真实文件 200 却报失败。改为动态探测 + 从 `latest-mac.yml` 读名（e4ee31a）
 
+### 新功能
+
+- **逐文件 diff + 单文件回滚**：`file_write` 上报改前/改后内容，按检查点存快照；新增 `GET /api/checkpoints/:id/diff` 与 `POST /api/checkpoints/:id/restore`（指定 paths 或 all），按文件返回结果，部分成功也能如实报告。短任务此前只留快照没有检查点可挂，现在收尾时补存。
+- **人格文件层**：`~/.supercrzy/{SOUL,USER,IDENTITY}.md` 注入提示词，首次启动生成模板且永不覆盖用户编辑；每份限 2k 字符，超长从中间裁剪并标注。
+- **诊断包导出**：`GET /api/diagnose/bundle` 返回版本/环境/能力计数/设置快照（密钥仅报有无）/日志尾部，日志页可下载。
+- **制品中心**：`/api/artifacts` 跨会话聚合（带会话标题），新增独立视图。
+- **后台任务接入 L3 沙箱**：此前 `sandboxify` 只包前台执行，同一条命令前台隔离、后台不隔离；现统一，探测不可用时降级而非失败。
+
 ### 工程
 
 - 本轮新增注释统一英文（95083cb）
@@ -83,6 +99,14 @@
 - **上下文用量弹窗被裁掉**：`.traffic-spacer` 的 `overflow:hidden` 裁掉了 absolute 弹层，改为 `position:fixed` + 按圆环坐标定位（bade658）
 - **Windows 顶部横栏布局**：标题压在侧边栏上、LOGO 上方留空。Windows 现将 LOGO 移入该栏（macOS 不动），侧边栏顶部 LOGO 在 Windows 隐藏（938d4c4、6ba19ae、c13a2aa、92d1014）
 - **产品名统一为 SUPERCRZY**：此前在「Super Crazy」「SUPERCRZY BOT」之间漂移（337c5d3）
+
+### 新功能
+
+- **逐文件 diff + 单文件回滚**：`file_write` 上报改前/改后内容，按检查点存快照；新增 `GET /api/checkpoints/:id/diff` 与 `POST /api/checkpoints/:id/restore`（指定 paths 或 all），按文件返回结果，部分成功也能如实报告。短任务此前只留快照没有检查点可挂，现在收尾时补存。
+- **人格文件层**：`~/.supercrzy/{SOUL,USER,IDENTITY}.md` 注入提示词，首次启动生成模板且永不覆盖用户编辑；每份限 2k 字符，超长从中间裁剪并标注。
+- **诊断包导出**：`GET /api/diagnose/bundle` 返回版本/环境/能力计数/设置快照（密钥仅报有无）/日志尾部，日志页可下载。
+- **制品中心**：`/api/artifacts` 跨会话聚合（带会话标题），新增独立视图。
+- **后台任务接入 L3 沙箱**：此前 `sandboxify` 只包前台执行，同一条命令前台隔离、后台不隔离；现统一，探测不可用时降级而非失败。
 
 ### 工程
 
@@ -125,6 +149,14 @@
 - **Android 稳定性（3da6a6e、e23abdf、f744c38、f4f9654）**：端上崩溃记录、设备桥与 tar 读取的 Kotlin 修复。
 - **CI 修复（b2aab51、f77a5bb、f2e2169、c4184f1）**：单测门禁恢复绿灯（慢 runner 的超时与时序假设）、Android 工作流锁定 JDK 17。
 
+### 新功能
+
+- **逐文件 diff + 单文件回滚**：`file_write` 上报改前/改后内容，按检查点存快照；新增 `GET /api/checkpoints/:id/diff` 与 `POST /api/checkpoints/:id/restore`（指定 paths 或 all），按文件返回结果，部分成功也能如实报告。短任务此前只留快照没有检查点可挂，现在收尾时补存。
+- **人格文件层**：`~/.supercrzy/{SOUL,USER,IDENTITY}.md` 注入提示词，首次启动生成模板且永不覆盖用户编辑；每份限 2k 字符，超长从中间裁剪并标注。
+- **诊断包导出**：`GET /api/diagnose/bundle` 返回版本/环境/能力计数/设置快照（密钥仅报有无）/日志尾部，日志页可下载。
+- **制品中心**：`/api/artifacts` 跨会话聚合（带会话标题），新增独立视图。
+- **后台任务接入 L3 沙箱**：此前 `sandboxify` 只包前台执行，同一条命令前台隔离、后台不隔离；现统一，探测不可用时降级而非失败。
+
 ### 工程
 
 - 测试 1826 项（client 655 / server 1064 / auth 102 / relay 5）。
@@ -160,6 +192,14 @@ _本次无新功能。_
   - `.app-body` 补定位基准；`min-width` 夹进容器宽；退出路径 ×4：tab 行还原按钮 / Esc / 切 tab / 关面板。
 - **Windows 登录页中文/English 切换让开系统按钮区（3fd6636）**：win 右缘让位 160px，mac 维持 22px 原样。
 - **更新源发布改用固定路径（1685097）**：发版脚本不再把含换行的路径写进更新源，应用内检查更新解析更稳。
+
+### 新功能
+
+- **逐文件 diff + 单文件回滚**：`file_write` 上报改前/改后内容，按检查点存快照；新增 `GET /api/checkpoints/:id/diff` 与 `POST /api/checkpoints/:id/restore`（指定 paths 或 all），按文件返回结果，部分成功也能如实报告。短任务此前只留快照没有检查点可挂，现在收尾时补存。
+- **人格文件层**：`~/.supercrzy/{SOUL,USER,IDENTITY}.md` 注入提示词，首次启动生成模板且永不覆盖用户编辑；每份限 2k 字符，超长从中间裁剪并标注。
+- **诊断包导出**：`GET /api/diagnose/bundle` 返回版本/环境/能力计数/设置快照（密钥仅报有无）/日志尾部，日志页可下载。
+- **制品中心**：`/api/artifacts` 跨会话聚合（带会话标题），新增独立视图。
+- **后台任务接入 L3 沙箱**：此前 `sandboxify` 只包前台执行，同一条命令前台隔离、后台不隔离；现统一，探测不可用时降级而非失败。
 
 ### 工程
 
@@ -205,6 +245,14 @@ _本次无新功能。_
 ### 修复
 
 _本次无修复。_
+
+### 新功能
+
+- **逐文件 diff + 单文件回滚**：`file_write` 上报改前/改后内容，按检查点存快照；新增 `GET /api/checkpoints/:id/diff` 与 `POST /api/checkpoints/:id/restore`（指定 paths 或 all），按文件返回结果，部分成功也能如实报告。短任务此前只留快照没有检查点可挂，现在收尾时补存。
+- **人格文件层**：`~/.supercrzy/{SOUL,USER,IDENTITY}.md` 注入提示词，首次启动生成模板且永不覆盖用户编辑；每份限 2k 字符，超长从中间裁剪并标注。
+- **诊断包导出**：`GET /api/diagnose/bundle` 返回版本/环境/能力计数/设置快照（密钥仅报有无）/日志尾部，日志页可下载。
+- **制品中心**：`/api/artifacts` 跨会话聚合（带会话标题），新增独立视图。
+- **后台任务接入 L3 沙箱**：此前 `sandboxify` 只包前台执行，同一条命令前台隔离、后台不隔离；现统一，探测不可用时降级而非失败。
 
 ### 工程
 
@@ -412,6 +460,14 @@ _本次无修复。_
 - `tool_search`：搜索词 + 激活名单（一眼看出搜了什么、真激活了哪几个）。
 - `browser` / `computer_use`：动作徽标 + 目标 + 结论三层，取代把参数 JSON 整坨贴出来的通用卡。
 - 至此 top10 调用里已无工具落在兜底渲染。
+
+### 新功能
+
+- **逐文件 diff + 单文件回滚**：`file_write` 上报改前/改后内容，按检查点存快照；新增 `GET /api/checkpoints/:id/diff` 与 `POST /api/checkpoints/:id/restore`（指定 paths 或 all），按文件返回结果，部分成功也能如实报告。短任务此前只留快照没有检查点可挂，现在收尾时补存。
+- **人格文件层**：`~/.supercrzy/{SOUL,USER,IDENTITY}.md` 注入提示词，首次启动生成模板且永不覆盖用户编辑；每份限 2k 字符，超长从中间裁剪并标注。
+- **诊断包导出**：`GET /api/diagnose/bundle` 返回版本/环境/能力计数/设置快照（密钥仅报有无）/日志尾部，日志页可下载。
+- **制品中心**：`/api/artifacts` 跨会话聚合（带会话标题），新增独立视图。
+- **后台任务接入 L3 沙箱**：此前 `sandboxify` 只包前台执行，同一条命令前台隔离、后台不隔离；现统一，探测不可用时降级而非失败。
 
 ### 工程
 
