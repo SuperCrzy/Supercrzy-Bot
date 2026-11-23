@@ -1,6 +1,6 @@
 import Router from 'koa-router'
 import { getDB } from '../services/database'
-import { cancelStoppedGoal, createPersistentGoal, getOpenPersistentGoal } from '../services/persistent-goals'
+import { cancelStoppedGoal, createPersistentGoal, getOpenPersistentGoal, listGoalEvents } from '../services/persistent-goals'
 
 export const persistentGoalsRouter = new Router({ prefix: '/api/sessions/:sessionId/goal' })
 
@@ -38,4 +38,12 @@ persistentGoalsRouter.post('/:goalId/cancel', ctx => {
   const ok = cancelStoppedGoal(getDB(), ctx.params.sessionId, ctx.params.goalId, body.version)
   if (!ok) { ctx.status = 409; ctx.body = { error: 'goal_changed_or_running' }; return }
   ctx.body = { ok: true }
+})
+
+persistentGoalsRouter.get('/:goalId/events', ctx => {
+  const raw = String(ctx.query.after ?? '0')
+  if (!/^\d{1,15}$/.test(raw) || !Number.isSafeInteger(Number(raw))) {
+    ctx.status = 400; ctx.body = { error: 'invalid_cursor' }; return
+  }
+  ctx.body = { events: listGoalEvents(getDB(), ctx.params.sessionId, ctx.params.goalId, Number(raw)) }
 })

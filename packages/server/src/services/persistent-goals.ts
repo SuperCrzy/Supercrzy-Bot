@@ -34,6 +34,25 @@ export function getOpenPersistentGoal(db: Database.Database, sessionId: string):
   return db.prepare("SELECT * FROM persistent_goals WHERE session_id = ? AND status NOT IN ('completed', 'cancelled')").get(sessionId) as PersistentGoal | undefined
 }
 
+/** Reject stale emitters and oversized events rather than silently losing approvals. */
+export function appendGoalEvent(db: Database.Database, goalId: string, runId: string, event: string, payload: unknown): boolean {
+  if (!/^[a-z][a-z0-9_]{0,63}$/.test(event)) throw new Error('invalid_event')
+  const json = JSON.stringify(payload)
+  if (typeof json !== 'string' || Buffer.byteLength(json, 'utf8') > 128 * 1024) throw new Error('invalid_event_payload')
+  const result = db.prepare(`INSERT INTO persistent_goal_events (goal_id, run_id, event, payload, created_at)
+    SELECT id, ?, ?, ?, ? FROM persistent_goals WHERE id = ? AND current_run_id = ? AND status IN ('active', 'pausing')`)
+    .run(runId, event, json, Date.now(), goalId, runId)
+  return result.changes === 1
+}
+
+export function listGoalEvents(db: Database.Database, sessionId: string, goalId: string, after: number) {
+  if (!Number.isSafeInteger(after) || after < 0) throw new Error('invalid_cursor')
+  const rows = db.prepare(`SELECT e.sequence, e.run_id, e.event, e.payload, e.created_at FROM persistent_goal_events e
+    JOIN persistent_goals g ON g.id = e.goal_id WHERE g.session_id = ? AND g.id = ? AND e.sequence > ? ORDER BY e.sequence LIMIT 100`)
+    .all(sessionId, goalId, after) as Array<{ sequence: number; run_id: string; event: string; payload: string; created_at: number }>
+  return rows.map(row => ({ ...row, payload: JSON.parse(row.payload) }))
+}
+
 /** Only a stopped goal may be cancelled here; running goals need the coordinator. */
 export function cancelStoppedGoal(db: Database.Database, sessionId: string, id: string, version: number): boolean {
   if (!Number.isSafeInteger(version) || version < 1) throw new Error('invalid_version')
@@ -79,12 +98,12 @@ export function reconcileDeadGoalRuns(db: Database.Database, ownerIsAlive: (pid:
 }
 
 /** Mark a running goal as pausing; the caller must also signal its executor. */
-export function requestGoalPause(db: Database.Database, sessionId: string, goalId: string, version: number, now = Date.now()): string | undefined {
+export function requestGoalPause(db: Database.Database, sessionId: string, goalId: string, version: number, now = Date.now(), expectedRunId?: string): string | undefined {
   if (!Number.isSafeInteger(version) || version < 1) throw new Error('invalid_version')
   return db.transaction(() => {
     const goal = db.prepare("SELECT current_run_id FROM persistent_goals WHERE id = ? AND session_id = ? AND version = ? AND status = 'active'")
       .get(goalId, sessionId, version) as { current_run_id: string | null } | undefined
-    if (!goal?.current_run_id) return undefined
+    if (!goal?.current_run_id || (expectedRunId && goal.current_run_id !== expectedRunId)) return undefined
     const changed = db.prepare("UPDATE persistent_goals SET status = 'pausing', version = version + 1, updated_at = ? WHERE id = ? AND version = ? AND status = 'active'")
       .run(now, goalId, version)
     return changed.changes === 1 ? goal.current_run_id : undefined

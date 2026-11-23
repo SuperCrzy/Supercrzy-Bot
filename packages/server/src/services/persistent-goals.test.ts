@@ -3,6 +3,7 @@ vi.mock('../config', () => ({ config: { db: { path: ':memory:' } } }))
 import { getDB, initDatabase } from './database'
 import { claimGoalRun, createPersistentGoal, getOpenPersistentGoal, reconcileDeadGoalRuns, requestGoalPause, settleGoalRun } from './persistent-goals'
 import { persistentGoalsRouter } from '../routes/persistent-goals'
+import { GoalCoordinator, type GoalRunResult } from './goal-coordinator'
 import Koa from 'koa'
 import bodyParser from 'koa-bodyparser'
 import request from 'supertest'
@@ -17,6 +18,45 @@ beforeEach(() => {
 afterEach(() => { getDB().close(); delete process.env.DB_PATH })
 
 describe('persistent goals storage', () => {
+  it('signals a pause without claiming that the runner has stopped', async () => {
+    const db = getDB(), goal = createPersistentGoal(db, 'a', 'goal')
+    let finish!: (result: GoalRunResult) => void
+    let signal: AbortSignal | undefined
+    const coordinator = new GoalCoordinator(db, async input => { signal = input.signal; return new Promise(resolve => { finish = resolve }) })
+    const run = coordinator.start('a', goal.id, goal.version)!
+    await Promise.resolve()
+    const active = getOpenPersistentGoal(db, 'a')!
+    expect(coordinator.pause('a', goal.id, active.version)).toBe(true)
+    expect(signal?.aborted).toBe(true)
+    expect(getOpenPersistentGoal(db, 'a')?.status).toBe('pausing')
+    finish({ outcome: 'paused', summary: 'saved' })
+    await run.completion
+    expect(getOpenPersistentGoal(db, 'a')).toMatchObject({ status: 'paused', last_result: 'saved' })
+  })
+
+  it('marks a runner failure interrupted, never completed', async () => {
+    const db = getDB(), goal = createPersistentGoal(db, 'a', 'goal')
+    const coordinator = new GoalCoordinator(db, async () => { throw new Error('connection lost') })
+    await coordinator.start('a', goal.id, goal.version)!.completion
+    expect(getOpenPersistentGoal(db, 'a')).toMatchObject({ status: 'interrupted', last_result: 'connection lost' })
+  })
+
+  it('persists runner events for reconnect without exposing them to another session', async () => {
+    const db = getDB(), goal = createPersistentGoal(db, 'a', 'goal')
+    const coordinator = new GoalCoordinator(db, async ({ emit }) => {
+      emit('question', { id: 'q1', question: '请选择' })
+      emit('tool_call', { id: 't1', status: 'pending' })
+      return { outcome: 'waiting_user', summary: 'waiting' }
+    })
+    await coordinator.start('a', goal.id, goal.version)!.completion
+    const response = await request(app.callback()).get(`/api/sessions/a/goal/${goal.id}/events`)
+    expect(response.body.events.map((e: any) => e.event)).toEqual(['question', 'tool_call'])
+    expect(response.body.events[0].payload.question).toBe('请选择')
+    const after = response.body.events[0].sequence
+    expect((await request(app.callback()).get(`/api/sessions/a/goal/${goal.id}/events?after=${after}`)).body.events).toHaveLength(1)
+    expect((await request(app.callback()).get(`/api/sessions/b/goal/${goal.id}/events`)).body.events).toEqual([])
+    expect((await request(app.callback()).get(`/api/sessions/a/goal/${goal.id}/events?after=-1`)).status).toBe(400)
+  })
   it('keeps full goals per session and starts them paused', () => {
     const db = getDB()
     const goal = createPersistentGoal(db, 'a', '  完整目标  ', '  验收条件  ')

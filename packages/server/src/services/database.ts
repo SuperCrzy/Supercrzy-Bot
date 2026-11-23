@@ -88,6 +88,15 @@ export function initDatabase() {
       result TEXT NOT NULL DEFAULT ''
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_persistent_goal_one_run ON persistent_goal_runs(goal_id) WHERE status = 'running';
+    CREATE TABLE IF NOT EXISTS persistent_goal_events (
+      sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+      goal_id TEXT NOT NULL REFERENCES persistent_goals(id) ON DELETE CASCADE,
+      run_id TEXT NOT NULL REFERENCES persistent_goal_runs(id) ON DELETE CASCADE,
+      event TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_persistent_goal_events_goal ON persistent_goal_events(goal_id, sequence);
 
     -- 工作区索引：最近打开的工作区（参考主流实现的 workspaces 表）
     CREATE TABLE IF NOT EXISTS workspaces (
