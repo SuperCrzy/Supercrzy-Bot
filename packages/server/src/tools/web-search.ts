@@ -37,11 +37,11 @@ const tool: ToolDef = {
       const wantFresh = effectiveSource === 'news' || timeRange === 'day' || timeRange === 'week'
       if (wantFresh) {
         const r = await runExhaustiveSearch({ query, count, timeRange, depth: args.depth || 'basic', source: effectiveSource, maxAgeDays })
-        if (r.results.length === 0) return JSON.stringify({ results: [], query, engine: r.engine, message: '未找到关于 "' + query + '" 的搜索结果。' })
+        if (r.results.length === 0) return JSON.stringify({ results: [], query, engine: r.engine, message: '没有可用的搜索结果；可能没有匹配内容，也可能是搜索来源暂时不可用。请调整关键词或稍后重试。' })
         return JSON.stringify({ engine: r.engine, engines: r.engines, results: r.results, query })
       }
       const { engine, results } = await runSearchChain({ query, count, timeRange, depth: args.depth || 'basic', source: effectiveSource, maxAgeDays })
-      if (results.length === 0) return JSON.stringify({ results: [], query, message: '未找到关于 "' + query + '" 的搜索结果。' })
+      if (results.length === 0) return JSON.stringify({ results: [], query, message: '没有可用的搜索结果；可能没有匹配内容，也可能是搜索来源暂时不可用。请调整关键词或稍后重试。' })
       return JSON.stringify({ engine, results, query })
     } catch (err: any) {
       return '❌ 搜索失败：' + err.message

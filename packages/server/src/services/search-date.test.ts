@@ -71,6 +71,19 @@ describe('postProcessSearchResults with maxAgeDays', () => {
     expect(postProcessSearchResults(rows, 10, 1).length).toBe(0)
   })
 
+  it('orders dated results newest first, undated last', () => {
+    // The older comparator only checked whether a date existed, so two dated rows
+    // compared equal and kept provider order — "sorted by date" was not true.
+    const rows = [
+      { title: 'oldest', url: 'https://a.com/1', date: '2026-11-01' },
+      { title: 'newest', url: 'https://b.com/2', date: '2026-11-23' },
+      { title: 'middle', url: 'https://c.com/3', date: '2026-11-15' },
+      { title: 'undated', url: 'https://d.com/4' },
+    ]
+    expect(postProcessSearchResults(rows, 10, 0).map((r) => r.title))
+      .toEqual(['newest', 'middle', 'oldest', 'undated'])
+  })
+
   it('leaves everything alone when no window is given', () => {
     const rows = [
       { title: 'a', url: 'https://a.com/1', date: iso(400) },

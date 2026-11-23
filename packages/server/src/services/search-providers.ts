@@ -76,7 +76,21 @@ export function postProcessSearchResults<T extends { title: string; url: string;
   const seen = new Map<string, number>()
   const out: T[] = []
   // 按有日期优先 + 原序
-  const sorted = [...byUrl.values()].sort((a, b) => (a.date ? 1 : 0) - (b.date ? 1 : 0))
+  // Dated first, then newest first among those.
+  //
+  // The previous comparator only checked whether a date *exists*
+  // (isFinite(b) - isFinite(a)), which is 0 for two dated rows — so results kept
+  // whatever order the provider returned and "sorted by date" was not true. Compare
+  // the timestamps; undated rows sort last and keep their relative order.
+  const sorted = [...byUrl.values()].sort((a, b) => {
+    const ta = parseResultDate(a.date)
+    const tb = parseResultDate(b.date)
+    const na = Number.isNaN(ta), nb = Number.isNaN(tb)
+    if (na && nb) return 0
+    if (na) return 1
+    if (nb) return -1
+    return tb - ta
+  })
   for (const r of sorted) {
     const host = r.url.replace(/^https?:\/\/(www\.)?/, '').split('/')[0]
     const hc = (seen.get(host) ?? 0) + 1
@@ -160,6 +174,7 @@ const tavilyProvider: SearchProvider = {
         ...(ctx.timeRange ? { days: maxAge } : {}),
         ...(ctx.source === 'news' ? { topic: 'news' } : {}),
       }),
+      signal: AbortSignal.timeout(10000),
     })
     if (!resp.ok) return []
     const data = await resp.json() as { results?: Array<{ title: string; url: string; content: string; score?: number }> }
@@ -320,13 +335,14 @@ const bingProvider: SearchProvider = {
       'Accept': 'application/rss+xml, application/xml, text/xml',
     }
     const url = `https://www.bing.com/search?format=rss&q=${encoded}&count=${ctx.count}`
-    let resp = await fetch(url, { headers, redirect: 'manual' })
+    const signal = AbortSignal.timeout(10000)
+    let resp = await fetch(url, { headers, redirect: 'manual', signal })
     if (resp.status >= 300 && resp.status < 400) {
       const location = resp.headers.get('location')
       if (!location) return []
       const next = location.startsWith('http') ? location : `https://www.bing.com${location}`
       if (next === url) return []
-      resp = await fetch(next, { headers, redirect: 'manual' })
+      resp = await fetch(next, { headers, redirect: 'manual', signal })
       if (resp.status >= 300) return []
     }
     if (!resp.ok) return []
@@ -378,7 +394,9 @@ export async function runSearchChain(
   const count = ctx.count || 8
   const maxAge = ctx.maxAgeDays || (ctx.timeRange ? ({ day: 1, week: 7, month: 31, year: 365 } as Record<string, number>)[ctx.timeRange] : 0) || 0
   for (const provider of SEARCH_PROVIDERS) {
-    if (!(await provider.enabled(ctx))) continue
+    let enabled = false
+    try { enabled = await provider.enabled(ctx) } catch { /* try the next provider */ }
+    if (!enabled) continue
     const raw = await safeSearch(provider, ctx)
     if (raw.length > 0) {
       // SearXNG rows carry no publishedDate (its engines do not expose one),
@@ -386,7 +404,8 @@ export async function runSearchChain(
       // age here would drop the entire result set. Skip the local age filter
       // for it and rely on the upstream filter.
       const effectiveMaxAge = provider.name === 'searxng' ? 0 : maxAge
-      return { engine: provider.name, results: postProcessSearchResults(raw as any, count, effectiveMaxAge) }
+      const results = postProcessSearchResults(raw as any, count, effectiveMaxAge)
+      if (results.length) return { engine: provider.name, results }
     }
   }
   return { engine: 'none', results: [] }
@@ -428,6 +447,9 @@ export async function runExhaustiveSearch(
   const byUrl = new Map<string, SearchResultItem>()
   for (const r of all) {
     if (!r?.url || !r?.title) continue
+    const timestamp = parseResultDate(r.date)
+    // Keep undated results for verification, but exclude dates known to be stale.
+    if (maxAge > 0 && Number.isFinite(timestamp) && timestamp < Date.now() - maxAge * 86400000) continue
     const key = `${(r.url).replace(/^https?:\/\/(www\.)?/, '').split('/')[0]}:${(r.title || '').slice(0, 40)}`
     if (!byUrl.has(key)) byUrl.set(key, r)
   }
@@ -435,9 +457,9 @@ export async function runExhaustiveSearch(
   const seenHost = new Map<string, number>()
   const merged = [...byUrl.values()]
     .sort((a, b) => {
-      const da = a.date ? Date.parse(a.date) : 0, db = b.date ? Date.parse(b.date) : 0
-      if (a.date && !isNaN(da) && b.date && !isNaN(db)) return db - da
-      return (a.date ? 1 : 0) - (b.date ? 1 : 0) // 有日期优先
+      const da = parseResultDate(a.date), db = parseResultDate(b.date)
+      if (Number.isFinite(da) && Number.isFinite(db)) return db - da
+      return Number(Number.isFinite(db)) - Number(Number.isFinite(da))
     })
     .filter((r) => {
       const host = (r.url).replace(/^https?:\/\/(www\.)?/, '').split('/')[0]

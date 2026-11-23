@@ -26,4 +26,9 @@ describe('web_search', () => {
     await tool.execute({ query: '新闻', count: -1, timeRange: 'day' })
     expect(search.runExhaustiveSearch).toHaveBeenCalledWith(expect.objectContaining({ count: 8, timeRange: 'day', source: 'news' }))
   })
+
+  it('does not claim an empty response proves that no matching pages exist', async () => {
+    const result = JSON.parse(await tool.execute({ query: 'example' }))
+    expect(result.message).toContain('来源暂时不可用')
+  })
 })
