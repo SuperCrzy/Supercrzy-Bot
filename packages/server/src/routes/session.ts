@@ -206,16 +206,18 @@ sessionRouter.post('/', (ctx: Context) => {
     : 'sandbox'
   // 超级协作平台：'semi'|'senate' 标记为协作任务会话，null=普通对话
   const collab = body.collab_mode === 'semi' || body.collab_mode === 'senate' ? body.collab_mode : null
-  db.prepare('INSERT INTO sessions (id, title, model, workspace_dir, permission_level, collab_mode) VALUES (?, ?, ?, ?, ?, ?)').run(
-    id,
-    body.title || 'New Chat',
-    body.model || 'deepseek-v4-pro',
-    ws,
-    level,
-    collab
-  )
-  // 工作区索引：创建会话时记录（upsertWorkspace 内部处理空路径）
-  upsertWorkspace(ws)
+  db.transaction(() => {
+    db.prepare('INSERT INTO sessions (id, title, model, workspace_dir, permission_level, collab_mode) VALUES (?, ?, ?, ?, ?, ?)').run(
+      id,
+      body.title || 'New Chat',
+      body.model || 'deepseek-v4-pro',
+      ws,
+      level,
+      collab
+    )
+    // 工作区索引与会话必须一起提交，避免失败后留下半条记录。
+    upsertWorkspace(ws)
+  })()
   ctx.body = { id, title: body.title || 'New Chat', model: body.model || 'deepseek-v4-pro', workspace_dir: ws, permission_level: level, collab_mode: collab }
   ctx.status = 201
 })

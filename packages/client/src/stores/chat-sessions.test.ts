@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useChatStore } from './chat'
+import { useAccountStore } from './account'
 import { normalizeDeliverySummary } from '@/utils/delivery'
 import { markTurnAborted } from '@/utils/turn-abort'
 
@@ -15,6 +16,19 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('chat session loading', () => {
+  it('does not insert an old account’s completed creation after an account switch', async () => {
+    let finish!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => { finish = resolve })))
+    const chat = useChatStore()
+    const account = useAccountStore()
+    account.accountId = 'a'
+    const creating = chat.createSession('test')
+    account.accountId = 'b'
+    finish(Response.json({}))
+    await expect(creating).rejects.toThrow('account_changed')
+    expect(chat.sessions).toEqual([])
+    expect(chat.currentSessionId).toBeNull()
+  })
   it('reuses the same ID after an uncertain creation and verifies the existing session', async () => {
     const ids: string[] = []
     let checks = 0

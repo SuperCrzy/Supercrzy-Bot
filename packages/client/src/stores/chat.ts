@@ -365,7 +365,9 @@ export const useChatStore = defineStore('chat', () => {
   let uncertainCreation: { key: string; session: ChatSession } | null = null
   async function createSession(title?: string, workspaceDir?: string, collabMode?: 'semi' | 'senate'): Promise<ChatSession> {
     const selectedBefore = currentSessionId.value
-    const key = JSON.stringify([useAccountStore().accountId, selectedBefore, title || '', workspaceDir || '', collabMode || ''])
+    const account = useAccountStore()
+    const owner = account.accountId
+    const key = JSON.stringify([owner, selectedBefore, title || '', workspaceDir || '', collabMode || ''])
     const session: ChatSession = uncertainCreation?.key === key ? uncertainCreation.session : {
       id: crypto.randomUUID(),
       title: title || defaultSessionTitle(),
@@ -384,6 +386,7 @@ export const useChatStore = defineStore('chat', () => {
       })
       if (!response.ok) throw new Error(`session_create_failed:${response.status}`)
     } catch (error) {
+      if (account.accountId !== owner) throw new Error('account_changed')
       // The server may have committed the row before the response was lost.
       // Verify this specific generated ID before reporting a failure.
       let found = false
@@ -399,6 +402,7 @@ export const useChatStore = defineStore('chat', () => {
         throw error
       }
     }
+    if (account.accountId !== owner) throw new Error('account_changed')
     if (uncertainCreation?.key === key) uncertainCreation = null
     sessions.value.unshift(session)
     messages.value.set(session.id, [])
