@@ -151,6 +151,7 @@
         <template v-for="item in currentMenu" :key="item.key">
           <div v-if="item.divider" class="app-menu-divider"></div>
           <button v-else class="app-menu-row" @click="runMenu(item.action)">
+            <span class="app-menu-check">{{ item.checked ? '✓' : '' }}</span>
             <span class="app-menu-label">{{ item.label }}</span>
             <span v-if="item.shortcut" class="app-menu-shortcut">{{ item.shortcut }}</span>
           </button>
@@ -594,6 +595,8 @@ interface MenuItem {
   shortcut?: string
   action?: () => void
   divider?: boolean
+  /** Renders a checkmark. Use for items that reflect a mode rather than perform an action. */
+  checked?: boolean
 }
 
 const desktopBridge = () => (window as any).supercrzyDesktop
@@ -629,7 +632,12 @@ const viewMenu = computed<MenuItem[]>(() => [
   { key: 'zoomOut', label: t('nav.menu.zoomOut'), shortcut: mod('-'), action: () => desktopBridge()?.app?.zoom?.('out') },
   { key: 'zoomReset', label: t('nav.menu.zoomReset'), shortcut: mod('0'), action: () => desktopBridge()?.app?.zoom?.('reset') },
   { key: 'd2', label: '', divider: true },
-  { key: 'toggleDark', label: t('nav.menu.toggleDark'), action: () => appStore.toggleDarkMode() },
+  // Light and dark are two checked items rather than one "toggle" entry: a single
+  // toggle only shows the current mode by the absence of a check, and its verb label
+  // read reversed in dark mode. Two items also match the sun/moon button in the
+  // sidebar, which has an explicit visual for both states.
+  { key: 'lightMode', label: t('nav.menu.lightMode'), checked: !appStore.darkMode, action: () => appStore.setDarkMode(false) },
+  { key: 'darkMode', label: t('nav.menu.darkMode'), checked: appStore.darkMode, action: () => appStore.setDarkMode(true) },
   { key: 'fullscreen', label: t('nav.menu.fullscreen'), shortcut: isWin.value ? 'F11' : '⌃⌘F', action: () => desktopBridge()?.app?.toggleFullscreen?.() },
 ])
 
@@ -801,6 +809,25 @@ function openSettings(tab?: string) {
 /** 个人资料：设置页账户 Tab */
 function openProfile() { openSettings('account') }
 
+/**
+ * Settings is a full-page view, and its modal layers cannot cover the AI browser:
+ * WebContentsView is a native surface, so no z-index reaches it and the changelog
+ * dialog came up behind the page. Close the panel on arrival instead — it also
+ * matches what the page is for. Watching the route covers every entry point
+ * (sidebar button, app menu, ⌘, shortcut, a direct push), so a new caller cannot
+ * reintroduce the overlap. Restored on return so the panel is not silently lost.
+ */
+const FULL_PAGE_ROUTE_PREFIXES = ['/settings', '/account']
+watch(
+  () => route.path,
+  (path) => {
+    const isFullPage = FULL_PAGE_ROUTE_PREFIXES.some((p) => path === p || path.startsWith(p + '/'))
+    if (isFullPage) appStore.closeDetailPanelForPage()
+    else appStore.restoreDetailPanel()
+  },
+  { immediate: true },
+)
+
 onMounted(() => {
   appStore.loadSettings()
   chatStore.loadSessions()
@@ -963,7 +990,6 @@ onMounted(() => {
 .app-menu-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 24px;
   width: 100%;
   padding: 6px 10px;
@@ -977,6 +1003,13 @@ onMounted(() => {
 }
 .app-menu-row:hover {
   background: var(--bg-hover, rgba(0, 0, 0, 0.06));
+}
+
+/** Fixed check gutter so labels line up whether or not an item is checked. */
+.app-menu-check {
+  flex: 0 0 12px;
+  font-size: 12px;
+  color: var(--accent, #4c8dff);
 }
 
 .app-menu-label { flex: 1; }

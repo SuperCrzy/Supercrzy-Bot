@@ -249,7 +249,7 @@ export interface ChatMessage {
   /** 应用的历史经验（playbook_used 事件） */
   playbookUsed?: Array<{ taskType: string; lesson: string }>
   /** AI 主动推荐保存为可复用流程（routine_suggest 事件，即"演示一次就学会"） */
-  routineSuggestion?: { sessionId: string; title: string; toolSummary: string[]; toolCount: number; turnCount: number }  /** 角色分发（role_routed 事件） */
+  routineSuggestion?: { sessionId: string; title: string; reason?: string; toolSummary: string[]; toolCount: number; turnCount: number }  /** 角色分发（role_routed 事件） */
   roleRouted?: { roleId: string; roleName: string; matchedKeyword: string }
   /** AI 绘制的矢量图（draw_diagram 工具，diagram 事件） */
   diagrams?: Array<{ title: string; svg: string }>

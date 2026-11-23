@@ -213,6 +213,8 @@ export const messages = {
         zoomOut: '缩小界面',
         zoomReset: '重置缩放',
         toggleDark: '切换深色模式',
+        lightMode: '浅色模式',
+        darkMode: '深色模式',
         fullscreen: '全屏',
         checkUpdate: '检查更新',
         about: '关于 SUPERCRZY',
@@ -1649,6 +1651,7 @@ export const messages = {
     routine: {
       suggestTitle: '可保存为可复用流程',
       suggestDesc: '「{title}」用了 {tools} 次工具调用（{turns} 轮）',
+      suggestDescFallback: '把「{title}」保存为可复用流程，下次一句话就能重跑',
       saveAsRoutine: '保存为例程',
       ignore: '忽略',
     },
@@ -1968,6 +1971,8 @@ export const messages = {
         zoomOut: 'Zoom out',
         zoomReset: 'Reset zoom',
         toggleDark: 'Toggle dark mode',
+        lightMode: 'Light mode',
+        darkMode: 'Dark mode',
         fullscreen: 'Full screen',
         checkUpdate: 'Check for updates',
         about: 'About SUPERCRZY',
@@ -3381,6 +3386,7 @@ export const messages = {
     routine: {
       suggestTitle: 'Save as a reusable routine',
       suggestDesc: '"{title}" used {tools} tool calls across {turns} turns',
+      suggestDescFallback: 'Save "{title}" as a routine so the next run is one sentence',
       saveAsRoutine: 'Save as routine',
       ignore: 'Ignore',
     },

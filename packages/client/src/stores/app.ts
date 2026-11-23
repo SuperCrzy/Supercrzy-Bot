@@ -354,7 +354,18 @@ const darkMode = ref(false)
   }
 
   function toggleDarkMode() {
-    darkMode.value = !darkMode.value
+    setDarkMode(!darkMode.value)
+  }
+
+  /**
+   * Set an explicit theme rather than flipping. The View menu offers light and dark
+   * as two checked items so the current one is visible instead of inferred from the
+   * absence of a check; picking either has to land on that theme even if it already
+   * is — a toggle here would flip the user away from what they just chose.
+   */
+  function setDarkMode(dark: boolean) {
+    if (darkMode.value === dark) return
+    darkMode.value = dark
     applyThemeClass()
     // localStorage：供 index.html 主题预载（防闪白）使用
     localStorage.setItem('supercrzy:theme', darkMode.value ? 'dark' : 'light')
@@ -383,6 +394,23 @@ const darkMode = ref(false)
 
   function toggleDetailPanel() {
     detailPanelVisible.value = !detailPanelVisible.value
+  }
+
+  /**
+   * Remember whether the user had the panel open before we closed it on their
+   * behalf, so returning to the chat restores what they had rather than leaving
+   * them with a panel they did not close.
+   */
+  const detailPanelAutoClosed = ref(false)
+  function closeDetailPanelForPage() {
+    if (!detailPanelVisible.value) return
+    detailPanelVisible.value = false
+    detailPanelAutoClosed.value = true
+  }
+  function restoreDetailPanel() {
+    if (!detailPanelAutoClosed.value) return
+    detailPanelAutoClosed.value = false
+    detailPanelVisible.value = true
   }
 
   // 历史残留守卫：localStorage/旧代码可能传入已删除的 'terminal'，非法值回退 deliverables
@@ -423,6 +451,8 @@ const darkMode = ref(false)
     currentModel,
     currentAgent,
     detailPanelVisible,
+    closeDetailPanelForPage,
+    restoreDetailPanel,
     detailPanelTab,
     bgTaskPreviewId,
     openBgTaskPreview,
@@ -468,6 +498,7 @@ const darkMode = ref(false)
     userAvatar,
     notifyProvidersChanged,
     toggleDarkMode,
+    setDarkMode,
     settingsImmersive,
     settingsMobileSection,
     setModel,

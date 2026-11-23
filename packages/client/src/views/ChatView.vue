@@ -399,7 +399,9 @@
             <div v-if="msg.routineSuggestion" class="routine-suggest">
               <div class="rs-info">
                 <span class="rs-title">{{ t('routine.suggestTitle') }}</span>
-                <span class="rs-desc">{{ t('routine.suggestDesc', { title: msg.routineSuggestion.title, tools: msg.routineSuggestion.toolCount, turns: msg.routineSuggestion.turnCount }) }}</span>
+                <!-- The model's reason, when it gave one: "used 6 tool calls" explains
+                     nothing about why this task would be worth running again. -->
+                <span class="rs-desc">{{ msg.routineSuggestion.reason || t('routine.suggestDescFallback', { title: msg.routineSuggestion.title }) }}</span>
               </div>
               <div class="rs-actions">
                 <n-button size="tiny" type="primary" :loading="savingRoutine" @click="saveRoutineSuggestion(msg)">
@@ -2784,10 +2786,13 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage, sessionId?
       break
     }
     case 'routine_suggest': {
-      // 复杂任务完成 → AI 主动推荐保存为可复用流程（"演示一次就学会"）
+      // The model called suggest_routine, so it has already judged that this task
+      // repeats. Carry its reason through — "used 6 tool calls" is not a reason to
+      // save anything, and showing it was why the card felt automatic.
       msg.routineSuggestion = {
         sessionId: data.sessionId || '',
         title: data.title || '未命名任务',
+        reason: data.reason || '',
         toolSummary: data.toolSummary || [],
         toolCount: data.toolCount || 0,
         turnCount: data.turnCount || 0,

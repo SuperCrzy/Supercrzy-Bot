@@ -82,6 +82,7 @@ import readMe from './read-me'
 // ---- 2026-09-18 从 services/tools.ts 迁入（P1-03 残余清零）----
 import toolSearch from './tool-search'
 import memoryStore from './memory-store'
+import suggestRoutine from './suggest-routine'
 import fileRead from './file-read'
 import lintFile from './lint-file'
 import fileWrite from './file-write'
@@ -114,6 +115,7 @@ export const directoryTools: ToolDef[] = [
   // ---- 原 services/tools.ts 内联的 18 个（保持原序）----
   toolSearch,
   memoryStore,
+  suggestRoutine,
   fileRead,
   lintFile,
   fileWrite,

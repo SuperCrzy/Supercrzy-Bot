@@ -564,6 +564,7 @@ import { shouldCompress, compressContext, pruneOldToolResults } from './context-
 import { matchPlaybooks } from './playbook-match'
 import { maybeCreateSkill, maybeRepairSkill } from './skill-evolve'
 import { createContentCoalescer } from './content-coalescer'
+import { takeRoutineSuggestion, clearRoutineSuggestion } from '../tools/suggest-routine'
 
 interface AgentMessage {
   role: 'system' | 'user' | 'assistant' | 'tool'
@@ -1296,6 +1297,9 @@ export async function runAgentLoop(
   sessionCfg?: { workspaceDir?: string; permissionLevel?: 'workspace-only' | 'sandbox' | 'full' },  // 会话级工作目录 + 默认权限
   uiLanguage?: string,  // 前端界面语言（zh-CN / en-US），用于 AI 回复语言跟随
 ) {
+  // Drop anything left from a previous turn: a suggestion the user ignored must not
+  // resurface in the next reply, and takeRoutineSuggestion only clears on read.
+  clearRoutineSuggestion(sessionId)
   const sessionWorkspace = sessionCfg?.workspaceDir || ''
   const permissionLevel = sessionCfg?.permissionLevel || 'sandbox'
   // rm 分级的"工作区内"判定源（2026-09-25）：会话覆盖 > 全局 config
@@ -2590,17 +2594,26 @@ export async function runAgentLoop(
     }).catch((e) => console.log(`[TaskLog] 异常: ${e?.message || e}`))
   }
 
-  // ---- Routine 推荐（"演示一次就学会"）：复杂任务完成后主动建议保存为可复用流程 ----
-  // 条件：≥3 次工具调用 + ≥3 轮 + 任务正常完成；必须在 done 之前发送
-  if (finished && turn >= 3 && totalToolCalls.length >= 3) {    try {
+  // ---- Routine 推荐（"演示一次就学会"）----
+  // Whether a task is worth repeating is a judgement about the request, not a count
+  // of turns and tools. The old rule (>=3 turns && >=3 tool calls) fired on one-off
+  // work as readily as on a weekly chore, so the card appeared after nearly every
+  // reply and stopped carrying meaning. The model now decides by calling
+  // suggest_routine; this only reads back what it recorded.
+  if (finished) {
+    try {
+      const suggestion = takeRoutineSuggestion(sessionId)
       const uniqueTools = [...new Set(totalToolCalls)].slice(0, 8)
-      emitSSE(ctx, 'routine_suggest', {
-        sessionId: sessionId || '',
-        title: (lastUserContent || '未命名任务').slice(0, 40),
-        toolSummary: uniqueTools,
-        toolCount: totalToolCalls.length,
-        turnCount: turn,
-      })
+      if (suggestion) {
+        emitSSE(ctx, 'routine_suggest', {
+          sessionId: sessionId || '',
+          title: suggestion.title,
+          reason: suggestion.reason,
+          toolSummary: uniqueTools,
+          toolCount: totalToolCalls.length,
+          turnCount: turn,
+        })
+      }
     } catch { /* 推荐失败不影响主流程 */ }
   }
 
