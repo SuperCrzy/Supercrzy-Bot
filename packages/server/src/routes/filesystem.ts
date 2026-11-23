@@ -4,6 +4,7 @@ import { readFile, stat } from 'fs/promises'
 import { join, resolve, dirname } from 'path'
 import { homedir } from 'os'
 import { assertSafeFilePath } from '../services/sandbox'
+import { config } from '../config'
 import { mediaMimeOf, isNonPreviewableBinary, docxMimeOf, isMarkdownPath, isSvgPath } from '../services/file-kind'
 
 /**
@@ -93,7 +94,7 @@ fsRouter.get('/read', async (ctx) => {
     return
   }
   let safePath: string
-  const pathErr = assertSafeFilePath(raw)
+  const pathErr = assertSafeFilePath(raw, { workspaceDir: config.workspaceDir })
   if (pathErr) {
     ctx.body = { error: `路径不在白名单内：${pathErr}` }
     return

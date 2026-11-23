@@ -1046,8 +1046,39 @@ const inputRef = ref()
 /** 正在编辑的用户消息 id（编辑态下回车提交 → submitEdit） */
 const editingMessageId = ref<string | null>(null)
 const fileInputRef = ref<HTMLInputElement>()
-const abortController = ref<AbortController | null>(null)
-const activeRunSessionId = ref<string | null>(null)
+/**
+ * One abort controller per conversation. A single shared controller meant stopping
+ * one task aborted whichever turn happened to own the slot last, and it prevented
+ * two turns from running at once at all. Keyed by session id; a draft new chat has
+ * no entry, so it can start immediately.
+ */
+const runControllers = new Map<string, AbortController>()
+/** The controller for the conversation on screen — what the stop button aborts. */
+const abortController = computed<AbortController | null>(() => {
+  const sid = chatStore.currentSessionId
+  return sid ? runControllers.get(sid) ?? null : null
+})
+/** Which conversation is running *on screen*. */
+const activeRunSessionId = computed<string | null>(() => {
+  const sid = chatStore.currentSessionId
+  return sid && runControllers.has(sid) ? sid : null
+})
+/**
+ * Register a controller for one conversation and mark it running. The controller
+ * is captured by the caller and passed down to the stream, never re-read from the
+ * map: with two turns live, reading the map mid-stream would hit whichever turn
+ * was registered last and abort the wrong one.
+ */
+function beginRun(sessionId: string): AbortController {
+  const controller = new AbortController()
+  runControllers.set(sessionId, controller)
+  chatStore.setLoading(true, sessionId)
+  return controller
+}
+function endRun(sessionId: string) {
+  runControllers.delete(sessionId)
+  chatStore.setLoading(false, sessionId)
+}
 /** Agent 模式（默认开）：提升到全局 store，桌面端横栏按钮与 header 同步高亮/切换 */
 const agentMode = computed({
   get: () => appStore.agentMode,
@@ -1320,7 +1351,8 @@ function stopGeneration() {
       if (!sent) nMessage.warning(t('chat.stopRequestFailed'), { duration: 10000 })
     })
   }
-  abortController.value?.abort()
+  // Abort only the conversation on screen; other turns have their own controllers.
+  if (sid) runControllers.get(sid)?.abort()
 }
 
 // =================================================================
@@ -1852,7 +1884,12 @@ const { onBgTaskDone } = useBgTaskResume({
   },
   addMessage: (sid, msg) => chatStore.addMessage(sid, msg),
   setLoading: (v) => chatStore.setLoading(v),
-  setAbort: (c) => { abortController.value = c; activeRunSessionId.value = c ? chatStore.currentSessionId : null },
+  setAbort: (c) => {
+    const sid = chatStore.currentSessionId
+    if (!sid) return
+    if (c) runControllers.set(sid, c)
+    else runControllers.delete(sid)
+  },
   newAbort: () => new AbortController(),
 })
 
@@ -1953,8 +1990,7 @@ async function sendGhostMessage(suggestion: string) {
   }
   chatStore.addMessage(session.id, assistantMsg)
   chatStore.setLoading(true)
-  activeRunSessionId.value = session.id
-  abortController.value = new AbortController()
+  beginRun(session.id)
   try {
     await sendAgentMessage(assistantMsg, [{ role: 'user', content: suggestion }], undefined, session?.id)
   } catch (err: any) {
@@ -1963,9 +1999,7 @@ async function sendGhostMessage(suggestion: string) {
       if (cur) cur.content = `❌ ${t('chat.execFail', { msg: err.message || t('chat.unknownError') })}`
     }
   } finally {
-    chatStore.setLoading(false)
-    abortController.value = null
-    activeRunSessionId.value = null
+    endRun(session.id)
     if (session) {
       fillEstimatedTokens(assistantMsg, textOf(assistantMsg.content).length)
       chatStore.persistMessageById(session.id, assistantMsg.id)
@@ -1999,8 +2033,7 @@ async function resumeFromCheckpoint(ckptId: string) {
   }
   chatStore.addMessage(session.id, assistantMsg)
   chatStore.setLoading(true)
-  activeRunSessionId.value = session.id
-  abortController.value = new AbortController()
+  beginRun(session.id)
   try {
     await sendAgentMessage(assistantMsg, [], ckptId, session?.id)
   } catch (err: any) {
@@ -2009,9 +2042,7 @@ async function resumeFromCheckpoint(ckptId: string) {
       if (cur) cur.content = `❌ ${t('chat.resumeFail', { msg: err.message || t('chat.unknownError') })}`
     }
   } finally {
-    chatStore.setLoading(false)
-    abortController.value = null
-    activeRunSessionId.value = null
+    endRun(session.id)
     if (session) {
       fillEstimatedTokens(assistantMsg, textOf(assistantMsg.content).length)
       chatStore.persistMessageById(session.id, assistantMsg.id)
@@ -2201,8 +2232,7 @@ async function doSend(text: string, files: Attachment[]) {
     if (uploadedFiles.value.length === files.length && uploadedFiles.value.every((f, i) => f === files[i])) uploadedFiles.value = []
     quoteRef.value = null
   }
-  activeRunSessionId.value = session.id
-  abortController.value = new AbortController()
+  beginRun(session.id)
 
   // 计时起点：也写入 store 里的响应式副本（flow 渲染基于它）
   const reactiveAssistantMsg = chatStore.messages.get(session.id)?.find((m) => m.id === assistantMsg.id)
@@ -2253,8 +2283,7 @@ async function doSend(text: string, files: Attachment[]) {
     if (lastMsg && lastMsg.role === 'assistant' && lastMsg.flow && lastMsg.flow.length > 0 && lastMsg.processCollapsed === undefined) {
       markEnd(lastMsg)
     }
-    abortController.value = null
-    activeRunSessionId.value = null
+    endRun(session.id)
     if (session) {
       // 估算 token 数兜底（usage 事件未提供真实值时）：中英混合粗略 0.6 token/字符
       fillEstimatedTokens(assistantMsg, textOf(assistantMsg.content).length)
@@ -2298,8 +2327,7 @@ async function sendQueued(texts: string[]) {
   }
   chatStore.addMessage(session.id, assistantMsg)
   chatStore.setLoading(true)
-  activeRunSessionId.value = session.id
-  abortController.value = new AbortController()
+  beginRun(session.id)
 
   let turnCompleted = false
   try {
@@ -2324,9 +2352,7 @@ async function sendQueued(texts: string[]) {
       }
     }
   } finally {
-    chatStore.setLoading(false)
-    abortController.value = null
-    activeRunSessionId.value = null
+    endRun(session.id)
     if (session) {
       // 真实 usage 已由 usage 事件写入则不覆盖；否则用估算值兜底
       fillEstimatedTokens(assistantMsg, textOf(assistantMsg.content).length)
@@ -2354,10 +2380,11 @@ async function sendCompare(assistantMsg: ChatMessage, apiMessages: Array<{ role:
   compareLiveFinished.value = false
   compareActiveId.value = assistantMsg.id
 
+  const compareSignal = abortController.value?.signal
   const resp = await fetch('/api/chat/compare-stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    signal: abortController.value?.signal,
+    signal: compareSignal,
     body: JSON.stringify({
       messages: apiMessages,
       models: compareModels.value.length > 0 ? compareModels.value : undefined,
@@ -2441,6 +2468,11 @@ async function sendAgentMessage(assistantMsg: ChatMessage, apiMessages: Array<{ 
   // 绑定流实例：打字机 + flow 更新集中到 stores/chat-stream.ts（SSE 直写，可多实例）
   bindStream(reactiveMsg)
 
+  // Pin this turn's controller now. Reading the map inside the stream would pick
+  // up whichever conversation registered last, so a second concurrent turn would
+  // abort the first — or report its own interrupted state against the wrong run.
+  const runSignal = (sessionId ? runControllers.get(sessionId) : abortController.value)?.signal
+
   // Event IDs only deduplicate this response. A fresh POST starts another run;
   // missing tool events do not prove that the server hasn't executed a tool.
   // Do not replay a disconnected run until the server supports idempotent resume.
@@ -2455,7 +2487,7 @@ async function sendAgentMessage(assistantMsg: ChatMessage, apiMessages: Array<{ 
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ messages: apiMessages, model: appStore.currentModel, resumeCheckpoint, sessionId, language: locale.value, images: images && images.length > 0 ? images : undefined, bgResume }),
-      signal: abortController.value!.signal,
+      signal: runSignal,
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`)
     const reader = res.body?.getReader()
@@ -2502,7 +2534,7 @@ async function sendAgentMessage(assistantMsg: ChatMessage, apiMessages: Array<{ 
     }
 
     if (receivedDone) return true
-    if (!receivedTerminalError && !abortController.value!.signal.aborted) {
+    if (!receivedTerminalError && !runSignal?.aborted) {
       nMessage.warning(t('chat.streamInterrupted'))
     }
     return false
@@ -2513,12 +2545,12 @@ async function sendAgentMessage(assistantMsg: ChatMessage, apiMessages: Array<{ 
     // Without a done event, preserve the partial answer and keep an explanation
     // on the visible message instead of relying only on a transient toast.
     await flushAllPending()
-    if (!receivedTerminalError && !abortController.value?.signal.aborted && !reactiveMsg.stopReason) {
+    if (!receivedTerminalError && !runSignal?.aborted && !reactiveMsg.stopReason) {
       reactiveMsg.stopReason = { reason: 'connection_interrupted', message: t('chat.streamInterrupted') }
     }
   }
   // 流自然结束（非用户手动停止）→ 提示音 + 自动朗读（见 finishTurn）
-  const completed = streamOk && !taskUnsuccessful && !abortController.value?.signal.aborted && !reactiveMsg.stopReason
+  const completed = streamOk && !taskUnsuccessful && !runSignal?.aborted && !reactiveMsg.stopReason
   finishTurn(assistantMsg, completed)
   return completed
 }
@@ -3035,11 +3067,12 @@ async function sendSimpleStream(assistantMsg: ChatMessage, apiMessages: Array<{ 
   const findMessage = () => chatStore.messages.get(sessionId)?.find((m) => m.id === assistantMsg.id)
   // 关闭流式：一次性拿完整回复（无打字机）
   if (!appStore.streamingEnabled) {
+    const plainSignal = abortController.value?.signal
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ messages: apiMessages, model: appStore.currentModel }),
-      signal: abortController.value!.signal,
+      signal: plainSignal,
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`)
     const data = await res.json()
@@ -3050,11 +3083,12 @@ async function sendSimpleStream(assistantMsg: ChatMessage, apiMessages: Array<{ 
     return
   }
 
+  const plainSignal = abortController.value?.signal
   const res = await fetch('/api/chat/stream', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ messages: apiMessages, model: appStore.currentModel }),
-    signal: abortController.value!.signal,
+    signal: plainSignal,
   })
 
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`)

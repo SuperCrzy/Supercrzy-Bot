@@ -110,7 +110,24 @@ export const useChatStore = defineStore('chat', () => {
   const SESSION_KEY = 'supercrzy:current-session'
   const currentSessionId = ref<string | null>(localStorage.getItem(SESSION_KEY) || null)
   const messages = ref<Map<string, ChatMessage[]>>(new Map())
-  const isLoading = ref(false)
+  /**
+   * Which conversations have a turn in flight. A single boolean could not express
+   * "A is running while I open a new task": starting a new chat inherited the old
+   * session's flag and got queued behind a task it had nothing to do with. Tracks
+   * per session so two turns can genuinely run at once.
+   */
+  const runningSessions = ref<Set<string>>(new Set())
+  /** True when the *current* conversation has a turn in flight, not "anything is running". */
+  const isLoading = computed(() => {
+    const sid = currentSessionId.value
+    return sid ? runningSessions.value.has(sid) : false
+  })
+  /** Any conversation at all is running — for banners that must warn regardless of where you are. */
+  const anyRunning = computed(() => runningSessions.value.size > 0)
+  const activeRunSessionId = computed(() => {
+    const sid = currentSessionId.value
+    return sid && runningSessions.value.has(sid) ? sid : null
+  })
   const loaded = ref(false)
   /** 分支续跑信号：TimelinePanel 设置后，ChatView 监听并发起续跑 */
   const pendingResume = ref<string | null>(null)
@@ -750,8 +767,14 @@ export const useChatStore = defineStore('chat', () => {
     if (message) await persistMessage(sessionId, message)
   }
 
-  function setLoading(v: boolean) {
-    isLoading.value = v
+  /** Mark a conversation as running. Without a session id this is a no-op: a draft
+   *  new chat has nothing in flight, which is exactly why it must not inherit another. */
+  function setLoading(v: boolean, sessionId: string | null = currentSessionId.value) {
+    if (!sessionId) return
+    const next = new Set(runningSessions.value)
+    if (v) next.add(sessionId)
+    else next.delete(sessionId)
+    runningSessions.value = next
   }
 
   return {
@@ -762,6 +785,9 @@ export const useChatStore = defineStore('chat', () => {
     unsavedMessages,
     retryUnsavedMessages,
     isLoading,
+    anyRunning,
+    runningSessions,
+    activeRunSessionId,
     loaded,
     pendingResume,
     pendingMessage,

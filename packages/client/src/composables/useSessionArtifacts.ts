@@ -10,6 +10,7 @@
  */
 import { ref, computed, reactive, watch, onMounted, onBeforeUnmount } from 'vue'
 import { mergeArtifactRows, type ArtifactRow } from '@/utils/artifact-merge'
+import { copyToClipboard } from '@/utils/clipboard'
 
 export interface UseSessionArtifactsOptions {
     sessionId: () => string | null | undefined
@@ -141,7 +142,12 @@ export function useSessionArtifacts(opts: UseSessionArtifactsOptions) {
         const a = artifactMenu.item
         closeArtifactMenu()
         if (!a) return
-        try { await navigator.clipboard.writeText(a.path) } catch { /* clipboard denied */ }
+        // Route through the shared helper: it falls back to execCommand when the
+        // async Clipboard API is unavailable, which is what made this a silent
+        // no-op in the packaged Windows build. Log only — the menu is transient
+        // and this composable has no toast dependency.
+        const ok = await copyToClipboard(a.path)
+        if (!ok) console.warn('[artifact] copy path failed')
     }
 
     return {
