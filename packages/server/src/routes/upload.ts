@@ -52,10 +52,11 @@ uploadRouter.post('/', upload.array('files', 5), async (ctx: Context) => {
     return
   }
 
-  const db = getDB()
   const sessionId = (ctx.request.body as any)?.session_id || null
 
-  const results = files.map((file) => {
+  try {
+    const db = getDB()
+    const save = db.transaction(() => files.map((file) => {
     const fileId = uuidv4()
     const fileUrl = `/api/upload/files/${basename(file.filename)}`
     // multer 的 originalname 是 latin1 解码（中文文件名乱码）→ 转回 utf8（ASCII 无损）
@@ -81,10 +82,21 @@ uploadRouter.post('/', upload.array('files', 5), async (ctx: Context) => {
       size: file.size,
       url: fileUrl,
     }
-  })
+    }))
 
-  ctx.body = { files: results }
-  ctx.status = 201
+    ctx.body = { files: save() }
+    ctx.status = 201
+  } catch (error) {
+    // Multer has already stored the entire batch. If database persistence
+    // fails, remove those files so the failed upload leaves no orphaned data.
+    for (const file of files) {
+      try { unlinkSync(join(UPLOAD_DIR, basename(file.filename))) }
+      catch (cleanupError) { console.error('[upload] failed to clean up upload:', cleanupError) }
+    }
+    console.error('[upload] failed to persist upload:', error)
+    ctx.status = 500
+    ctx.body = { error: '上传保存失败，请重试', code: 'UPLOAD_SAVE_FAILED' }
+  }
 })
 
 // Serve uploaded files
@@ -111,10 +123,15 @@ uploadRouter.get('/files/:filename', (ctx: Context) => {
     '.md': 'text/markdown', '.zip': 'application/zip', '.gz': 'application/gzip',
   }
 
-  ctx.set('Content-Type', mimeMap[ext] || 'application/octet-stream')
+  // Never serve active uploaded content (HTML/SVG/JS, etc.) as same-origin
+  // executable content. Only known passive formats may be previewed inline.
+  const inlineExtensions = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.pdf', '.txt', '.csv', '.md', '.json'])
+  const inline = inlineExtensions.has(ext)
+  ctx.set('Content-Type', inline ? (mimeMap[ext] || 'application/octet-stream') : 'application/octet-stream')
+  ctx.set('X-Content-Type-Options', 'nosniff')
+  ctx.set('Content-Security-Policy', "sandbox; default-src 'none'")
   ctx.set('Cache-Control', 'public, max-age=86400')
-  // Allow inline preview for images and PDFs
-  ctx.set('Content-Disposition', 'inline')
+  ctx.set('Content-Disposition', inline ? 'inline' : 'attachment')
   ctx.body = createReadStream(filePath)
 })
 
@@ -187,8 +204,11 @@ uploadRouter.delete('/:id', (ctx: Context) => {
   if (existsSync(filePath)) {
     try {
       unlinkSync(filePath)
-    } catch {
-      // Ignore delete errors
+    } catch (error) {
+      console.error('[upload] failed to delete upload:', error)
+      ctx.status = 500
+      ctx.body = { error: '文件删除失败，请重试', code: 'UPLOAD_DELETE_FAILED' }
+      return
     }
   }
 
