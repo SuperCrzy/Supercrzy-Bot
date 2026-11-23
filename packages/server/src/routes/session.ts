@@ -149,7 +149,7 @@ sessionRouter.post('/:id/artifacts/:artifactId/open', async (ctx: Context) => {
         // quote the path so spaces in the file name survive. The empty "" that
         // follows `start` is start's window-title argument — without it a quoted
         // path would be taken as the title and nothing would open.
-        execFile('cmd', ['/c', 'start', '""', art.path], { windowsVerbatimArguments: true },
+        execFile('cmd', ['/c', 'start', '""', art.path], { windowsVerbatimArguments: true, windowsHide: true },
           (err) => (err ? reject(err) : resolve()))
         return
       }
@@ -157,7 +157,8 @@ sessionRouter.post('/:id/artifacts/:artifactId/open', async (ctx: Context) => {
       // arguments made explorer treat the path as a second switch and do nothing.
       const cmd = isWin ? 'explorer' : 'open'
       const args = isWin ? [`/select,${art.path}`] : reveal ? ['-R', art.path] : [art.path]
-      execFile(cmd, args, (err) => (err ? reject(err) : resolve()))
+      // windowsHide: a console window would otherwise flash on every reveal.
+      execFile(cmd, args, { windowsHide: true }, (err) => (err ? reject(err) : resolve()))
     })
     ctx.body = { success: true, opened: art.path, reveal }
   } catch (err: any) {

@@ -17,7 +17,7 @@ export const workspaceRouter = new Router({ prefix: '/api/workspace' })
 const WORKSPACE_ROOT = resolve(config.workspaceDir || process.cwd())
 
 /** 动态工作区根：优先最近会话绑定目录（AI 真正干活的地方），回退 WORKSPACE_ROOT */
-function resolveWorkspaceRoot(): string {
+export function resolveWorkspaceRoot(): string {
   try {
     const db = getDB()
     const row = db.prepare(`

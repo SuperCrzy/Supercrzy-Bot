@@ -5,6 +5,7 @@ import { join, resolve, dirname } from 'path'
 import { homedir } from 'os'
 import { assertSafeFilePath } from '../services/sandbox'
 import { config } from '../config'
+import { resolveWorkspaceRoot } from './workspace'
 import { mediaMimeOf, isNonPreviewableBinary, docxMimeOf, isMarkdownPath, isSvgPath } from '../services/file-kind'
 
 /**
@@ -94,7 +95,7 @@ fsRouter.get('/read', async (ctx) => {
     return
   }
   let safePath: string
-  const pathErr = assertSafeFilePath(raw, { workspaceDir: config.workspaceDir })
+  const pathErr = assertSafeFilePath(raw, { workspaceDir: resolveWorkspaceRoot() })
   if (pathErr) {
     ctx.body = { error: `路径不在白名单内：${pathErr}` }
     return
@@ -210,7 +211,7 @@ fsRouter.get('/read', async (ctx) => {
 fsRouter.get('/raw', async (ctx) => {
   const raw = String(ctx.query.path || '').trim()
   if (!raw) { ctx.status = 400; ctx.body = { error: '缺少 path 参数' }; return }
-  const pathErr = assertSafeFilePath(raw)
+  const pathErr = assertSafeFilePath(raw, { workspaceDir: resolveWorkspaceRoot() })
   if (pathErr) { ctx.status = 403; ctx.body = { error: `路径不在白名单内：${pathErr}` }; return }
   const safePath = resolve(raw)
   const mime = mediaMimeOf(safePath) || docxMimeOf(safePath)
