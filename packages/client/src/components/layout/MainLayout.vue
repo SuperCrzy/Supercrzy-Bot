@@ -841,9 +841,37 @@ watch(
   { immediate: true },
 )
 
+/**
+ * Last line of defence for "clicking Settings does nothing".
+ *
+ * The native browser view is a WebContentsView above the page: it consumes clicks
+ * inside its rectangle before the renderer sees them. If it is still up when the user
+ * aims at a sidebar entry, the click never arrives and the router watcher below never
+ * runs — a capture-phase listener on the layout cannot help either, because the event
+ * stops at the native layer.
+ *
+ * So hide on any pointer-down inside the app chrome. It costs one IPC per click and
+ * only fires when a view exists; if the user was aiming at the browser the panel is
+ * already gone by the time the click lands, which is the intended trade: a click
+ * that cannot reach the app is a bug, a panel closing slightly eagerly is not.
+ */
+function onChromePointerDown(e: PointerEvent) {
+  const el = e.target as HTMLElement | null
+  if (!el) return
+  // Ignore clicks that belong to the browser canvas itself: those are meant for the page.
+  if (el.closest('.browser-canvas, .browser-chrome-bar, .browser-cmd, .browser-console, .browser-dom')) return
+  hideNativeBrowserNow()
+}
+
 onMounted(() => {
+  window.addEventListener('pointerdown', onChromePointerDown, true)
   appStore.loadSettings()
   chatStore.loadSessions()
+})
+onBeforeUnmount(() => {
+  // Capture-phase listener: leaving it attached after unmount would call into a
+  // disposed composable on every click.
+  window.removeEventListener('pointerdown', onChromePointerDown, true)
 })
 </script>
 

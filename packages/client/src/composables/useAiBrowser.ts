@@ -193,8 +193,20 @@ export function useAiBrowser(opts: AiBrowserOptions) {
     if (!bridge || !el) return
     const r = el.getBoundingClientRect()
     // 面板收起/宽度动画中间态会给出一像素级矩形 —— 上报它会把视图摆成一条缝，
-    // 而且动画结束前每帧都在变、白白刷 IPC。等矩形稳定下来再说。
-    if (r.width < 24 || r.height < 24) return
+    // 而且动画结束前每帧都在变、白白刷 IPC。
+    //
+    // 但不能只是 return：视图是原生层，**会拦截鼠标事件**，停在原地就等于在界面上
+    // 糊了一块看不见的挡板 —— 用户点「设置」点不动，因为它吃掉了那次点击。收起时
+    // 必须真的把它藏掉。这里直接 hide（不经过 stopNativeSync），因为循环还在跑，
+    // nativeShown 要保持可判定的状态由下次 show 处理。
+    if (r.width < 24 || r.height < 24) {
+      if (nativeShown) {
+        try { desktopBridge()?.hide?.()?.catch?.(() => {}) } catch { /* 视图已销毁 */ }
+        nativeShown = false
+        lastSentRect = ''
+      }
+      return
+    }
     const rect = { x: Math.round(r.left), y: Math.round(r.top), width: Math.round(r.width), height: Math.round(r.height) }
     const key = `${rect.x},${rect.y},${rect.width},${rect.height}`
     if (key === lastSentRect) return
