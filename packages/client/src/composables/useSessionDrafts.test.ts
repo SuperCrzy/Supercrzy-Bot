@@ -3,6 +3,21 @@ import { effectScope, ref } from 'vue'
 import { useSessionDrafts } from './useSessionDrafts'
 
 describe('session composer drafts', () => {
+  it('clears sent welcome content without removing uploads that completed later', () => {
+    const session = ref<string | null>(null)
+    const text = ref('hello')
+    const files = ref<Array<{ name: string }>>([{ name: 'sent.txt' }])
+    const scope = effectScope()
+    const drafts = scope.run(() => useSessionDrafts(() => session.value, text, files))!
+    const sent = [...files.value]
+    session.value = 'new-session'
+    drafts.addAttachments(null, [{ name: 'late.txt' }])
+    drafts.consumeDraft(null, 'hello', sent)
+    session.value = null
+    expect(text.value).toBe('')
+    expect(files.value.map(f => f.name)).toEqual(['late.txt'])
+    scope.stop()
+  })
   it('returns a delayed upload to its originating draft after a session switch', () => {
     const session = ref<string | null>('a')
     const text = ref('draft A')

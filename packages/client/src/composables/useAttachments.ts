@@ -19,6 +19,7 @@ export interface UseAttachmentsOptions {
   /** 当前会话 id（作为上传归属，后端按会话关联文件） */
   sessionId: () => string | undefined
   addAttachments: (sessionId: string | null, files: Attachment[]) => void
+  updateAttachment: (sessionId: string | null, predicate: (file: Attachment) => boolean, update: (file: Attachment) => void) => void
   /** 隐藏的 file input（用于上传结束后重置 value） */
   fileInputRef: Ref<HTMLInputElement | undefined | null>
   t: (key: string, params?: Record<string, unknown>) => string
@@ -37,7 +38,7 @@ export function useAttachments(opts: UseAttachmentsOptions) {
   const ocrUrl = opts.ocrUrl ?? '/api/ocr'
 
   /** 上传成功后旁路跑 OCR，结果回填到附件上（失败静默，不影响发送） */
-  function runOcr(file: Attachment) {
+  function runOcr(file: Attachment, sessionId: string | null) {
     fetch(ocrUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -46,8 +47,7 @@ export function useAttachments(opts: UseAttachmentsOptions) {
       .then((r) => (r.ok ? r.json() : null))
       .then((res) => {
         if (res && Array.isArray(res.texts) && res.texts.length > 0) {
-          const att = opts.uploadedFiles.value.find((a) => a.id === file.id)
-          if (att) att.ocrTexts = res.texts
+          opts.updateAttachment(sessionId, (a) => a.id === file.id, (a) => { a.ocrTexts = res.texts })
         }
       })
       .catch(() => { /* OCR 失败不影响发送 */ })
@@ -82,7 +82,7 @@ export function useAttachments(opts: UseAttachmentsOptions) {
       opts.addAttachments(sid || null, data.files)
       // 自动 OCR：图片上传后本地识别文字（RapidOCR，免费开源）→ 发消息时注入对话
       for (const f of data.files as Attachment[]) {
-        if (f.type?.startsWith('image/') && f.url) runOcr(f)
+        if (f.type?.startsWith('image/') && f.url) runOcr(f, sid || null)
       }
     } catch (err: any) {
       opts.onError(opts.t('chat.uploadFailMsg', { msg: err.message }))

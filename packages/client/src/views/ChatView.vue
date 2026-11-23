@@ -1223,7 +1223,7 @@ function confirmCompare() {
   comparePickerOpen.value = false
 }
 const uploadedFiles = ref<Attachment[]>([])
-const { addAttachments: addDraftAttachments } = useSessionDrafts(() => chatStore.currentSessionId, inputText, uploadedFiles)
+const { addAttachments: addDraftAttachments, updateAttachment: updateDraftAttachment, consumeDraft } = useSessionDrafts(() => chatStore.currentSessionId, inputText, uploadedFiles)
 /** 当前会话已绑定的工作目录（欢迎页"工作文件夹"显示与弹窗初始定位用） */
 const currentWorkspaceDir = computed(() => chatStore.currentSession?.workspaceDir || wsCurrent.value)
 
@@ -1598,6 +1598,7 @@ const showNoKeyBanner = computed(() => !appStore.hasApiKey && !noKeyBannerDismis
 const { handleFileSelect, removeFile, openAttachment } = useAttachments({
   uploadedFiles,
   addAttachments: addDraftAttachments,
+  updateAttachment: updateDraftAttachment,
   sessionId: () => chatStore.currentSession?.id,
   fileInputRef,
   t: (k: string, params?: Record<string, unknown>) => (params ? t(k, params) : t(k)),
@@ -2184,6 +2185,7 @@ async function doSend(text: string, files: Attachment[]) {
   // 新消息发送 → 重置横栏任务胶囊（旧计划"完成"态不再悬挂，等新 plan_update；history 保留在弹窗）
   planStore.resetProgress()
   let session = chatStore.currentSession
+  const startedFromWelcome = !session
   if (!session) {
     // 欢迎页草稿态发送 → 此刻才真正创建会话（标题交给下方自动命名生成摘要）
     session = await chatStore.createSession(undefined, currentWorkspaceDir.value)
@@ -2208,6 +2210,7 @@ async function doSend(text: string, files: Attachment[]) {
     attachments: files.length > 0 ? files : undefined,
   }
   await chatStore.addMessage(session.id, userMsg)
+  if (startedFromWelcome) consumeDraft(null, text, files)
   // 自动命名：新会话（标题仍是默认值）用首条消息摘要做标题，侧边栏可读
   if (isDefaultTitle(session.title)) {
     const title = (text || t('chat.filePlaceholder')).replace(/\s+/g, ' ').trim().slice(0, 24)

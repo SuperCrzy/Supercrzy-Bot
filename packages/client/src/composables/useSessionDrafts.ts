@@ -18,5 +18,22 @@ export function useSessionDrafts<T>(sessionId: () => string | null, text: Ref<st
       drafts.set(target, draft)
     }
   }
-  return { addAttachments }
+  function updateAttachment(target: string | null, predicate: (file: T) => boolean, update: (file: T) => void) {
+    const list = sessionId() === target ? attachments.value : drafts.get(target)?.attachments
+    const file = list?.find(predicate)
+    if (file) update(file)
+  }
+  function consumeDraft(target: string | null, sentText: string, sentFiles: T[]) {
+    const current = sessionId() === target
+    const draft = current ? { text: text.value, attachments: attachments.value } : drafts.get(target)
+    if (!draft) return
+    const nextText = draft.text.trim() === sentText ? '' : draft.text
+    const nextAttachments = draft.attachments.filter(file => !sentFiles.includes(file))
+    if (current) {
+      text.value = nextText
+      attachments.value = nextAttachments
+    } else if (nextText || nextAttachments.length) drafts.set(target, { text: nextText, attachments: nextAttachments })
+    else drafts.delete(target)
+  }
+  return { addAttachments, updateAttachment, consumeDraft }
 }
