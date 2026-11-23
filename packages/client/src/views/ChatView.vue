@@ -1975,7 +1975,8 @@ async function sendGhostMessage(suggestion: string) {
   }
   let session = chatStore.currentSession
   if (!session) {
-    session = await chatStore.createSession(suggestion.slice(0, 40), currentWorkspaceDir.value)
+    try { session = await chatStore.createSession(suggestion.slice(0, 40), currentWorkspaceDir.value) }
+    catch { nMessage.error(t('chat.sessionCreateFailed')); return }
   }
   const userMsg: ChatMessage = {
     id: crypto.randomUUID(),
@@ -2026,7 +2027,8 @@ async function resumeFromCheckpoint(ckptId: string) {
   }
   let session = chatStore.currentSession
   if (!session) {
-    session = await chatStore.createSession(t('chat.resumeTitle', { id: ckptId.slice(0, 8) }), currentWorkspaceDir.value)
+    try { session = await chatStore.createSession(t('chat.resumeTitle', { id: ckptId.slice(0, 8) }), currentWorkspaceDir.value) }
+    catch { nMessage.error(t('chat.sessionCreateFailed')); return }
   }
   const assistantMsg: ChatMessage = {
     id: crypto.randomUUID(),
@@ -2188,7 +2190,8 @@ async function doSend(text: string, files: Attachment[]) {
   const startedFromWelcome = !session
   if (!session) {
     // 欢迎页草稿态发送 → 此刻才真正创建会话（标题交给下方自动命名生成摘要）
-    session = await chatStore.createSession(undefined, currentWorkspaceDir.value)
+    try { session = await chatStore.createSession(undefined, currentWorkspaceDir.value) }
+    catch { nMessage.error(t('chat.sessionCreateFailed')); return }
   }
 
   // 欢迎页显式选择的技能 → 注入消息开头（AI 优先使用这些技能）
@@ -2210,7 +2213,9 @@ async function doSend(text: string, files: Attachment[]) {
     attachments: files.length > 0 ? files : undefined,
   }
   await chatStore.addMessage(session.id, userMsg)
-  if (startedFromWelcome) consumeDraft(null, text, files)
+  if (startedFromWelcome && !chatStore.unsavedMessages.get(session.id)?.includes(userMsg.id)) {
+    consumeDraft(null, text, files)
+  }
   // 自动命名：新会话（标题仍是默认值）用首条消息摘要做标题，侧边栏可读
   if (isDefaultTitle(session.title)) {
     const title = (text || t('chat.filePlaceholder')).replace(/\s+/g, ' ').trim().slice(0, 24)
@@ -2310,7 +2315,8 @@ async function sendQueued(texts: string[]) {
   planStore.resetProgress()
   let session = chatStore.currentSession
   if (!session) {
-    session = await chatStore.createSession(texts[0].slice(0, 50))
+    try { session = await chatStore.createSession(texts[0].slice(0, 50)) }
+    catch { nMessage.error(t('chat.sessionCreateFailed')); return }
   }
 
   for (const text of texts) {

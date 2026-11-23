@@ -362,6 +362,7 @@ export const useChatStore = defineStore('chat', () => {
    * @param collabMode 2026-08-29 超级协作平台：传 'semi'/'senate' 则创建协作任务会话（侧边栏显示"超级"标）
    */
   async function createSession(title?: string, workspaceDir?: string, collabMode?: 'semi' | 'senate'): Promise<ChatSession> {
+    const selectedBefore = currentSessionId.value
     const session: ChatSession = {
       id: crypto.randomUUID(),
       title: title || defaultSessionTitle(),
@@ -371,21 +372,19 @@ export const useChatStore = defineStore('chat', () => {
       workspaceDir: workspaceDir || '',
       collabMode,
     }
-    sessions.value.unshift(session)
-    messages.value.set(session.id, [])
-    currentSessionId.value = session.id
-    localStorage.setItem(SESSION_KEY, session.id)
-    persistCurrentSession()
-
     // 持久化到后端
-    try {
-      await fetch('/api/sessions', {
+    const response = await fetch('/api/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: session.title, model: session.model, id: session.id, workspace_dir: session.workspaceDir, collab_mode: collabMode || null }),
       })
-    } catch (err) {
-      console.error('Failed to persist session:', err)
+    if (!response.ok) throw new Error(`session_create_failed:${response.status}`)
+    sessions.value.unshift(session)
+    messages.value.set(session.id, [])
+    if (currentSessionId.value === selectedBefore) {
+      currentSessionId.value = session.id
+      localStorage.setItem(SESSION_KEY, session.id)
+      void persistCurrentSession()
     }
     return session
   }

@@ -15,6 +15,25 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('chat session loading', () => {
+  it('does not create or select a local session when the server rejects creation', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 503 })))
+    const chat = useChatStore()
+    await expect(chat.createSession('test')).rejects.toThrow('session_create_failed:503')
+    expect(chat.sessions).toEqual([])
+    expect(chat.currentSessionId).toBeNull()
+  })
+
+  it('does not replace a session the user selected while creation was pending', async () => {
+    let finish!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => { finish = resolve })))
+    const chat = useChatStore()
+    const creating = chat.createSession('test')
+    chat.currentSessionId = 'selected-in-the-meantime'
+    finish(Response.json({}))
+    await creating
+    expect(chat.currentSessionId).toBe('selected-in-the-meantime')
+    expect(chat.sessions).toHaveLength(1)
+  })
   it('serializes deletion after an in-flight save and skips later saves of the deleted message', async () => {
     let finishSave!: (response: Response) => void
     const calls: string[] = []

@@ -363,12 +363,18 @@ sessionRouter.post('/:id/messages', (ctx: Context) => {
 
   // 检查消息是否已存在（幂等）
   const existing = db.prepare('SELECT id, session_id FROM messages WHERE id = ?').get(id) as { id: string; session_id: string } | undefined
+  if (existing && existing.session_id !== ctx.params.id) {
+    ctx.status = 409
+    ctx.body = { error: 'message_id_conflict' }
+    return
+  }
+  const attachmentPayload: unknown = body.attachments
+  const files = Array.isArray(attachmentPayload) ? attachmentPayload
+    : attachmentPayload && typeof attachmentPayload === 'object' && 'attachments' in attachmentPayload && Array.isArray(attachmentPayload.attachments)
+      ? attachmentPayload.attachments : []
+  const attachmentIds = [...new Set(files.map((file: any) => typeof file?.id === 'string' ? file.id : '').filter(Boolean))]
+  db.transaction(() => {
   if (existing) {
-    if (existing.session_id !== ctx.params.id) {
-      ctx.status = 409
-      ctx.body = { error: 'message_id_conflict' }
-      return
-    }
     // 更新已有消息内容
     db.prepare(
       'UPDATE messages SET content = ?, token_count = ?, token_estimated = ?, cost = ?, elapsed_ms = ?, model = ?, attachments = ? WHERE id = ? AND session_id = ?'
@@ -381,6 +387,11 @@ sessionRouter.post('/:id/messages', (ctx: Context) => {
 
   // Update session timestamp
   db.prepare("UPDATE sessions SET updated_at = datetime('now') WHERE id = ?").run(ctx.params.id)
+  if (attachmentIds.length) {
+    const bind = db.prepare("UPDATE uploads SET session_id = ? WHERE id = ? AND (session_id IS NULL OR session_id = '')")
+    for (const attachmentId of attachmentIds) bind.run(ctx.params.id, attachmentId)
+  }
+  })()
 
   ctx.body = { id, ...body }
   ctx.status = 201
