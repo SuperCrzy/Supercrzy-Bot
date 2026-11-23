@@ -547,18 +547,8 @@ function getPlanSnapshot(sessionId: string): PlanSnapshot | null {
   }
 }
 
-/** 任务结束：全部步骤 + 根任务标记完成 */
-function finishPlan(sessionId: string): PlanSnapshot | null {
-  const db = getDB()
-  const plan = db.prepare("SELECT * FROM tasks WHERE session_id=? AND parent_id IS NULL AND status='in_progress' ORDER BY created_at DESC LIMIT 1").get(sessionId) as any
-  if (!plan) return null
-  db.prepare("UPDATE tasks SET status='completed' WHERE parent_id=?").run(plan.id)
-  db.prepare("UPDATE tasks SET status='completed' WHERE id=?").run(plan.id)
-  const steps = db.prepare('SELECT * FROM tasks WHERE parent_id=? ORDER BY sort_order').all(plan.id) as any[]
-  return { planId: plan.id, title: plan.subject, steps: steps.map((s: any) => ({ id: s.id, subject: s.subject, status: 'completed' })) }
-}
-
 import { classifyApiError, jitteredBackoff } from './error-classifier'
+import { finalizePlan } from './plan-finalize'
 import { ToolGuardrailController } from './tool-guardrails'
 import { shouldCompress, compressContext, pruneOldToolResults } from './context-compressor'
 import { matchPlaybooks } from './playbook-match'
@@ -2725,7 +2715,7 @@ export async function runAgentLoop(
   // ---- Plan 收尾：任务结束，全部步骤标记完成（横栏胶囊全部划线） ----
   if (sessionId) {
     try {
-      const snap = finishPlan(sessionId)
+      const snap = finalizePlan(getDB(), sessionId, finished && !interrupted)
       if (snap) emitSSE(ctx, 'plan_update', snap)
     } catch { /* 收尾失败不影响主流程 */ }
   }

@@ -57,15 +57,28 @@ export function claimGoalRun(db: Database.Database, sessionId: string, goalId: s
   })()
 }
 
+/** Mark a running goal as pausing; the caller must also signal its executor. */
+export function requestGoalPause(db: Database.Database, sessionId: string, goalId: string, version: number, now = Date.now()): string | undefined {
+  if (!Number.isSafeInteger(version) || version < 1) throw new Error('invalid_version')
+  return db.transaction(() => {
+    const goal = db.prepare("SELECT current_run_id FROM persistent_goals WHERE id = ? AND session_id = ? AND version = ? AND status = 'active'")
+      .get(goalId, sessionId, version) as { current_run_id: string | null } | undefined
+    if (!goal?.current_run_id) return undefined
+    const changed = db.prepare("UPDATE persistent_goals SET status = 'pausing', version = version + 1, updated_at = ? WHERE id = ? AND version = ? AND status = 'active'")
+      .run(now, goalId, version)
+    return changed.changes === 1 ? goal.current_run_id : undefined
+  })()
+}
+
 /** Record a settled run, accepting only the run that still owns the goal. */
 export function settleGoalRun(db: Database.Database, goalId: string, runId: string, outcome: 'paused' | 'waiting_user' | 'interrupted', result: string, now = Date.now()): boolean {
   return db.transaction(() => {
     const run = db.prepare("SELECT started_at FROM persistent_goal_runs WHERE id = ? AND goal_id = ? AND status = 'running'").get(runId, goalId) as { started_at: number } | undefined
     if (!run) return false
     const elapsed = Math.max(0, now - run.started_at)
-    const updated = db.prepare(`UPDATE persistent_goals SET status = ?, current_run_id = NULL, elapsed_ms = elapsed_ms + ?,
+    const updated = db.prepare(`UPDATE persistent_goals SET status = CASE WHEN status = 'pausing' AND ? != 'interrupted' THEN 'paused' ELSE ? END, current_run_id = NULL, elapsed_ms = elapsed_ms + ?,
       last_result = ?, version = version + 1, updated_at = ? WHERE id = ? AND current_run_id = ? AND status IN ('active', 'pausing')`)
-      .run(outcome, elapsed, result, now, goalId, runId)
+      .run(outcome, outcome, elapsed, result, now, goalId, runId)
     if (updated.changes !== 1) return false
     db.prepare("UPDATE persistent_goal_runs SET status = ?, ended_at = ?, result = ? WHERE id = ? AND status = 'running'")
       .run(outcome === 'interrupted' ? 'interrupted' : 'finished', now, result, runId)
