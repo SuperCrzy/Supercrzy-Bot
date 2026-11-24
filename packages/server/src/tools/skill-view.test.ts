@@ -7,8 +7,8 @@ import skillView from './skill-view'
 
 beforeEach(() => {
   state.db = new Database(':memory:')
-  state.db.exec('CREATE TABLE skills (id TEXT PRIMARY KEY, name TEXT, description TEXT, category TEXT, enabled INTEGER, is_builtin INTEGER, trigger_keywords TEXT, tools TEXT, prompt_template TEXT, source_file TEXT)')
-  const insert = state.db.prepare('INSERT INTO skills VALUES (?, ?, ?, ?, 1, 0, ?, ?, ?, ?)')
+  state.db.exec('CREATE TABLE skills (id TEXT PRIMARY KEY, name TEXT, description TEXT, category TEXT, enabled INTEGER, is_builtin INTEGER, trigger_keywords TEXT, tools TEXT, prompt_template TEXT, source_file TEXT, created_at TEXT DEFAULT (datetime(\'now\')), usage_count INTEGER NOT NULL DEFAULT 0)')
+  const insert = state.db.prepare('INSERT INTO skills (id, name, description, category, enabled, is_builtin, trigger_keywords, tools, prompt_template, source_file) VALUES (?, ?, ?, ?, 1, 0, ?, ?, ?, ?)')
   insert.run('11111111-2222-3333-4444-555555555555', 'superpowers/brainstorming', 'Think first', 'general', 'brainstorming', '[]', 'First explore the problem', '')
   insert.run('other', 'brainstorming-lite', 'Other', 'general', '', '[]', 'Different instructions', '')
 })

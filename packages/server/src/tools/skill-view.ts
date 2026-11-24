@@ -25,7 +25,14 @@ const tool: ToolDef = {
     let skill: any
     if (id) skill = db.prepare('SELECT * FROM skills WHERE id = ?').get(id)
     else {
-      skill = db.prepare('SELECT * FROM skills WHERE name = ? COLLATE NOCASE').get(name)
+      // Duplicate names exist (a skill re-imported while an older copy stayed
+      // around). Without an ORDER BY, which row comes back is undefined — the same
+      // name could open a different skill on the next call, so instructions changed
+      // between attempts with no visible reason. Prefer an enabled copy, then the
+      // most-used one, then the oldest: the version the history refers to.
+      skill = db.prepare(
+        'SELECT * FROM skills WHERE name = ? COLLATE NOCASE ORDER BY enabled DESC, usage_count DESC, created_at ASC LIMIT 1'
+      ).get(name)
       // Preserve older calls that passed a UUID in the name field.
       if (!skill && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(name)) {
         skill = db.prepare('SELECT * FROM skills WHERE id = ?').get(name)

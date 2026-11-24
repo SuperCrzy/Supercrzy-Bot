@@ -5,6 +5,15 @@
 import type { ToolDef } from './types'
 import { getDB } from '../services/database'
 
+/**
+ * Stay under the caller's output cap with room to spare.
+ *
+ * The hard limit is 16,000 characters. Using 12,000 leaves room for the header line
+ * and the trailing note, and means a listing that just fits is not pushed over by
+ * a longer skill name later.
+ */
+const LIST_BUDGET = 12_000
+
 const tool: ToolDef = {
     // get_goal 已迁至 tools/ 目录（ToolDef 注册表，2026-08-25 工具架构轻量包化）——此处不再内联定义，避免工具名重复
     name: 'skill_list',
@@ -17,11 +26,22 @@ const tool: ToolDef = {
       'SELECT name, description, category, enabled, is_builtin, trigger_keywords FROM skills ORDER BY sort_order ASC, created_at DESC'
     ).all() as any[]
     if (rows.length === 0) return 'No skills installed.'
-    return rows.map((r: any) => {
+    // Tool output is capped at 16,000 characters by the caller. With 200+ skills the
+    // full listing runs past 30,000, so everything after the cutoff silently vanished
+    // — the model reported a shorter library than exists and answered "I don't have
+    // that skill" about entries it never saw. When the listing would not fit, return
+    // names only: every skill stays visible, and descriptions come from skill_view.
+    const full = rows.map((r: any) => {
       const status = r.enabled ? 'ON' : 'OFF'
       const source = r.is_builtin ? 'builtin' : 'installed'
       return `[${status}] ${r.name} (${r.category}, ${source}) - ${r.description}`
     }).join('\n')
+    if (full.length <= LIST_BUDGET) return full
+    const names = rows.map((r: any) => {
+      const status = r.enabled ? 'ON' : 'OFF'
+      return `[${status}] ${r.name} (${r.category})`
+    }).join('\n')
+    return `${names}\n\n(${rows.length} skills; descriptions omitted to fit — call skill_view(name) for details)`
   },
 }
 
