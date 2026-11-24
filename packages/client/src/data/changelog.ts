@@ -37,6 +37,34 @@ export const APP_VERSION: string = typeof __APP_VERSION__ === 'string' ? __APP_V
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.3.7',
+    date: '2026-11-24',
+    title: '不再被随机踢下线',
+    titleEn: 'No longer signed out at random',
+    features: [
+      '明确要求用某个技能时，助手会先读取该技能的说明再动手',
+    ],
+    featuresEn: [
+      'Naming a skill now makes the assistant read it before acting',
+    ],
+    fixes: [
+      '刷新令牌撞车不再导致退出登录：明明登录了却点什么都没反应的问题已修复',
+      '写文件改为全有或全无，中途失败不会留下半截文件、原内容也不再丢失',
+      '目标栏输出不再重复显示两遍',
+      '中断的任务不再把所有步骤标为完成',
+      '日期解析拒绝 2月30日、13月这类不存在的日期',
+      '切换账号后不会再沿用上一个账号执行目标',
+    ],
+    fixesEn: [
+      'A refresh race no longer signs you out — the "signed in but nothing responds" case is fixed',
+      'File writes are all-or-nothing: a failure no longer leaves a partial file or loses the original',
+      'The goal bar no longer prints its output twice',
+      'An interrupted run no longer marks every step complete',
+      'Impossible dates like Feb 30 are rejected instead of silently rolled forward',
+      "A goal picked up after switching accounts no longer runs as the previous account",
+    ],
+  },
+  {
     version: '1.3.6',
     date: '2026-11-24',
     title: '安全加固与持续目标',
