@@ -9,7 +9,9 @@ export function parseGoalTurnReport(answer: string, calls: Map<string, { name: s
   // Until tool execution has a durable idempotency mechanism, do not start a
   // second autonomous turn after an operation that could have side effects.
   // Check every call, not only the evidence selected by the model.
-  const readOnlyTools = new Set(['file_read'])
+  // These implementations only read local files or query local SQLite. Network
+  // requests, terminal operations and unknown tools remain outside the list.
+  const readOnlyTools = new Set(['file_read', 'skill_list', 'skill_view', 'memory_list'])
   if ([...calls.values()].some(call => !readOnlyTools.has(call.name))) return { summary }
   let report: any
   try { report = JSON.parse(match[1]) } catch { return { summary } }

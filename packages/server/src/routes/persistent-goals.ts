@@ -1,6 +1,6 @@
 import Router from 'koa-router'
 import { getDB } from '../services/database'
-import { cancelStoppedGoal, completeStoppedGoal, createPersistentGoal, getOpenPersistentGoal, listGoalEvents } from '../services/persistent-goals'
+import { cancelStoppedGoal, completeStoppedGoal, createPersistentGoal, getOpenPersistentGoal, goalOwnerIsAlive, listGoalEvents, reconcileDeadGoalRuns, updateStoppedGoal } from '../services/persistent-goals'
 import { createGoalRuntime } from '../services/goal-runtime'
 import { handleAgentChat } from '../services/chat'
 import { getPendingConfirmationMeta, hasPendingQuestion, requestStop } from '../services/agent'
@@ -24,7 +24,10 @@ persistentGoalsRouter.get('/', ctx => {
   if (!db.prepare('SELECT 1 FROM sessions WHERE id = ?').get(ctx.params.sessionId)) {
     ctx.status = 404; ctx.body = { error: 'session_not_found' }; return
   }
-  const goal = getOpenPersistentGoal(db, ctx.params.sessionId)
+  let goal = getOpenPersistentGoal(db, ctx.params.sessionId)
+  if (goal?.current_run_id && reconcileDeadGoalRuns(db, goalOwnerIsAlive, Date.now(), goal.id)) {
+    goal = getOpenPersistentGoal(db, ctx.params.sessionId)
+  }
   const run = goal?.current_run_id
     ? db.prepare('SELECT started_at FROM persistent_goal_runs WHERE id = ? AND goal_id = ? AND status = ?').get(goal.current_run_id, goal.id, 'running') as { started_at: number } | undefined
     : undefined
@@ -60,6 +63,19 @@ persistentGoalsRouter.post('/:goalId/cancel', ctx => {
   ctx.body = { ok: true }
 })
 
+persistentGoalsRouter.post('/:goalId/edit', ctx => {
+  const body = ctx.request.body as { version?: unknown; objective?: unknown; acceptance?: unknown } | undefined
+  if (typeof body?.version !== 'number' || !Number.isSafeInteger(body.version) || body.version < 1 ||
+      typeof body.objective !== 'string' || !body.objective.trim() || body.objective.trim().length > 20_000 ||
+      typeof body.acceptance !== 'string' || body.acceptance.trim().length > 20_000) {
+    ctx.status = 400; ctx.body = { error: 'invalid_goal' }; return
+  }
+  if (!updateStoppedGoal(getDB(), ctx.params.sessionId, ctx.params.goalId, body.version, body.objective, body.acceptance)) {
+    ctx.status = 409; ctx.body = { error: 'goal_changed_or_running' }; return
+  }
+  ctx.body = { ok: true }
+})
+
 persistentGoalsRouter.get('/history', ctx => {
   const goals = getDB().prepare(`SELECT id, objective, status, last_result, elapsed_ms, updated_at FROM persistent_goals
     WHERE session_id = ? AND status IN ('completed', 'cancelled') ORDER BY updated_at DESC LIMIT 20`).all(ctx.params.sessionId)
@@ -79,10 +95,14 @@ persistentGoalsRouter.post('/:goalId/complete', ctx => {
 })
 
 persistentGoalsRouter.post('/:goalId/start', ctx => {
-  const body = ctx.request.body as { version?: unknown; acknowledgeInterrupted?: unknown } | undefined
+  const body = ctx.request.body as { version?: unknown; acknowledgeInterrupted?: unknown; model?: unknown; language?: unknown } | undefined
   if (!isSignedIn() || !readSession()?.accountId) { ctx.status = 401; ctx.body = { error: 'not_signed_in' }; return }
   if (typeof body?.version !== 'number' || !Number.isSafeInteger(body.version) || body.version < 1) {
     ctx.status = 400; ctx.body = { error: 'invalid_version' }; return
+  }
+  if ((body.model !== undefined && (typeof body.model !== 'string' || body.model.length > 256)) ||
+      (body.language !== undefined && (typeof body.language !== 'string' || body.language.length > 32))) {
+    ctx.status = 400; ctx.body = { error: 'invalid_execution_options' }; return
   }
   const db = getDB(), goal = getOpenPersistentGoal(db, ctx.params.sessionId)
   if (!goal || goal.id !== ctx.params.goalId || goal.version !== body.version) {
@@ -91,7 +111,7 @@ persistentGoalsRouter.post('/:goalId/start', ctx => {
   if (goal.status === 'interrupted' && body.acknowledgeInterrupted !== true) {
     ctx.status = 409; ctx.body = { error: 'interruption_review_required' }; return
   }
-  const run = getRuntime(db).start(ctx.params.sessionId, goal.id, goal.version)
+  const run = getRuntime(db).start(ctx.params.sessionId, goal.id, goal.version, { model: body.model || undefined, language: body.language || undefined })
   if (!run) { ctx.status = 409; ctx.body = { error: 'goal_not_startable' }; return }
   void run.completion.catch(error => console.error('[goal] failed to settle run:', error))
   ctx.status = 202; ctx.body = { ok: true, runId: run.runId }

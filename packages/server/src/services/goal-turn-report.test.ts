@@ -26,4 +26,14 @@ describe('goal turn report', () => {
     mixed.set('write', { name: 'shell_exec', arguments: '{"command":"echo hi"}' })
     expect(parseGoalTurnReport(report(['one']), mixed, results, false).fingerprint).toBeUndefined()
   })
+  it('can continue after local skill and memory lookups, but not network or unknown tools', () => {
+    for (const name of ['skill_list', 'skill_view', 'memory_list']) {
+      const local = new Map([['one', { name, arguments: '{}' }]])
+      expect(parseGoalTurnReport(report(['one']), local, results, false).fingerprint).toMatch(/^[a-f0-9]{64}$/)
+    }
+    for (const name of ['web_fetch', 'web_search', 'unknown']) {
+      const other = new Map([['one', { name, arguments: '{}' }]])
+      expect(parseGoalTurnReport(report(['one']), other, results, false).fingerprint).toBeUndefined()
+    }
+  })
 })

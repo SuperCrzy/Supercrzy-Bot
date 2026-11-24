@@ -48,7 +48,6 @@ export default defineConfig({
       output: {
         manualChunks: {
           echarts: ['echarts'],
-          monaco: ['monaco-editor'],
         }
       }
     }

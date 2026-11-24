@@ -12,7 +12,7 @@ export function makeGoalAgentRunner(options: {
   makeMessages: (sessionId: string, objective: string, acceptance: string) => Promise<Array<{ role: string; content: string }>>
   ownerIsCurrent: () => boolean
 }): GoalRunner {
-  return async ({ goal, signal, emit }) => {
+  return async ({ goal, signal, emit, options: executionOptions }) => {
     if (signal.aborted || !options.ownerIsCurrent()) return { outcome: 'interrupted', summary: '执行尚未开始或账号已变更。' }
     const messages = await options.makeMessages(goal.session_id, goal.objective, goal.acceptance)
     if (signal.aborted || !options.ownerIsCurrent()) return { outcome: 'interrupted', summary: '执行尚未开始或账号已变更。' }
@@ -46,7 +46,7 @@ export function makeGoalAgentRunner(options: {
       return true
     }
     response.end = () => { response.writableEnded = true; response.emit('finish') }
-    const ctx = { state: { goalExecution: true }, request: { body: { messages, sessionId: goal.session_id } }, req: new EventEmitter(), res: response, set: () => {} } as unknown as Context
+    const ctx = { state: { goalExecution: true }, request: { body: { messages, sessionId: goal.session_id, model: executionOptions?.model, language: executionOptions?.language } }, req: new EventEmitter(), res: response, set: () => {} } as unknown as Context
     try { await options.handler(ctx) } finally { signal.removeEventListener('abort', stop) }
     if (captureFailed || !done || ['failed', 'interrupted'].includes(terminal)) return { outcome: 'interrupted', summary: '执行中断或事件未能保存，请检查进度。' }
     if (signal.aborted || terminal === 'paused' || terminal === 'cancelled') return { outcome: 'paused', summary: answer || chunks || '已停止。' }

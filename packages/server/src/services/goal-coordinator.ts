@@ -2,14 +2,15 @@ import type Database from 'better-sqlite3'
 import { appendGoalEvent, claimGoalRun, getOpenPersistentGoal, recordGoalProgress, requestGoalPause, settleGoalRun, type PersistentGoal } from './persistent-goals'
 
 export type GoalRunResult = { outcome: 'paused' | 'waiting_user' | 'interrupted'; summary: string; progressFingerprint?: string }
-export type GoalRunner = (input: { goal: PersistentGoal; runId: string; signal: AbortSignal; emit: (event: string, payload: unknown) => void }) => Promise<GoalRunResult>
+export type GoalExecutionOptions = { model?: string; language?: string }
+export type GoalRunner = (input: { goal: PersistentGoal; runId: string; signal: AbortSignal; emit: (event: string, payload: unknown) => void; options?: GoalExecutionOptions }) => Promise<GoalRunResult>
 
 /** Coordinates one owned run. A runner must resolve only after its work actually stops. */
 export class GoalCoordinator {
   private readonly running = new Map<string, { runId: string; controller: AbortController }>()
   constructor(private readonly db: Database.Database, private readonly runner: GoalRunner) {}
 
-  start(sessionId: string, goalId: string, version: number): { runId: string; completion: Promise<void> } | undefined {
+  start(sessionId: string, goalId: string, version: number, options?: GoalExecutionOptions): { runId: string; completion: Promise<void> } | undefined {
     const goal = getOpenPersistentGoal(this.db, sessionId)
     if (!goal || goal.id !== goalId || goal.version !== version || this.running.has(goalId)) return undefined
     const runId = claimGoalRun(this.db, sessionId, goalId, version)
@@ -25,7 +26,7 @@ export class GoalCoordinator {
       const maxTurns = 3
       for (let turn = 0; turn < maxTurns; turn++) {
         if (controller.signal.aborted) { settleGoalRun(this.db, goalId, runId, 'paused', currentGoal.last_result); return }
-        const result = await this.runner({ goal: currentGoal, runId, signal: controller.signal, emit })
+        const result = await this.runner({ goal: currentGoal, runId, signal: controller.signal, emit, options })
         if (!['paused', 'waiting_user', 'interrupted'].includes(result?.outcome) || typeof result.summary !== 'string') throw new Error('invalid_runner_result')
         const canContinue = result.outcome === 'paused' && !controller.signal.aborted && typeof result.progressFingerprint === 'string' && /^[a-f0-9]{64}$/.test(result.progressFingerprint) && !seen.has(result.progressFingerprint)
         if (!canContinue || turn === maxTurns - 1) {

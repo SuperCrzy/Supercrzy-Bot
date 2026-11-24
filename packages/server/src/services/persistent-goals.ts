@@ -33,12 +33,22 @@ export function createPersistentGoal(db: Database.Database, sessionId: string, o
 export function getOpenPersistentGoal(db: Database.Database, sessionId: string): PersistentGoal | undefined {
   try {
     return db.prepare("SELECT * FROM persistent_goals WHERE session_id = ? AND status NOT IN ('completed', 'cancelled')").get(sessionId) as PersistentGoal | undefined
-  } catch {
+  } catch (error) {
     // Called from the chat entry point, which must survive a database that predates
     // this table — an older install, a restored backup, or a test harness that builds
     // its own schema. A missing goals table means "no goal", not "chat is broken".
-    return undefined
+    if (error instanceof Error && (error as Error & { code?: string }).code === 'SQLITE_ERROR' && /no such table: (?:main\.)?persistent_goals\b/i.test(error.message)) return undefined
+    throw error
   }
+}
+
+/** Edit only a stopped goal at the exact version the user reviewed. */
+export function updateStoppedGoal(db: Database.Database, sessionId: string, id: string, version: number, objective: string, acceptance: string): boolean {
+  const text = objective.trim(), criteria = acceptance.trim()
+  if (!Number.isSafeInteger(version) || version < 1 || !text || text.length > 20_000 || criteria.length > 20_000) throw new Error('invalid_goal')
+  return db.prepare(`UPDATE persistent_goals SET objective = ?, acceptance = ?, version = version + 1, updated_at = ?
+    WHERE id = ? AND session_id = ? AND version = ? AND status IN ('paused', 'interrupted', 'waiting_user') AND current_run_id IS NULL`)
+    .run(text, criteria, Date.now(), id, sessionId, version).changes === 1
 }
 
 /** Reject stale emitters and oversized events rather than silently losing approvals. */
@@ -92,8 +102,13 @@ export function claimGoalRun(db: Database.Database, sessionId: string, goalId: s
 }
 
 /** Reconcile only runs whose owning local process is definitely gone. */
-export function reconcileDeadGoalRuns(db: Database.Database, ownerIsAlive: (pid: number) => boolean, now = Date.now()): number {
-  const runs = db.prepare("SELECT id, goal_id, owner_pid FROM persistent_goal_runs WHERE status = 'running' AND owner_pid IS NOT NULL").all() as Array<{ id: string; goal_id: string; owner_pid: number }>
+export function goalOwnerIsAlive(pid: number): boolean {
+  try { process.kill(pid, 0); return true }
+  catch (error) { return (error as NodeJS.ErrnoException).code !== 'ESRCH' }
+}
+
+export function reconcileDeadGoalRuns(db: Database.Database, ownerIsAlive: (pid: number) => boolean, now = Date.now(), goalId?: string): number {
+  const runs = db.prepare("SELECT id, goal_id, owner_pid FROM persistent_goal_runs WHERE status = 'running' AND owner_pid IS NOT NULL AND (? IS NULL OR goal_id = ?)").all(goalId ?? null, goalId ?? null) as Array<{ id: string; goal_id: string; owner_pid: number }>
   let count = 0
   for (const run of runs) {
     if (!Number.isSafeInteger(run.owner_pid) || run.owner_pid <= 0) continue

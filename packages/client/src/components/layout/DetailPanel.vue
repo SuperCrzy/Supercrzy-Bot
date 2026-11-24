@@ -137,6 +137,7 @@
             <span class="diff-filename">{{ df.name }}</span>
           </div>
         </div>
+        <p v-if="diffLoadError" role="alert">{{ $t('detail.diffLoadError') }}</p>
         <div v-if="showDiffEditor" class="diff-editor-container" ref="diffEditorRef"></div>
       </div>
 
@@ -232,7 +233,7 @@ import { usePanelMaximize } from '@/composables/usePanelMaximize'
 import { sanitizeSvg } from '@/utils/sanitize-svg'
 import { openFilePreview } from '@/utils/file-preview'
 import { formatSize } from '@/utils/format-size'
-import * as monaco from 'monaco-editor'
+import type * as Monaco from 'monaco-editor'
 
 interface FileEntry {
   name: string
@@ -558,7 +559,21 @@ function openInMax(src: string) {
 const diffEditorRef = ref<HTMLElement | null>(null)
 const selectedDiff = ref(0)
 const showDiffEditor = ref(false)
-let diffEditor: monaco.editor.IStandaloneDiffEditor | null = null
+let diffEditor: Monaco.editor.IStandaloneDiffEditor | null = null
+let diffRequest = 0
+const diffLoadError = ref(false)
+
+function disposeDiff() {
+  const models = diffEditor?.getModel()
+  diffEditor?.dispose()
+  models?.original.dispose()
+  models?.modified.dispose()
+  diffEditor = null
+}
+onBeforeUnmount(() => { diffRequest++; disposeDiff() })
+watch(() => props.activeTab, tab => {
+  if (tab !== 'changes') { diffRequest++; disposeDiff(); showDiffEditor.value = false; diffLoadError.value = false }
+})
 
 // 变更数据源：store 里的 file_changed 事件（file_write 写入时后端推送，含真实改前/改后内容）
 const diffFiles = computed(() => appStore.fileChanges.map((c: { name: string; path: string; oldContent: string; newContent: string }) => ({
@@ -568,11 +583,17 @@ const diffFiles = computed(() => appStore.fileChanges.map((c: { name: string; pa
   newContent: c.newContent,
 })))
 
-function showDiff() {
+async function showDiff() {
+  const request = ++diffRequest
   showDiffEditor.value = true
-  nextTick(() => {
-    if (diffEditorRef.value) {
-      if (diffEditor) diffEditor.dispose()
+  diffLoadError.value = false
+  try {
+    const [monaco, worker] = await Promise.all([import('monaco-editor'), import('monaco-editor/editor/editor.worker.js?worker'), nextTick()])
+    if (request === diffRequest && diffEditorRef.value) {
+      // The diff uses plain text only; Vite supplies the bundled editor worker.
+      // Without this Monaco guesses an unserved source path in dev and packaged builds.
+      ;(globalThis as any).MonacoEnvironment = { getWorker: () => new worker.default() }
+      disposeDiff()
       const df = diffFiles.value[selectedDiff.value]
       diffEditor = monaco.editor.createDiffEditor(diffEditorRef.value, {
         theme: 'vs-dark', readOnly: true, automaticLayout: true,
@@ -583,7 +604,9 @@ function showDiff() {
         modified: monaco.editor.createModel(df?.newContent || '', 'text/plain'),
       })
     }
-  })
+  } catch (error) {
+    if (request === diffRequest) { diffLoadError.value = true; console.error('[diff] failed to load editor', error) }
+  }
 }
 
 /**

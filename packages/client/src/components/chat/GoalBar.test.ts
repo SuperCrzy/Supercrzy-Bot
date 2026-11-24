@@ -3,8 +3,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createApp, h, nextTick, ref, type Ref } from 'vue'
 import GoalBar from './GoalBar.vue'
 
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key, locale: { value: 'zh' } }) }))
 vi.mock('@/stores/account', () => ({ useAccountStore: () => ({ accountId: 'account' }) }))
+vi.mock('@/stores/app', () => ({ useAppStore: () => ({ currentModel: 'selected-model' }) }))
 
 const goal = (id: string) => ({ id, objective: id, acceptance: '', status: 'active', version: 1, elapsed_ms: 0, running_since: null, last_result: '' })
 let unmount: (() => void) | undefined
@@ -20,6 +21,81 @@ function mount(session: Ref<string>) {
 }
 
 describe('goal progress display', () => {
+  it('preserves a question reply when the answer request fails', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('/question-answer')) return new Response('', { status: 500 })
+      if (url.endsWith('/pending')) return Response.json({ questions: [{ id: 'q', question: 'Question' }], confirmations: [] })
+      if (url.includes('/events?')) return Response.json({ events: [] })
+      return Response.json({ goal: goal('a') })
+    }))
+    const root = mount(ref('a'))
+    await vi.waitFor(() => expect(root.querySelector('.goal-pending input')).not.toBeNull())
+    const input = root.querySelector('.goal-pending input') as HTMLInputElement
+    input.value = 'keep my answer'; input.dispatchEvent(new Event('input')); await nextTick()
+    root.querySelector('.goal-pending form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await vi.waitFor(() => expect(root.textContent).toContain('goal.actionError'))
+    expect(input.value).toBe('keep my answer')
+  })
+  it('does not save an old draft into a replacement goal', async () => {
+    let current = { ...goal('a'), status: 'paused' }
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('/pending')) return Response.json({ questions: [], confirmations: [] })
+      if (url.includes('/events?')) return Response.json({ events: [] })
+      return Response.json({ goal: current })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const root = mount(ref('session'))
+    await vi.waitFor(() => expect(root.querySelector('.goal-summary')).not.toBeNull())
+    ;(root.querySelector('.goal-summary') as HTMLButtonElement).click(); await nextTick()
+    ;([...root.querySelectorAll('button')].find(item => item.textContent?.includes('goal.edit')) as HTMLButtonElement).click(); await nextTick()
+    const input = root.querySelector('#goal-edit-objective') as HTMLTextAreaElement
+    input.value = 'unsaved draft'; input.dispatchEvent(new Event('input'))
+    current = { ...goal('replacement'), status: 'paused' }
+    await vi.waitFor(() => expect(root.querySelector('.goal-text')?.textContent).toBe('replacement'), { timeout: 3000 })
+    expect(input.value).toBe('unsaved draft')
+    expect(root.textContent).toContain('goal.editChanged')
+    expect(([...root.querySelectorAll('button')].find(item => item.textContent?.includes('goal.save')) as HTMLButtonElement).disabled).toBe(true)
+  })
+  it('edits a stopped goal using the version displayed when editing began', async () => {
+    let current = { ...goal('a'), status: 'paused', acceptance: 'old' }
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.endsWith('/edit')) { const data = JSON.parse(String(init?.body)); current = { ...current, objective: data.objective, acceptance: data.acceptance, version: 2 }; return Response.json({ ok: true }) }
+      if (url.endsWith('/pending')) return Response.json({ questions: [], confirmations: [] })
+      if (url.includes('/events?')) return Response.json({ events: [] })
+      return Response.json({ goal: current })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const root = mount(ref('a'))
+    await vi.waitFor(() => expect(root.querySelector('.goal-summary')).not.toBeNull())
+    ;(root.querySelector('.goal-summary') as HTMLButtonElement).click(); await nextTick()
+    ;([...root.querySelectorAll('button')].find(item => item.textContent?.includes('goal.edit')) as HTMLButtonElement).click(); await nextTick()
+    const input = root.querySelector('#goal-edit-objective') as HTMLTextAreaElement
+    input.value = 'new goal'; input.dispatchEvent(new Event('input')); await nextTick()
+    ;([...root.querySelectorAll('button')].find(item => item.textContent?.includes('goal.save')) as HTMLButtonElement).click()
+    await vi.waitFor(() => expect(root.querySelector('.goal-text')?.textContent).toBe('new goal'))
+    const post = fetchMock.mock.calls.find(([url]) => String(url).endsWith('/edit'))!
+    expect(JSON.parse(String(post[1]?.body))).toMatchObject({ version: 1, objective: 'new goal', acceptance: 'old' })
+  })
+  it('starts with the currently selected model and interface language', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (init?.method === 'POST') return Response.json({ ok: true })
+      if (url.endsWith('/pending')) return Response.json({ questions: [], confirmations: [] })
+      if (url.includes('/events?')) return Response.json({ events: [] })
+      return Response.json({ goal: { ...goal('a'), status: 'paused' } })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const root = mount(ref('a'))
+    await vi.waitFor(() => expect(root.textContent).toContain('goal.start'))
+    const button = [...root.querySelectorAll('button')].find(item => item.textContent?.includes('goal.start'))!
+    button.click()
+    await vi.waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(true))
+    const post = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST')!
+    expect(JSON.parse(String(post[1]?.body))).toMatchObject({ model: 'selected-model', language: 'zh' })
+  })
   it('catches up with more than five pages without waiting for the polling interval', async () => {
     const cursors: number[] = []
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {

@@ -8,6 +8,7 @@ import { createGoalRuntime } from './goal-runtime'
 import Koa from 'koa'
 import bodyParser from 'koa-bodyparser'
 import request from 'supertest'
+import Database from 'better-sqlite3'
 
 const app = new Koa(); app.use(bodyParser()); app.use(persistentGoalsRouter.routes())
 
@@ -19,6 +20,14 @@ beforeEach(() => {
 afterEach(() => { getDB().close(); delete process.env.DB_PATH })
 
 describe('persistent goals storage', () => {
+  it('tolerates only a missing goal table, without masking other database errors', () => {
+    const oldDb = new Database(':memory:')
+    expect(getOpenPersistentGoal(oldDb, 'a')).toBeUndefined()
+    oldDb.exec('CREATE TABLE persistent_goals (id TEXT)')
+    expect(() => getOpenPersistentGoal(oldDb, 'a')).toThrow(/no such column/)
+    oldDb.close()
+    expect(() => getOpenPersistentGoal(oldDb, 'a')).toThrow()
+  })
   it('continues on new evidence, passes progress forward and stops on repeated evidence', async () => {
     const db = getDB(), goal = createPersistentGoal(db, 'a', 'goal')
     const seen: string[] = []

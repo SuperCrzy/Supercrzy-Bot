@@ -20,7 +20,18 @@
       </div>
       <p class="goal-note">{{ $t('goal.singleRound') }}</p>
       <div v-if="expanded" class="goal-details">
-        <p v-if="goal.acceptance"><strong>{{ $t('goal.acceptance') }}：</strong>{{ goal.acceptance }}</p>
+        <div v-if="editing" class="goal-editor">
+          <label for="goal-edit-objective">{{ $t('goal.objective') }}</label>
+          <textarea id="goal-edit-objective" v-model="editObjective" maxlength="20000" rows="3" />
+          <label for="goal-edit-acceptance">{{ $t('goal.acceptance') }}</label>
+          <textarea id="goal-edit-acceptance" v-model="editAcceptance" maxlength="20000" rows="2" />
+          <p v-if="editGoalId !== goal.id" class="goal-error" role="alert">{{ $t('goal.editChanged') }}</p>
+          <div class="goal-actions"><button :disabled="busy || !editObjective.trim() || editGoalId !== goal.id" @click="saveEdit">{{ $t('goal.save') }}</button><button :disabled="busy" @click="editing = false">{{ $t('goal.close') }}</button></div>
+        </div>
+        <template v-else>
+          <p v-if="goal.acceptance"><strong>{{ $t('goal.acceptance') }}：</strong>{{ goal.acceptance }}</p>
+          <button v-if="['paused', 'interrupted', 'waiting_user'].includes(goal.status)" :disabled="busy" @click="beginEdit">{{ $t('goal.edit') }}</button>
+        </template>
         <p v-if="goal.last_result"><strong>{{ $t('goal.lastResult') }}：</strong>{{ goal.last_result }}</p>
         <p v-if="displayStream" class="goal-output">{{ displayStream }}</p>
       </div>
@@ -50,16 +61,19 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAccountStore } from '@/stores/account'
+import { useAppStore } from '@/stores/app'
 
 interface Goal { id: string; objective: string; acceptance: string; status: string; version: number; elapsed_ms: number; running_since: number | null; last_result: string }
 interface PendingItem { id: string; name?: string; arguments?: string; question?: string; options?: string[] }
 const props = defineProps<{ sessionId: string }>()
-const { t } = useI18n({ useScope: 'global' })
+const { t, locale } = useI18n({ useScope: 'global' })
 const account = useAccountStore()
+const app = useAppStore()
 const goal = ref<Goal | null>(null), creating = ref(false), objective = ref(''), acceptance = ref(''), expanded = ref(false), busy = ref(false), error = ref(''), reply = ref('')
 const pending = ref<{ questions: PendingItem[]; confirmations: PendingItem[] }>({ questions: [], confirmations: [] })
 const streamText = ref(''), now = ref(Date.now())
 const historyOpen = ref(false), history = ref<Array<Pick<Goal, 'id' | 'objective' | 'status' | 'last_result'>>>([])
+const editing = ref(false), editObjective = ref(''), editAcceptance = ref(''), editVersion = ref(0), editGoalId = ref('')
 const displayStream = computed(() => streamText.value.replace(/<goal_report>[\s\S]*$/, '').trim())
 let generation = 0, cursor = 0, loadingGeneration: number | null = null, refreshQueued = false, disposed = false, streamRun = ''
 const statusText = computed(() => t(`goal.status_${goal.value?.status || 'paused'}`))
@@ -122,18 +136,20 @@ async function refresh() {
 async function post(url: string, body: unknown) {
   const stamp = generation
   busy.value = true
-  try { await json(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); if (stamp === generation) { error.value = ''; await refresh() } }
-  catch { if (stamp === generation) { await refresh(); if (stamp === generation) error.value = t('goal.actionError') } }
+  try { await json(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); if (stamp === generation) { error.value = ''; await refresh(); return stamp === generation } return false }
+  catch { if (stamp === generation) { await refresh(); if (stamp === generation) error.value = t('goal.actionError') } return false }
   finally { if (stamp === generation) busy.value = false }
 }
-async function create() { await post(base(), { objective: objective.value, acceptance: acceptance.value }); if (goal.value) { creating.value = false; objective.value = ''; acceptance.value = '' } }
+async function create() { if (await post(base(), { objective: objective.value, acceptance: acceptance.value })) { creating.value = false; objective.value = ''; acceptance.value = '' } }
+function beginEdit() { if (!goal.value) return; editGoalId.value = goal.value.id; editObjective.value = goal.value.objective; editAcceptance.value = goal.value.acceptance; editVersion.value = goal.value.version; editing.value = true }
+async function saveEdit() { if (!goal.value || goal.value.id !== editGoalId.value) return; if (await post(`${base()}/${encodeURIComponent(editGoalId.value)}/edit`, { version: editVersion.value, objective: editObjective.value, acceptance: editAcceptance.value })) editing.value = false }
 async function action(kind: 'start' | 'pause' | 'cancel' | 'complete', extra: Record<string, unknown> = {}) {
   const g = goal.value; if (!g) return
   await post(`${base()}/${encodeURIComponent(g.id)}/${kind}`, { version: g.version, ...extra })
 }
 async function start() {
   if (goal.value?.status === 'interrupted' && !window.confirm(t('goal.reviewConfirm'))) return
-  await action('start', { acknowledgeInterrupted: goal.value?.status === 'interrupted' })
+  await action('start', { acknowledgeInterrupted: goal.value?.status === 'interrupted', model: app.currentModel || undefined, language: locale.value })
 }
 async function cancel() { if (window.confirm(t('goal.cancelConfirm'))) { await action('cancel'); if (historyOpen.value) await loadHistory() } }
 async function complete() { if (window.confirm(t('goal.completeConfirm'))) { await action('complete'); if (historyOpen.value) await loadHistory() } }
@@ -144,8 +160,8 @@ async function loadHistory() {
 }
 async function toggleHistory() { historyOpen.value = !historyOpen.value; if (historyOpen.value) await loadHistory() }
 async function confirmTool(id: string, decision: 'allow' | 'deny') { await post('/api/chat/tool-confirm', { toolCallId: id, decision }) }
-async function answer(id: string, value: string) { if (!value.trim()) return; await post('/api/chat/question-answer', { questionId: id, answer: value }); reply.value = '' }
-watch(() => [props.sessionId, account.accountId], () => { generation++; refreshQueued = false; goal.value = null; creating.value = false; objective.value = ''; acceptance.value = ''; expanded.value = false; historyOpen.value = false; history.value = []; pending.value = { questions: [], confirmations: [] }; streamText.value = ''; streamRun = ''; cursor = 0; busy.value = false; void refresh() }, { immediate: true })
+async function answer(id: string, value: string) { if (!value.trim()) return; if (await post('/api/chat/question-answer', { questionId: id, answer: value }) && reply.value === value) reply.value = '' }
+watch(() => [props.sessionId, account.accountId], () => { generation++; refreshQueued = false; goal.value = null; creating.value = false; editing.value = false; editObjective.value = ''; editAcceptance.value = ''; objective.value = ''; acceptance.value = ''; expanded.value = false; historyOpen.value = false; history.value = []; pending.value = { questions: [], confirmations: [] }; streamText.value = ''; streamRun = ''; cursor = 0; busy.value = false; void refresh() }, { immediate: true })
 const timer = setInterval(() => { now.value = Date.now(); void refresh() }, 2000)
 onBeforeUnmount(() => { disposed = true; generation++; clearInterval(timer) })
 </script>
