@@ -2287,7 +2287,7 @@ export async function runAgentLoop(
             name: toolName,
             content: result.content.slice(0, 500),
             tool_call_id: result.tool_call_id,
-            ...((result.dispatchError || result.skipped) ? { status: 'failed' } : {}),
+            ...(result.skipped ? { status: 'cancelled' } : result.dispatchError ? { status: 'error' } : {}),
           })
           if (result.duration) {
             emitSSE(ctx, 'tool_duration', { name: toolName, duration: result.duration, tool_call_id: result.tool_call_id })

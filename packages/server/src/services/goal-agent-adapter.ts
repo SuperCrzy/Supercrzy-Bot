@@ -43,7 +43,7 @@ export function makeGoalAgentRunner(options: {
         try { emit(name, payload) } catch { captureFailed = true; stop(); continue }
         if (name === 'question' || (name === 'tool_result' && payload.status === 'denied')) hadInteraction = true
         if (name === 'tool_call' && typeof payload.id === 'string' && typeof payload.name === 'string') calls.set(payload.id, { name: payload.name, arguments: String(payload.arguments || '') })
-        if (name === 'tool_result' && typeof payload.tool_call_id === 'string' && typeof payload.content === 'string') results.set(payload.tool_call_id, { content: payload.content, denied: payload.status === 'denied' || payload.status === 'failed' })
+        if (name === 'tool_result' && typeof payload.tool_call_id === 'string' && typeof payload.content === 'string') results.set(payload.tool_call_id, { content: payload.content, denied: ['denied', 'failed', 'error', 'cancelled'].includes(String(payload.status)) })
         if (name === 'content' && typeof payload.content === 'string') answer = payload.content
         if (name === 'content_chunk' && typeof payload.text === 'string') chunks += payload.text
         if (name === 'task_state' && typeof payload.status === 'string') terminal = payload.status

@@ -48,6 +48,14 @@ function emptyMsg(): ChatMessage {
 const nodeOf = (m: ChatMessage) => (m.flow || [])[0] as any
 
 describe('applyToolProgress（SSE tool_progress → 节点）', () => {
+  it('shows dispatcher failures and skipped work as errors or cancellations, never success', () => {
+    for (const [status, expected] of [['error', 'error'], ['failed', 'error'], ['cancelled', 'cancelled']] as const) {
+      const m = emptyMsg()
+      applyToolArgsChunk(m, { toolCallId: 'call', name: 'file_read', chunk: '{}' })
+      applyToolResult(m, { tool_call_id: 'call', status, content: 'not executed' })
+      expect(nodeOf(m).tool.status).toBe(expected)
+    }
+  })
   it('按 toolCallId 落到对应节点，且**剥掉 toolCallId/name**不进 progress', () => {
     const m = emptyMsg()
     applyToolArgsChunk(m, { toolCallId: 'call_1', name: 'file_write', chunk: '{"path":"/a/b/C.vue"}' })

@@ -103,7 +103,7 @@ export function applyToolProgress(msg: ChatMessage, data: any) {
 /** 工具结果：优先按 toolCallId 精确归属（并行同名不串卡），fallback name；denied/cancelled/error 标记状态 */
 export function applyToolResult(msg: ChatMessage, data: any) {
   const terminal: 'done' | 'error' | 'denied' | 'cancelled' =
-    data.status === 'denied' ? 'denied' : data.status === 'cancelled' ? 'cancelled' : data.status === 'error' ? 'error' : 'done'
+    data.status === 'denied' ? 'denied' : data.status === 'cancelled' ? 'cancelled' : data.status === 'error' || data.status === 'failed' ? 'error' : 'done'
   const targetId = data.tool_call_id || data.toolCallId
   const node = findToolNode(msg, targetId, targetId ? undefined : data.name, true)
   if (!node) return

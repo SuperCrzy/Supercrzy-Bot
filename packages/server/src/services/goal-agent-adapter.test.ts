@@ -9,7 +9,7 @@ describe('goal agent adapter', () => {
   it('rejects structured failures as progress even when their text looks successful', async () => {
     const runner = makeGoalAgentRunner({ ownerIsCurrent: () => true, requestStop: vi.fn(), makeMessages: async () => [], handler: async ctx => {
       ctx.res.write(frame('tool_call', { id: 't1', name: 'file_read', arguments: '{}' }))
-      ctx.res.write(frame('tool_result', { tool_call_id: 't1', content: 'looks successful', status: 'failed' }))
+      ctx.res.write(frame('tool_result', { tool_call_id: 't1', content: 'looks successful', status: 'error' }))
       ctx.res.write(frame('content', { content: '尝试读取。\n<goal_report>{"action":"continue","evidence_call_ids":["t1"]}</goal_report>' }))
       ctx.res.write(frame('done', { finished: true }))
     } })
