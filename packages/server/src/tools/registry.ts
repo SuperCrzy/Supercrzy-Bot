@@ -8,6 +8,7 @@
 import type { ToolDef } from './types'
 // ---- 原有注册表工具 ----
 import getGoalTool from './get-goal'
+import proposeGoalTool from './propose-goal'
 import newsSearchTool from './news-search'
 import terminalClose from './terminal-close'
 import terminalList from './terminal-list'
@@ -136,6 +137,7 @@ export const directoryTools: ToolDef[] = [
   askUser,
   // ---- 原注册表工具（保持原序）----
   getGoalTool,
+  proposeGoalTool,
   newsSearchTool,
   terminalClose,
   terminalList,

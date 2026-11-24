@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { makeGoalAgentRunner } from './goal-agent-adapter'
 import type { PersistentGoal } from './persistent-goals'
 
-const goal: PersistentGoal = { id: 'g', session_id: 's', objective: 'goal', acceptance: '', status: 'paused', elapsed_ms: 0, current_run_id: null, last_result: '', version: 1, created_at: 0, updated_at: 0 }
+const goal: PersistentGoal = { id: 'g', session_id: 's', objective: 'goal', acceptance: '', source: 'user', status: 'paused', elapsed_ms: 0, current_run_id: null, last_result: '', version: 1, created_at: 0, updated_at: 0 }
 const frame = (event: string, data: unknown) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
 
 describe('goal agent adapter', () => {

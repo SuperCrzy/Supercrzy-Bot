@@ -6,6 +6,8 @@ export interface PersistentGoal {
   session_id: string
   objective: string
   acceptance: string
+  /** Who opened the goal: the user (via the bar or /goal) or the agent, as a proposal. */
+  source: 'user' | 'ai'
   status: 'paused' | 'active' | 'pausing' | 'waiting_user' | 'interrupted' | 'completed' | 'cancelled'
   elapsed_ms: number
   current_run_id: string | null
@@ -16,16 +18,17 @@ export interface PersistentGoal {
 }
 
 /** Creates a stopped goal; execution must be started by a separate coordinator. */
-export function createPersistentGoal(db: Database.Database, sessionId: string, objective: string, acceptance = ''): PersistentGoal {
+export function createPersistentGoal(db: Database.Database, sessionId: string, objective: string, acceptance = '', source: 'user' | 'ai' = 'user'): PersistentGoal {
   const text = typeof objective === 'string' ? objective.trim() : ''
   const criteria = typeof acceptance === 'string' ? acceptance.trim() : ''
   if (!sessionId || !text || text.length > 20_000 || criteria.length > 20_000) throw new Error('invalid_goal')
+  const origin: 'user' | 'ai' = source === 'ai' ? 'ai' : 'user'
   return db.transaction(() => {
     if (!db.prepare('SELECT 1 FROM sessions WHERE id = ?').get(sessionId)) throw new Error('session_not_found')
     if (getOpenPersistentGoal(db, sessionId)) throw new Error('goal_already_exists')
     const id = randomUUID(), now = Date.now()
-    db.prepare(`INSERT INTO persistent_goals (id, session_id, objective, acceptance, status, created_at, updated_at)
-      VALUES (?, ?, ?, ?, 'paused', ?, ?)`).run(id, sessionId, text, criteria, now, now)
+    db.prepare(`INSERT INTO persistent_goals (id, session_id, objective, acceptance, source, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, 'paused', ?, ?)`).run(id, sessionId, text, criteria, origin, now, now)
     return db.prepare('SELECT * FROM persistent_goals WHERE id = ?').get(id) as PersistentGoal
   })()
 }

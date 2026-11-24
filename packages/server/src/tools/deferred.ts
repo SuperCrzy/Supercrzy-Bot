@@ -43,6 +43,9 @@ export const DEFERRED_TOOLS = new Set<string>([
   'file_exists', 'file_delete', 'lint_file',
   // ---- 计划辅助：create_plan/task_create/task_update 已常驻，其余按需 ----
   'get_goal', 'task_list',
+  // Rare by design: a goal proposal is for large explicit projects only, and the
+  // description carries the whole bar. Never worth a resident schema slot.
+  'propose_goal',
   // ---- 提问：与常驻的 ask_user 语义重复（同一条前端提问链路），按需即可 ----
   'ask_question',
   // ---- 后台任务控制：启动走 shell_exec 的 run_in_background，本工具只管 list/output/cancel ----

@@ -996,6 +996,18 @@ Structure every turn as a narrative the user can follow without expanding any to
 Same-stage consecutive tools need only one lead-in sentence at the start of the stage, not one per tool. Cite sources as markdown links \`[Media](url)\` at the end of the message (multiple sources separated by spaces, never inside body paragraphs); the frontend renders them into source cards.`
 
 
+  // A persistent goal is a long-running commitment shown above the input box and
+  // continued across turns. Proposing one is a product decision, not a summary:
+  // every condition must hold or the model stays quiet. The bar lives here AND in
+  // the tool description, because the model reads whichever it sees first.
+  const goalProposalSection = `\n\n## Proposing a persistent goal (rare — high bar)
+A persistent goal is a long-running commitment shown above the input box that the app keeps working toward across turns. Propose one ONLY when ALL of these hold:
+1. The user describes a large project spanning many steps or sessions — an end-to-end build, a migration, a systematic refactor, a long research programme. Not a one-off question, not a single-file edit, not a small fix, not brainstorming.
+2. The user is explicit about the end state: from their own words you can write both a one-sentence objective and measurable acceptance criteria.
+3. This session has no goal yet (when a goal status is injected above, read it first).
+When all three hold: \`tool_search("propose_goal")\` then \`propose_goal(objective, acceptance)\`. Write the objective in the user's language as one concrete sentence; make the acceptance criteria verifiable. Then tell the user in ONE short sentence that the goal is waiting above the input box for confirmation.
+Never call it for routine work, and at most once per session. Never start, resume or complete a goal yourself — only the user's Start click begins execution. If unsure, stay silent: a missing proposal costs nothing, a noisy one teaches the user to ignore the bar.`
+
   // 读取记忆开关
   const memoryEnabledRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('memoryEnabled') as any
   const memoryEnabled = memoryEnabledRow ? memoryEnabledRow.value === 'true' : true
@@ -1060,6 +1072,7 @@ Same-stage consecutive tools need only one lead-in sentence at the start of the 
 - **[按需]** news_search: Search SUPERCRZY's own AI news library (supercrzy.com, real-time, each item has precise publication date + category Models/Business/Hardware/Agents/Open Source/Research). **When the user asks about 最近/今日/最新 AI 动态、模型/硬件/Agent 进展、或具体方向(如 '推理成本' '某模型') — prefer news_search first (time-accurate by built-in dates), then web_search for cross-source depth. After returning, if an item deserves deeper digging, call deep_research on it.**
 - **[按需]** file_exists / file_delete / lint_file / read_me: 文件存在性检查 / 删除 / 内容校验 / 读取网页正文（多数场景已被 file_read、file_write、shell_exec、web_fetch 覆盖）
 - **[按需]** get_goal / task_list: 长任务自查目标与列出任务清单（防跑偏）
+- **[按需]** propose_goal: 为大项目提出持续目标（用户确认后才执行；触发条件见 "Proposing a persistent goal"）
 - **[按需]** draw_diagram: Draw vector diagrams (architecture/flow/comparison) as SVG, shown instantly in the conversation. **When the user asks you to draw a diagram, chart, architecture, flowchart or illustration — you MUST call this tool and output the SVG code, never replace it with plain-text tables.**
 - **[按需]** generate_image: Generate a real image from a text description. **When the user asks to 生成/画一张图、配图、封面图、示意图(非架构流程图的真实图)，找不到现成图、或任务需要 image 素材时，先 tool_search 加载 generate_image 再调用它**(provider 默认免key pollinations，可在设置配 doubao/gemini 等)。
 - **[按需]** browser: AI 浏览器驾驶. **当任务需要 核实一个网页的精确内容/看真实排版与视觉(截图)/在某个网站内点击、填表、翻页做交互 时——先 tool_search 加载 browser 再用它: navigate 打开 → look 看可点清单 → click/type/back 逐原语推进**, 而非只用摘要 web_search。需要凭据登录时停下交回用户本人。
@@ -1222,7 +1235,7 @@ ${contentFactoryLine}`
   const baseTools = toolDefinitions.map((t) => t.name)
   const allowedTools = [...new Set([...baseTools, ...skillTools])]
 
-  const prompt = `${basePrompt}${personalitySection}${todaySection}${searchTriggerSection}${absenceSection}${evidenceSection}${selfCapabilitySection}${skillRequestSection}${toolChoiceSection}${outputStyleSection}
+  const prompt = `${basePrompt}${personalitySection}${todaySection}${searchTriggerSection}${absenceSection}${evidenceSection}${selfCapabilitySection}${skillRequestSection}${goalProposalSection}${toolChoiceSection}${outputStyleSection}
 
 ## Response Language (MUST FOLLOW)
 - Always reply in the SAME LANGUAGE the user writes in. If the user writes English, reply in English. If Chinese, reply in Chinese.

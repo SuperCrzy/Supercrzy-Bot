@@ -73,6 +73,7 @@ export function initDatabase() {
       session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
       objective TEXT NOT NULL,
       acceptance TEXT NOT NULL DEFAULT '',
+      source TEXT NOT NULL DEFAULT 'user' CHECK(source IN ('user', 'ai')),
       status TEXT NOT NULL CHECK(status IN ('paused','active','pausing','waiting_user','interrupted','completed','cancelled')),
       elapsed_ms INTEGER NOT NULL DEFAULT 0 CHECK(elapsed_ms >= 0),
       current_run_id TEXT,
@@ -368,6 +369,12 @@ export function initDatabase() {
   db.transaction(() => {
     const goalRunColumns = db.pragma('table_info(persistent_goal_runs)') as Array<{ name: string }>
     if (!goalRunColumns.some(column => column.name === 'owner_pid')) db.exec('ALTER TABLE persistent_goal_runs ADD COLUMN owner_pid INTEGER')
+  }).immediate()
+
+  // Agents may now propose a goal; goals written before this column are the user's own.
+  db.transaction(() => {
+    const goalColumns = db.pragma('table_info(persistent_goals)') as Array<{ name: string }>
+    if (!goalColumns.some(column => column.name === 'source')) db.exec("ALTER TABLE persistent_goals ADD COLUMN source TEXT NOT NULL DEFAULT 'user'")
   }).immediate()
 
   // Migration: add attachments column to messages
