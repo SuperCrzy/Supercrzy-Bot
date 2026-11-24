@@ -7,6 +7,8 @@ import { basename, join } from 'path'
 import { readFile } from 'fs/promises'
 import { existsSync } from 'fs'
 import { safeWriteSse, endSseStream, registerSseStream } from './sse-health'
+import { acquireAgentSession } from './agent-session-lock'
+import { getOpenPersistentGoal } from './persistent-goals'
 
 /** 标准化 base URL，确保不会出现双重 /v1 */
 function normalizeBaseUrl(url: string): string {
@@ -347,6 +349,22 @@ export async function handleAgentChat(ctx: Context) {
   }
 
   const db = getDB()
+  // Goal runs already supply their own fuller history. For ordinary agent
+  // chat, provide a bounded snapshot before the user's latest message so a
+  // follow-up can refer to the goal without starting another execution.
+  const chatSessionId = typeof (body as any).sessionId === 'string' ? (body as any).sessionId : ''
+  if (chatSessionId && !ctx.state?.goalExecution && !body.resumeCheckpoint) {
+    const goal = getOpenPersistentGoal(db, chatSessionId)
+    if (goal) {
+      const snapshot = JSON.stringify({ objective: goal.objective.slice(0, 4000), acceptance: goal.acceptance.slice(0, 2000), status: goal.status, lastResult: goal.last_result.slice(0, 6000) })
+      const messages = [...body.messages]
+      const lastUser = messages.map(message => message.role).lastIndexOf('user')
+      if (lastUser >= 0) {
+        messages.splice(lastUser, 0, { role: 'user', content: `[当前会话的目标状态，供回答参考，不代表新的执行指令]\n${snapshot}\n请以用户接下来的实际问题为准；目标是否完成须以证据为准。` } as any)
+        body.messages = messages
+      }
+    }
+  }
   const apiKeyRow = db.prepare('SELECT value FROM settings WHERE key = ?').get('apiKey') as any
   let apiKey = apiKeyRow?.value || config.deepseek.apiKey
   let baseUrl = config.deepseek.baseUrl
@@ -370,6 +388,15 @@ export async function handleAgentChat(ctx: Context) {
   const visionInjected = await injectVisionImages(body.messages, images)
   const effectiveModel = visionInjected ? 'deepseek-v4-flash-vision-exp' : model
 
+  const sessionId = typeof (body as any).sessionId === 'string' ? (body as any).sessionId : ''
+  const releaseSession = sessionId ? acquireAgentSession(db, sessionId) : () => {}
+  if (!releaseSession) {
+    ctx.status = 409
+    ctx.body = { error: 'session_agent_busy' }
+    return
+  }
+
+  try {
   // 用 Koa 标准 SSE 头 + 原生 write 写数据
   ctx.set({
     'Content-Type': 'text/event-stream',
@@ -389,7 +416,6 @@ export async function handleAgentChat(ctx: Context) {
   // 登记活跃流：/api/health 的 sse.active 就靠这个判断"有没有长任务占着连接"
   registerSseStream(ctx, 'agent')
 
-  try {
     // 兼容两种 resumeCheckpoint 语义：checkpoint id 或完整文件路径
     let resumePath = body.resumeCheckpoint
     if (resumePath && !resumePath.includes('/') && !resumePath.endsWith('.json')) {
@@ -438,6 +464,7 @@ export async function handleAgentChat(ctx: Context) {
       const { closeBrowserForSession } = await import('./ai-browser')
       await closeBrowserForSession((body as any).sessionId)
     } catch { /* 清理失败不影响主流程 */ }
+    releaseSession()
   }
 }
 

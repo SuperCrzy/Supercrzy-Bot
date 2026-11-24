@@ -14,6 +14,24 @@ const rows = [
 ]
 
 describe('search result ordering and fallback', () => {
+  it('keeps distinct stories sharing a long title prefix and deduplicates the same URL', () => {
+    const input = [
+      { title: '人工智能行业观察报告发布北京篇', url: 'https://a.example/a' },
+      { title: '人工智能行业观察报告发布上海篇', url: 'https://b.example/b' },
+      { title: '另一个标题', url: 'https://a.example/a#fragment' },
+    ]
+    expect(postProcessSearchResults(input, 10).map(r => r.title)).toEqual(input.slice(0, 2).map(r => r.title))
+  })
+
+  it('uses the same title and URL deduplication for multi-source results', async () => {
+    const input = [
+      { title: '人工智能行业观察报告发布北京篇', url: 'https://a.example/a' },
+      { title: '人工智能行业观察报告发布上海篇', url: 'https://b.example/b' },
+      { title: '人工智能行业观察报告发布北京篇', url: 'https://c.example/c' },
+    ]
+    SEARCH_PROVIDERS.splice(0, SEARCH_PROVIDERS.length, provider('test', input))
+    expect((await runExhaustiveSearch({ query: 'test', count: 10 })).results.map(r => r.title)).toEqual(input.slice(0, 2).map(r => r.title))
+  })
   it('puts parseable dates ahead of unknown dates in ordinary search', () => {
     expect(postProcessSearchResults(rows, 4).map(r => r.title)).toEqual(['new', 'old', 'unknown', 'bad date'])
   })

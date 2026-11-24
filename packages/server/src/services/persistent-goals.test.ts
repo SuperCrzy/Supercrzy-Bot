@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('../config', () => ({ config: { db: { path: ':memory:' } } }))
 import { getDB, initDatabase } from './database'
-import { claimGoalRun, createPersistentGoal, getOpenPersistentGoal, reconcileDeadGoalRuns, requestGoalPause, settleGoalRun } from './persistent-goals'
+import { appendGoalEvent, cancelStoppedGoal, claimGoalRun, createPersistentGoal, getOpenPersistentGoal, reconcileDeadGoalRuns, requestGoalPause, settleGoalRun } from './persistent-goals'
 import { persistentGoalsRouter } from '../routes/persistent-goals'
 import { GoalCoordinator, type GoalRunResult } from './goal-coordinator'
+import { createGoalRuntime } from './goal-runtime'
 import Koa from 'koa'
 import bodyParser from 'koa-bodyparser'
 import request from 'supertest'
@@ -18,6 +19,64 @@ beforeEach(() => {
 afterEach(() => { getDB().close(); delete process.env.DB_PATH })
 
 describe('persistent goals storage', () => {
+  it('continues on new evidence, passes progress forward and stops on repeated evidence', async () => {
+    const db = getDB(), goal = createPersistentGoal(db, 'a', 'goal')
+    const seen: string[] = []
+    const coordinator = new GoalCoordinator(db, async ({ goal: current }) => {
+      seen.push(current.last_result)
+      return { outcome: 'paused', summary: `round ${seen.length}`, progressFingerprint: 'a'.repeat(64) }
+    })
+    await coordinator.start('a', goal.id, goal.version)!.completion
+    expect(seen).toEqual(['', 'round 1'])
+    expect(getOpenPersistentGoal(db, 'a')).toMatchObject({ status: 'paused', last_result: 'round 2' })
+  })
+
+  it('bounds repeated continuations and stops at three turns', async () => {
+    const db = getDB(), goal = createPersistentGoal(db, 'a', 'goal')
+    let count = 0
+    const coordinator = new GoalCoordinator(db, async () => ({ outcome: 'paused', summary: `round ${++count}`, progressFingerprint: count.toString(16).repeat(64) }))
+    await coordinator.start('a', goal.id, goal.version)!.completion
+    expect(count).toBe(3)
+    expect(getOpenPersistentGoal(db, 'a')).toMatchObject({ status: 'paused', last_result: 'round 3' })
+  })
+  it('passes the session history and full goal into the normal Agent handler', async () => {
+    const db = getDB(), goal = createPersistentGoal(db, 'a', '完成项目', '测试通过')
+    db.prepare("INSERT INTO messages (id, session_id, role, content) VALUES ('m1', 'a', 'user', '前情')").run()
+    let sent: any
+    const runtime = createGoalRuntime(db, { currentAccount: () => 'account', requestStop: vi.fn(), handler: async ctx => {
+      sent = ctx.request.body
+      ctx.res.write('event: config\ndata: {}\n\n')
+      ctx.res.write('event: content\ndata: {"content":"完成一部分"}\n\n')
+      ctx.res.write('event: done\ndata: {"finished":true}\n\n')
+    } })
+    await runtime.start('a', goal.id, goal.version)!.completion
+    expect(sent.sessionId).toBe('a')
+    expect(sent.messages[0].content).toBe('前情')
+    expect(sent.messages.at(-1).content).toContain('完成项目')
+    expect(sent.messages.at(-1).content).toContain('测试通过')
+    expect(getOpenPersistentGoal(db, 'a')).toMatchObject({ status: 'paused', last_result: '完成一部分' })
+  })
+  it('passes persisted recent goal progress to a later run without mixing other goals', async () => {
+    const db = getDB(), goal = createPersistentGoal(db, 'a', '目标 A')
+    const other = createPersistentGoal(db, 'b', '目标 B')
+    const first = claimGoalRun(db, 'a', goal.id, goal.version)!
+    expect(settleGoalRun(db, goal.id, first, 'paused', '第一轮已检查配置')).toBe(true)
+    const second = claimGoalRun(db, 'a', goal.id, getOpenPersistentGoal(db, 'a')!.version)!
+    expect(settleGoalRun(db, goal.id, second, 'paused', '第二轮已修复问题')).toBe(true)
+    const otherRun = claimGoalRun(db, 'b', other.id, other.version)!
+    expect(settleGoalRun(db, other.id, otherRun, 'paused', '其他会话私有结果')).toBe(true)
+    let sent: any
+    const runtime = createGoalRuntime(db, { currentAccount: () => 'account', requestStop: vi.fn(), handler: async ctx => {
+      sent = ctx.request.body
+      ctx.res.write('event: config\ndata: {}\n\n')
+      ctx.res.write('event: done\ndata: {"finished":true}\n\n')
+    } })
+    await runtime.start('a', goal.id, getOpenPersistentGoal(db, 'a')!.version)!.completion
+    const prompt = sent.messages.at(-1).content
+    expect(prompt).toContain('第一轮已检查配置')
+    expect(prompt).toContain('第二轮已修复问题')
+    expect(prompt).not.toContain('其他会话私有结果')
+  })
   it('signals a pause without claiming that the runner has stopped', async () => {
     const db = getDB(), goal = createPersistentGoal(db, 'a', 'goal')
     let finish!: (result: GoalRunResult) => void
@@ -56,6 +115,22 @@ describe('persistent goals storage', () => {
     expect((await request(app.callback()).get(`/api/sessions/a/goal/${goal.id}/events?after=${after}`)).body.events).toHaveLength(1)
     expect((await request(app.callback()).get(`/api/sessions/b/goal/${goal.id}/events`)).body.events).toEqual([])
     expect((await request(app.callback()).get(`/api/sessions/a/goal/${goal.id}/events?after=-1`)).status).toBe(400)
+  })
+  it('pages a large event backlog without gaps or duplicates', async () => {
+    const db = getDB(), goal = createPersistentGoal(db, 'a', 'goal')
+    const run = claimGoalRun(db, 'a', goal.id, goal.version)!
+    for (let i = 0; i < 205; i++) expect(appendGoalEvent(db, goal.id, run, 'content_chunk', { text: String(i) })).toBe(true)
+    const all: any[] = []
+    let cursor = 0
+    for (let page = 0; page < 3; page++) {
+      const response = await request(app.callback()).get(`/api/sessions/a/goal/${goal.id}/events?after=${cursor}`)
+      expect(response.status).toBe(200)
+      all.push(...response.body.events)
+      cursor = all.at(-1).sequence
+    }
+    expect(all).toHaveLength(205)
+    expect(all.map(event => event.payload.text)).toEqual(Array.from({ length: 205 }, (_, i) => String(i)))
+    expect((await request(app.callback()).get(`/api/sessions/a/goal/${goal.id}/events?after=${cursor}`)).body.events).toEqual([])
   })
   it('keeps full goals per session and starts them paused', () => {
     const db = getDB()
@@ -119,6 +194,22 @@ describe('persistent goals storage', () => {
     expect(claimGoalRun(db, 'a', goal.id, pausing.version)).toBeUndefined()
     expect(settleGoalRun(db, goal.id, run, 'waiting_user', 'stopped', 2000)).toBe(true)
     expect(getOpenPersistentGoal(db, 'a')).toMatchObject({ status: 'paused', current_run_id: null, elapsed_ms: 1000 })
+  })
+
+  it('allows a settled waiting goal to resume or end but rejects stale versions', () => {
+    const db = getDB(), goal = createPersistentGoal(db, 'a', 'goal')
+    const firstRun = claimGoalRun(db, 'a', goal.id, goal.version)!
+    expect(settleGoalRun(db, goal.id, firstRun, 'waiting_user', 'need input')).toBe(true)
+    const waiting = getOpenPersistentGoal(db, 'a')!
+    expect(cancelStoppedGoal(db, 'a', goal.id, waiting.version - 1)).toBe(false)
+    const secondRun = claimGoalRun(db, 'a', goal.id, waiting.version)!
+    expect(secondRun).toBeTruthy()
+    const active = getOpenPersistentGoal(db, 'a')!
+    expect(cancelStoppedGoal(db, 'a', goal.id, active.version)).toBe(false)
+    expect(settleGoalRun(db, goal.id, secondRun, 'waiting_user', 'still waiting')).toBe(true)
+    const waitingAgain = getOpenPersistentGoal(db, 'a')!
+    expect(cancelStoppedGoal(db, 'a', goal.id, waitingAgain.version)).toBe(true)
+    expect(getOpenPersistentGoal(db, 'a')).toBeUndefined()
   })
 
   it('marks only definitely dead owners interrupted, without guessing elapsed time', () => {

@@ -21,7 +21,7 @@ let db: Database.Database
 let baseUrl: string
 let remote: typeof import('./remote-task-bridge')
 let providerRequests: Array<{ messages?: Array<{ role: string; content: unknown }>; stream?: boolean }> = []
-let providerMode: 'answer' | 'file-read' | 'stall' | 'approval' | 'question' | 'disconnect' = 'answer'
+let providerMode: 'answer' | 'file-read' | 'goal-continue' | 'stall' | 'approval' | 'question' | 'disconnect' = 'answer'
 let providerDisconnected = false
 const originalEnv = { ...process.env }
 const originalFetch = globalThis.fetch
@@ -52,11 +52,12 @@ beforeAll(async () => {
         res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: 'Partial answer' }, finish_reason: null }] })}\n\n`)
         return
       }
-      const toolName = providerMode === 'file-read' ? 'file_read' : providerMode === 'approval' ? 'file_delete' : 'ask_user'
-      const toolArgs = providerMode === 'file-read' ? { path: 'input.txt' } : providerMode === 'approval' ? { path: 'protected.txt' } : { question: 'Choose an option', options: [{ label: 'A' }] }
-      const delta = ['file-read', 'approval', 'question'].includes(providerMode) && providerRequests.length === 1
+      const isRead = providerMode === 'file-read' || providerMode === 'goal-continue'
+      const toolName = isRead ? 'file_read' : providerMode === 'approval' ? 'file_delete' : 'ask_user'
+      const toolArgs = isRead ? { path: 'input.txt' } : providerMode === 'approval' ? { path: 'protected.txt' } : { question: 'Choose an option', options: [{ label: 'A' }] }
+      const delta = ['file-read', 'goal-continue', 'approval', 'question'].includes(providerMode) && providerRequests.length === 1
         ? { reasoning_content: 'Use the requested tool.', tool_calls: [{ index: 0, id: 'tool-test-1', type: 'function', function: { name: toolName, arguments: JSON.stringify(toolArgs) } }] }
-        : { content: providerMode === 'file-read' ? 'Read completed.' : 'Local model answer' }
+        : { content: providerMode === 'goal-continue' && providerRequests.length === 2 ? '已读取文件。\n<goal_report>{"action":"continue","evidence_call_ids":["tool-test-1"]}</goal_report>' : providerMode === 'file-read' ? 'Read completed.' : 'Local model answer' }
       res.end(`data: ${JSON.stringify({ choices: [{ delta, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`)
     })
   })
@@ -99,6 +100,105 @@ afterAll(async () => {
 })
 
 describe('real agent bridge', () => {
+  it('automatically advances a goal only after observed successful tool evidence', async () => {
+    providerRequests = []
+    providerMode = 'goal-continue'
+    writeFileSync(join(isolation.root, 'input.txt'), 'isolated fixture contents')
+    db.prepare('INSERT INTO sessions (id, title, workspace_dir) VALUES (?, ?, ?)').run('goal-auto', 'Goal', isolation.root)
+    const { createPersistentGoal, getOpenPersistentGoal, listGoalEvents } = await import('./persistent-goals')
+    const { createGoalRuntime } = await import('./goal-runtime')
+    const { handleAgentChat } = await import('./chat')
+    const { requestStop } = await import('./agent')
+    const goal = createPersistentGoal(db, 'goal-auto', 'Hello read input.txt')
+    const runtime = createGoalRuntime(db, { handler: handleAgentChat, requestStop, currentAccount: () => 'test-account' })
+    try {
+      await runtime.start('goal-auto', goal.id, goal.version)!.completion
+      expect(providerRequests).toHaveLength(3)
+      expect(providerRequests[2].messages?.some(message => String(message.content).includes('已读取文件'))).toBe(true)
+      expect(listGoalEvents(db, 'goal-auto', goal.id, 0).some(event => event.event === 'goal_turn')).toBe(true)
+      expect(getOpenPersistentGoal(db, 'goal-auto')).toMatchObject({ status: 'paused', last_result: 'Local model answer' })
+      await waitForTaskLog('Hello read input.txt')
+    } finally { providerMode = 'answer'; providerRequests = [] }
+  })
+  it('runs a persistent goal through the real Agent loop with a local model', async () => {
+    providerRequests = []
+    providerMode = 'answer'
+    db.prepare("INSERT INTO sessions (id, title) VALUES ('goal-real-loop', 'Goal')").run()
+    const { createPersistentGoal, getOpenPersistentGoal, listGoalEvents } = await import('./persistent-goals')
+    const { createGoalRuntime } = await import('./goal-runtime')
+    const { handleAgentChat } = await import('./chat')
+    const { requestStop } = await import('./agent')
+    const goal = createPersistentGoal(db, 'goal-real-loop', '测试目标', '保留证据')
+    const runtime = createGoalRuntime(db, { handler: handleAgentChat, requestStop, currentAccount: () => 'test-account' })
+    await runtime.start('goal-real-loop', goal.id, goal.version)!.completion
+    expect(providerRequests.length).toBeGreaterThan(0)
+    expect(providerRequests.some(r => r.messages?.some(m => m.role === 'user' && String(m.content).includes('测试目标')))).toBe(true)
+    expect(getOpenPersistentGoal(db, 'goal-real-loop')).toMatchObject({ status: 'paused', last_result: 'Local model answer' })
+    expect(listGoalEvents(db, 'goal-real-loop', goal.id, 0).some(e => e.event === 'done')).toBe(true)
+    await waitForTaskLog('测试目标')
+  })
+
+  it('stops a persistent goal that is waiting on the local model', async () => {
+    providerRequests = []
+    providerMode = 'stall'
+    providerDisconnected = false
+    db.prepare("INSERT INTO sessions (id, title) VALUES ('goal-pause-loop', 'Goal')").run()
+    const { createPersistentGoal, getOpenPersistentGoal } = await import('./persistent-goals')
+    const { createGoalRuntime } = await import('./goal-runtime')
+    const { handleAgentChat } = await import('./chat')
+    const { requestStop } = await import('./agent')
+    const goal = createPersistentGoal(db, 'goal-pause-loop', '测试暂停')
+    const runtime = createGoalRuntime(db, { handler: handleAgentChat, requestStop, currentAccount: () => 'test-account' })
+    const run = runtime.start('goal-pause-loop', goal.id, goal.version)!
+    try {
+      await vi.waitFor(() => expect(providerRequests.length).toBeGreaterThan(0))
+      const active = getOpenPersistentGoal(db, 'goal-pause-loop')!
+      expect(runtime.pause('goal-pause-loop', goal.id, active.version)).toBe(true)
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const deadline = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('goal pause timed out')), 4000) })
+      await Promise.race([run.completion, deadline]).finally(() => { if (timer) clearTimeout(timer) })
+      expect(getOpenPersistentGoal(db, 'goal-pause-loop')?.status).toBe('paused')
+      await vi.waitFor(() => expect(providerDisconnected).toBe(true))
+    } finally { providerMode = 'answer'; providerRequests = [] }
+  })
+
+  it.each(['approval', 'question'] as const)('stops a goal while waiting for %s without approving it', async mode => {
+    providerRequests = []
+    providerMode = mode
+    const sessionId = `goal-${mode}`
+    const path = join(isolation.root, 'protected.txt')
+    writeFileSync(path, 'do not delete')
+    db.prepare('INSERT INTO sessions (id, title, workspace_dir) VALUES (?, ?, ?)').run(sessionId, 'Goal', isolation.root)
+    const { createPersistentGoal, getOpenPersistentGoal, listGoalEvents } = await import('./persistent-goals')
+    const { createGoalRuntime } = await import('./goal-runtime')
+    const { handleAgentChat } = await import('./chat')
+    const { requestStop } = await import('./agent')
+    const goal = createPersistentGoal(db, sessionId, `Hello test ${mode}`)
+    const runtime = createGoalRuntime(db, { handler: handleAgentChat, requestStop, currentAccount: () => 'test-account' })
+    const run = runtime.start(sessionId, goal.id, goal.version)!
+    try {
+      await vi.waitFor(() => {
+        const events = listGoalEvents(db, sessionId, goal.id, 0)
+        const found = events.find(event => event.event === (mode === 'approval' ? 'tool_call' : 'question') && (mode !== 'approval' || event.payload.status === 'pending'))
+        expect(found).toBeTruthy()
+      })
+      const { persistentGoalsRouter } = await import('../routes/persistent-goals')
+      const pendingApp = new Koa().use(persistentGoalsRouter.routes())
+      const supertest = (await import('supertest')).default
+      const pending = await supertest(pendingApp.callback()).get(`/api/sessions/${sessionId}/goal/${goal.id}/pending`)
+      expect(pending.status).toBe(200)
+      expect(mode === 'approval' ? pending.body.confirmations : pending.body.questions).toHaveLength(1)
+      expect(runtime.pause(sessionId, goal.id, getOpenPersistentGoal(db, sessionId)!.version)).toBe(true)
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const deadline = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('goal pause timed out')), 4000) })
+      await Promise.race([run.completion, deadline]).finally(() => { if (timer) clearTimeout(timer) })
+      expect(getOpenPersistentGoal(db, sessionId)?.status).toBe('paused')
+      const afterPause = await supertest(pendingApp.callback()).get(`/api/sessions/${sessionId}/goal/${goal.id}/pending`)
+      expect(afterPause.body).toEqual({ questions: [], confirmations: [] })
+      expect(providerRequests).toHaveLength(1)
+      expect(existsSync(path)).toBe(true)
+    } finally { providerMode = 'answer'; providerRequests = [] }
+  })
   it('forwards a complete simple chat answer and its DONE marker', async () => {
     providerMode = 'answer'
     try {

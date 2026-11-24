@@ -44,6 +44,7 @@ async function waitFor(check: () => boolean | Promise<boolean>, timeout = 5000):
 beforeAll(async () => {
   state.db = new Database(':memory:')
   state.db.exec(`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT);
+    CREATE TABLE agent_session_locks (session_id TEXT PRIMARY KEY, owner_pid INTEGER NOT NULL, token TEXT NOT NULL);
     CREATE TABLE sessions (id TEXT PRIMARY KEY, title TEXT NOT NULL, workspace_dir TEXT, permission_level TEXT, updated_at TEXT DEFAULT (datetime('now')));
     CREATE TABLE messages (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now')));
     CREATE TABLE custom_models (id TEXT, model_id TEXT, provider_id TEXT, enabled INTEGER);

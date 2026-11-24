@@ -57,8 +57,8 @@ export function parseResultDate(raw: string | undefined): number {
 }
 
 /** 搜索结果后处理：过滤空条目 + 同域名最多 2 条 + 标题相似去重 + 有日期的排前；maxAgeDays>0 时剔除超期结果 */
-export function postProcessSearchResults<T extends { title: string; url: string; description?: string; date?: string }>(results: T[], limit: number, maxAgeDays = 0): T[] {
-  let list = results.filter((r) => r.title && r.url && r.title !== 'Object moved')
+export function postProcessSearchResults<T extends { title: string; url: string; description?: string; date?: string }>(results: T[], limit: number, maxAgeDays = 0, maxPerHost = 2): T[] {
+  let list = results.filter((r) => r && typeof r.title === 'string' && typeof r.url === 'string' && r.title && r.url && r.title !== 'Object moved')
   if (maxAgeDays > 0) {
     const cutoff = Date.now() - maxAgeDays * 86400000
     // Drop what is provably too old. Keep what cannot be dated.
@@ -75,15 +75,8 @@ export function postProcessSearchResults<T extends { title: string; url: string;
       return isNaN(t) || t >= cutoff
     })
   }
-  const byUrl = new Map<string, T>()
-  for (const r of list) {
-    const u = (r.url || '').replace(/^https?:\/\/(www\.)?/, '').split('/')[0]
-    const key = `${u}:${(r.title || '').slice(0, 30)}`
-    if (!byUrl.has(key)) byUrl.set(key, r)
-  }
-  // Same story syndicated under near-identical headlines on different hosts.
-  // Normalizing to letters/digits and comparing a prefix catches "AI 日报 | …" across
-  // domains without needing similarity scoring.
+  // Full normalized headlines avoid conflating different stories with a shared prefix.
+  const urlsSeen = new Set<string>()
   const titleSeen = new Set<string>()
   const seen = new Map<string, number>()
   const out: T[] = []
@@ -94,7 +87,7 @@ export function postProcessSearchResults<T extends { title: string; url: string;
   // (isFinite(b) - isFinite(a)), which is 0 for two dated rows — so results kept
   // whatever order the provider returned and "sorted by date" was not true. Compare
   // the timestamps; undated rows sort last and keep their relative order.
-  const sorted = [...byUrl.values()].sort((a, b) => {
+  const sorted = [...list].sort((a, b) => {
     const ta = parseResultDate(a.date)
     const tb = parseResultDate(b.date)
     const na = Number.isNaN(ta), nb = Number.isNaN(tb)
@@ -104,15 +97,14 @@ export function postProcessSearchResults<T extends { title: string; url: string;
     return tb - ta
   })
   for (const r of sorted) {
-    const titleKey = (r.title || '').toLowerCase().replace(/[^\u4e00-\u9fa5a-z0-9]/g, '').slice(0, 12)
-    if (titleKey) {
-      if (titleSeen.has(titleKey)) continue
-      titleSeen.add(titleKey)
-    }
-    const host = r.url.replace(/^https?:\/\/(www\.)?/, '').split('/')[0]
-    const hc = (seen.get(host) ?? 0) + 1
-    seen.set(host, hc)
-    if (hc <= 2) out.push(r)
+    let urlKey = r.url, host = r.url
+    try { const url = new URL(r.url); url.hash = ''; urlKey = url.toString(); host = url.hostname.replace(/^www\./, '') } catch { /* preserve malformed URLs as distinct */ }
+    const titleKey = r.title.toLowerCase().normalize('NFKC').replace(/[^\p{L}\p{N}]/gu, '')
+    if (urlsSeen.has(urlKey) || (titleKey && titleSeen.has(titleKey)) || (seen.get(host) ?? 0) >= maxPerHost) continue
+    urlsSeen.add(urlKey)
+    if (titleKey) titleSeen.add(titleKey)
+    seen.set(host, (seen.get(host) ?? 0) + 1)
+    out.push(r)
   }
   return out.slice(0, limit)
 }
@@ -460,31 +452,8 @@ export async function runExhaustiveSearch(
   }))
   const all: SearchResultItem[] = settled.flatMap((s) => s.raw)
 
-  // 标题/域名去重 + 全部分页后处理时不过度约束同源(放宽 host 上限，仅去重重复URL)
-  const byUrl = new Map<string, SearchResultItem>()
-  for (const r of all) {
-    if (!r?.url || !r?.title) continue
-    const timestamp = parseResultDate(r.date)
-    // Keep undated results for verification, but exclude dates known to be stale.
-    if (maxAge > 0 && Number.isFinite(timestamp) && timestamp < Date.now() - maxAge * 86400000) continue
-    const key = `${(r.url).replace(/^https?:\/\/(www\.)?/, '').split('/')[0]}:${(r.title || '').slice(0, 40)}`
-    if (!byUrl.has(key)) byUrl.set(key, r)
-  }
-  // 有日期的按日期新→旧排最前；无日期排后；同源最多 3 条
-  const seenHost = new Map<string, number>()
-  const merged = [...byUrl.values()]
-    .sort((a, b) => {
-      const da = parseResultDate(a.date), db = parseResultDate(b.date)
-      if (Number.isFinite(da) && Number.isFinite(db)) return db - da
-      return Number(Number.isFinite(db)) - Number(Number.isFinite(da))
-    })
-    .filter((r) => {
-      const host = (r.url).replace(/^https?:\/\/(www\.)?/, '').split('/')[0]
-      const hc = (seenHost.get(host) ?? 0) + 1
-      seenHost.set(host, hc)
-      return hc <= 3
-    })
-    .slice(0, count)
+  // Use the same date and duplicate rules as ordinary search, with a wider host cap.
+  const merged = postProcessSearchResults(all, count, maxAge, 3)
 
   if (merged.length === 0) return { engine: 'none', results: [], engines: [] }
   return { engine: `multi(${settled.filter((s) => s.raw.length).map((s) => s.name).join('+')})`, results: merged, engines: settled.filter((s) => s.raw.length).map((s) => s.name) }

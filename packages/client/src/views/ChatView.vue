@@ -556,6 +556,8 @@
       :active-index="activeQuestionIndex"
     />
 
+    <GoalBar v-if="chatStore.currentSessionId && !isMobile" :session-id="chatStore.currentSessionId" />
+
     <!-- Input area（欢迎页时隐藏，中央输入框替代；保留 DOM 供文件选择器使用） -->
     <footer ref="footerRef" class="input-area" v-show="messages.length > 0">
       <!-- 后台任务小浮条：挂在输入卡外侧右上方（绝对定位，零占位；任务再多也不顶输入框） -->
@@ -896,6 +898,7 @@ import BgTaskBar from '@/components/chat/BgTaskBar.vue'
 import ElapsedBadge from '@/components/chat/ElapsedBadge.vue'
 import { markTurnAborted, requestAgentStop } from '@/utils/turn-abort'
 import PlanCapsule from '@/components/chat/PlanCapsule.vue'
+import GoalBar from '@/components/chat/GoalBar.vue'
 import MessageFlowRenderer from '@/components/chat/MessageFlowRenderer.vue'
 import ToolApprovalFloating from '@/components/chat/ToolApprovalFloating.vue'
 import QuestionFloating from '@/components/chat/QuestionFloating.vue'

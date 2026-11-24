@@ -112,7 +112,9 @@ chatRouter.post('/question-answer', async (ctx) => {
   if (!questionId || answer === undefined) {
     ctx.status = 400; ctx.body = { error: 'questionId and answer required' }; return
   }
-  resolveQuestion(questionId, String(answer))
+  if (!resolveQuestion(questionId, String(answer))) {
+    ctx.status = 404; ctx.body = { error: 'unknown or expired questionId' }; return
+  }
   ctx.body = { ok: true }
 })
 chatRouter.post('/tool-confirm', async (ctx) => {

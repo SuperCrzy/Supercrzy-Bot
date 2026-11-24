@@ -6,6 +6,18 @@ const goal: PersistentGoal = { id: 'g', session_id: 's', objective: 'goal', acce
 const frame = (event: string, data: unknown) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
 
 describe('goal agent adapter', () => {
+  it('allows continuation only when the report references an observed successful tool result', async () => {
+    const runner = makeGoalAgentRunner({ ownerIsCurrent: () => true, requestStop: vi.fn(), makeMessages: async () => [], handler: async ctx => {
+      ctx.res.write(frame('config', {}))
+      ctx.res.write(frame('tool_call', { id: 't1', name: 'file_read', arguments: '{"path":"a"}' }))
+      ctx.res.write(frame('tool_result', { tool_call_id: 't1', content: 'found content' }))
+      ctx.res.write(frame('content', { content: '已检查。\n<goal_report>{"action":"continue","evidence_call_ids":["t1"]}</goal_report>' }))
+      ctx.res.write(frame('done', { finished: true }))
+    } })
+    const result = await runner({ goal, runId: 'r', signal: new AbortController().signal, emit: vi.fn() })
+    expect(result.summary).toBe('已检查。')
+    expect(result.progressFingerprint).toMatch(/^[a-f0-9]{64}$/)
+  })
   it('forwards events but does not claim the overall goal is complete', async () => {
     const emit = vi.fn()
     const runner = makeGoalAgentRunner({ ownerIsCurrent: () => true, requestStop: vi.fn(), makeMessages: async () => [{ role: 'user', content: 'goal' }], handler: async ctx => {

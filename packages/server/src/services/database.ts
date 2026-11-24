@@ -62,6 +62,11 @@ export function initDatabase() {
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+    CREATE TABLE IF NOT EXISTS agent_session_locks (
+      session_id TEXT PRIMARY KEY,
+      owner_pid INTEGER NOT NULL,
+      token TEXT NOT NULL
+    );
 
     CREATE TABLE IF NOT EXISTS persistent_goals (
       id TEXT PRIMARY KEY,

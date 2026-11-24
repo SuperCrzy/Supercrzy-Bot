@@ -31,7 +31,14 @@ export function createPersistentGoal(db: Database.Database, sessionId: string, o
 }
 
 export function getOpenPersistentGoal(db: Database.Database, sessionId: string): PersistentGoal | undefined {
-  return db.prepare("SELECT * FROM persistent_goals WHERE session_id = ? AND status NOT IN ('completed', 'cancelled')").get(sessionId) as PersistentGoal | undefined
+  try {
+    return db.prepare("SELECT * FROM persistent_goals WHERE session_id = ? AND status NOT IN ('completed', 'cancelled')").get(sessionId) as PersistentGoal | undefined
+  } catch {
+    // Called from the chat entry point, which must survive a database that predates
+    // this table — an older install, a restored backup, or a test harness that builds
+    // its own schema. A missing goals table means "no goal", not "chat is broken".
+    return undefined
+  }
 }
 
 /** Reject stale emitters and oversized events rather than silently losing approvals. */
@@ -57,9 +64,17 @@ export function listGoalEvents(db: Database.Database, sessionId: string, goalId:
 export function cancelStoppedGoal(db: Database.Database, sessionId: string, id: string, version: number): boolean {
   if (!Number.isSafeInteger(version) || version < 1) throw new Error('invalid_version')
   const result = db.prepare(`UPDATE persistent_goals SET status = 'cancelled', version = version + 1, updated_at = ?
-    WHERE id = ? AND session_id = ? AND version = ? AND status IN ('paused', 'interrupted') AND current_run_id IS NULL`)
+    WHERE id = ? AND session_id = ? AND version = ? AND status IN ('paused', 'interrupted', 'waiting_user') AND current_run_id IS NULL`)
     .run(Date.now(), id, sessionId, version)
   return result.changes === 1
+}
+
+/** Completion is an explicit user decision, never inferred from an Agent turn. */
+export function completeStoppedGoal(db: Database.Database, sessionId: string, id: string, version: number): boolean {
+  if (!Number.isSafeInteger(version) || version < 1) throw new Error('invalid_version')
+  return db.prepare(`UPDATE persistent_goals SET status = 'completed', version = version + 1, updated_at = ?
+    WHERE id = ? AND session_id = ? AND version = ? AND status IN ('paused', 'interrupted', 'waiting_user') AND current_run_id IS NULL`)
+    .run(Date.now(), id, sessionId, version).changes === 1
 }
 
 /** Atomically claims one execution; duplicate clicks and workers cannot both run it. */
@@ -68,7 +83,7 @@ export function claimGoalRun(db: Database.Database, sessionId: string, goalId: s
   return db.transaction(() => {
     const runId = randomUUID()
     const claim = db.prepare(`UPDATE persistent_goals SET status = 'active', current_run_id = ?, version = version + 1, updated_at = ?
-      WHERE id = ? AND session_id = ? AND version = ? AND status IN ('paused', 'interrupted') AND current_run_id IS NULL`)
+      WHERE id = ? AND session_id = ? AND version = ? AND status IN ('paused', 'interrupted', 'waiting_user') AND current_run_id IS NULL`)
       .run(runId, now, goalId, sessionId, version)
     if (claim.changes !== 1) return undefined
     db.prepare("INSERT INTO persistent_goal_runs (id, goal_id, status, started_at, owner_pid) VALUES (?, ?, 'running', ?, ?)").run(runId, goalId, now, process.pid)
@@ -108,6 +123,13 @@ export function requestGoalPause(db: Database.Database, sessionId: string, goalI
       .run(now, goalId, version)
     return changed.changes === 1 ? goal.current_run_id : undefined
   })()
+}
+
+/** Update the continuation context only while this exact run is still active. */
+export function recordGoalProgress(db: Database.Database, goalId: string, runId: string, summary: string): boolean {
+  const changed = db.prepare("UPDATE persistent_goals SET last_result = ?, version = version + 1, updated_at = ? WHERE id = ? AND current_run_id = ? AND status = 'active'")
+    .run(summary.slice(0, 20_000), Date.now(), goalId, runId)
+  return changed.changes === 1
 }
 
 /** Record a settled run, accepting only the run that still owns the goal. */

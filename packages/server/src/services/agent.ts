@@ -202,11 +202,15 @@ function approvalDenialText(kind: 'deny' | 'timeout' | 'cancelled', toolName: st
 
 // ---- AskQuestion：Agent 结构化提问（结构化提问）----
 const pendingQuestions = new Map<string, (answer: string) => void>()
+export function hasPendingQuestion(id: string): boolean { return pendingQuestions.has(id) }
 
 /** 前端回复提问（chat.ts 路由调用） */
 export function resolveQuestion(id: string, answer: string) {
-  pendingQuestions.get(id)?.(answer)
+  const handler = pendingQuestions.get(id)
+  if (!handler) return false
+  handler(answer)
   pendingQuestions.delete(id)
+  return true
 }
 
 /** Agent 提问：挂起等待用户选项/输入答复（10 分钟超时自动取消） */

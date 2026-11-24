@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3'
-import { appendGoalEvent, claimGoalRun, getOpenPersistentGoal, requestGoalPause, settleGoalRun, type PersistentGoal } from './persistent-goals'
+import { appendGoalEvent, claimGoalRun, getOpenPersistentGoal, recordGoalProgress, requestGoalPause, settleGoalRun, type PersistentGoal } from './persistent-goals'
 
-export type GoalRunResult = { outcome: 'paused' | 'waiting_user' | 'interrupted'; summary: string }
+export type GoalRunResult = { outcome: 'paused' | 'waiting_user' | 'interrupted'; summary: string; progressFingerprint?: string }
 export type GoalRunner = (input: { goal: PersistentGoal; runId: string; signal: AbortSignal; emit: (event: string, payload: unknown) => void }) => Promise<GoalRunResult>
 
 /** Coordinates one owned run. A runner must resolve only after its work actually stops. */
@@ -19,11 +19,30 @@ export class GoalCoordinator {
     const emit = (event: string, payload: unknown) => {
       if (!appendGoalEvent(this.db, goalId, runId, event, payload)) throw new Error('goal_run_not_active')
     }
-    const completion = Promise.resolve().then(() => this.runner({ goal, runId, signal: controller.signal, emit }))
-      .then(result => {
+    const completion = Promise.resolve().then(async () => {
+      let currentGoal = goal
+      const seen = new Set<string>()
+      const maxTurns = 3
+      for (let turn = 0; turn < maxTurns; turn++) {
+        if (controller.signal.aborted) { settleGoalRun(this.db, goalId, runId, 'paused', currentGoal.last_result); return }
+        const result = await this.runner({ goal: currentGoal, runId, signal: controller.signal, emit })
         if (!['paused', 'waiting_user', 'interrupted'].includes(result?.outcome) || typeof result.summary !== 'string') throw new Error('invalid_runner_result')
-        settleGoalRun(this.db, goalId, runId, result.outcome, result.summary.slice(0, 20_000))
-      })
+        const canContinue = result.outcome === 'paused' && !controller.signal.aborted && typeof result.progressFingerprint === 'string' && /^[a-f0-9]{64}$/.test(result.progressFingerprint) && !seen.has(result.progressFingerprint)
+        if (!canContinue || turn === maxTurns - 1) {
+          settleGoalRun(this.db, goalId, runId, result.outcome, result.summary.slice(0, 20_000))
+          return
+        }
+        seen.add(result.progressFingerprint!)
+        if (!recordGoalProgress(this.db, goalId, runId, result.summary)) {
+          settleGoalRun(this.db, goalId, runId, 'paused', result.summary.slice(0, 20_000))
+          return
+        }
+        emit('goal_turn', { turn: turn + 1, summary: result.summary.slice(0, 2000) })
+        const next = getOpenPersistentGoal(this.db, sessionId)
+        if (!next || next.id !== goalId || next.current_run_id !== runId) return
+        currentGoal = next
+      }
+    })
       .catch(error => {
         // An exception does not prove tools stopped safely or that work completed.
         const reason = error instanceof Error ? error.message : 'runner_failed'
