@@ -37,6 +37,28 @@ export const APP_VERSION: string = typeof __APP_VERSION__ === 'string' ? __APP_V
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.3.8',
+    date: '2026-11-24',
+    title: '目标可见，过程可读',
+    titleEn: 'Goals you can see, process you can read',
+    features: [
+      '长任务回复改成可读的记录：旁白留在原位，每段工具调用收成一行摘要，最终答案固定为「总起 + 数字 + 边界说明」三段',
+      '输入 /goal 可直接设置持续目标；描述一个大项目时，助手也会在输入框上方提出目标卡（暂停态，等你确认才执行）',
+      '写入后被读回核实的目标可以继续推进，最多自动续跑三轮；网络、终端、设备操作后仍会暂停',
+    ],
+    featuresEn: [
+      'Finished replies read as a record: narration stays in place, each tool batch folds into one summary row, and the answer is a lead-in plus numbers plus a boundary line',
+      'Type /goal to set a persistent goal; describe a large project and the assistant may propose one above the input box, paused until you confirm',
+      'A goal may continue after writes that were read back, up to three turns; network, shell and device actions still pause it',
+    ],
+    fixes: [
+      '已安装技能列表不再因超出长度预算而丢条目；重名技能会打开其中一个',
+    ],
+    fixesEn: [
+      'The installed-skill index no longer drops entries when it exceeds its length budget; duplicate names open one skill',
+    ],
+  },
+  {
     version: '1.3.7',
     date: '2026-11-24',
     title: '不再被随机踢下线',
