@@ -167,7 +167,6 @@ import type { ChatMessage, ChatFlowNode } from '@/types'
 import { composeFoldSummary, formatDurationMs } from '@/utils/tool-summary'
 import { useSecondTick } from '@/composables/useSecondTick'
 import { stageOfTool, stageBreakdown, formatStageBreakdown, STAGE_I18N } from '@/utils/stage'
-import { shouldFoldProcess } from '@/utils/process-fold'
 // I3：AI 产出的 SVG 走 v-html 前必须清洗（见 utils/sanitize-svg.ts 的威胁模型）
 import { sanitizeSvg } from '@/utils/sanitize-svg'
 import { extractSvgs } from '@/utils/svg-extract'
@@ -438,49 +437,16 @@ function segmentFlow(nodes: FlowDisplayNode[]): FlowSegment[] {
   return segs
 }
 
-/** 合并 process 段（完成态：所有过程合一，一个折叠条收起全部过程） */
-function makeProcessSeg(nodes: FlowDisplayNode[]): FlowSegment {
-  return {
-    kind: 'process',
-    nodes,
-    tools: nodes.filter((n) => n.kind === 'tool').length,
-    thinks: nodes.filter((n) => n.kind === 'thinking' || n.kind === 'thinking-group').length,
-  }
-}
-
 /**
- * 分段结果：
- * - 执行中（流式中）：保持分段结构，全程平铺可视化（工具紧凑卡片 + 中间说明 + 思考实时可见）——不逐段折叠
- * - 完成态（自适应，2026-10-23 老板拍板"短任务简单核实，长任务灵活，不要固定模式"）：
- *   - 短任务（工具 ≤3 且过程节点 ≤8）：不折叠，平铺展示——"执行了 3 步"不该被收成摘要条（证据消失）
- *   - 长任务：所有过程段合并为一个折叠条，插在过程**第一次出现的位置**（时间顺序，
- *     不再 unshift 顶到消息最上面——那会打乱"旁白→过程→结论"的阅读顺序）
+ * Segmentation:
+ * - While streaming: keep the segment structure, everything renders flat (compact
+ *   tool cards + narration + live thinking).
+ * - Completed: each process segment collapses into its own Codex-style summary row
+ *   ("Ran 1 command · Edited 1 file · 3s") sitting between narration paragraphs.
+ *   The long-task merge into one mega-bar was removed with the reply-structure
+ *   template (2026-11-24): merging erased the narration rhythm and hid findings.
  */
-const segments = computed<FlowSegment[]>(() => {
-  const segs = segmentFlow(visibleFlow(props.msg.flow))
-  if (!shouldCollapse(props.msg)) return segs
-  // 统计过程规模：steps = 工具调用数，nodes = 过程节点总数（思考 + 工具）
-  let steps = 0
-  let nodes = 0
-  let firstProcIdx = -1
-  segs.forEach((s, i) => {
-    if (s.kind !== 'process') return
-    if (firstProcIdx < 0) firstProcIdx = i
-    steps += s.tools
-    nodes += s.nodes.length
-  })
-  if (!shouldFoldProcess(steps, nodes)) return segs
-  // 长任务：合并为一个折叠条。firstProcIdx 之前全是非 process 段（segmentFlow 保证
-  // 相邻 process 之间必有 text/diagram 隔断），故过滤后 merged 的落点下标不变。
-  if (firstProcIdx < 0 || nodes === 0) return segs
-  const procNodes: FlowDisplayNode[] = []
-  for (const s of segs) {
-    if (s.kind === 'process') procNodes.push(...s.nodes)
-  }
-  const out: FlowSegment[] = segs.filter((s) => s.kind !== 'process')
-  out.splice(firstProcIdx, 0, makeProcessSeg(procNodes))
-  return out
-})
+const segments = computed<FlowSegment[]>(() => segmentFlow(visibleFlow(props.msg.flow)))
 
 /** 最后一个 text 段节点 id（来源卡片只挂在最后一段正文后，避免每条 text 都重复渲染） */
 const lastTextNodeId = computed(() => {
@@ -506,19 +472,18 @@ function segCollapsed(si: number): boolean {
 }
 
 /**
- * text 段是否渲染（**完成态只出结果**）。
+ * Whether a text segment renders.
  *
- * 数据模型（`utils/flow-reconcile.ts` 不变量）：`msg.content` = 本轮**最终答案**，
- * flow 里最后一个 text 段承载它，它之前的 text 段是**过程旁白**（"我先看一下…"）。
- * ⇒ 收尾/历史折叠态只渲染最后一段（= 结果）；旁白随过程一起收起，不再平铺成"过程小回复"。
+ * Reply-structure template (Codex mobile teardown, approved 2026-11-24): a turn
+ * reads as a narrative — opening narration, tool rows, mid narration, final
+ * answer. Narration segments stay visible in the completed state too; the
+ * per-segment process bar carries the folded tool work between them.
+ * (Supersedes the 2026-08-21 "completed shows only the result" rule.)
  *
- * 流式态（`shouldCollapse` false）**照常全部平铺**：此刻旁白就是实时进度，藏掉会让长任务看起来卡住。
- * 用户手动展开（`processCollapsed === false`）同样全部显示 —— 主动展开就是要看过程，旁白没丢。
+ * Streaming behavior is unchanged: everything renders as it arrives.
  */
 function shouldShowText(seg: FlowSegment): boolean {
-  if (seg.kind !== 'text') return false
-  if (!shouldCollapse(props.msg)) return true
-  return seg.node.id === lastTextNodeId.value
+  return seg.kind === 'text'
 }
 
 /**
@@ -594,11 +559,11 @@ function runningLines(n: Extract<FlowDisplayNode, { kind: 'tool' }>): string {
   return parts.join(' ')
 }
 
-/** 段摘要（**只服务收尾条**）：流式中的历史段显示阶段画像，收尾返回空（条上只留状态词+耗时，
- *  对齐主流实现 fold.completedWithDuration —— 2026-09-26 老板"收尾条臃肿"） */
+/** Segment summary: a historical segment still streaming shows the stage
+ *  breakdown; a completed segment shows the verb aggregate, matching the Codex
+ *  template where the collapsed row itself says what the segment did. */
 function segSummary(seg: FlowSegment): string {
   if (seg.kind !== 'process') return ''
-  if (!isMsgStreaming(props.msg)) return ''
   const nodes = seg.nodes
   // ①未完成的思考 → "正在思考"
   for (let i = nodes.length - 1; i >= 0; i--) {
