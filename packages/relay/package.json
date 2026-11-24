@@ -1,6 +1,6 @@
 {
   "name": "@supercrzy/relay",
-  "version": "1.3.5",
+  "version": "1.3.6",
   "private": true,
   "description": "M8 rendezvous relay: pairs the phone client with the desktop BOT over outbound-only WebSockets. Forwards JSON-RPC envelopes and streams nothing to disk (zero storage by design).",
   "type": "module",

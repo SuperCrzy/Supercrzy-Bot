@@ -37,6 +37,38 @@ export const APP_VERSION: string = typeof __APP_VERSION__ === 'string' ? __APP_V
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: '1.3.6',
+    date: '2026-11-24',
+    title: '安全加固与持续目标',
+    titleEn: 'Security hardening and persistent goals',
+    features: [
+      '会话可以持有长期目标，输入框上方显示目标状态与累计运行时间，支持暂停与恢复',
+      '目标默认暂停，中断后恢复前会问你有没有检查过进度，不会自动重跑',
+    ],
+    featuresEn: [
+      'A session can hold a long-running goal, shown above the input with its status and accumulated time',
+      'Goals start paused; resuming after an interruption asks whether you have reviewed it rather than re-running',
+    ],
+    fixes: [
+      '诊断包不再包含日志正文和自由文本设置，只导出配置状态、计数与日志元数据',
+      '上传的 HTML/SVG 不再作为同源可执行内容返回，防止脚本在应用源上运行',
+      '回滚不再覆盖任务结束后你自己的修改，不一致的文件会跳过并提示',
+      'AI 浏览器不再吃掉点在其上的鼠标事件，点设置不再没反应',
+      '搜索结果按日期排序；带时间过滤的搜索不再返回空',
+      '计划不再因运行结束就把所有步骤标为完成；工具失败不再显示为成功',
+      '会话只有服务端确认存在才显示；上传与识别结果回到发起它的会话',
+    ],
+    fixesEn: [
+      'The diagnostic bundle no longer contains log contents or free-text settings',
+      'Uploaded HTML and SVG are no longer served as same-origin executable content',
+      'Rollback no longer overwrites your changes made after the task, skipping files that differ',
+      'The AI browser no longer swallows clicks aimed at the app',
+      'Search results are ordered by date, and time-filtered searches no longer come back empty',
+      'A plan no longer marks every step complete just because the run ended; a failed tool is no longer shown as done',
+      'A session appears only once the server has it; uploads stay with the session that started them',
+    ],
+  },
+  {
     version: '1.3.5',
     date: '2026-11-23',
     title: '网页抓取与回答保存的稳定性',
