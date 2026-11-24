@@ -1,6 +1,6 @@
 /** Execute the real chat route and agent loop against a local deterministic model. */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer, type Server } from 'node:http'
@@ -21,7 +21,7 @@ let db: Database.Database
 let baseUrl: string
 let remote: typeof import('./remote-task-bridge')
 let providerRequests: Array<{ messages?: Array<{ role: string; content: unknown }>; stream?: boolean }> = []
-let providerMode: 'answer' | 'file-read' | 'goal-continue' | 'bad-args' | 'stall' | 'approval' | 'question' | 'disconnect' = 'answer'
+let providerMode: 'answer' | 'file-read' | 'goal-continue' | 'bad-args' | 'write-invalid' | 'write-ok' | 'stall' | 'approval' | 'question' | 'disconnect' = 'answer'
 let providerDisconnected = false
 const originalEnv = { ...process.env }
 const originalFetch = globalThis.fetch
@@ -53,9 +53,9 @@ beforeAll(async () => {
         return
       }
       const isRead = providerMode === 'file-read' || providerMode === 'goal-continue' || providerMode === 'bad-args'
-      const toolName = isRead ? 'file_read' : providerMode === 'approval' ? 'file_delete' : 'ask_user'
-      const toolArgs = isRead ? { path: 'input.txt' } : providerMode === 'approval' ? { path: 'protected.txt' } : { question: 'Choose an option', options: [{ label: 'A' }] }
-      const delta = ['file-read', 'goal-continue', 'bad-args', 'approval', 'question'].includes(providerMode) && providerRequests.length === 1
+      const toolName = isRead ? 'file_read' : ['write-invalid', 'write-ok'].includes(providerMode) ? 'file_write' : providerMode === 'approval' ? 'file_delete' : 'ask_user'
+      const toolArgs = isRead ? { path: 'input.txt' } : providerMode === 'write-invalid' ? { path: join(isolation.root, 'never-written.txt') } : providerMode === 'write-ok' ? { path: join(isolation.root, 'written.txt'), content: 'fixture content' } : providerMode === 'approval' ? { path: 'protected.txt' } : { question: 'Choose an option', options: [{ label: 'A' }] }
+      const delta = ['file-read', 'goal-continue', 'bad-args', 'write-invalid', 'write-ok', 'approval', 'question'].includes(providerMode) && providerRequests.length === 1
         ? { reasoning_content: 'Use the requested tool.', tool_calls: [{ index: 0, id: 'tool-test-1', type: 'function', function: { name: toolName, arguments: providerMode === 'bad-args' ? '{' : JSON.stringify(toolArgs) } }] }
         : { content: ['goal-continue', 'bad-args'].includes(providerMode) && providerRequests.length === 2 ? '已读取文件。\n<goal_report>{"action":"continue","evidence_call_ids":["tool-test-1"]}</goal_report>' : providerMode === 'file-read' ? 'Read completed.' : 'Local model answer' }
       res.end(`data: ${JSON.stringify({ choices: [{ delta, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`)
@@ -100,6 +100,136 @@ afterAll(async () => {
 })
 
 describe('real agent bridge', () => {
+  it.each(['missing', 'malformed', 'no-messages'])('does not start a new run when the %s checkpoint cannot be resumed', async kind => {
+    providerRequests = []; providerMode = 'answer'
+    const sessionId = `resume-bad-${kind}`, fixture = join(isolation.root, `resume-bad-${kind}.json`)
+    db.prepare('INSERT INTO sessions (id,title,workspace_dir) VALUES (?,?,?)').run(sessionId, 'Resume', isolation.root)
+    if (kind === 'malformed') writeFileSync(fixture, '{broken')
+    if (kind === 'no-messages') writeFileSync(fixture, JSON.stringify({ id: 'bad', turn: 1 }))
+    const response = await fetch(`${baseUrl}/api/chat/agent`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sessionId, resumeCheckpoint: fixture, messages: [{ role: 'user', content: 'Resume invalid task' }] }), signal: AbortSignal.timeout(10000) })
+    const body = await response.text()
+    expect(body).toContain('Failed to resume checkpoint')
+    expect(body).toMatch(/event: done\ndata: .*"finished":false.*"reason":"checkpoint_invalid"/)
+    expect(providerRequests).toHaveLength(0)
+  })
+  it('preserves historical checkpoint records after a resumed task is stopped again', async () => {
+    providerRequests = []; providerMode = 'stall'
+    const sessionId = 'resume-stop-again', fixture = join(isolation.root, 'resume-stop-fixture.json')
+    const historicalFile = { name: 'old.txt', path: join(isolation.root, 'old.txt'), mime: 'text/plain', size: 3 }
+    db.prepare('INSERT INTO sessions (id,title,workspace_dir) VALUES (?,?,?)').run(sessionId, 'Resume', isolation.root)
+    writeFileSync(fixture, JSON.stringify({ id: 'old', turn: 1, messages: [{ role: 'user', content: 'Earlier task' }], createdFiles: [historicalFile], totalToolCalls: ['file_read'] }))
+    try {
+      const response = await fetch(`${baseUrl}/api/chat/agent`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sessionId, resumeCheckpoint: fixture, messages: [{ role: 'user', content: 'Resume then stop fixture' }] }), signal: AbortSignal.timeout(10000) })
+      await vi.waitFor(() => expect(providerRequests.length).toBeGreaterThan(0))
+      const { requestStop } = await import('./agent')
+      requestStop(sessionId)
+      const body = await response.text()
+      const frame = /event: checkpoint_available\ndata: (.+)/.exec(body)
+      expect(frame).toBeTruthy()
+      const event = JSON.parse(frame![1])
+      const saved = JSON.parse(readFileSync(event.checkpointPath, 'utf8'))
+      expect(saved.createdFiles).toEqual([historicalFile])
+      expect(saved.totalToolCalls).toContain('file_read')
+      expect(body).not.toContain('任务完成，共产生 1 个文件')
+      expect(body).toMatch(/event: done\ndata: .*"finished":false/)
+      await waitForTaskLog('Resume then stop fixture')
+    } finally { providerMode = 'answer'; providerRequests = [] }
+  })
+  it.each(['resume-by-id', 'resume-by-id.json'])('resolves checkpoint %s from the configured workspace', async checkpoint => {
+    providerRequests = []; providerMode = 'answer'
+    const sessionId = `session-${checkpoint}`
+    db.prepare('INSERT INTO sessions (id,title,workspace_dir) VALUES (?,?,?)').run(sessionId, 'Resume', isolation.root)
+    const dir = join(isolation.root, 'data', 'checkpoints')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'resume-by-id.json'), JSON.stringify({ id: 'resume-by-id', turn: 1, messages: [{ role: 'user', content: 'Earlier task' }], createdFiles: [], totalToolCalls: [] }))
+    const response = await fetch(`${baseUrl}/api/chat/agent`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sessionId, resumeCheckpoint: checkpoint, messages: [{ role: 'user', content: `Resume ${checkpoint}` }] }), signal: AbortSignal.timeout(10000) })
+    const body = await response.text()
+    expect(body).toContain('event: checkpoint_resumed')
+    expect(body).not.toContain('Failed to resume checkpoint')
+    await waitForTaskLog(`Resume ${checkpoint}`)
+  })
+  it('retains checkpoint artifacts and tool count through a resumed agent run', async () => {
+    providerRequests = []; providerMode = 'answer'
+    const sessionId = 'resume-artifacts', fixture = join(isolation.root, 'resume-fixture.json')
+    db.prepare('INSERT INTO sessions (id,title,workspace_dir) VALUES (?,?,?)').run(sessionId, 'Resume', isolation.root)
+    writeFileSync(fixture, JSON.stringify({ id: 'old-checkpoint', turn: 1, messages: [{ role: 'user', content: 'Earlier task' }], createdFiles: [{ name: 'existing.txt', path: join(isolation.root, 'existing.txt'), mime: 'text/plain', size: 4 }], totalToolCalls: ['file_write'], timestamp: new Date().toISOString() }))
+    const response = await fetch(`${baseUrl}/api/chat/agent`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sessionId, resumeCheckpoint: fixture, messages: [{ role: 'user', content: 'Resume fixture task' }] }), signal: AbortSignal.timeout(10000) })
+    const body = await response.text()
+    expect(body).toMatch(/event: checkpoint_resumed\ndata: .*"savedFiles":1.*"toolCalls":1/)
+    expect(body).not.toContain('任务完成，共产生 1 个文件')
+    expect(body).toMatch(/event: delivery_summary\ndata: .*"artifactCount":0/)
+    await waitForTaskLog('Resume fixture task')
+  })
+  it('resumes an older checkpoint without artifact or tool arrays', async () => {
+    providerRequests = []; providerMode = 'answer'
+    const sessionId = 'resume-legacy', fixture = join(isolation.root, 'resume-legacy.json')
+    db.prepare('INSERT INTO sessions (id,title,workspace_dir) VALUES (?,?,?)').run(sessionId, 'Resume', isolation.root)
+    writeFileSync(fixture, JSON.stringify({ id: 'old', turn: 1, messages: [{ role: 'user', content: 'Earlier task' }] }))
+    const response = await fetch(`${baseUrl}/api/chat/agent`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sessionId, resumeCheckpoint: fixture, messages: [{ role: 'user', content: 'Resume legacy fixture' }] }), signal: AbortSignal.timeout(10000) })
+    const body = await response.text()
+    expect(body).toMatch(/event: checkpoint_resumed\ndata: .*"savedFiles":0.*"toolCalls":0/)
+    expect(body).toContain('Local model answer')
+    expect(body).not.toContain('Failed to resume checkpoint')
+    await waitForTaskLog('Resume legacy fixture')
+  })
+  it('records one artifact with the actual path and size after a successful write', async () => {
+    providerRequests = []; providerMode = 'write-ok'
+    db.prepare("INSERT OR REPLACE INTO settings (key,value) VALUES ('permissionTier','accept-edits')").run()
+    db.prepare('INSERT INTO sessions (id, title, workspace_dir, permission_level) VALUES (?, ?, ?, ?)').run('goal-write-ok', 'Goal', isolation.root, 'workspace-only')
+    const { createPersistentGoal, listGoalEvents } = await import('./persistent-goals')
+    const { createGoalRuntime } = await import('./goal-runtime')
+    const { handleAgentChat } = await import('./chat')
+    const { requestStop } = await import('./agent')
+    const goal = createPersistentGoal(db, 'goal-write-ok', 'Hello write fixture')
+    const runtime = createGoalRuntime(db, { handler: handleAgentChat, requestStop, currentAccount: () => 'test-account' })
+    try {
+      await runtime.start('goal-write-ok', goal.id, goal.version)!.completion
+      const events = listGoalEvents(db, 'goal-write-ok', goal.id, 0)
+      const created = events.filter(event => event.event === 'file_created')
+      expect(created).toHaveLength(1)
+      expect(created[0].payload).toMatchObject({ path: join(isolation.root, 'written.txt'), size: Buffer.byteLength('fixture content') })
+      expect(db.prepare('SELECT path, size FROM artifacts WHERE session_id = ?').all('goal-write-ok')).toEqual([{ path: join(isolation.root, 'written.txt'), size: Buffer.byteLength('fixture content') }])
+      expect(readFileSync(join(isolation.root, 'written.txt'), 'utf8')).toBe('fixture content')
+      await waitForTaskLog('Hello write fixture')
+    } finally { providerMode = 'answer'; providerRequests = []; db.prepare("DELETE FROM settings WHERE key = 'permissionTier'").run() }
+  })
+  it('reports the actual action when an artifact path is recreated', async () => {
+    providerRequests = []; providerMode = 'write-ok'
+    const file = join(isolation.root, 'written.txt')
+    rmSync(file, { force: true })
+    db.prepare("INSERT OR REPLACE INTO settings (key,value) VALUES ('permissionTier','accept-edits')").run()
+    db.prepare('INSERT INTO sessions (id, title, workspace_dir, permission_level) VALUES (?, ?, ?, ?)').run('artifact-recreated', 'Artifact', isolation.root, 'workspace-only')
+    db.prepare("INSERT INTO artifacts (id, session_id, name, path, mime, size, action, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))").run('old-artifact', 'artifact-recreated', 'old-name', file, 'old/type', 0, 'updated')
+    try {
+      const response = await fetch(`${baseUrl}/api/chat/agent`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sessionId: 'artifact-recreated', messages: [{ role: 'user', content: 'Recreate artifact fixture' }] }), signal: AbortSignal.timeout(10000) })
+      const body = await response.text()
+      expect(body).toMatch(/event: file_created\ndata: .*"action":"created"/)
+      expect(body).toContain('产出或更新 1 个文件')
+      expect(db.prepare('SELECT name, mime, action FROM artifacts WHERE id = ?').get('old-artifact')).toEqual({ name: 'written.txt', mime: 'text/plain', action: 'created' })
+      await waitForTaskLog('Recreate artifact fixture')
+    } finally { providerMode = 'answer'; providerRequests = []; db.prepare("DELETE FROM settings WHERE key = 'permissionTier'").run() }
+  })
+  it('does not report an artifact when file_write fails validation', async () => {
+    providerRequests = []; providerMode = 'write-invalid'
+    db.prepare("INSERT OR REPLACE INTO settings (key,value) VALUES ('permissionTier','accept-edits')").run()
+    db.prepare('INSERT INTO sessions (id, title, workspace_dir, permission_level) VALUES (?, ?, ?, ?)').run('goal-write-invalid', 'Goal', isolation.root, 'workspace-only')
+    const { createPersistentGoal, listGoalEvents } = await import('./persistent-goals')
+    const { createGoalRuntime } = await import('./goal-runtime')
+    const { handleAgentChat } = await import('./chat')
+    const { requestStop } = await import('./agent')
+    const goal = createPersistentGoal(db, 'goal-write-invalid', 'Hello validate file output')
+    const runtime = createGoalRuntime(db, { handler: handleAgentChat, requestStop, currentAccount: () => 'test-account' })
+    try {
+      await runtime.start('goal-write-invalid', goal.id, goal.version)!.completion
+      const events = listGoalEvents(db, 'goal-write-invalid', goal.id, 0)
+      expect(events.some(event => event.event === 'tool_result' && String((event.payload as any).content).includes('❌'))).toBe(true)
+      expect(events.find(event => event.event === 'tool_result')?.payload).toMatchObject({ status: 'error' })
+      expect(events.some(event => event.event === 'file_created')).toBe(false)
+      expect(db.prepare('SELECT count(*) AS n FROM artifacts WHERE session_id = ?').get('goal-write-invalid')).toEqual({ n: 0 })
+      expect(existsSync(join(isolation.root, 'never-written.txt'))).toBe(false)
+      await waitForTaskLog('Hello validate file output')
+    } finally { providerMode = 'answer'; providerRequests = []; db.prepare("DELETE FROM settings WHERE key = 'permissionTier'").run() }
+  })
   it.skipIf(process.env.SC_TEST_LIVE_GOAL !== '1')('continues a two-stage read-only goal against a live model', async () => {
     const Database = (await import('better-sqlite3')).default
     const sourcePath = process.env.SC_TEST_SOURCE_DB

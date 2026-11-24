@@ -3,7 +3,11 @@
  * 定义与执行器一体：加工具 = 加一个文件，不再双写。
  */
 import type { ToolDef } from './types'
-import { runSearchChain, runExhaustiveSearch } from '../services/search-providers'
+import { parseResultDate, runSearchChain, runExhaustiveSearch, type SearchResultItem } from '../services/search-providers'
+
+function labelDates(results: SearchResultItem[]) {
+  return results.map(result => ({ ...result, date_status: Number.isNaN(parseResultDate(result.date)) ? 'unknown' : 'unverified' }))
+}
 
 const tool: ToolDef = {
     name: 'web_search',
@@ -38,11 +42,11 @@ const tool: ToolDef = {
       if (wantFresh) {
         const r = await runExhaustiveSearch({ query, count, timeRange, depth: args.depth || 'basic', source: effectiveSource, maxAgeDays })
         if (r.results.length === 0) return JSON.stringify({ results: [], query, engine: r.engine, message: '没有可用的搜索结果；可能没有匹配内容，也可能是搜索来源暂时不可用。请调整关键词或稍后重试。' })
-        return JSON.stringify({ engine: r.engine, engines: r.engines, results: r.results, query })
+        return JSON.stringify({ engine: r.engine, engines: r.engines, results: labelDates(r.results), query, ...(timeRange ? { date_note: 'unknown 表示日期未知，不能确认符合时间范围；unverified 表示日期尚未向原始来源核实。' } : {}) })
       }
       const { engine, results } = await runSearchChain({ query, count, timeRange, depth: args.depth || 'basic', source: effectiveSource, maxAgeDays })
       if (results.length === 0) return JSON.stringify({ results: [], query, message: '没有可用的搜索结果；可能没有匹配内容，也可能是搜索来源暂时不可用。请调整关键词或稍后重试。' })
-      return JSON.stringify({ engine, results, query })
+      return JSON.stringify({ engine, results: labelDates(results), query, ...(timeRange ? { date_note: 'unknown 表示日期未知，不能确认符合时间范围；unverified 表示日期尚未向原始来源核实。' } : {}) })
     } catch (err: any) {
       return '❌ 搜索失败：' + err.message
     }

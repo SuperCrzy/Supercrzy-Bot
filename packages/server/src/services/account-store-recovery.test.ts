@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { readSession, writeSession, type StoredSession } from './account-store'
+import { clearSession, onSessionChange, readSession, writeSession, type StoredSession } from './account-store'
 
 let dir: string
 const session: StoredSession = { accountId: 'fixture', email: '', deviceId: 'fixture', accessToken: 'access', refreshToken: 'refresh', expiresAt: 1, savedAt: 1 }
@@ -10,6 +10,16 @@ beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'supercrzy-account-recovery-
 afterEach(() => { delete process.env.SC_AUTH_DIR; rmSync(dir, { recursive: true, force: true }) })
 
 describe('account session recovery', () => {
+  it('notifies subscribers after a successful session write and removal', () => {
+    const observed: Array<string | null> = []
+    const unsubscribe = onSessionChange(() => observed.push(readSession()?.accountId ?? null))
+    try {
+      writeSession(session)
+      writeSession({ ...session, accountId: 'other' })
+      clearSession()
+      expect(observed).toEqual(['fixture', 'other', null])
+    } finally { unsubscribe() }
+  })
   it('preserves a malformed key and ciphertext instead of replacing either', () => {
     writeSession(session)
     const ciphertext = readFileSync(join(dir, 'auth.json'), 'utf8')

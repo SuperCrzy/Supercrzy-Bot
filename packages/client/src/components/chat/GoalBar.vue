@@ -33,7 +33,7 @@
           <button v-if="['paused', 'interrupted', 'waiting_user'].includes(goal.status)" :disabled="busy" @click="beginEdit">{{ $t('goal.edit') }}</button>
         </template>
         <p v-if="goal.last_result"><strong>{{ $t('goal.lastResult') }}：</strong>{{ goal.last_result }}</p>
-        <p v-if="displayStream" class="goal-output">{{ displayStream }}</p>
+        <p v-if="visibleStream" class="goal-output">{{ visibleStream }}</p>
       </div>
       <div v-for="item in pending.confirmations" :key="item.id" class="goal-pending" role="alert">
         <strong>{{ $t('goal.approval') }}: {{ item.name }}</strong><pre>{{ item.arguments }}</pre>
@@ -75,6 +75,12 @@ const streamText = ref(''), now = ref(Date.now())
 const historyOpen = ref(false), history = ref<Array<Pick<Goal, 'id' | 'objective' | 'status' | 'last_result'>>>([])
 const editing = ref(false), editObjective = ref(''), editAcceptance = ref(''), editVersion = ref(0), editGoalId = ref('')
 const displayStream = computed(() => streamText.value.replace(/<goal_report>[\s\S]*$/, '').trim())
+const visibleStream = computed(() => {
+  const stream = displayStream.value
+  if (!stream) return ''
+  if (goal.value && !['active', 'pausing'].includes(goal.value.status) && stream === goal.value.last_result.trim()) return ''
+  return stream
+})
 let generation = 0, cursor = 0, loadingGeneration: number | null = null, refreshQueued = false, disposed = false, streamRun = ''
 const statusText = computed(() => t(`goal.status_${goal.value?.status || 'paused'}`))
 const elapsed = computed(() => {

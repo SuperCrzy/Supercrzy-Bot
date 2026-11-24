@@ -957,6 +957,19 @@ function buildSystemPrompt(basePrompt: string, userMessage: string, model?: stri
 3. **反向同样成立**：不要承诺查不到的能力。只有工具列表、技能列表、MCP 名单里切实存在的才可答应；
    承诺做不到的事，比承认做不到伤害大得多。`
 
+  // 用户明确要求"用某个技能/有没有相关技能"时，必须先查再动手。
+  //
+  // 实测：中文提问"帮我理清需求"，模型直接调 ask_user 或 shell_exec，一次都没打开
+  // skill_view——索引里列了名字和描述，但没有任何一句话说"这种情况要去查"。技能对模型
+  // 而言是"可选参考"，不是"前置步骤"。下面这条把显式请求变成硬要求；不做关键词猜测，
+  // 只在用户真的提到技能时才强制，避免每轮多一次无谓调用。
+  const skillRequestSection = `\n\n## 用户提到"技能"时（硬要求）
+用户说"用 xx 技能""有没有相关技能""按技能来做"之类的话，**动手之前必须**：
+1. \`tool_search("skill_view")\` 找到该工具；
+2. \`skill_list()\` 或 \`skill_search(关键词)\` 拿到准确名字；
+3. \`skill_view(name="准确名字")\` 读取它的说明，再按说明执行。
+不要凭技能名字猜内容，也不要只列出名字就说"我有这个技能"。用户没提技能时不需要主动查。`
+
   // Files the user maintains (SOUL/USER/IDENTITY). Empty when none exist yet.
   const personalitySection = buildPersonalitySection()
   const toolChoiceSection = `\n\n## 检索手段优先级（判断代码库事实时）
@@ -1199,7 +1212,7 @@ ${contentFactoryLine}`
   const baseTools = toolDefinitions.map((t) => t.name)
   const allowedTools = [...new Set([...baseTools, ...skillTools])]
 
-  const prompt = `${basePrompt}${personalitySection}${todaySection}${searchTriggerSection}${absenceSection}${evidenceSection}${selfCapabilitySection}${toolChoiceSection}${outputStyleSection}
+  const prompt = `${basePrompt}${personalitySection}${todaySection}${searchTriggerSection}${absenceSection}${evidenceSection}${selfCapabilitySection}${skillRequestSection}${toolChoiceSection}${outputStyleSection}
 
 ## Response Language (MUST FOLLOW)
 - Always reply in the SAME LANGUAGE the user writes in. If the user writes English, reply in English. If Chinese, reply in Chinese.
@@ -1422,6 +1435,8 @@ export async function runAgentLoop(
   // ---- 消息初始化（支持续跑） ----
   let messages: AgentMessage[]
   let resumedTurn = 0  // 检查点恢复时的轮次
+  let resumedFiles: AgentCheckpoint['createdFiles'] = []
+  let resumedTools: string[] = []
 
   if (resumeCheckpoint) {
     // 从检查点恢复
@@ -1429,6 +1444,11 @@ export async function runAgentLoop(
       const { readFile } = await import('fs/promises')
       const ckptData = await readFile(resumeCheckpoint, 'utf-8')
       const ckpt: AgentCheckpoint = JSON.parse(ckptData)
+      if (!ckpt || !Array.isArray(ckpt.messages) || ckpt.messages.length === 0) throw new Error('检查点缺少任务消息')
+      const savedFiles = Array.isArray(ckpt.createdFiles)
+        ? ckpt.createdFiles.filter(f => f && typeof f.name === 'string' && typeof f.path === 'string' && typeof f.mime === 'string')
+        : []
+      const savedTools = Array.isArray(ckpt.totalToolCalls) ? ckpt.totalToolCalls.filter(tool => typeof tool === 'string') : []
       // 2026-08-28：恢复时也清洗一次——磁盘上已有的旧检查点（实测 14 个）可能带着孤立 tool_calls，
       // 直接读回来首轮就 400。与 saveCheckpoint 侧形成双保险。
       const before = (ckpt.messages || []).length
@@ -1436,7 +1456,7 @@ export async function runAgentLoop(
       if (messages.length !== before || hasOrphanToolCalls(ckpt.messages || [])) {
         console.warn(`[Checkpoint] 恢复时清洗了消息序列（${before} 条）`)
       }
-      resumedTurn = ckpt.turn || 0
+      resumedTurn = Number.isSafeInteger(ckpt.turn) && ckpt.turn >= 0 ? ckpt.turn : 0
       // 读取最近任务日志摘要，注入续跑上下文（2026-08-26：让 Agent 知道上次干到哪、避免重复）。
       const taskLogSummary = await readLatestTaskLog()
       let resumeNotice = `[系统提示] 你正在从检查点恢复执行（第 ${ckpt.turn} 轮）。请继续完成之前未完成的任务，不要重复已完成的工作。`
@@ -1446,12 +1466,17 @@ export async function runAgentLoop(
       messages.push({ role: 'user', content: resumeNotice })
       emitSSE(ctx, 'checkpoint_resumed', {
         fromTurn: ckpt.turn,
-        savedFiles: ckpt.createdFiles.length,
-        toolCalls: ckpt.totalToolCalls.length,
+        savedFiles: savedFiles.length,
+        toolCalls: savedTools.length,
       })
+      resumedFiles = savedFiles
+      resumedTools = savedTools
     } catch (err: any) {
-      emitSSE(ctx, 'error', { message: `Failed to resume checkpoint: ${err.message}` })
-      messages = userMessages.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }))
+      // Starting over after a failed resume can repeat side effects. Stop before
+      // invoking a model or tool and make the failure explicit to the client.
+      emitSSE(ctx, 'error', { message: `Failed to resume checkpoint: ${err.message}`, hint: '检查点无法读取或内容不完整，本次未执行任务。请检查检查点后重试。' })
+      emitSSE(ctx, 'done', { turns: 0, maxTurns: effectiveMaxTurns, finished: false, reason: 'checkpoint_invalid' })
+      return
     }
   } else {
     messages = userMessages.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }))
@@ -1554,8 +1579,11 @@ export async function runAgentLoop(
   let finished = false
   let interrupted: string | null = null  // 2026-08-26：API 中断原因（费用耗尽/不可重试），非空时可续跑
   const db = getDB()  // 顶层 DB 句柄（产物持久化等用）
-  const createdFiles: Array<{ name: string; path: string; mime: string; size?: number }> = []
-  const totalToolCalls: string[] = []
+  // Checkpoint artifacts are historical records, not proof that a file still exists
+  // or was produced during this run. Preserve them for later checkpoints separately.
+  const createdFiles: AgentCheckpoint['createdFiles'] = []
+  const checkpointFiles = () => [...new Map([...resumedFiles, ...createdFiles].map(file => [file.path, file])).values()]
+  const totalToolCalls: string[] = [...resumedTools]
   // P1-05 任务交付页：本任务改过的文件（file_changed 事件来源，去重）
   const changedFiles = new Map<string, { name: string; path: string }>()
   // P1-05：全任务 token / 成本累计（此前只有逐轮 usage 事件，交付页拿不到总量）
@@ -2231,26 +2259,30 @@ export async function runAgentLoop(
           },
           // shell 命令产生的文件 → 补录产物（持久化 + 实时推送）
           onArtifacts: (files) => {
-            if (!sessionId || files.length === 0) return
             for (const f of files) {
+              const ext = f.name.includes('.') ? f.name.split('.').pop()?.toLowerCase() : ''
+              const mimeMap: Record<string, string> = {
+                md: 'text/markdown', txt: 'text/plain', json: 'application/json',
+                html: 'text/html', css: 'text/css', js: 'application/javascript',
+                ts: 'application/typescript', py: 'text/x-python',
+                png: 'image/png', jpg: 'image/jpeg', svg: 'image/svg+xml', csv: 'text/csv',
+              }
+              const fileInfo = { name: f.name, path: f.path, mime: mimeMap[ext || ''] || 'text/plain', size: f.size || 0 }
+              const previous = createdFiles.findIndex(item => item.path === f.path)
+              if (previous >= 0) createdFiles[previous] = fileInfo
+              else createdFiles.push(fileInfo)
+              emitSSE(ctx, 'file_created', { ...fileInfo, action: f.action })
+              if (!sessionId) continue
               try {
                 const existing = db.prepare('SELECT id FROM artifacts WHERE session_id = ? AND path = ?').get(sessionId, f.path) as any
                 if (existing) {
-                  db.prepare("UPDATE artifacts SET action = 'updated', size = ?, created_at = datetime('now') WHERE id = ?").run(f.size || 0, existing.id)
+                  db.prepare("UPDATE artifacts SET name = ?, mime = ?, action = ?, size = ?, created_at = datetime('now') WHERE id = ?").run(f.name, fileInfo.mime, f.action, f.size || 0, existing.id)
                 } else {
-                  const ext = f.name.includes('.') ? f.name.split('.').pop()?.toLowerCase() : ''
-                  const mimeMap: Record<string, string> = {
-                    md: 'text/markdown', txt: 'text/plain', json: 'application/json',
-                    html: 'text/html', css: 'text/css', js: 'application/javascript',
-                    ts: 'application/typescript', py: 'text/x-python',
-                    png: 'image/png', jpg: 'image/jpeg', svg: 'image/svg+xml', csv: 'text/csv',
-                  }
                   db.prepare(
                     `INSERT INTO artifacts (id, session_id, name, path, mime, size, action, created_at)
                      VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))`
-                  ).run(randomUUID(), sessionId, f.name, f.path, mimeMap[ext || ''] || 'text/plain', f.size || 0, f.action)
+                  ).run(randomUUID(), sessionId, f.name, f.path, fileInfo.mime, f.size || 0, f.action)
                 }
-                emitSSE(ctx, 'file_created', { name: f.name, path: f.path, mime: 'text/plain', size: f.size })
               } catch {}
             }
           },
@@ -2283,11 +2315,14 @@ export async function runAgentLoop(
         for (const result of toolResults) {
           const tc = toolCalls.find((t: any) => t.id === result.tool_call_id)
           const toolName = tc?.function?.name || 'unknown'
+          // file_write currently returns a text error contract; unlike file_read,
+          // its output is not arbitrary user file content.
+          const failedWrite = toolName === 'file_write' && result.content.startsWith('❌')
           emitSSE(ctx, 'tool_result', {
             name: toolName,
             content: result.content.slice(0, 500),
             tool_call_id: result.tool_call_id,
-            ...(result.skipped ? { status: 'cancelled' } : result.dispatchError ? { status: 'error' } : {}),
+            ...(result.skipped ? { status: 'cancelled' } : (result.dispatchError || failedWrite) ? { status: 'error' } : {}),
           })
           if (result.duration) {
             emitSSE(ctx, 'tool_duration', { name: toolName, duration: result.duration, tool_call_id: result.tool_call_id })
@@ -2328,37 +2363,6 @@ export async function runAgentLoop(
           } else if (guardResult.decision === 'warn') {
             emitSSE(ctx, 'tool_guardrail', { decision: 'warn', toolName, message: guardResult.message })
             messages.push({ role: 'system', content: guardResult.message! })
-          }
-
-          if (toolName === 'file_write' && !result.skipped) {
-            try {
-              const args = JSON.parse(tc?.function?.arguments || '{}')
-              const filePath = args.path || args.file_path || args.filePath
-              if (filePath) {
-                const parts = filePath.split('/')
-                const name = parts[parts.length - 1] || filePath
-                const ext = name.includes('.') ? name.split('.').pop()?.toLowerCase() : ''
-                const mimeMap: Record<string, string> = {
-                  md: 'text/markdown', txt: 'text/plain', json: 'application/json',
-                  html: 'text/html', css: 'text/css', js: 'application/javascript',
-                  ts: 'application/typescript', py: 'text/x-python',
-                  png: 'image/png', jpg: 'image/jpeg', svg: 'image/svg+xml',
-                }
-                const fileInfo = { name, path: filePath, mime: mimeMap[ext || ''] || 'text/plain', size: (tc?.function?.arguments?.length || result.content?.length) }
-                createdFiles.push(fileInfo)
-                emitSSE(ctx, 'file_created', fileInfo)
-                // 持久化产物（会话级）：刷新页面后仍能在会话里看到 AI 生成的文件
-                if (sessionId) {
-                  try {
-                    const action = existsSync(filePath) ? 'updated' : 'created'
-                    db.prepare(
-                      `INSERT INTO artifacts (id, session_id, name, path, mime, size, action, created_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))`
-                    ).run(randomUUID(), sessionId, name, filePath, fileInfo.mime, fileInfo.size || 0, action)
-                  } catch {}
-                }
-              }
-            } catch {}
           }
 
           // ---- Plan 进度推送（横栏任务胶囊）：进度唯一来源 = 模型 task_update 显式声明 ----
@@ -2452,7 +2456,7 @@ export async function runAgentLoop(
           id: checkpointId,
           turn,
           messages: [...messages],
-          createdFiles: [...createdFiles],
+          createdFiles: checkpointFiles(),
           totalToolCalls: [...totalToolCalls],
           timestamp: new Date().toISOString(),
         }
@@ -2587,7 +2591,7 @@ export async function runAgentLoop(
       id: checkpointId,
       turn,
       messages: [...messages],
-      createdFiles: [...createdFiles],
+      createdFiles: checkpointFiles(),
       totalToolCalls: [...totalToolCalls],
       timestamp: new Date().toISOString(),
     }
@@ -2644,7 +2648,7 @@ export async function runAgentLoop(
     if (hasWork) {
       const changed = [...changedFiles.values()]
       const bits: string[] = []
-      if (createdFiles.length > 0) bits.push(`新增 ${createdFiles.length} 个文件`)
+      if (createdFiles.length > 0) bits.push(`产出或更新 ${createdFiles.length} 个文件`)
       if (changed.length > 0) bits.push(`改动 ${changed.length} 个文件`)
       bits.push(`${turn} 轮 / ${totalToolCalls.length} 次工具`)
       const summaryLine = finalStatus === 'completed'
@@ -2720,7 +2724,7 @@ export async function runAgentLoop(
           id: checkpointId,
           turn,
           messages: [...messages],
-          createdFiles: [...createdFiles],
+          createdFiles: checkpointFiles(),
           totalToolCalls: [...totalToolCalls],
           timestamp: new Date().toISOString(),
         }
@@ -2789,7 +2793,7 @@ export async function runAgentLoop(
     } catch { /* 收尾失败不影响主流程 */ }
   }
 
-  emitSSE(ctx, 'done', { turns: turn, maxTurns: effectiveMaxTurns, finished, summary: createdFiles.length > 0 ? `任务完成，共产生 ${createdFiles.length} 个文件` : undefined })
+  emitSSE(ctx, 'done', { turns: turn, maxTurns: effectiveMaxTurns, finished: finished && !interrupted, summary: finished && !interrupted && createdFiles.length > 0 ? `任务完成，共产生 ${createdFiles.length} 个文件` : undefined })
 
   // ---- Playbook: 复杂任务完成后异步生成执行复盘（不阻塞主流程） ----
   if (turn >= 3 && totalToolCalls.length > 0) {

@@ -54,6 +54,16 @@ describe('search result ordering and fallback', () => {
     expect(result.results.map(r => r.title)).toEqual(['recent', 'unknown'])
   })
 
+  it('filters known stale SearXNG dates while preserving undated results', async () => {
+    const items = [
+      { title: 'old', url: 'https://a.example/', date: new Date(Date.now() - 40 * 86400000).toISOString() },
+      { title: 'unknown', url: 'https://b.example/' },
+    ]
+    SEARCH_PROVIDERS.splice(0, SEARCH_PROVIDERS.length, provider('searxng', items))
+    const result = await runSearchChain({ query: 'test', count: 4, timeRange: 'month' })
+    expect(result.results.map(row => row.title)).toEqual(['unknown'])
+  })
+
   it('tries the next provider when the first has no usable results', async () => {
     SEARCH_PROVIDERS.splice(0, SEARCH_PROVIDERS.length, provider('empty', [{ title: '', url: 'https://a.example/' }]), provider('good', [rows[0]]))
     const result = await runSearchChain({ query: 'test', count: 4 })

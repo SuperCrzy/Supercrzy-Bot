@@ -4,7 +4,7 @@ import { cancelStoppedGoal, completeStoppedGoal, createPersistentGoal, getOpenPe
 import { createGoalRuntime } from '../services/goal-runtime'
 import { handleAgentChat } from '../services/chat'
 import { getPendingConfirmationMeta, hasPendingQuestion, requestStop } from '../services/agent'
-import { isSignedIn, readSession } from '../services/account-store'
+import { isSignedIn, onSessionChange, readSession } from '../services/account-store'
 import type { GoalCoordinator } from '../services/goal-coordinator'
 import type Database from 'better-sqlite3'
 
@@ -13,7 +13,7 @@ const runtimes = new WeakMap<Database.Database, GoalCoordinator>()
 function getRuntime(db: Database.Database): GoalCoordinator {
   let runtime = runtimes.get(db)
   if (!runtime) {
-    runtime = createGoalRuntime(db, { handler: handleAgentChat, requestStop, currentAccount: () => isSignedIn() ? readSession()?.accountId || null : null })
+    runtime = createGoalRuntime(db, { handler: handleAgentChat, requestStop, currentAccount: () => isSignedIn() ? readSession()?.accountId || null : null, onAccountChange: onSessionChange })
     runtimes.set(db, runtime)
   }
   return runtime

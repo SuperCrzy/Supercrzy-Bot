@@ -21,6 +21,20 @@ function mount(session: Ref<string>) {
 }
 
 describe('goal progress display', () => {
+  it('does not display the same settled answer twice', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('/pending')) return Response.json({ questions: [], confirmations: [] })
+      if (url.includes('/events?')) return Response.json({ events: [{ sequence: 1, run_id: 'r', event: 'content', payload: { content: 'result text' } }] })
+      return Response.json({ goal: { ...goal('a'), status: 'paused', last_result: 'result text' } })
+    }))
+    const root = mount(ref('a'))
+    await vi.waitFor(() => expect(root.querySelector('.goal-summary')).not.toBeNull())
+    ;(root.querySelector('.goal-summary') as HTMLButtonElement).click()
+    await vi.waitFor(() => expect(root.textContent).toContain('result text'))
+    expect(root.textContent?.match(/result text/g)).toHaveLength(1)
+    expect(root.querySelector('.goal-output')).toBeNull()
+  })
   it('preserves a question reply when the answer request fails', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)

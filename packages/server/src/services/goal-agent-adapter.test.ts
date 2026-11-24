@@ -6,6 +6,36 @@ const goal: PersistentGoal = { id: 'g', session_id: 's', objective: 'goal', acce
 const frame = (event: string, data: unknown) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
 
 describe('goal agent adapter', () => {
+  it('requests stop on account change during a silent run and stays interrupted if the account switches back', async () => {
+    let current = true, notify!: () => void, finish!: () => void
+    const stop = vi.fn(), unsubscribe = vi.fn()
+    const runner = makeGoalAgentRunner({ ownerIsCurrent: () => current, requestStop: stop, makeMessages: async () => [], onAccountChange: listener => { notify = listener; return unsubscribe }, handler: async ctx => {
+      ctx.res.write(frame('config', {}))
+      await new Promise<void>(resolve => { finish = resolve })
+      ctx.res.write(frame('done', { finished: true }))
+    } })
+    const result = runner({ goal, runId: 'r', signal: new AbortController().signal, emit: vi.fn() })
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
+    notify() // token refresh for the same account
+    expect(stop).not.toHaveBeenCalled()
+    current = false; notify()
+    expect(stop).toHaveBeenCalledWith('s')
+    current = true; notify(); finish()
+    expect((await result).outcome).toBe('interrupted')
+    expect(unsubscribe).toHaveBeenCalledOnce()
+  })
+  it('interrupts if the account changes after the final event and before the handler returns', async () => {
+    let current = true
+    const runner = makeGoalAgentRunner({ ownerIsCurrent: () => current, requestStop: vi.fn(), makeMessages: async () => [], handler: async ctx => {
+      ctx.res.write(frame('content', { content: '旧账号的结果' }))
+      ctx.res.write(frame('done', { finished: true }))
+      current = false
+    } })
+    const result = await runner({ goal, runId: 'r', signal: new AbortController().signal, emit: vi.fn() })
+    expect(result.outcome).toBe('interrupted')
+    expect(result.summary).not.toContain('旧账号的结果')
+    expect(result.progressFingerprint).toBeUndefined()
+  })
   it('rejects structured failures as progress even when their text looks successful', async () => {
     const runner = makeGoalAgentRunner({ ownerIsCurrent: () => true, requestStop: vi.fn(), makeMessages: async () => [], handler: async ctx => {
       ctx.res.write(frame('tool_call', { id: 't1', name: 'file_read', arguments: '{}' }))

@@ -17,6 +17,19 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 const AAD = Buffer.from('supercrzy-auth-session-v1')
+const sessionListeners = new Set<() => void>()
+
+/** Subscribe to local session writes/removals. No credentials are exposed. */
+export function onSessionChange(listener: () => void): () => void {
+  sessionListeners.add(listener)
+  return () => { sessionListeners.delete(listener) }
+}
+
+function notifySessionChange(): void {
+  for (const listener of sessionListeners) {
+    try { listener() } catch { /* a subscriber must not break account storage */ }
+  }
+}
 
 /** How long a session survives without a successful refresh. */
 export const REFRESH_TTL_MS = 30 * 24 * 60 * 60 * 1000
@@ -136,6 +149,7 @@ export function writeSession(session: StoredSession): void {
   // removed. Best-effort: failing to clean up must not fail the write.
   const legacy = `${sessionPath()}.tmp`
   try { if (existsSync(legacy)) rmSync(legacy, { force: true }) } catch { /* keep going */ }
+  notifySessionChange()
 }
 
 export function clearSession(): void {
@@ -145,6 +159,7 @@ export function clearSession(): void {
   const legacy = `${file}.tmp`
   if (existsSync(legacy)) rmSync(legacy, { force: true })
   if (existsSync(file)) rmSync(file, { force: true })
+  notifySessionChange()
 }
 
 /** Access token if one exists and has not expired; otherwise null. */

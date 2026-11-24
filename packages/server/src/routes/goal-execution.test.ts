@@ -6,7 +6,7 @@ import request from 'supertest'
 const state = vi.hoisted(() => ({ run: vi.fn(), signedIn: true }))
 vi.mock('../config', () => ({ config: { db: { path: ':memory:' }, deepseek: { apiKey: '', baseUrl: 'https://example.invalid', defaultModel: 'deepseek-chat' }, workspaceDir: '' } }))
 vi.mock('../services/agent', () => ({ runAgentLoop: state.run, requestStop: vi.fn() }))
-vi.mock('../services/account-store', () => ({ isSignedIn: () => state.signedIn, readSession: () => ({ accountId: 'owner' }) }))
+vi.mock('../services/account-store', () => ({ isSignedIn: () => state.signedIn, readSession: () => ({ accountId: 'owner' }), onSessionChange: () => () => {} }))
 vi.mock('../services/ai-browser', () => ({ closeBrowserForSession: vi.fn() }))
 import { initDatabase, getDB } from '../services/database'
 import { persistentGoalsRouter } from './persistent-goals'

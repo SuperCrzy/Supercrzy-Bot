@@ -72,7 +72,7 @@ export async function writeArtifact(
 ): Promise<WriteArtifactResult> {
     await writeFile(filePath, content)
 
-    const action: 'created' | 'updated' = options.previous ? 'updated' : 'created'
+    const action: 'created' | 'updated' = options.previous != null ? 'updated' : 'created'
 
     let size = options.size
     if (size === undefined) {

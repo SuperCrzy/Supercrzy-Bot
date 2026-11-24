@@ -557,13 +557,11 @@
     />
 
     <!--
-      Persistent goals are behind a switch until the execution path has been driven
-      end to end against a live model. The tests cover the pieces; they do not cover
-      "a signed-in user presses Start and sees work happen", which is what broke in
-      1.3.6 — the button answered 401 for anyone whose login sat in auth.json.tmp, and
-      the UI said nothing. Shipping a control that can silently do nothing is worse
-      than not shipping it, so the bar stays off until that path is verified, not just
-      unit-tested. Set VITE_GOALS=1 to bring it back while working on it.
+      Off by default until the execution path is verified end to end against a live
+      model. The unit tests cover the pieces; they did not cover "a signed-in user
+      presses Start and sees work happen", and that is exactly what failed in 1.3.6.
+      A control that can silently do nothing is worse than an absent one.
+      Set VITE_GOALS=1 to enable it while working on the feature.
     -->
     <GoalBar v-if="goalsEnabled && chatStore.currentSessionId && !isMobile" :session-id="chatStore.currentSessionId" />
 
@@ -909,7 +907,7 @@ import { markTurnAborted, requestAgentStop } from '@/utils/turn-abort'
 import PlanCapsule from '@/components/chat/PlanCapsule.vue'
 import GoalBar from '@/components/chat/GoalBar.vue'
 
-/** Off by default; see the note by the GoalBar tag. */
+/** Opt-in: see the note by the GoalBar tag. */
 const goalsEnabled = import.meta.env.VITE_GOALS === '1'
 import MessageFlowRenderer from '@/components/chat/MessageFlowRenderer.vue'
 import ToolApprovalFloating from '@/components/chat/ToolApprovalFloating.vue'
@@ -3018,7 +3016,7 @@ function handleAgentEvent(event: string, data: any, msg: ChatMessage, sessionId?
         planStore.setPlanUpdate(planStore.planProgress)
       }
       if (visibleSession && planStore.planProgress) {
-        planStore.markPlanFinished()
+        planStore.markPlanFinished(data.finished !== false)
       }
       // 任务完成计时：发送时刻 → done 时刻
       if (msg.startedAt) {

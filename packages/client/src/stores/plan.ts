@@ -27,19 +27,22 @@ export const usePlanStore = defineStore('plan', () => {
    * 步骤全 completed 但未 done → 胶囊显示"收尾中"，done 后才显示"全部完成"（对齐 AI 实际状态）
    */
   const planFinished = ref(false)
+  const planInterrupted = ref(false)
 
   /** 收到 plan_update 快照：planId 变化 → 旧计划归档进历史 */
   function setPlanUpdate(snap: PlanInfo) {
     if (planProgress.value && planProgress.value.planId !== snap.planId) {
       planHistory.value = [planProgress.value, ...planHistory.value.filter((p) => p.planId !== planProgress.value!.planId)]
       planFinished.value = false  // 新计划开始：结束标记复位
+      planInterrupted.value = false
     }
     planProgress.value = snap
   }
 
   /** 回复 done：当前计划随回复结束（胶囊可显示"全部完成"） */
-  function markPlanFinished() {
-    planFinished.value = true
+  function markPlanFinished(completed = true) {
+    planFinished.value = completed
+    planInterrupted.value = !completed
   }
 
   function setPlanHistory(list: Array<PlanInfo & { finishedAt?: number }>) {
@@ -50,13 +53,16 @@ export const usePlanStore = defineStore('plan', () => {
   function clearPlan() {
     planProgress.value = null
     planHistory.value = []
+    planFinished.value = false
+    planInterrupted.value = false
   }
 
   /** 新消息开始：重置当前进度（保留历史）——旧计划的"完成"态不再悬挂在胶囊上，等新 plan_update */
   function resetProgress() {
     planProgress.value = null
     planFinished.value = false
+    planInterrupted.value = false
   }
 
-  return { planProgress, planHistory, planFinished, setPlanUpdate, setPlanHistory, markPlanFinished, clearPlan, resetProgress }
+  return { planProgress, planHistory, planFinished, planInterrupted, setPlanUpdate, setPlanHistory, markPlanFinished, clearPlan, resetProgress }
 })

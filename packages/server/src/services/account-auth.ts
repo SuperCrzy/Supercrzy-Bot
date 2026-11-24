@@ -12,7 +12,7 @@
  * the signature check on whichever service consumes the token.
  */
 import type { Context, Next } from 'koa'
-import { readSession, writeSession, clearSession, currentAccessToken, isSignedIn } from './account-store'
+import { readSession, writeSession, currentAccessToken, isSignedIn } from './account-store'
 
 /** Reachable without an account — the sign-in flow itself, plus health. */
 const PUBLIC_PATHS = new Set([
@@ -60,6 +60,23 @@ export function refreshOutcome(): RefreshOutcome {
   return lastRefreshOutcome
 }
 
+
+/**
+ * The server's error code from a rejection body, or '' when there is none.
+ *
+ * Codes are what let the caller tell "you are signed out" from "this particular
+ * attempt lost a race". Reading the body is best-effort: a proxy error page has none.
+ */
+async function rejectionCode(res: Response): Promise<string> {
+  try {
+    const body = (await res.clone().json()) as { error?: { code?: string } | string; code?: string }
+    if (typeof body?.error === 'object' && typeof body.error?.code === 'string') return body.error.code
+    if (typeof body?.error === 'string') return body.error
+    if (typeof body?.code === 'string') return body.code
+  } catch { /* not JSON */ }
+  return ''
+}
+
 async function rotate(): Promise<boolean> {
   const session = readSession()
   if (!session?.refreshToken || !session.deviceId) {
@@ -100,9 +117,25 @@ async function rotate(): Promise<boolean> {
     return false
   }
   if (!res.ok) {
-    // Rejected outright → signed out for real; keep UI and gate in agreement.
     if (res.status >= 400 && res.status < 500) {
-      if (stillCurrent()) clearSession()
+      // "reuse" is not a verdict on the user — it is a verdict on this attempt.
+      //
+      // The account service rejects a refresh token it believes was already spent,
+      // which is what happens when two processes refresh the same token at once. The
+      // token on disk may be perfectly good; another process may have just rotated it.
+      // Deleting the session here signs the user out for something they did not do,
+      // and there is no way back without a manual login. Keep the session, report
+      // "could not confirm" so the caller answers 503 instead of 401, and let the
+      // next attempt read whatever is on disk by then.
+      const code = await rejectionCode(res)
+      if (code === 'reuse' || code === 'concurrent' || code === 'race') {
+        lastRefreshOutcome = 'unreachable'
+        return false
+      }
+      // A real rejection (revoked, expired, unknown device). Mark it, but do not
+      // delete the file either: the next successful login overwrites it, and until
+      // then the user can still see which account they were on. Clearing is a
+      // separate, explicit action (sign out).
       lastRefreshOutcome = 'invalid'
     } else {
       // 5xx: their problem, not the user's. Do NOT sign them out.

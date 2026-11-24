@@ -19,6 +19,22 @@ beforeEach(() => {
 afterEach(() => { getDB().close(); delete process.env.DB_PATH; vi.resetAllMocks() })
 
 describe('goal runtime through chat handler', () => {
+  it('does not continue under a different account between automatic turns', async () => {
+    const db = getDB(), goal = createPersistentGoal(db, 'session', '完成项目')
+    const currentAccount = () => (db.prepare("SELECT count(*) AS n FROM persistent_goal_events WHERE event = 'goal_turn'").get() as { n: number }).n ? 'other-account' : 'owner'
+    state.run.mockImplementation(async (ctx: any) => {
+      ctx.res.write('event: config\ndata: {}\n\n')
+      ctx.res.write('event: tool_call\ndata: {"id":"call-1","name":"file_read","arguments":"{\\"path\\":\\"a\\"}"}\n\n')
+      ctx.res.write('event: tool_result\ndata: {"tool_call_id":"call-1","content":"data"}\n\n')
+      ctx.res.write('event: content\ndata: {"content":"已检查。\\n<goal_report>{\\"action\\":\\"continue\\",\\"evidence_call_ids\\":[\\"call-1\\"]}</goal_report>"}\n\n')
+      ctx.res.write('event: done\ndata: {"finished":true}\n\n')
+    })
+    const runtime = createGoalRuntime(db, { handler: handleAgentChat, requestStop: vi.fn(), currentAccount })
+    await runtime.start('session', goal.id, goal.version)!.completion
+    expect(state.run).toHaveBeenCalledOnce()
+    expect(getOpenPersistentGoal(db, 'session')?.status).toBe('interrupted')
+    expect(listGoalEvents(db, 'session', goal.id, 0).some(event => event.event === 'goal_turn')).toBe(true)
+  })
   it('includes only the current session goal in ordinary agent follow-ups', async () => {
     const db = getDB(), goal = createPersistentGoal(db, 'session', '修复桌面体验', '测试通过')
     const { claimGoalRun, settleGoalRun } = await import('./persistent-goals')

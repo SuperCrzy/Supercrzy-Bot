@@ -418,9 +418,8 @@ export async function handleAgentChat(ctx: Context) {
 
     // 兼容两种 resumeCheckpoint 语义：checkpoint id 或完整文件路径
     let resumePath = body.resumeCheckpoint
-    if (resumePath && !resumePath.includes('/') && !resumePath.endsWith('.json')) {
-      const { join } = await import('path')
-      resumePath = join(process.cwd(), 'data', 'checkpoints', `${resumePath}.json`)
+    if (resumePath && !resumePath.includes('/') && !resumePath.includes('\\')) {
+      resumePath = join(config.workspaceDir, 'data', 'checkpoints', resumePath.endsWith('.json') ? resumePath : `${resumePath}.json`)
     }
 
     await runAgentLoop(

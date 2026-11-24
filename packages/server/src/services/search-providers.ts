@@ -34,8 +34,17 @@ const CN_MONTHS: Record<string, number> = {
   '7月': 6, '8月': 7, '9月': 8, '10月': 9, '11月': 10, '12月': 11,
 }
 
+function validCalendarDate(year: number, month: number, day: number): boolean {
+  if (month < 1 || month > 12 || day < 1) return false
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+  return day <= days[month - 1]
+}
+
 export function parseResultDate(raw: string | undefined): number {
   if (!raw) return NaN
+  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})(?:$|T|\s)/)
+  if (iso && !validCalendarDate(Number(iso[1]), Number(iso[2]), Number(iso[3]))) return NaN
   const direct = Date.parse(raw)
   if (!isNaN(direct)) return direct
 
@@ -45,14 +54,14 @@ export function parseResultDate(raw: string | undefined): number {
     const day = Number(m[1])
     const month = CN_MONTHS[m[2]]
     const year = Number(m[3])
-    if (month !== undefined) {
+    if (month !== undefined && validCalendarDate(year, month + 1, day) && Number(m[4] || 0) <= 23 && Number(m[5] || 0) <= 59 && Number(m[6] || 0) <= 59) {
       const t = Date.UTC(year, month, day, Number(m[4] || 0), Number(m[5] || 0), Number(m[6] || 0))
       return isNaN(t) ? NaN : t
     }
   }
   // "2026年11月23日" and "2026-11-23" both survive this.
   const cn = raw.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/)
-  if (cn) return Date.UTC(Number(cn[1]), Number(cn[2]) - 1, Number(cn[3]))
+  if (cn && validCalendarDate(Number(cn[1]), Number(cn[2]), Number(cn[3]))) return Date.UTC(Number(cn[1]), Number(cn[2]) - 1, Number(cn[3]))
   return NaN
 }
 
@@ -408,12 +417,9 @@ export async function runSearchChain(
     if (!enabled) continue
     const raw = await safeSearch(provider, ctx)
     if (raw.length > 0) {
-      // SearXNG rows carry no publishedDate (its engines do not expose one),
-      // but `time_range` was already applied server-side, so re-filtering by
-      // age here would drop the entire result set. Skip the local age filter
-      // for it and rely on the upstream filter.
-      const effectiveMaxAge = provider.name === 'searxng' ? 0 : maxAge
-      const results = postProcessSearchResults(raw as any, count, effectiveMaxAge)
+      // Unknown dates survive local filtering; known stale dates must be treated
+      // consistently even if the upstream engine ignored its time-range option.
+      const results = postProcessSearchResults(raw, count, maxAge)
       if (results.length) return { engine: provider.name, results }
     }
   }

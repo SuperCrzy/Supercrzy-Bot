@@ -20,7 +20,7 @@ import {
 let dir: string
 const CID = '11111111-2222-3333-4444-555555555555'
 
-beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'snap-')) })
+beforeEach(() => { dir = mkdtempSync(join('/tmp', 'snap-')) })
 afterEach(() => rmSync(dir, { recursive: true, force: true }))
 
 const target = () => join(dir, 'file.txt')

@@ -134,13 +134,29 @@ describe('silent rotation', () => {
     expect(calls).toBe(1)
   })
 
-  it('drops the session when the auth service rejects the refresh token', async () => {
+  it('keeps the session when the rejection is a reuse race', async () => {
+    // Reversed deliberately. This expectation is what signed users out for something
+    // that was not their doing: 'reuse' means the token was already spent, which is
+    // what happens when two processes refresh at once — and the winner has already
+    // written a good token to disk. Deleting the file here threw that away and left
+    // the user with no way back except a manual login.
     writeSession(session({ expiresAt: Date.now() - 1000 }))
     vi.stubGlobal('fetch', async () => new Response(JSON.stringify({ error: { code: 'reuse' } }), { status: 401 }))
 
     const token = await ensureAccessToken()
     expect(token).toBeNull()
-    expect(readSession()).toBeNull()
+    expect(readSession()?.refreshToken).toBe('refresh-1')
+  })
+
+  it('keeps the file but marks the rejection invalid for a non-race 4xx', async () => {
+    // A genuine rejection (revoked, unknown device). The caller must know it is not
+    // recoverable, but deleting the file is a separate, explicit action.
+    writeSession(session({ expiresAt: Date.now() - 1000 }))
+    vi.stubGlobal('fetch', async () => new Response(JSON.stringify({ error: { code: 'revoked' } }), { status: 401 }))
+
+    const token = await ensureAccessToken()
+    expect(token).toBeNull()
+    expect(readSession()?.refreshToken).toBe('refresh-1')
   })
 
   it('keeps the session when the network is unreachable', async () => {

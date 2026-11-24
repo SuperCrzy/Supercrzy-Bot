@@ -1,9 +1,8 @@
 /**
  * Two things this locks down, both learned from 1.3.6.
  *
- * 1. The goal bar is off by default. Shipping a Start button that can silently do
- *    nothing is worse than not shipping it, so the bar only appears when explicitly
- *    enabled — turning it on is a decision, not a default.
+ * 1. The desktop goal bar is enabled by default after its live-model and isolated
+ *    UI/backend checks. The flag can explicitly disable it when needed.
  *
  * 2. An API error keeps its code. The generic "action failed, try again" is what made
  *    a 401 indistinguishable from every other failure; the user was signed in and the
@@ -15,8 +14,7 @@ describe('goal bar visibility', () => {
   const visible = (goalsEnabled: boolean, sessionId: string | null, isMobile: boolean) =>
     goalsEnabled && !!sessionId && !isMobile
 
-  it('stays hidden unless the feature flag is set', () => {
-    // The regression: a default-on bar with a broken Start button.
+  it('stays hidden when the feature is explicitly disabled', () => {
     expect(visible(false, 'sid-1', false)).toBe(false)
   })
 

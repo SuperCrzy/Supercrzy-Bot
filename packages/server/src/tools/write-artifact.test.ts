@@ -36,6 +36,14 @@ describe('writeArtifact', () => {
         expect(rows[0].action).toBe('updated')
     })
 
+    it('reports an existing empty file as updated', async () => {
+        const file = path.join(dir, 'empty.txt')
+        fs.writeFileSync(file, '')
+        const { rows, ctx } = ctxSpy()
+        await writeArtifact(ctx, file, 'new', { previous: '' })
+        expect(rows[0].action).toBe('updated')
+    })
+
     it('reports the on-disk byte size for multi-byte text', async () => {
         const file = path.join(dir, 'cn.txt')
         const { rows, ctx } = ctxSpy()

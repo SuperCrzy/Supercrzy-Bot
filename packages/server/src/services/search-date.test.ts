@@ -38,6 +38,13 @@ describe('parseResultDate', () => {
     expect(Number.isNaN(parseResultDate(''))).toBe(true)
     expect(Number.isNaN(parseResultDate(undefined))).toBe(true)
   })
+
+  it('treats impossible calendar dates as unknown instead of rolling them forward', () => {
+    for (const date of ['2026-02-30', '2026年13月40日', '周一, 31 2月 2026 05:46:00 GMT', '周一, 23 11月 2026 25:46:00 GMT']) {
+      expect(Number.isNaN(parseResultDate(date)), date).toBe(true)
+    }
+    expect(Number.isNaN(parseResultDate('2024-02-29'))).toBe(false)
+  })
 })
 
 describe('postProcessSearchResults with maxAgeDays', () => {

@@ -11,17 +11,23 @@ export function makeGoalAgentRunner(options: {
   requestStop: (sessionId: string) => unknown
   makeMessages: (sessionId: string, objective: string, acceptance: string) => Promise<Array<{ role: string; content: string }>>
   ownerIsCurrent: () => boolean
+  onAccountChange?: (listener: () => void) => () => void
 }): GoalRunner {
   return async ({ goal, signal, emit, options: executionOptions }) => {
     if (signal.aborted || !options.ownerIsCurrent()) return { outcome: 'interrupted', summary: '执行尚未开始或账号已变更。' }
     const messages = await options.makeMessages(goal.session_id, goal.objective, goal.acceptance)
     if (signal.aborted || !options.ownerIsCurrent()) return { outcome: 'interrupted', summary: '执行尚未开始或账号已变更。' }
     let started = false, doneSeen = false, finished = false, terminal = '', answer = '', chunks = '', captureFailed = false, checkpointInterrupted = false
-    let hadInteraction = false, hadToolFailure = false
+    let hadInteraction = false, hadToolFailure = false, accountChanged = false
     const calls = new Map<string, { name: string; arguments: string }>()
     const results = new Map<string, { content: string; denied: boolean }>()
     const stop = () => { if (started) options.requestStop(goal.session_id) }
     signal.addEventListener('abort', stop)
+    const unsubscribeAccount = options.onAccountChange?.(() => {
+      let current = false
+      try { current = options.ownerIsCurrent() } catch { /* unreadable account state fails closed */ }
+      if (!current) { accountChanged = true; stop() }
+    })
     const response = new EventEmitter() as EventEmitter & { write: (data: unknown) => boolean; end: () => void; writableEnded: boolean }
     let pendingFrame = ''
     response.writableEnded = false
@@ -39,7 +45,7 @@ export function makeGoalAgentRunner(options: {
         let payload: Record<string, unknown>
         try { payload = JSON.parse(raw) } catch { captureFailed = true; stop(); continue }
         if (name === 'config') { started = true; if (signal.aborted) stop() }
-        if (!options.ownerIsCurrent()) { captureFailed = true; stop(); continue }
+        if (accountChanged || !options.ownerIsCurrent()) { accountChanged = true; captureFailed = true; stop(); continue }
         try { emit(name, payload) } catch { captureFailed = true; stop(); continue }
         if (name === 'question' || (name === 'tool_result' && payload.status === 'denied')) hadInteraction = true
         if (name === 'tool_result' && ['failed', 'error', 'cancelled'].includes(String(payload.status))) { hadToolFailure = true; hadInteraction = true }
@@ -56,7 +62,10 @@ export function makeGoalAgentRunner(options: {
     }
     response.end = () => { response.writableEnded = true; response.emit('finish') }
     const ctx = { state: { goalExecution: true }, request: { body: { messages, sessionId: goal.session_id, model: executionOptions?.model, language: executionOptions?.language } }, req: new EventEmitter(), res: response, set: () => {} } as unknown as Context
-    try { await options.handler(ctx) } finally { signal.removeEventListener('abort', stop) }
+    try { await options.handler(ctx) } finally { signal.removeEventListener('abort', stop); unsubscribeAccount?.() }
+    // The account can change after the final event but before the handler exits.
+    // Never settle that run as a normal result for a different account.
+    if (accountChanged || !options.ownerIsCurrent()) return { outcome: 'interrupted', summary: '执行期间账号已变更，请检查原账号下的进度。' }
     if (captureFailed || pendingFrame.trim() || !doneSeen || ['failed', 'interrupted'].includes(terminal)) return { outcome: 'interrupted', summary: '执行中断或事件未能保存，请检查进度。' }
     if (signal.aborted || terminal === 'paused' || terminal === 'cancelled') return { outcome: 'paused', summary: answer || chunks || '已停止。' }
     if (!finished || checkpointInterrupted) return { outcome: 'interrupted', summary: answer || chunks || '执行中断，请检查进度。' }

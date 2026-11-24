@@ -72,6 +72,7 @@ const planPercent = computed(() => {
  *  - 步骤全完成但回复未 done（AI 收尾中）→ "收尾中"
  *  - 步骤全完成且已 done → "全部完成" */
 const planStepShort = computed(() => {
+  if (planStore.planInterrupted) return t('chat.planInterrupted')
   const name = currentPlanStep.value?.subject
   if (name) return name.length > 10 ? name.slice(0, 10) + '…' : name
   if (allStepsDone.value && !planStore.planFinished) return t('chat.planFinalizing')
