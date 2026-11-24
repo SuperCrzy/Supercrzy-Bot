@@ -289,7 +289,7 @@ fi  # BOT_ONLY gate for phases 4-5
 # ---------------------------------------------------------------------------
 log "6/8 bot.html (local rewrite + diff; upload gated by --publish-bot-html)"
 [ -f "$SITE_BOT_HTML" ] || die "site page not found: $SITE_BOT_HTML (set SITE_BOT_HTML to override)"
-old_ver=$(grep -oE 'BOT-[0-9]+\.[0-9]+\.[0-9]+' "$SITE_BOT_HTML" | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+old_ver=$(grep -oE '(BOT-|SUPERCRZY-)[0-9]+\.[0-9]+\.[0-9]+' "$SITE_BOT_HTML" | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
 [ -n "$old_ver" ] || die "could not detect the current version in bot.html"
 # 幂等：已经是目标版本就直接跳过（`--publish-bot-html-only` 重跑时就是这个情形）。
 # 没有这一步，下面的"残留自检"会把 old==new 误判成"替换漏了"，让脚本第二次跑必然失败。
@@ -304,6 +304,7 @@ tmp_html=$(mktemp)
 # 现在按**带明确前缀**的形态替换，点号转义，SVG 之类无关内容一律不碰。
 old_esc=$(printf '%s' "$old_ver" | sed 's/\./\\./g')
 sed -e "s/BOT-$old_esc/BOT-$VER/g" \
+    -e "s/SUPERCRZY-$old_esc/SUPERCRZY-$VER/g" \
     -e "s/BOT%20Setup%20$old_esc/BOT%20Setup%20$VER/g" \
     -e "s/v$old_esc/v$VER/g" \
     -e "s/\"softwareVersion\": \"$old_esc\"/\"softwareVersion\": \"$VER\"/g" \
