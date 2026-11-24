@@ -84,10 +84,31 @@ const elapsed = computed(() => {
   return `${Math.floor(seconds / 3600)}:${String(Math.floor(seconds / 60) % 60).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
 })
 function base(sid = props.sessionId) { return `/api/sessions/${encodeURIComponent(sid)}/goal` }
+/** An error carrying the server's machine-readable code, when it sent one. */
+class ApiError extends Error {
+  constructor(readonly status: number, readonly code: string) { super(code || `HTTP ${status}`) }
+}
+
+/**
+ * Keep the response body's error code on failure.
+ *
+ * It used to throw `HTTP 401` and drop the body, so callers could not tell "not
+ * signed in" from "goal changed" from "network died" and showed one generic line for
+ * all of them. The code is the only part the caller can act on.
+ */
 async function json(url: string, init?: RequestInit) {
   const response = await fetch(url, init)
-  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  if (!response.ok) {
+    let code = ''
+    try { const body = await response.json(); if (typeof body?.error === 'string') code = body.error } catch { /* non-JSON error page */ }
+    throw new ApiError(response.status, code)
+  }
   return response.json()
+}
+
+function errorCode(error: unknown): string {
+  if (error instanceof ApiError) return error.code
+  return ''
 }
 async function refresh() {
   if (disposed) return
@@ -133,12 +154,34 @@ async function refresh() {
     }
   }
 }
+/**
+ * Map the server's error code to something the user can act on.
+ *
+ * Every failure used to collapse into "action failed, try again", which is why a
+ * 401 looked like a dead button: the user was signed in, the request said otherwise,
+ * and nothing on screen distinguished the two. The code is the one thing the server
+ * is sure about, so it decides the message.
+ */
+function messageFor(code: string): string {
+  if (code === 'not_signed_in') return t('goal.notSignedIn')
+  if (code === 'goal_changed' || code === 'invalid_version') return t('goal.goalChanged')
+  if (code === 'goal_not_startable' || code === 'interruption_review_required') return t('goal.notStartable')
+  return t('goal.actionError')
+}
+
 async function post(url: string, body: unknown) {
   const stamp = generation
   busy.value = true
-  try { await json(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); if (stamp === generation) { error.value = ''; await refresh(); return stamp === generation } return false }
-  catch { if (stamp === generation) { await refresh(); if (stamp === generation) error.value = t('goal.actionError') } return false }
-  finally { if (stamp === generation) busy.value = false }
+  let failure = ''
+  try {
+    await json(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    if (stamp === generation) { error.value = ''; await refresh(); return stamp === generation }
+    return false
+  } catch (e) {
+    failure = errorCode(e)
+    if (stamp === generation) { await refresh(); if (stamp === generation) error.value = messageFor(failure) }
+    return false
+  } finally { if (stamp === generation) busy.value = false }
 }
 async function create() { if (await post(base(), { objective: objective.value, acceptance: acceptance.value })) { creating.value = false; objective.value = ''; acceptance.value = '' } }
 function beginEdit() { if (!goal.value) return; editGoalId.value = goal.value.id; editObjective.value = goal.value.objective; editAcceptance.value = goal.value.acceptance; editVersion.value = goal.value.version; editing.value = true }

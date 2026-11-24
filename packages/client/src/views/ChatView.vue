@@ -556,7 +556,16 @@
       :active-index="activeQuestionIndex"
     />
 
-    <GoalBar v-if="chatStore.currentSessionId && !isMobile" :session-id="chatStore.currentSessionId" />
+    <!--
+      Persistent goals are behind a switch until the execution path has been driven
+      end to end against a live model. The tests cover the pieces; they do not cover
+      "a signed-in user presses Start and sees work happen", which is what broke in
+      1.3.6 — the button answered 401 for anyone whose login sat in auth.json.tmp, and
+      the UI said nothing. Shipping a control that can silently do nothing is worse
+      than not shipping it, so the bar stays off until that path is verified, not just
+      unit-tested. Set VITE_GOALS=1 to bring it back while working on it.
+    -->
+    <GoalBar v-if="goalsEnabled && chatStore.currentSessionId && !isMobile" :session-id="chatStore.currentSessionId" />
 
     <!-- Input area（欢迎页时隐藏，中央输入框替代；保留 DOM 供文件选择器使用） -->
     <footer ref="footerRef" class="input-area" v-show="messages.length > 0">
@@ -899,6 +908,9 @@ import ElapsedBadge from '@/components/chat/ElapsedBadge.vue'
 import { markTurnAborted, requestAgentStop } from '@/utils/turn-abort'
 import PlanCapsule from '@/components/chat/PlanCapsule.vue'
 import GoalBar from '@/components/chat/GoalBar.vue'
+
+/** Off by default; see the note by the GoalBar tag. */
+const goalsEnabled = import.meta.env.VITE_GOALS === '1'
 import MessageFlowRenderer from '@/components/chat/MessageFlowRenderer.vue'
 import ToolApprovalFloating from '@/components/chat/ToolApprovalFloating.vue'
 import QuestionFloating from '@/components/chat/QuestionFloating.vue'

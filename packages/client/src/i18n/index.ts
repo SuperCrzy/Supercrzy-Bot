@@ -146,7 +146,7 @@ export const messages = {
       title: '持续目标', create: '设置持续目标', objective: '目标', acceptance: '验收条件（选填）', placeholder: '描述希望持续完成的事情', save: '保存目标', close: '关闭',
       pause: '暂停', start: '开始推进', cancel: '结束目标', lastResult: '上轮结果', singleRound: '只读检查后可自动继续，最多三轮；执行其他操作后暂停，完成情况需核实。',
       status_paused: '已暂停', status_active: '执行中', status_pausing: '正在暂停', status_waiting_user: '等待你', status_interrupted: '已中断', status_completed: '已完成', status_cancelled: '已结束',
-      approval: '需要授权', allow: '允许', deny: '拒绝', answerPlaceholder: '输入答复', reply: '回复', retry: '重试', loadError: '目标状态暂时无法读取', actionError: '操作失败，请刷新状态后重试',
+      approval: '需要授权', allow: '允许', deny: '拒绝', answerPlaceholder: '输入答复', reply: '回复', retry: '重试', loadError: '目标状态暂时无法读取', actionError: '操作失败，请刷新状态后重试', notSignedIn: '目标功能需要先登录账号', goalChanged: '目标已被修改，请刷新后重试', notStartable: '当前状态无法开始推进，请刷新',
       reviewConfirm: '上次运行中断，可能已经产生外部操作。确认已检查进度并准备继续？', cancelConfirm: '结束这个目标？', complete: '标记完成', completeConfirm: '确认已核实目标和验收条件，标记为完成？', history: '目标历史', noHistory: '暂无历史目标', edit: '编辑目标', editChanged: '目标已被替换，草稿无法保存到新目标；请复制需要保留的内容。'
     },
     errors: {
@@ -1917,7 +1917,7 @@ export const messages = {
       title: 'Persistent goal', create: 'Set a goal', objective: 'Goal', acceptance: 'Acceptance criteria (optional)', placeholder: 'Describe what you want to accomplish', save: 'Save goal', close: 'Close',
       pause: 'Pause', start: 'Start', cancel: 'End goal', lastResult: 'Last result', singleRound: 'May continue after read-only checks for up to three turns; pauses after other operations. Review completion.',
       status_paused: 'Paused', status_active: 'Running', status_pausing: 'Pausing', status_waiting_user: 'Waiting for you', status_interrupted: 'Interrupted', status_completed: 'Complete', status_cancelled: 'Ended',
-      approval: 'Approval required', allow: 'Allow', deny: 'Deny', answerPlaceholder: 'Type a reply', reply: 'Reply', retry: 'Retry', loadError: 'Could not load the goal', actionError: 'Action failed; refresh the status and try again',
+      approval: 'Approval required', allow: 'Allow', deny: 'Deny', answerPlaceholder: 'Type a reply', reply: 'Reply', retry: 'Retry', loadError: 'Could not load the goal', actionError: 'Action failed; refresh the status and try again', notSignedIn: 'Sign in to use goals', goalChanged: 'The goal changed; refresh and try again', notStartable: 'This goal cannot start from its current state; refresh',
       reviewConfirm: 'The previous run was interrupted and may have changed external state. Have you reviewed its progress?', cancelConfirm: 'End this goal?', complete: 'Mark complete', completeConfirm: 'Have you verified the goal and its acceptance criteria?', history: 'Goal history', noHistory: 'No past goals', edit: 'Edit goal', editChanged: 'The goal was replaced. This draft cannot be saved to the new goal; copy any text you want to keep.'
     },
     errors: {
