@@ -33,4 +33,11 @@ describe('tool batch waiting', () => {
     const result = await executeToolCalls([{ id: 'call-1', type: 'function', function: { name: 'file_write', arguments: '{}' } }], { shouldStop: () => true })
     expect(result).toMatchObject([{ tool_call_id: 'call-1', skipped: true, content: '已请求停止，该工具未执行。' }])
   })
+  it('marks dispatcher failures structurally without claiming a tool ran', async () => {
+    const results = await executeToolCalls([
+      { id: 'missing', type: 'function', function: { name: 'not_a_tool', arguments: '{}' } },
+      { id: 'bad-args', type: 'function', function: { name: 'file_read', arguments: '{' } },
+    ])
+    expect(results).toMatchObject([{ tool_call_id: 'missing', dispatchError: true }, { tool_call_id: 'bad-args', dispatchError: true }])
+  })
 })

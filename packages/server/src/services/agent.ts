@@ -2287,11 +2287,14 @@ export async function runAgentLoop(
             name: toolName,
             content: result.content.slice(0, 500),
             tool_call_id: result.tool_call_id,
+            ...((result.dispatchError || result.skipped) ? { status: 'failed' } : {}),
           })
           if (result.duration) {
             emitSSE(ctx, 'tool_duration', { name: toolName, duration: result.duration, tool_call_id: result.tool_call_id })
           }
-          messages.push(result)
+          // dispatchError is internal metadata, not part of the model tool schema.
+          const { dispatchError: _dispatchError, ...modelResult } = result
+          messages.push(modelResult)
 
           // ---- tool_search 激活（G2，2026-10-23 重写）：数据驱动，不再正则解析返回文案 ----
           // 旧实现（2026-09-04）：对 result.content 做「是否命中已加载短语」的 includes 判断，

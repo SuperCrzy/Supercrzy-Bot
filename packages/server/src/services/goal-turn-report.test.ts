@@ -14,6 +14,11 @@ describe('goal turn report', () => {
     expect(parseGoalTurnReport(report(['one']), calls, new Map([['one', { content: '❌ failed', denied: false }]]), false).fingerprint).toBeUndefined()
     expect(parseGoalTurnReport(report(['one']), calls, results, true).fingerprint).toBeUndefined()
   })
+  it('does not treat dispatcher failures as evidence of progress', () => {
+    for (const content of ['Tool execution error: database unavailable', 'Failed to parse tool arguments: {}', 'Unknown tool: file_read', '⛔ 记忆功能已关闭', 'Skill not found: missing']) {
+      expect(parseGoalTurnReport(report(['one']), calls, new Map([['one', { content, denied: false }]]), false).fingerprint).toBeUndefined()
+    }
+  })
   it('stops on missing, malformed or non-final reports', () => {
     expect(parseGoalTurnReport('done', calls, results, false).fingerprint).toBeUndefined()
     expect(parseGoalTurnReport('<goal_report>bad</goal_report>', calls, results, false).fingerprint).toBeUndefined()

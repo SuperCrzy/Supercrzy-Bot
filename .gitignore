@@ -49,6 +49,10 @@ articles/
 .git-rewrite/
 .git-rewrite/
 _tmp_*
+# Throwaway harnesses used to check a component in isolation. They are not part of
+# the build and were once committed by accident (6c026ab) — keep them out.
+*diff-qa-temp*
+*.qa-temp.*
 # Playwright CLI 会话缓存（2026-10-14 加：浏览器自动化运行时残留）
 /.playwright-cli/
 

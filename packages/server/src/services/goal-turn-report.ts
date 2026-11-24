@@ -20,7 +20,9 @@ export function parseGoalTurnReport(answer: string, calls: Map<string, { name: s
   for (const id of report.evidence_call_ids) {
     if (typeof id !== 'string') return { summary }
     const call = calls.get(id), result = results.get(id)
-    if (!call || !result || result.denied || !result.content.trim() || /^\s*(?:❌|error\b|错误|失败)/i.test(result.content)) return { summary }
+    // Tool executors return some failures as text rather than structured status.
+    // Do not treat those known dispatcher and guardrail failures as progress.
+    if (!call || !result || result.denied || !result.content.trim() || /^\s*(?:❌|⛔|error\b|tool execution error\b|failed to parse tool arguments\b|unknown tool\b|skill not found\b|错误|失败)/i.test(result.content)) return { summary }
     evidence.push(JSON.stringify([call.name, call.arguments, result.content]))
   }
   return { summary, fingerprint: createHash('sha256').update(evidence.sort().join('\n')).digest('hex') }

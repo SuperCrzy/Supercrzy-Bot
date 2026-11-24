@@ -756,6 +756,7 @@ export function getToolsByCategory(category: string): ToolDefinition[] {
 export interface ToolResultWithMeta extends ToolResult {
   duration?: number
   skipped?: boolean
+  dispatchError?: boolean
 }
 
 /** 互斥工具集（对齐 harness 工具调度器：写类工具=屏障，串行执行防冲突） */
@@ -796,7 +797,7 @@ export async function executeToolCalls(
       let mcpArgs: Record<string, any> = {}
       try { mcpArgs = JSON.parse(tc.function.arguments || '{}') } catch { /* ignore */ }
       if (!serverId) {
-        results[idx] = { tool_call_id: tc.id, role: 'tool', content: `❌ 无效的 MCP 工具名: ${tc.function.name}` }
+        results[idx] = { tool_call_id: tc.id, role: 'tool', content: `❌ 无效的 MCP 工具名: ${tc.function.name}`, dispatchError: true }
         return
       }
       try {
@@ -804,13 +805,13 @@ export async function executeToolCalls(
         const content = await callMcpTool(serverId, toolName, mcpArgs)
         results[idx] = { tool_call_id: tc.id, role: 'tool', content }
       } catch (err: any) {
-        results[idx] = { tool_call_id: tc.id, role: 'tool', content: `❌ MCP 调用失败: ${err.message}` }
+        results[idx] = { tool_call_id: tc.id, role: 'tool', content: `❌ MCP 调用失败: ${err.message}`, dispatchError: true }
       }
       return
     }
     const executor = toolExecutors[tc.function.name]
     if (!executor) {
-      results[idx] = { tool_call_id: tc.id, role: 'tool', content: `Unknown tool: ${tc.function.name}` }
+      results[idx] = { tool_call_id: tc.id, role: 'tool', content: `Unknown tool: ${tc.function.name}`, dispatchError: true }
       return
     }
 
@@ -818,7 +819,7 @@ export async function executeToolCalls(
     try {
       args = JSON.parse(tc.function.arguments)
     } catch {
-      results[idx] = { tool_call_id: tc.id, role: 'tool', content: `Failed to parse tool arguments: ${tc.function.arguments}` }
+      results[idx] = { tool_call_id: tc.id, role: 'tool', content: `Failed to parse tool arguments: ${tc.function.arguments}`, dispatchError: true }
       return
     }
 
@@ -842,6 +843,7 @@ export async function executeToolCalls(
         tool_call_id: tc.id,
         role: 'tool',
         content: `Tool execution error: ${err.message}`,
+        dispatchError: true,
       }
     }
   }
