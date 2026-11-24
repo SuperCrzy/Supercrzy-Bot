@@ -91,8 +91,21 @@ function decrypt(payload: string, key: Buffer): string | null {
 
 export function readSession(): StoredSession | null {
   const file = sessionPath()
-  if (!existsSync(file)) return null
-  const plain = decrypt(readFileSync(file, 'utf8').trim(), loadKey())
+  // A session left behind as auth.json.tmp is still a signed-in session.
+  //
+  // An earlier write path produced "<file>.tmp" without the random suffix this one
+  // uses, and never renamed it into place — so the only copy of a valid login sat
+  // under a name nothing read. Every account-gated endpoint then answered 401 while
+  // the user was, as far as they could tell, signed in. Read the fallback, and adopt
+  // it: the next successful write replaces it properly.
+  let raw: string | null = null
+  if (existsSync(file)) raw = readFileSync(file, 'utf8').trim()
+  else {
+    const legacy = `${file}.tmp`
+    if (existsSync(legacy)) raw = readFileSync(legacy, 'utf8').trim()
+  }
+  if (!raw) return null
+  const plain = decrypt(raw, loadKey())
   if (!plain) return null
   try {
     const parsed = JSON.parse(plain) as StoredSession
