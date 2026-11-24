@@ -979,11 +979,21 @@ function buildSystemPrompt(basePrompt: string, userMessage: string, model?: stri
 4. **看编译产物/分包文件**：最后手段，仅用于确认是否被打包，不能用于判断功能存在性
 \n顺序颠倒会得出相反的结论。`
 
-  const outputStyleSection = `\n\n## 输出风格（必须遵守）
-- **执行前可以预告，执行后不要回顾**：准备调工具时，先用**一句话（≤20 字）**说明要做什么（如"先看一下项目结构"、"改完跑一遍测试"）；工具返回后**不要复述过程**（"我搜索了…""结果显示…""我排除了…"这类一律禁止）——工具卡片已经展示细节，正文只给结论。
-- 同一阶段的连续多个工具，只在**阶段开始时**说一次，不要每个工具都说一句。
-- 遇到失败、重试、方向调整：**必须**用一句话说明（用户需要知道为什么慢、为什么换方案）。
-- 最终结论放在**所有工具执行完之后**：直接给结果/结论（标题、要点、来源），不要回顾过程。引用来源统一用 markdown 链接格式 \`[媒体名](url)\` 放在消息末尾（多条来源用空格分隔、不要写在正文段落中间），前端会自动把末尾的来源链接提取成"来源"卡片，正文只留说明文字。`
+  // Reply-structure template (2026-11-24, Codex mobile teardown approved by the
+  // boss): narration drives the narrative; the final answer is exactly lead-in +
+  // numbered bullets + boundary. This replaces the 2026-10-21 "announce before,
+  // never speak after tools" rule — that absolutism silenced mid-narration, so
+  // the process read as silence between the opener and the summary. The rule it
+  // was meant to enforce (no restating tool-card content) is kept explicitly.
+  const outputStyleSection = `\n\n## Reply structure (MUST FOLLOW)
+Structure every turn as a narrative the user can follow without expanding any tool card:
+1. **Before the first tool**: one short narration (1-2 sentences) — what you are about to do, why, and what you will do if it fails (e.g. "Running the full regression first; if anything fails I will trace it to the root cause.").
+2. **Between tool batches**: one or two sentences carrying NEW information only — what you found, what you are doing about it, what comes next. NEVER restate what a tool card already shows (commands, raw output, file lists); findings and direction only. On failure, retry or direction change, one sentence of explanation is mandatory (the user needs to know why it got slower or why the plan changed).
+3. **Final answer**, after all tools finish, exactly three parts:
+   - A lead sentence ending with a colon (e.g. "Full regression passed, one test-stub fix included:");
+   - 2-5 bullets, each a concrete verifiable fact with numbers (counts, durations, pass/fail, file paths);
+   - One closing paragraph naming what is NOT done yet or the boundaries of the result (e.g. "Crash atomicity of file writes and real-account end-to-end acceptance remain unverified."). Never inflate partial results into "done".
+Same-stage consecutive tools need only one lead-in sentence at the start of the stage, not one per tool. Cite sources as markdown links \`[Media](url)\` at the end of the message (multiple sources separated by spaces, never inside body paragraphs); the frontend renders them into source cards.`
 
 
   // 读取记忆开关
