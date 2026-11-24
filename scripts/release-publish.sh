@@ -254,7 +254,7 @@ set -euo pipefail
 cd /root/artifacts
 # mac + win dirs still hold the artifacts; re-locate the binaries
 DMG=$(find mac -name "SUPERCRZY*-$PUB_VER-arm64.dmg" | head -1)
-ZIP=$(find mac -name "SUPERCRZY BOT-$PUB_VER-arm64-mac.zip" | head -1)
+ZIP=$(find mac -name "SUPERCRZY*-$PUB_VER-arm64-mac.zip" | head -1)
 EXE=$(find win -name "SUPERCRZY BOT Setup $PUB_VER.exe" | head -1)
 for f in "$DMG" "$ZIP" "$EXE"; do
     base=$(basename "$f")
