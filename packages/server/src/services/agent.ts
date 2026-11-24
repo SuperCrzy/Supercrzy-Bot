@@ -2370,6 +2370,15 @@ export async function runAgentLoop(
             if (snap) emitSSE(ctx, 'plan_update', snap)
           }
         }
+        if (ctx.state?.goalExecution) {
+          // The outer goal coordinator verifies IDs against observed events. Give
+          // the model the real IDs immediately before its next response; asking
+          // it to infer opaque provider-generated IDs from the original prompt is
+          // unreliable. A report is still optional and cannot bypass validation.
+          const evidenceIds = toolResults.filter(result => !result.dispatchError && !result.skipped)
+            .map(result => result.tool_call_id).filter(id => typeof id === 'string' && id.length <= 200).slice(0, 10)
+          if (evidenceIds.length) messages.push({ role: 'system', content: `持续目标的本批工具调用 ID：${JSON.stringify(evidenceIds)}。若目标尚未完成、本轮有可核实进展且无需等待用户，在最终回复末尾追加 <goal_report>{"action":"continue","evidence_call_ids":["实际成功工具调用ID"]}</goal_report>，ID 必须从上面的列表选择；若目标已完成、工具失败或需要用户，请不要追加该报告。` })
+        }
       } else {
         // ---- 空内容兜底：模型只返回 reasoning 没有实际内容 ----
         if (!contentBuffer || contentBuffer.trim().length === 0) {

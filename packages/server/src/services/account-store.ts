@@ -12,7 +12,7 @@
  * real profile.
  */
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -98,11 +98,15 @@ export function readSession(): StoredSession | null {
   // under a name nothing read. Every account-gated endpoint then answered 401 while
   // the user was, as far as they could tell, signed in. Read the fallback, and adopt
   // it: the next successful write replaces it properly.
+  // readTextIfFile, not existsSync + readFileSync: existsSync returns true for a
+  // directory, and reading one throws — which would take down every account-gated
+  // request rather than reporting "signed out". A damaged auth.json should look like
+  // no session, not like a broken server.
   let raw: string | null = null
-  if (existsSync(file)) raw = readFileSync(file, 'utf8').trim()
-  else {
-    const legacy = `${file}.tmp`
-    if (existsSync(legacy)) raw = readFileSync(legacy, 'utf8').trim()
+  for (const candidate of [file, `${file}.tmp`]) {
+    try {
+      if (statSync(candidate).isFile()) { raw = readFileSync(candidate, 'utf8').trim(); break }
+    } catch { /* missing or unreadable: try the next candidate */ }
   }
   if (!raw) return null
   const plain = decrypt(raw, loadKey())
@@ -127,10 +131,19 @@ export function writeSession(session: StoredSession): void {
   } finally {
     rmSync(tmp, { force: true })
   }
+  // A legacy "<file>.tmp" is now redundant once a real file exists, and leaving it
+  // means readSession keeps falling back to a stale copy if auth.json is ever
+  // removed. Best-effort: failing to clean up must not fail the write.
+  const legacy = `${sessionPath()}.tmp`
+  try { if (existsSync(legacy)) rmSync(legacy, { force: true }) } catch { /* keep going */ }
 }
 
 export function clearSession(): void {
   const file = sessionPath()
+  // readSession can recover an older session from this legacy path. Remove it
+  // before the primary file so a logout cannot resurrect the fallback session.
+  const legacy = `${file}.tmp`
+  if (existsSync(legacy)) rmSync(legacy, { force: true })
   if (existsSync(file)) rmSync(file, { force: true })
 }
 

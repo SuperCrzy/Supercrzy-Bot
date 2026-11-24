@@ -17,7 +17,7 @@ export function makeGoalAgentRunner(options: {
     const messages = await options.makeMessages(goal.session_id, goal.objective, goal.acceptance)
     if (signal.aborted || !options.ownerIsCurrent()) return { outcome: 'interrupted', summary: '执行尚未开始或账号已变更。' }
     let started = false, doneSeen = false, finished = false, terminal = '', answer = '', chunks = '', captureFailed = false, checkpointInterrupted = false
-    let hadInteraction = false
+    let hadInteraction = false, hadToolFailure = false
     const calls = new Map<string, { name: string; arguments: string }>()
     const results = new Map<string, { content: string; denied: boolean }>()
     const stop = () => { if (started) options.requestStop(goal.session_id) }
@@ -42,6 +42,7 @@ export function makeGoalAgentRunner(options: {
         if (!options.ownerIsCurrent()) { captureFailed = true; stop(); continue }
         try { emit(name, payload) } catch { captureFailed = true; stop(); continue }
         if (name === 'question' || (name === 'tool_result' && payload.status === 'denied')) hadInteraction = true
+        if (name === 'tool_result' && ['failed', 'error', 'cancelled'].includes(String(payload.status))) { hadToolFailure = true; hadInteraction = true }
         if (name === 'tool_call' && typeof payload.id === 'string' && typeof payload.name === 'string') calls.set(payload.id, { name: payload.name, arguments: String(payload.arguments || '') })
         if (name === 'tool_result' && typeof payload.tool_call_id === 'string' && typeof payload.content === 'string') results.set(payload.tool_call_id, { content: payload.content, denied: ['denied', 'failed', 'error', 'cancelled'].includes(String(payload.status)) })
         if (name === 'content' && typeof payload.content === 'string') answer = payload.content
@@ -62,6 +63,7 @@ export function makeGoalAgentRunner(options: {
     if (terminal === 'waiting_user') return { outcome: 'waiting_user', summary: answer || chunks || '等待用户操作。' }
     // A finished Agent turn is not proof that the overall objective is complete.
     const report = parseGoalTurnReport(answer || chunks, calls, results, hadInteraction)
-    return { outcome: 'paused', summary: report.summary || '本轮结束，请核实目标进度。', ...(report.fingerprint ? { progressFingerprint: report.fingerprint } : {}) }
+    const summary = report.summary || '本轮结束，请核实目标进度。'
+    return { outcome: 'paused', summary: hadToolFailure ? `本轮有工具执行失败或未执行，以下结果需要核实：\n${summary}` : summary, ...(report.fingerprint ? { progressFingerprint: report.fingerprint } : {}) }
   }
 }
