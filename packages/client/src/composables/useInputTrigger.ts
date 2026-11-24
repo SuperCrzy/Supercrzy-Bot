@@ -52,13 +52,35 @@ export interface UseInputTriggerOptions {
   onNewChat: () => void
   onSend: () => void
   onInfo: (msg: string) => void
+  /** Whether the goal bar is usable; `/goal` is hidden when it is not, so the
+   *  menu never promises a control the app cannot show. */
+  goalsEnabled?: () => boolean
+  /** `/goal` — open the goal editor above the input box. */
+  onOpenGoalCreate?: () => void
   debounceMs?: number
+}
+
+/**
+ * The `/` menu. Exported and pure so the visibility rule (goals on or off) is
+ * assertable without mounting the composer.
+ */
+export function slashCommands(t: (key: string) => string, options: { goalsEnabled: boolean }): TriggerCandidate[] {
+  const items: TriggerCandidate[] = [
+    { key: 'new', label: '/new', desc: t('chat.trigger.newDesc'), section: t('chat.trigger.secCommands'), kind: 'command' },
+    { key: 'search', label: '/search', desc: t('chat.trigger.searchDesc'), section: t('chat.trigger.secCommands'), kind: 'command' },
+    { key: 'help', label: '/help', desc: t('chat.trigger.helpDesc'), section: t('chat.trigger.secCommands'), kind: 'command' },
+    { key: 'skill', label: '/skill', desc: t('chat.trigger.skillDesc'), section: t('chat.trigger.secCommands'), kind: 'command' },
+  ]
+  if (options.goalsEnabled) {
+    items.push({ key: 'goal', label: '/goal', desc: t('chat.trigger.goalDesc'), section: t('chat.trigger.secCommands'), kind: 'command' })
+  }
+  return items
 }
 
 export function useInputTrigger(opts: UseInputTriggerOptions) {
   const {
     inputText, inputRef, t, sessions, currentSessionId, currentWorkspaceDir,
-    welcomePlusOpen, onNewChat, onSend, onInfo, debounceMs = 60,
+    welcomePlusOpen, onNewChat, onSend, onInfo, goalsEnabled, onOpenGoalCreate, debounceMs = 60,
   } = opts
 
   const triggerState = ref<TriggerState | null>(null)
@@ -116,12 +138,7 @@ export function useInputTrigger(opts: UseInputTriggerOptions) {
   async function loadTriggerCandidates(char: '/' | '@', query: string) {
     const q = query.toLowerCase()
     if (char === '/') {
-      const all: TriggerCandidate[] = [
-        { key: 'new', label: '/new', desc: t('chat.trigger.newDesc'), section: t('chat.trigger.secCommands'), kind: 'command' },
-        { key: 'search', label: '/search', desc: t('chat.trigger.searchDesc'), section: t('chat.trigger.secCommands'), kind: 'command' },
-        { key: 'help', label: '/help', desc: t('chat.trigger.helpDesc'), section: t('chat.trigger.secCommands'), kind: 'command' },
-        { key: 'skill', label: '/skill', desc: t('chat.trigger.skillDesc'), section: t('chat.trigger.secCommands'), kind: 'command' },
-      ]
+      const all = slashCommands(t, { goalsEnabled: goalsEnabled?.() === true })
       triggerCandidates.value = all.filter((c) => c.label.toLowerCase().includes(q) || (c.desc || '').toLowerCase().includes(q))
       return
     }
@@ -230,6 +247,9 @@ export function useInputTrigger(opts: UseInputTriggerOptions) {
         nextTick(() => ta?.focus())
       } else if (c.key === 'help') {
         onInfo(t('chat.trigger.helpHint'))
+      } else if (c.key === 'goal') {
+        // The goal editor lives above the input box; the command only opens it.
+        onOpenGoalCreate?.()
       }
       return
     }

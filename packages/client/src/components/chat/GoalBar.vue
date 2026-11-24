@@ -11,14 +11,14 @@
     <div v-if="goal" class="goal-card">
       <div class="goal-row">
         <button class="goal-summary" type="button" :aria-expanded="expanded" @click="expanded = !expanded">
-          <strong>{{ $t('goal.title') }}</strong><span class="goal-text">{{ goal.objective }}</span><span>{{ statusText }}</span><span>{{ elapsed }}</span>
+          <strong>{{ $t('goal.title') }}</strong><span v-if="goal.source === 'ai'" class="goal-ai">{{ $t('goal.proposedByAi') }}</span><span class="goal-text">{{ goal.objective }}</span><span>{{ statusText }}</span><span>{{ elapsed }}</span>
         </button>
         <button v-if="goal.status === 'active'" :disabled="busy" @click="action('pause')">{{ $t('goal.pause') }}</button>
         <button v-if="['paused', 'interrupted', 'waiting_user'].includes(goal.status)" :disabled="busy" @click="start">{{ $t('goal.start') }}</button>
         <button v-if="['paused', 'interrupted', 'waiting_user'].includes(goal.status)" :disabled="busy" @click="complete">{{ $t('goal.complete') }}</button>
         <button v-if="['paused', 'interrupted', 'waiting_user'].includes(goal.status)" :disabled="busy" @click="cancel">{{ $t('goal.cancel') }}</button>
       </div>
-      <p class="goal-note">{{ $t('goal.singleRound') }}</p>
+      <p class="goal-note">{{ note }}</p>
       <div v-if="expanded" class="goal-details">
         <div v-if="editing" class="goal-editor">
           <label for="goal-edit-objective">{{ $t('goal.objective') }}</label>
@@ -63,7 +63,7 @@ import { useI18n } from 'vue-i18n'
 import { useAccountStore } from '@/stores/account'
 import { useAppStore } from '@/stores/app'
 
-interface Goal { id: string; objective: string; acceptance: string; status: string; version: number; elapsed_ms: number; running_since: number | null; last_result: string }
+interface Goal { id: string; objective: string; acceptance: string; source: 'user' | 'ai'; status: string; version: number; elapsed_ms: number; running_since: number | null; last_result: string }
 interface PendingItem { id: string; name?: string; arguments?: string; question?: string; options?: string[] }
 const props = defineProps<{ sessionId: string }>()
 const { t, locale } = useI18n({ useScope: 'global' })
@@ -83,6 +83,14 @@ const visibleStream = computed(() => {
 })
 let generation = 0, cursor = 0, loadingGeneration: number | null = null, refreshQueued = false, disposed = false, streamRun = ''
 const statusText = computed(() => t(`goal.status_${goal.value?.status || 'paused'}`))
+/** An agent-proposed goal explains what confirmation means; anything else shows the run limits. */
+const note = computed(() => goal.value?.source === 'ai' && goal.value?.status === 'paused' ? t('goal.proposedHint') : t('goal.singleRound'))
+/** Opened by `/goal`: edit the existing goal or start a new draft. */
+function openCreate() {
+  if (goal.value) { expanded.value = true; return }
+  creating.value = true
+}
+defineExpose({ openCreate })
 const elapsed = computed(() => {
   const g = goal.value
   const ms = (g?.elapsed_ms || 0) + (g?.running_since && ['active', 'pausing'].includes(g.status) ? Math.max(0, now.value - g.running_since) : 0)
@@ -221,6 +229,7 @@ onBeforeUnmount(() => { disposed = true; generation++; clearInterval(timer) })
 .goal-row, .goal-actions { display: flex; align-items: center; gap: 8px; }
 .goal-summary { flex: 1; min-width: 0; display: flex; align-items: center; gap: 9px; text-align: left; }
 .goal-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.goal-ai { flex-shrink: 0; border: 1px solid var(--border-color); border-radius: 4px; padding: 0 4px; color: var(--text-muted); font-size: 11px; }
 .goal-bar button { cursor: pointer; border: 0; border-radius: 6px; padding: 4px 7px; color: inherit; background: transparent; }
 .goal-bar button:hover { background: var(--bg-hover); }
 .goal-bar button:disabled { opacity: .5; cursor: not-allowed; }

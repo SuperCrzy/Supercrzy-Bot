@@ -557,13 +557,12 @@
     />
 
     <!--
-      Off by default until the execution path is verified end to end against a live
-      model. The unit tests cover the pieces; they did not cover "a signed-in user
-      presses Start and sees work happen", and that is exactly what failed in 1.3.6.
-      A control that can silently do nothing is worse than an absent one.
-      Set VITE_GOALS=1 to enable it while working on the feature.
+      On by default since the reply-structure work (2026-11-24). The agent may also
+      propose a goal on its own for a large, explicit project (propose_goal), which
+      lands here in the paused state for the user to confirm — see tools/propose-goal.ts.
+      Set VITE_GOALS=0 to hide the bar entirely.
     -->
-    <GoalBar v-if="goalsEnabled && chatStore.currentSessionId && !isMobile" :session-id="chatStore.currentSessionId" />
+    <GoalBar v-if="goalsEnabled && chatStore.currentSessionId && !isMobile" ref="goalBarRef" :session-id="chatStore.currentSessionId" />
 
     <!-- Input area（欢迎页时隐藏，中央输入框替代；保留 DOM 供文件选择器使用） -->
     <footer ref="footerRef" class="input-area" v-show="messages.length > 0">
@@ -845,7 +844,9 @@
 
 <script setup lang="ts">
 import { ref, computed, nextTick, watch, onMounted, onUnmounted, onBeforeUnmount, h } from 'vue'
-import { useMessage } from 'naive-ui'
+import { useMessage, useDialog } from 'naive-ui'
+import { useAccountStore } from '@/stores/account'
+import { blocksSend, isAuthFailure } from '@/utils/chat-auth'
 import { useI18n } from 'vue-i18n'
 import { useChatStore, isDefaultTitle } from '@/stores/chat'
 import { useRouter } from 'vue-router'
@@ -907,8 +908,15 @@ import { markTurnAborted, requestAgentStop } from '@/utils/turn-abort'
 import PlanCapsule from '@/components/chat/PlanCapsule.vue'
 import GoalBar from '@/components/chat/GoalBar.vue'
 
-/** Opt-in: see the note by the GoalBar tag. */
-const goalsEnabled = import.meta.env.VITE_GOALS === '1'
+/** Goals are on by default; `VITE_GOALS=0` is the escape hatch. */
+const goalsEnabled = import.meta.env.VITE_GOALS !== '0'
+
+/** The goal editor lives inside GoalBar; `/goal` and the AI proposal both open it there. */
+const goalBarRef = ref<{ openCreate: () => void } | null>(null)
+function openGoalCreate() {
+  if (!chatStore.currentSessionId) { nMessage.info(t('chat.trigger.goalNeedsSession')); return }
+  goalBarRef.value?.openCreate()
+}
 import MessageFlowRenderer from '@/components/chat/MessageFlowRenderer.vue'
 import ToolApprovalFloating from '@/components/chat/ToolApprovalFloating.vue'
 import QuestionFloating from '@/components/chat/QuestionFloating.vue'
@@ -926,6 +934,25 @@ const chatStore = useChatStore()
 const planStore = usePlanStore()
 const appStore = useAppStore()
 const router = useRouter()
+const accountStore = useAccountStore()
+const dialog = useDialog()
+
+/**
+ * One prompt for both signed-out cases: the pre-send check and a 401 mid-stream.
+ * The API answers 401 to every non-public path without an account, so letting the
+ * request go out would surface as "connection interrupted" — the wrong story.
+ */
+function promptSignIn() {
+  dialog.warning({
+    title: t('chat.signInRequiredTitle'),
+    content: t('chat.signInRequired'),
+    positiveText: t('chat.goSignIn'),
+    negativeText: t('common.cancel'),
+    // Reload first: the router guard sends a stale "signed in" state straight back
+    // to Chat, so the login page would never appear.
+    onPositiveClick: async () => { await accountStore.reload(); void router.push({ name: 'Login' }) },
+  })
+}
 
 // ---- 历史消息搜索（右上角放大镜）→ composables/useHistorySearch.ts ----
 const {
@@ -1309,6 +1336,8 @@ const {
   onNewChat: () => handleNewChat(),
   onSend: () => handleSend(),
   onInfo: (msg: string) => nMessage.info(msg),
+  goalsEnabled: () => goalsEnabled,
+  onOpenGoalCreate: () => openGoalCreate(),
 })
 
 // ===== 对话内一键引用（抽到 composables/useQuote）=====
@@ -2148,6 +2177,8 @@ function onWelcomeEnter(event: KeyboardEvent) {
 async function handleSend() {
   if (sendPreparing.value || branchChanging) return
   if (!historyReady()) return
+  // No account → say so here instead of sending a request that must fail with 401.
+  if (blocksSend(accountStore.signedIn)) { promptSignIn(); return }
   // 未配置模型 → 引导去模型页（不继续发送）
   if (!ensureApiKey()) return
   // 2026-11-19: sending a message interrupts the reading of the previous reply —
@@ -2503,6 +2534,8 @@ async function sendAgentMessage(assistantMsg: ChatMessage, apiMessages: Array<{ 
   // Do not replay a disconnected run until the server supports idempotent resume.
   const decoder = new TextDecoder()
   let receivedDone = false
+  // Set when the stream fails with 401; suppresses the "connection interrupted" story.
+  let signedOut = false
   let taskUnsuccessful = false
   let receivedTerminalError = false
   let lastSeq = 0
@@ -2514,7 +2547,17 @@ async function sendAgentMessage(assistantMsg: ChatMessage, apiMessages: Array<{ 
       body: JSON.stringify({ messages: apiMessages, model: appStore.currentModel, resumeCheckpoint, sessionId, language: locale.value, images: images && images.length > 0 ? images : undefined, bgResume }),
       signal: runSignal,
     })
-    if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`)
+    if (!res.ok) {
+      // The account expired while the window stayed open: prompt sign-in, not a drop.
+      if (isAuthFailure(res.status)) {
+        signedOut = true
+        reactiveMsg.stopReason = { reason: 'sign_in_required', message: t('chat.signInRequired') }
+        void accountStore.reload()
+        promptSignIn()
+        return false
+      }
+      throw new Error(`HTTP ${res.status}: ${await res.text()}`)
+    }
     const reader = res.body?.getReader()
     if (!reader) throw new Error('No response body')
 
@@ -2559,7 +2602,7 @@ async function sendAgentMessage(assistantMsg: ChatMessage, apiMessages: Array<{ 
     }
 
     if (receivedDone) return true
-    if (!receivedTerminalError && !runSignal?.aborted) {
+    if (!receivedTerminalError && !runSignal?.aborted && !signedOut) {
       nMessage.warning(t('chat.streamInterrupted'))
     }
     return false
